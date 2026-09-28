@@ -297,24 +297,28 @@ jobs:
       DATABASE_STACK: experimentation-database-${{ inputs.environment }}
       SECRETS_PREFIX: /${{ inputs.environment }}/experimentation
     steps:
-      # FIRST, and the only place the account variable is read (PE v1 C9).
-      # Environment-scoped variables are not visible to a job-level `if:`, so
-      # the old `if: vars.AWS_ACCOUNT_ID != ''` skipped every job green for an
-      # environment configured the recommended way -- a deploy that did
-      # nothing and said nothing. An unconfigured environment is a red run.
+      # FIRST, and the only place the account ID is read (PE v1 C9). It is an
+      # environment SECRET, never a variable: a step's log header prints its
+      # evaluated `env:` before the step runs, so a variable's value would be
+      # public before anything could mask it, while a secret is masked from
+      # the start of the job. Environment-scoped values are not visible to a
+      # job-level `if:`, so the old job-level `if:` on the account ID skipped
+      # every job green for an environment configured the recommended way --
+      # a deploy that did nothing and said nothing. An unconfigured
+      # environment is a red run.
       - name: Refuse an environment that is not configured
         env:
-          ACCOUNT_ID: ${{ vars.AWS_ACCOUNT_ID }}
+          ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}
           ROLE_ARN_SET: ${{ secrets.AWS_ROLE_ARN != '' }}
           PUBLIC_BASE_URL: ${{ vars.PUBLIC_BASE_URL }}
         run: |
           set -euo pipefail
           if [ -z "$ACCOUNT_ID" ]; then
-            echo "::error title=Not configured::vars.AWS_ACCOUNT_ID is not set for the '${TARGET_ENV}' environment, so nothing was deployed. Set it under Settings → Environments → ${TARGET_ENV} → Variables. See docs/deployment/README.md#before-the-first-deploy"
+            echo "::error title=Not configured::secrets.AWS_ACCOUNT_ID is not set for the '${TARGET_ENV}' environment, so nothing was deployed. Set it as an environment secret under Settings → Environments → ${TARGET_ENV} → Environment secrets (gh secret set AWS_ACCOUNT_ID --env ${TARGET_ENV}); a variable of that name is not read. See docs/deployment/README.md#before-the-first-deploy"
             exit 1
           fi
           if ! [[ "$ACCOUNT_ID" =~ ^[0-9]{12}$ ]]; then
-            echo "::error title=Not configured::vars.AWS_ACCOUNT_ID for the '${TARGET_ENV}' environment is not a 12-digit AWS account id, so nothing was deployed. See docs/deployment/README.md#before-the-first-deploy"
+            echo "::error title=Not configured::secrets.AWS_ACCOUNT_ID for the '${TARGET_ENV}' environment is not a 12-digit AWS account id, so nothing was deployed. See docs/deployment/README.md#before-the-first-deploy"
             exit 1
           fi
           if [ "$ROLE_ARN_SET" != "true" ]; then
@@ -360,18 +364,23 @@ jobs:
           # timeout-minutes x 60 <= this <= the role's MaxSessionDuration (10800);
           # test_aws_session_duration.py. The default, 3600, expires mid-job.
           role-duration-seconds: 9000
+          # The ASSUMED account, which the wrong-account check below may find
+          # is not the configured one; the configured one is a secret already.
+          mask-aws-account-id: true
 
       # DECISIONS D7: each environment is its own account. A role ARN pasted
       # into the wrong environment would otherwise deploy staging into prod.
+      # Neither account ID is printed: the log is public.
       - name: Refuse the wrong AWS account
+        id: account
         run: |
           set -euo pipefail
           actual="$(aws sts get-caller-identity --query Account --output text)"
           if [ "$actual" != "$EXPECTED_ACCOUNT_ID" ]; then
-            echo "::error title=Wrong AWS account::environment=${TARGET_ENV} expects account ${EXPECTED_ACCOUNT_ID}; the assumed role is in ${actual}. Nothing has been built or changed."
+            echo "::error title=Wrong AWS account::environment=${TARGET_ENV}: the assumed role is not in the account in this environment's AWS_ACCOUNT_ID secret. Check that its AWS_ROLE_ARN secret names a role in that account. Nothing has been built or changed."
             exit 1
           fi
-          echo "account $actual, region $AWS_REGION"
+          echo "the assumed role is in the account in the AWS_ACCOUNT_ID secret; region $AWS_REGION"
 
       - name: Refuse when the stacks are not deployed here
         run: |
@@ -379,7 +388,7 @@ jobs:
           active="$(aws ecs describe-clusters --clusters "$ECS_CLUSTER" \
                       --query "clusters[?status=='ACTIVE'].clusterName" --output text)"
           if [ "$active" != "$ECS_CLUSTER" ]; then
-            echo "::error::No ECS cluster ${ECS_CLUSTER} in ${AWS_REGION} (account ${EXPECTED_ACCOUNT_ID}). Run ENVIRONMENT=${TARGET_ENV} cdk deploy --all in this account and region first: docs/self-hosting/cdk.md"
+            echo "::error::No ECS cluster ${ECS_CLUSTER} in ${AWS_REGION} of this environment's account. Run ENVIRONMENT=${TARGET_ENV} cdk deploy --all in this account and region first: docs/self-hosting/cdk.md"
             exit 1
           fi
 
@@ -498,7 +507,8 @@ jobs:
                        --query "services[0].taskSets[?status=='PRIMARY'].taskDefinition | [0]" --output text)"
           case "$serving" in None|null) serving="" ;; esac
           echo "arn=$serving" >> "$GITHUB_OUTPUT"
-          echo "serving now: ${serving:-nothing (first deploy)}"
+          shown="${serving##*/}"
+          echo "serving now: ${shown:-nothing (first deploy)}"
 
       # The dashboard (#69), read-only, before anything changes. Refuses a
       # service that is missing (stacks before v0.4.0), not on the ECS rolling
@@ -554,20 +564,22 @@ jobs:
           set -euo pipefail
           IMAGE_TAG="${VERSION}-${PROFILE}"
           REF="$ECR_REGISTRY/$ECR_BACKEND_REPO:$IMAGE_TAG"
+          # What the log prints: the registry host names the account.
+          SHOWN="$ECR_BACKEND_REPO:$IMAGE_TAG"
           # The commit actually checked out, never the dispatch ref: the image
           # labels itself with it (org.opencontainers.image.revision, #70).
           RELEASE_COMMIT="$(git -C release rev-parse HEAD)"
 
           check_labels() {
-            local ref="$1" built revision
-            built="$(docker inspect --format '{{index .Config.Labels "io.experimently.profile"}}' "$ref")"
-            revision="$(docker inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$ref")"
+            local image="$1" built revision
+            built="$(docker inspect --format '{{index .Config.Labels "io.experimently.profile"}}' "$image")"
+            revision="$(docker inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$image")"
             if [ "$built" != "$PROFILE" ]; then
-              echo "::error::requested profile '$PROFILE' but $ref is labelled '$built'"
+              echo "::error::requested profile '$PROFILE' but ${image#*/} is labelled '$built'"
               exit 1
             fi
             if [ "$revision" != "$RELEASE_COMMIT" ]; then
-              echo "::error::$ref is labelled revision '$revision', but ${VERSION} is $RELEASE_COMMIT"
+              echo "::error::${image#*/} is labelled revision '$revision', but ${VERSION} is $RELEASE_COMMIT"
               exit 1
             fi
           }
@@ -580,12 +592,14 @@ jobs:
           else
             case "$found" in
               *ImageNotFoundException*) ;;
-              *) echo "::error::could not look up $REF: $found"; exit 1 ;;
+              *)
+                found="$(sed -E 's/(^|[^0-9A-Za-z])[0-9]{12}([^0-9A-Za-z]|$)/\1<account>\2/g' <<<"$found")"
+                echo "::error::could not look up $SHOWN: $found"; exit 1 ;;
             esac
           fi
 
           if [ -n "$digest" ]; then
-            echo "$REF already exists ($digest): reusing it"
+            echo "$SHOWN already exists ($digest): reusing it"
             docker pull "$ECR_REGISTRY/$ECR_BACKEND_REPO@$digest"
             check_labels "$ECR_REGISTRY/$ECR_BACKEND_REPO@$digest"
             reused=true
@@ -610,7 +624,7 @@ jobs:
           fi
 
           if ! [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
-            echo "::error::could not resolve a digest for $REF (got '$digest')"
+            echo "::error::could not resolve a digest for $SHOWN (got '$digest')"
             exit 1
           fi
           {
@@ -619,7 +633,7 @@ jobs:
             echo "tag=$IMAGE_TAG"
             echo "reused=$reused"
           } >> "$GITHUB_OUTPUT"
-          echo "image: $ECR_REGISTRY/$ECR_BACKEND_REPO@$digest (tag $IMAGE_TAG, commit $RELEASE_COMMIT)"
+          echo "image: $ECR_BACKEND_REPO@$digest (tag $IMAGE_TAG, commit $RELEASE_COMMIT)"
 
       # The dashboard's image, by the same rules, and also BEFORE the snapshot
       # and the migration: a frontend that does not compile leaves nothing
@@ -635,18 +649,20 @@ jobs:
           set -euo pipefail
           IMAGE_TAG="${VERSION}-${PROFILE}"
           REF="$ECR_REGISTRY/$ECR_DASHBOARD_REPO:$IMAGE_TAG"
+          # What the log prints: the registry host names the account.
+          SHOWN="$ECR_DASHBOARD_REPO:$IMAGE_TAG"
           RELEASE_COMMIT="$(git -C release rev-parse HEAD)"
 
           check_labels() {
-            local ref="$1" built revision
-            built="$(docker inspect --format '{{index .Config.Labels "io.experimently.profile"}}' "$ref")"
-            revision="$(docker inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$ref")"
+            local image="$1" built revision
+            built="$(docker inspect --format '{{index .Config.Labels "io.experimently.profile"}}' "$image")"
+            revision="$(docker inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$image")"
             if [ "$built" != "$PROFILE" ]; then
-              echo "::error::requested profile '$PROFILE' but $ref is labelled '$built'"
+              echo "::error::requested profile '$PROFILE' but ${image#*/} is labelled '$built'"
               exit 1
             fi
             if [ "$revision" != "$RELEASE_COMMIT" ]; then
-              echo "::error::$ref is labelled revision '$revision', but ${VERSION} is $RELEASE_COMMIT"
+              echo "::error::${image#*/} is labelled revision '$revision', but ${VERSION} is $RELEASE_COMMIT"
               exit 1
             fi
           }
@@ -659,12 +675,14 @@ jobs:
           else
             case "$found" in
               *ImageNotFoundException*) ;;
-              *) echo "::error::could not look up $REF: $found"; exit 1 ;;
+              *)
+                found="$(sed -E 's/(^|[^0-9A-Za-z])[0-9]{12}([^0-9A-Za-z]|$)/\1<account>\2/g' <<<"$found")"
+                echo "::error::could not look up $SHOWN: $found"; exit 1 ;;
             esac
           fi
 
           if [ -n "$digest" ]; then
-            echo "$REF already exists ($digest): reusing it"
+            echo "$SHOWN already exists ($digest): reusing it"
             docker pull "$ECR_REGISTRY/$ECR_DASHBOARD_REPO@$digest"
             check_labels "$ECR_REGISTRY/$ECR_DASHBOARD_REPO@$digest"
             reused=true
@@ -688,7 +706,7 @@ jobs:
           fi
 
           if ! [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
-            echo "::error::could not resolve a digest for $REF (got '$digest')"
+            echo "::error::could not resolve a digest for $SHOWN (got '$digest')"
             exit 1
           fi
           {
@@ -697,7 +715,7 @@ jobs:
             echo "tag=$IMAGE_TAG"
             echo "reused=$reused"
           } >> "$GITHUB_OUTPUT"
-          echo "dashboard image: $ECR_REGISTRY/$ECR_DASHBOARD_REPO@$digest (tag $IMAGE_TAG, commit $RELEASE_COMMIT)"
+          echo "dashboard image: $ECR_DASHBOARD_REPO@$digest (tag $IMAGE_TAG, commit $RELEASE_COMMIT)"
 
       # Always, before the migration. The check this replaces compared the
       # CLI's `None` (its text for an empty result) with "NONE", so it never
@@ -1009,7 +1027,7 @@ jobs:
               3) why="the API's route and its tasks disagree: ${API_TD_ARN##*/} is the PRIMARY task set but the /api/* rule forwards to the other group (the line above)" ;;
               *) why="could not tell whether the API is serving ${API_TD_ARN##*/}: an AWS call failed or the check crashed (exit $code; the line above)" ;;
             esac
-            echo "::error title=API changed after the dashboard rolled out::After the dashboard rolled out, ${why}. The dashboard is on this run's revision. Check both before anything else: python3 scripts/api_serving.py ${ECS_CLUSTER} ${ECS_BACKEND_SERVICE} ${API_TD_ARN}. If CodeDeploy stopped deployment ${DEPLOYMENT_ID} for an alarm, read docs/deployment/rollback-runbook.md#an-alarm-rolled-the-api-back."
+            echo "::error title=API changed after the dashboard rolled out::After the dashboard rolled out, ${why}. The dashboard is on this run's revision. Check both before anything else: python3 scripts/api_serving.py ${ECS_CLUSTER} ${ECS_BACKEND_SERVICE} ${API_TD_ARN##*/}. If CodeDeploy stopped deployment ${DEPLOYMENT_ID} for an alarm, read docs/deployment/rollback-runbook.md#an-alarm-rolled-the-api-back."
             exit 1
           fi
 
@@ -1021,7 +1039,9 @@ jobs:
           PREVIOUS: ${{ steps.previous.outputs.arn }}
           PREVIOUS_DASHBOARD: ${{ steps.previous-dashboard.outputs.arn }}
         run: |
-          echo "::warning title=Migrated, not deployed::The migration was applied; the deployment then failed before any traffic shifted. The database is at ${VERSION}'s heads; ${PREVIOUS:-the previous revision} is still serving, and the dashboard is unchanged (${PREVIOUS_DASHBOARD:-not read}). This is safe only if the migration is backward-compatible (docs/deployment/deployment-guide.md#backward-compatible-migrations)."
+          previous="${PREVIOUS##*/}"
+          previous_dashboard="${PREVIOUS_DASHBOARD##*/}"
+          echo "::warning title=Migrated, not deployed::The migration was applied; the deployment then failed before any traffic shifted. The database is at ${VERSION}'s heads; ${previous:-the previous revision} is still serving, and the dashboard is unchanged (${previous_dashboard:-not read}). This is safe only if the migration is backward-compatible (docs/deployment/deployment-guide.md#backward-compatible-migrations)."
 
       # Not when an alarm stopped the deployment (#148 PE condition 7): then
       # CodeDeploy is moving the API back by itself, and "use the rollback
@@ -1033,7 +1053,7 @@ jobs:
         env:
           NEW_REVISION: ${{ steps.api-td.outputs.arn }}
         run: |
-          echo "::warning title=Migrated, shift approved, run failed::The migration was applied and the traffic shift was approved, so ${NEW_REVISION} may be serving some or all traffic. Check with: python3 scripts/api_serving.py ${ECS_CLUSTER} ${ECS_BACKEND_SERVICE} ${NEW_REVISION} (exit 0 = serving). If this release is bad, use the rollback line in this run's summary."
+          echo "::warning title=Migrated, shift approved, run failed::The migration was applied and the traffic shift was approved, so ${NEW_REVISION##*/} may be serving some or all traffic. Check with: python3 scripts/api_serving.py ${ECS_CLUSTER} ${ECS_BACKEND_SERVICE} ${NEW_REVISION##*/} (exit 0 = serving). If this release is bad, use the rollback line in this run's summary."
 
       # CodeDeploy stopped this run's deployment for an alarm (#148 UX W2).
       # Read-only: whether the revision serving before this run is serving
@@ -1062,11 +1082,13 @@ jobs:
           if [ "$MIGRATION" = success ]; then
             migration=" The migration stays applied: the database is at ${VERSION}'s heads (docs/deployment/deployment-guide.md#backward-compatible-migrations)."
           fi
-          dashboard="The dashboard was not changed: it is on ${PREVIOUS_DASHBOARD:-the revision it was on (not read)}."
+          previous_dashboard="${PREVIOUS_DASHBOARD##*/}"
+          dashboard="The dashboard was not changed: it is on ${previous_dashboard:-the revision it was on (not read)}."
           next="Next: docs/deployment/rollback-runbook.md#an-alarm-rolled-the-api-back"
+          previous="${PREVIOUS##*/}"
           if [ "$APPROVED" != "true" ]; then
             echo "api_back=nothing shifted" >> "$GITHUB_OUTPUT"
-            echo "::error title=Stopped by an alarm::${alarm} was in ALARM before ${VERSION}'s traffic shift, so CodeDeploy stopped deployment ${DEPLOYMENT_ID} and nothing shifted: ${PREVIOUS:-the previous revision} keeps serving. ${dashboard}${migration} Every deployment to this group is stopped while an alarm is in ALARM: docs/deployment/rollback-runbook.md#fix-forward-while-an-alarm-is-firing"
+            echo "::error title=Stopped by an alarm::${alarm} was in ALARM before ${VERSION}'s traffic shift, so CodeDeploy stopped deployment ${DEPLOYMENT_ID} and nothing shifted: ${previous:-the previous revision} keeps serving. ${dashboard}${migration} Every deployment to this group is stopped while an alarm is in ALARM: docs/deployment/rollback-runbook.md#fix-forward-while-an-alarm-is-firing"
             exit 0
           fi
           if [ -z "$PREVIOUS" ]; then
@@ -1085,7 +1107,7 @@ jobs:
               ;;
             1)
               echo "api_back=not confirmed yet" >> "$GITHUB_OUTPUT"
-              echo "::error title=Rolled back by an alarm::${alarm} fired during the traffic shift of ${VERSION}, and CodeDeploy is putting the API back to ${PREVIOUS##*/}, which is not confirmed serving yet (${line}). ${dashboard}${migration} Watch it: aws deploy get-deployment --deployment-id ${DEPLOYMENT_ID}, then python3 scripts/api_serving.py ${ECS_CLUSTER} ${ECS_BACKEND_SERVICE} ${PREVIOUS} (exit 0 = back). Do not redeploy ${VERSION}. ${next}"
+              echo "::error title=Rolled back by an alarm::${alarm} fired during the traffic shift of ${VERSION}, and CodeDeploy is putting the API back to ${PREVIOUS##*/}, which is not confirmed serving yet (${line}). ${dashboard}${migration} Watch it: aws deploy get-deployment --deployment-id ${DEPLOYMENT_ID}, then python3 scripts/api_serving.py ${ECS_CLUSTER} ${ECS_BACKEND_SERVICE} ${PREVIOUS##*/} (exit 0 = back). Do not redeploy ${VERSION}. ${next}"
               ;;
             3)
               echo "api_back=route disagrees" >> "$GITHUB_OUTPUT"
@@ -1093,7 +1115,7 @@ jobs:
               ;;
             *)
               echo "api_back=could not tell" >> "$GITHUB_OUTPUT"
-              echo "::error title=Rolled back by an alarm::${alarm} fired during the traffic shift of ${VERSION}, and CodeDeploy stopped deployment ${DEPLOYMENT_ID}. Whether ${PREVIOUS##*/} is serving again could not be told (exit ${serving}: ${line}). Check it: python3 scripts/api_serving.py ${ECS_CLUSTER} ${ECS_BACKEND_SERVICE} ${PREVIOUS} (exit 0 = back). ${dashboard}${migration} ${next}"
+              echo "::error title=Rolled back by an alarm::${alarm} fired during the traffic shift of ${VERSION}, and CodeDeploy stopped deployment ${DEPLOYMENT_ID}. Whether ${PREVIOUS##*/} is serving again could not be told (exit ${serving}: ${line}). Check it: python3 scripts/api_serving.py ${ECS_CLUSTER} ${ECS_BACKEND_SERVICE} ${PREVIOUS##*/} (exit 0 = back). ${dashboard}${migration} ${next}"
               ;;
           esac
 
@@ -1196,17 +1218,23 @@ jobs:
           OVERRIDE_ALARMS: ${{ inputs.override_alarms }}
           OVERRIDE_REASON: ${{ inputs.override_alarms_reason }}
           JOB_STATUS: ${{ job.status }}
+          ACCOUNT_CHECK: ${{ steps.account.outcome }}
         run: |
           # Not `$([ "$REUSED" = true ] && echo ...)`: under the runner's `bash
           # -e`, that substitution's status 1 on a fresh build ended this step
           # before it wrote a line, and failed a deploy that had succeeded.
-          image_line="${IMAGE:-not built}"
+          # Printed without the registry host (<account>.dkr.ecr...): the
+          # summary is public. The account ID is never printed; the account
+          # row says only whether the check against the secret passed.
+          image="${IMAGE#*/}"
+          image_line="${image:-not built}"
           if [ -n "$IMAGE_TAG" ]; then
             reused_note=""
             if [ "$REUSED" = true ]; then reused_note=", reused"; fi
             image_line="${image_line} (tag ${IMAGE_TAG}${reused_note})"
           fi
-          dashboard_image_line="${DASHBOARD_IMAGE:-not built}"
+          dashboard_image="${DASHBOARD_IMAGE#*/}"
+          dashboard_image_line="${dashboard_image:-not built}"
           if [ -n "$DASHBOARD_TAG" ]; then
             reused_note=""
             if [ "$DASHBOARD_REUSED" = true ]; then reused_note=", reused"; fi
@@ -1245,6 +1273,16 @@ jobs:
           # case applies; each also gives Slack its API line.
           previous="${PREVIOUS##*/}"
           previous="${previous:-the revision serving before this run}"
+          previous_serving="${PREVIOUS##*/}"
+          new_revision="${NEW_REVISION##*/}"
+          new_dashboard="${NEW_DASHBOARD##*/}"
+          previous_dashboard="${PREVIOUS_DASHBOARD##*/}"
+          previous_dashboard_image="${PREVIOUS_DASHBOARD_IMAGE#*/}"
+          case "$ACCOUNT_CHECK" in
+            success) account_cell="matches the environment's AWS_ACCOUNT_ID secret" ;;
+            failure) account_cell="does NOT match the environment's AWS_ACCOUNT_ID secret" ;;
+            *) account_cell="not checked" ;;
+          esac
           reason="${OVERRIDE_REASON//[$'\r\n']/ }"
           alarms="${ALARMS:-}"
           if [ -z "$alarms" ]; then
@@ -1301,20 +1339,20 @@ jobs:
             echo "| | |"
             echo "|---|---|"
             echo "| Environment | \`${TARGET_ENV}\` |"
-            echo "| Account / region | \`${EXPECTED_ACCOUNT_ID:-not checked}\` / \`${AWS_REGION}\` |"
+            echo "| Account / region | ${account_cell} / \`${AWS_REGION}\` |"
             echo "| Release | \`${VERSION}\` at \`${RELEASE_COMMIT}\` |"
             echo "| Profile | \`${PROFILE}\` |"
             echo "| Image | \`${image_line}\` |"
             echo "| Snapshot before migrating | \`${SNAPSHOT:-none taken}\` |"
             echo "| Migration | ${MIGRATION:-not run} |"
-            echo "| New API revision | \`${NEW_REVISION:-not registered}\` |"
+            echo "| New API revision | \`${new_revision:-not registered}\` |"
             echo "| CodeDeploy deployment | \`${DEPLOYMENT_ID:-not created}\` |"
-            echo "| API serving before this run | \`${PREVIOUS:-nothing (first deploy)}\` |"
+            echo "| API serving before this run | \`${previous_serving:-nothing (first deploy)}\` |"
             echo "| Traffic shift | ${shift_cell} |"
             echo "| Live API target group | \`${LIVE_GROUP:-not confirmed}\` |"
             echo "| Dashboard image | \`${dashboard_image_line}\` |"
-            echo "| New dashboard revision | \`${NEW_DASHBOARD:-not registered}\` |"
-            echo "| Dashboard serving before this run | \`${PREVIOUS_DASHBOARD:-not read}\` (\`${PREVIOUS_DASHBOARD_IMAGE:-image not read}\`) |"
+            echo "| New dashboard revision | \`${new_dashboard:-not registered}\` |"
+            echo "| Dashboard serving before this run | \`${previous_dashboard:-not read}\` (\`${previous_dashboard_image:-image not read}\`) |"
             echo "| Dashboard rollout | ${rollout_cell} |"
             echo ""
             if [ -n "$api_changed" ]; then
@@ -1339,7 +1377,7 @@ jobs:
             echo "$rollback_line"
             if [ -n "$PREVIOUS" ] && [ -z "$dashboard_param" ] && [ -n "$PREVIOUS_DASHBOARD" ]; then
               echo ""
-              echo "The dashboard was on ${PREVIOUS_DASHBOARD_IMAGE:-an image this run could not read} before this run, not a release: there is no released dashboard to roll back to."
+              echo "The dashboard was on ${previous_dashboard_image:-an image this run could not read} before this run, not a release: there is no released dashboard to roll back to."
             fi
           } >> "$GITHUB_STEP_SUMMARY"
 

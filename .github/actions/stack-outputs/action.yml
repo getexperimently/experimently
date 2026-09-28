@@ -52,6 +52,9 @@ runs:
               echo "::error title=Stack not deployed::No CloudFormation stack $STACK in $region. Run ENVIRONMENT=$TARGET_ENV cdk deploy --all in this account and region first: docs/self-hosting/cdk.md"
               ;;
             *)
+              # An AccessDenied names the role's ARN, and so the account: an
+              # annotation is public, so every run of twelve digits goes.
+              raw="$(sed -E 's/(^|[^0-9A-Za-z])[0-9]{12}([^0-9A-Za-z]|$)/\1<account>\2/g' <<<"$raw")"
               echo "::error::Could not describe $STACK in $region: $raw"
               ;;
           esac

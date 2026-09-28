@@ -82,7 +82,8 @@ def test_one_throttle_on_get_deployment_then_the_rollback_completes(runner):
     )
     assert code == 0, log
     assert "ThrottlingException" in log and "reading again on the next poll" in log
-    assert f"traffic is on {TARGET}" in log and "approved by this run" in log
+    assert f"traffic is on {TARGET.rsplit('/', 1)[-1]}" in log
+    assert "approved by this run" in log
     assert _ops(runner).count("deploy continue-deployment") == 1
 
 
@@ -97,7 +98,7 @@ def test_a_throttle_on_describe_services_is_read_again(runner):
         ],
     )
     assert code == 0, log
-    assert f"traffic is on {TARGET}" in log
+    assert f"traffic is on {TARGET.rsplit('/', 1)[-1]}" in log
 
 
 @pytest.mark.regression

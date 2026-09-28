@@ -549,8 +549,10 @@ def test_the_timeout_names_what_is_serving_when_it_is_not_the_target(runner):
         timeout="3",
     )
     assert code == 1, log
-    assert f"rollback deployment {ROLLBACK_ID} did not put {TARGET} in service" in log
-    assert f"serving {NEW}, not approved" in log
+    shown = TARGET.rsplit("/", 1)[-1]
+    assert f"rollback deployment {ROLLBACK_ID} did not put {shown} in service" in log
+    assert f"serving {NEW.rsplit('/', 1)[-1]}, not approved" in log
+    assert "123456789012" not in log
 
 
 # --- the stop step refuses CodeDeploy's own rollback (PE condition 3, UX W9) ----------

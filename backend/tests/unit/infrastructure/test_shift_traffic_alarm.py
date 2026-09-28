@@ -203,7 +203,8 @@ def test_no_rollback_is_claimed_without_rollback_info(aws):
     assert "no rollbackInfo" in out
     assert "moving the API back" not in out
     assert "auto-rollback puts" not in out
-    assert f"python3 scripts/api_serving.py {CLUSTER} {SERVICE} {NEW}" in out
+    shown = NEW.rsplit("/", 1)[-1]
+    assert f"python3 scripts/api_serving.py {CLUSTER} {SERVICE} {shown}" in out
 
 
 @pytest.mark.regression
