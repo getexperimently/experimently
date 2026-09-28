@@ -1,0 +1,79 @@
+name: OIDC subject probe
+run-name: OIDC subject probe (${{ inputs.environment }})
+
+# Prints the `sub`, `aud` and `environment` claims of the OIDC token GitHub
+# issues to a job bound to the chosen environment, so that the AWS trust
+# policy (infrastructure/cdk/github-actions-trust-policy.json) is written from
+# a real token rather than from the customization API
+# (docs/deployment/iam-permissions.md, "Before writing the policy").
+#
+# It prints those three claims and nothing else: never the token, which the
+# runner does not mask, and no other claim. It checks nothing out, installs
+# nothing, and makes no AWS call.
+#
+# The only choice is `staging`; `prod` is added when its environment exists
+# and is protected, because a dispatch that names an environment that does not
+# exist creates it unprotected.
+#
+# This workflow stays until the prod trust policy is written; delete it then.
+#
+# backend/tests/unit/infrastructure/test_oidc_sub_probe.py pins all of the
+# above and runs the script against a fake token service.
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment whose OIDC subject to print'
+        required: true
+        type: choice
+        default: staging
+        options: [staging]
+
+permissions: {}
+
+jobs:
+  probe:
+    name: Print the OIDC subject for ${{ inputs.environment }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    environment: ${{ inputs.environment }}
+    permissions:
+      id-token: write
+    steps:
+      - name: Print sub, aud and environment
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import base64
+          import json
+          import os
+          import sys
+          import urllib.parse
+          import urllib.request
+
+          url = os.environ.get("ACTIONS_ID_TOKEN_REQUEST_URL", "")
+          bearer = os.environ.get("ACTIONS_ID_TOKEN_REQUEST_TOKEN", "")
+          if not url or not bearer:
+              print("::error::No ID token is available to this job; it needs permissions: id-token: write.")
+              sys.exit(1)
+
+          separator = "&" if "?" in url else "?"
+          request = urllib.request.Request(
+              url + separator + "audience=" + urllib.parse.quote("sts.amazonaws.com"),
+              headers={"Authorization": "bearer " + bearer},
+          )
+          try:
+              with urllib.request.urlopen(request, timeout=30) as response:
+                  token = json.load(response)["value"]
+              payload = token.split(".")[1]
+              claims = json.loads(base64.urlsafe_b64decode(payload + "=" * (-len(payload) % 4)))
+          except Exception as error:
+              # The type only: an exception's text could quote the response.
+              print(f"::error::Could not read the ID token ({type(error).__name__}).")
+              sys.exit(1)
+
+          print(f"sub={claims.get('sub')}")
+          print(f"aud={claims.get('aud')}")
+          print(f"environment={claims.get('environment')}")
+          PY

@@ -83,11 +83,31 @@ assumes the role.
 from the API, not from a token. Before the first staging deploy, run a
 throwaway job bound to the `staging` environment that prints only the
 *payload* of its OIDC token's `sub` claim, and the trust policy is written
-from what it printed. A `sub` that does not match fails `AssumeRoleWithWebIdentity`
+from what it printed. The **OIDC subject probe** workflow
+(`.github/workflows/oidc-sub-probe.yml`; Actions → OIDC subject probe → Run
+workflow, from `main`) is that job: it prints `sub`, `aud` and `environment`
+and never the token. Protect the environment first (see
+[GitHub side](#github-side)). A `sub` that does not match fails `AssumeRoleWithWebIdentity`
 with "Not authorized", which is the safe direction.
 
 The account also needs the GitHub OIDC provider
 (`token.actions.githubusercontent.com`, audience `sts.amazonaws.com`), once.
+
+### Session length
+
+Each environment role needs a **`MaxSessionDuration` of 10800 seconds (3
+hours)**. The workflows ask for a session as long as the job may run:
+`role-duration-seconds` is 9000 in `deploy.yml` (a 150-minute job) and 5400 in
+`db-migrate.yml` and `rollback.yml` (90-minute jobs). IAM's default maximum is
+one hour, and a request above the role's maximum fails at the "Configure AWS
+credentials" step, before anything has changed.
+
+Create the role with `--max-session-duration 10800`. For a role that already
+exists:
+
+```bash
+aws iam update-role --role-name <ROLE_NAME> --max-session-duration 10800
+```
 
 ### Permissions policy
 
