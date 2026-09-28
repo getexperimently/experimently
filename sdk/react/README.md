@@ -92,6 +92,8 @@ A resolved assignment also carries `assigned` and `reason`. `assigned: false` me
 did not enrol the user — `reason` is `'holdout'`, `'mutual_exclusion'` or `'targeting'` — and
 returned the experiment's control variant so you render the default experience (no exposure is
 recorded). Servers that predate the field are reported as `assigned: true` with no `reason`.
+**When you export exposures to a warehouse, log only assignments with `assigned: true`**; the
+others were never in the experiment.
 
 ### `useTrackEvent(): (eventName, properties?, options?) => void`
 

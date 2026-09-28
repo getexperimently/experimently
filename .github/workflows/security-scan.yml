@@ -44,9 +44,9 @@ jobs:
         run: |
           pip install bandit pip-audit
 
-      # Both trees: the modules (SAML parsing, PHI encryption, the SQL-building
-      # warehouse connectors, the inbound webhooks) moved to modules/backend/app
-      # and `-r backend/app` no longer reaches them. modules/ is absent in a
+      # Both trees: the modules (SAML parsing, PHI encryption, the inbound
+      # webhooks) moved to modules/backend/app and `-r backend/app` no longer
+      # reaches them. modules/ is absent in a
       # core checkout, so it is passed only when it is there.
       - name: Run Bandit
         run: |
@@ -159,8 +159,8 @@ jobs:
       - uses: actions/checkout@v7
 
       # Both trees, for the reason Bandit takes both: the SAML XML parser, the
-      # PHI encryption, the SQL-string-building warehouse connectors and the
-      # platform's only anonymous write path all live under modules/backend/app
+      # PHI encryption and the platform's only anonymous write path all live
+      # under modules/backend/app
       # now, and `backend/app/` reaches none of them. modules/ is absent in a
       # core checkout, so it is passed only when it is there.
       - name: Run Semgrep

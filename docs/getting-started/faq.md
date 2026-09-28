@@ -119,9 +119,7 @@ You can combine both: run a feature behind a flag during an experiment, then gra
 
 ### Can I use my own data warehouse?
 
-Yes. The warehouse-native analytics feature lets you connect to Snowflake, BigQuery, or Amazon Redshift and run experiment analysis directly against your existing data. This is useful when your source-of-truth metrics already live in the warehouse, or when you need to analyze large datasets.
-
-See the [Warehouse-Native Analytics API](../api/warehouse-analytics.md) for setup instructions.
+Not today. The warehouse endpoints have been removed, and warehouse analysis is being rebuilt (#312). See [Warehouse Analytics](../api/warehouse-analytics.md).
 
 ---
 

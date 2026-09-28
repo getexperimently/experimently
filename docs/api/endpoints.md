@@ -1430,18 +1430,11 @@ GET  /api/v1/holdout/check/{uid}  — Check if user is in holdout
 
 ---
 
-### Warehouse-Native Analytics
+### Warehouse Analytics
 
-See [Warehouse Analytics Guide](warehouse-analytics.md) for full documentation.
-
-```
-GET    /api/v1/warehouse/connections          — List connections (DEVELOPER+)
-POST   /api/v1/warehouse/connections          — Create connection (DEVELOPER+)
-GET    /api/v1/warehouse/connections/{id}     — Get connection
-DELETE /api/v1/warehouse/connections/{id}     — Delete connection (DEVELOPER+)
-POST   /api/v1/warehouse/connections/test     — Test credentials (DEVELOPER+)
-POST   /api/v1/warehouse/sync/{experiment_id} — Trigger warehouse sync (DEVELOPER+)
-```
+The `/api/v1/warehouse` endpoints have been removed and answer 404.
+Warehouse analysis is being rebuilt (#312); see
+[Warehouse Analytics](warehouse-analytics.md).
 
 ---
 
@@ -1576,8 +1569,9 @@ GET  /api/v1/etl/jobs/{run_id}/status   — Status of one run
 POST /api/v1/etl/crawler/run            — Trigger the Glue crawler
 GET  /api/v1/etl/crawler/status         — Crawler status
 POST /api/v1/etl/partitions/add         — Register a new partition
-POST /api/v1/etl/query                  — Run an Athena query
 ```
+
+`POST /api/v1/etl/query` has been removed and answers 404.
 
 ---
 

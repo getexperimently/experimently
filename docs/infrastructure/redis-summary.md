@@ -7,8 +7,8 @@ This document summarizes the implementation of ElastiCache Redis for the experim
 ## Key Features
 
 ### High Availability & Scalability
-- **Multi-AZ Deployment**: Production and staging environments use replicas across multiple availability zones
-- **Automatic Failover**: Seamless failover to replicas in case of primary node failure
+- **Multi-AZ Deployment**: Production uses replicas across multiple availability zones. Staging and development run a single node, so they have no replica
+- **Automatic Failover**: In production, failover to a replica if the primary node fails. Staging and development have no failover
 - **Environment-Based Scaling**: Cluster size and instance types scale based on environment needs
 - **Read Replicas**: Read requests can be distributed across replicas for improved performance
 
@@ -61,9 +61,10 @@ The stack dynamically adjusts based on environment:
 
 | Feature | Development | Staging | Production |
 |---------|-------------|---------|------------|
-| Node Count | 1 | 2 | 3 |
-| Instance Type | cache.t4g.medium | cache.m6g.large | cache.r6g.large |
-| Multi-AZ | No | Yes | Yes |
+| Node Count | 1 | 1 | 3 |
+| Instance Type | cache.t4g.medium | cache.t4g.small | cache.r6g.large |
+| Automatic Failover | No | No | Yes |
+| Multi-AZ | No | No | Yes |
 | Snapshot Retention | 1 day | 3 days | 7 days |
 
 ### Parameter Group Configuration
@@ -147,7 +148,7 @@ The Redis stack is integrated with the application through:
 
 2. **Connection Management**:
    - Connection details stored in SSM Parameter Store
-   - Automatic failover to read replicas for read operations
+   - Automatic failover to read replicas for read operations (production only; staging and development have one node)
    - Connection pooling and health checking
 
 3. **Utils Directory**:

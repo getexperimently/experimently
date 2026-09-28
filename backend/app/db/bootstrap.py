@@ -95,6 +95,11 @@ from sqlalchemy import ForeignKeyConstraint, create_engine, inspect, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.schema import AddConstraint, CreateSchema
 
+from backend.app.core.settings_rules import (
+    WEAK_FIRST_SUPERUSER_PASSWORD_MESSAGE,
+    WEAK_SUPERUSER_PASSWORD_ENVIRONMENTS,
+    superuser_password_is_weak,
+)
 from backend.app.core.version import get_version
 from backend.app.db.autogenerate_filters import MODULE_TABLES
 from backend.app.db.schema import (
@@ -220,6 +225,28 @@ def create_from_models(engine: Engine, schema: str) -> None:
     schema_metadata(schema).create_all(bind=engine)
 
 
+class FirstSuperuserRefused(RuntimeError):
+    """The first administrator's password is not acceptable here."""
+
+
+def first_superuser_refusal(settings) -> str | None:
+    """Why the first administrator may not be created with these settings, or None.
+
+    A weak or well-known ``FIRST_SUPERUSER_PASSWORD`` (the rule staging and
+    production apply at start-up, ``settings_rules.superuser_password_is_weak``)
+    is accepted only when ENVIRONMENT was *set* to development or test. The
+    development default that an unset ENVIRONMENT falls back to does not count.
+    """
+    if (
+        settings.environment_explicit
+        and settings.ENVIRONMENT in WEAK_SUPERUSER_PASSWORD_ENVIRONMENTS
+    ):
+        return None
+    if superuser_password_is_weak(settings.FIRST_SUPERUSER_PASSWORD):
+        return WEAK_FIRST_SUPERUSER_PASSWORD_MESSAGE
+    return None
+
+
 def ensure_first_superuser(engine: Engine, schema: str) -> bool:
     """
     Create the ``FIRST_SUPERUSER`` administrator when no user exists yet.
@@ -227,6 +254,9 @@ def ensure_first_superuser(engine: Engine, schema: str) -> bool:
     Returns True when a user was created.  Existing databases (any row in
     ``users``) are left untouched, so this never overrides seeded or
     real accounts; the seed scripts keep ``admin@demo.com`` / ``Demo1234!``.
+
+    Raises :class:`FirstSuperuserRefused`, creating nothing, when the users
+    table is empty and :func:`first_superuser_refusal` refuses the password.
     """
     from sqlalchemy.orm import sessionmaker
 
@@ -254,6 +284,10 @@ def ensure_first_superuser(engine: Engine, schema: str) -> bool:
             # does nothing, and nothing else would say so.
             logger.info("users exist; FIRST_SUPERUSER settings ignored")
             return False
+
+        refusal = first_superuser_refusal(settings)
+        if refusal:
+            raise FirstSuperuserRefused(refusal)
 
         email = str(settings.FIRST_SUPERUSER).strip().lower()
         username = email.split("@", 1)[0] or "admin"
@@ -700,7 +734,14 @@ if __name__ == "__main__":
     # created (#237). This module's own level survives that (env.py passes
     # disable_existing_loggers=False), so pin it.
     logger.setLevel(logging.INFO)
-    result = bootstrap()
+    try:
+        result = bootstrap()
+    except FirstSuperuserRefused as refused:
+        # One line an operator can act on, not a traceback. The schema work
+        # above is committed; re-running with the setting fixed creates the
+        # administrator.
+        logger.error("%s", refused)
+        raise SystemExit(1) from None
     print(
         f"Database bootstrap complete ({result}) — schema '{schema_name()}' at {database_url().split('@')[-1]}"
     )

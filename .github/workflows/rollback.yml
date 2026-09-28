@@ -65,6 +65,10 @@ jobs:
   rollback:
     name: Roll back ${{ inputs.environment }}
     runs-on: ubuntu-latest
+    # The job's waits are ROLLBACK_TIMEOUT_SECONDS (1800) and
+    # DASHBOARD_ROLLOUT_DEADLINE_SECONDS (1200), about 55 minutes with the
+    # rest; the default of 360 would outlive the AWS session.
+    timeout-minutes: 90
     environment: ${{ inputs.environment }}
     permissions:
       id-token: write
@@ -126,6 +130,9 @@ jobs:
         with:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
+          # timeout-minutes x 60 <= this <= the role's MaxSessionDuration (10800);
+          # test_aws_session_duration.py. The default, 3600, expires mid-job.
+          role-duration-seconds: 5400
 
       - name: Refuse the wrong AWS account
         run: |
