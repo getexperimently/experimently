@@ -172,7 +172,7 @@ describe('ssoErrorMessage: the copy for every code (spec-v3 §10)', () => {
     ],
     [
       { sso_error: 'sso_saml_only' },
-      "acme.com signs in through your identity provider's portal. Start from there, or ask your administrator.",
+      "SAML sign-in isn't available yet. Ask your administrator to set up OIDC sign-in for acme.com.",
       'acme.com',
     ],
     [

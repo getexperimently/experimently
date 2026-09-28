@@ -64,7 +64,7 @@ When the API lists the `sso` module (`GET /api/v1/modules`), the dashboard's sig
 
 A browser's history keeps `/sso/complete#code=...`. That code expires after 60 seconds, and without the secret held by the tab that started the sign-in it cannot be exchanged.
 
-A domain whose only active configuration is SAML cannot start here: the dashboard says to start from the identity provider's portal (`sso_saml_only`). A domain with more than one active OIDC configuration cannot sign in until an administrator removes the extra ones; the API logs a warning naming them, and the user sees `sso_not_configured`.
+A domain whose only active configuration is SAML cannot start here: the dashboard says SAML sign-in is not available yet and to ask an administrator to set up OIDC sign-in (`sso_saml_only`). A domain with more than one active OIDC configuration cannot sign in until an administrator removes the extra ones; the API logs a warning naming them, and the user sees `sso_not_configured`.
 
 ### What the user sees when a sign-in fails
 

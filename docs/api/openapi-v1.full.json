@@ -30804,7 +30804,7 @@
       "name": "Integrations"
     },
     {
-      "description": "SAML 2.0 and OIDC single sign-on with just-in-time provisioning",
+      "description": "OIDC single sign-on with just-in-time provisioning. SAML 2.0 sign-in is not available yet.",
       "name": "SSO"
     },
     {
