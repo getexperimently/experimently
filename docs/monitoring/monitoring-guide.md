@@ -269,6 +269,8 @@ environments can share an account:
    of the existing EP-013 alarms at the bottom of `__init__`.
 
 3. Run `cdk diff` and `cdk deploy experimentation-monitoring-<env>` to apply.
+   For `staging` or `prod`, `ALARM_EMAIL` must be set, or synth refuses
+   ([AWS CDK Deployment](../self-hosting/cdk.md#required-environment-variables)).
 
 ### SNS topic
 
