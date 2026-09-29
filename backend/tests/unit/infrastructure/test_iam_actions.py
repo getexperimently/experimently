@@ -277,3 +277,40 @@ def test_the_real_override_is_granted_and_attributed():
         ".github/workflows/deploy.yml",
         ".github/workflows/rollback.yml",
     }, found["codedeploy:UpdateDeploymentGroup"]
+
+
+# --- the alarm pre-flight (#148 PR-3, #297) ------------------------------------
+
+
+@pytest.mark.regression
+def test_the_alarm_preflight_reads_are_granted_and_attributed():
+    """EM condition 11: the pre-flight's two reads are in the generated policy,
+    each needed by scripts/refuse_alarm_active.py and by nothing else."""
+    found = _module().calls()
+    for action in ("codedeploy:GetDeploymentGroup", "cloudwatch:DescribeAlarms"):
+        assert action in found, sorted(found)
+        assert {p.split(":")[0] for p in found[action]} == {
+            "scripts/refuse_alarm_active.py"
+        }, found[action]
+    granted = json.loads(POLICY.read_text())["Statement"][0]["Action"]
+    assert "codedeploy:GetDeploymentGroup" in granted
+    assert "cloudwatch:DescribeAlarms" in granted
+
+
+@pytest.mark.regression
+def test_an_unmapped_service_in_operations_fails_generation(tmp_path):
+    """The tuple scan skips a pair whose service is not mapped (scripts hold
+    other string pairs), so `("cloudwatch", "describe-alarms")` was dropped
+    from the role in silence until `cloudwatch` was mapped. A service in a
+    script's OPERATIONS allow-list must be mapped, or generation fails."""
+    iam = _module()
+    script = tmp_path / "probe.py"
+    script.write_text(
+        'OPERATIONS = frozenset({("deploy", "get-deployment"), ("sqs", "send-message")})\n'
+        'PAIRS = ("blue", "green")\n'
+    )
+    with pytest.raises(SystemExit, match="'sqs' is not mapped"):
+        iam.calls([script])
+    # Pairs outside OPERATIONS are still ignored.
+    script.write_text('PAIRS = ("blue", "green")\n')
+    assert dict(iam.calls([script])) == {}
