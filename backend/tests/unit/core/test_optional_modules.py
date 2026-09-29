@@ -183,7 +183,7 @@ class TestSplitUrlRefusedWithoutRouting:
                 experiments, "split_url_routing_available", return_value=False
             ),
             patch.object(
-                experiments.deps, "get_experiment_access", return_value=existing
+                experiments.deps, "get_experiment_change_access", return_value=existing
             ),
         ):
             with pytest.raises(HTTPException) as exc:
@@ -234,7 +234,7 @@ class TestSplitUrlRefusedWithoutRouting:
             ),
             patch.object(
                 experiments.deps,
-                "get_experiment_access",
+                "get_experiment_change_access",
                 side_effect=HTTPException(status_code=403, detail="not yours"),
             ),
         ):
@@ -267,7 +267,7 @@ class TestSplitUrlRefusedWithoutRouting:
                 experiments, "split_url_routing_available", return_value=False
             ),
             patch.object(
-                experiments.deps, "get_experiment_access", return_value=existing
+                experiments.deps, "get_experiment_change_access", return_value=existing
             ),
             patch.object(experiments, "_reject_unroutable_split_url") as reject,
         ):
@@ -301,7 +301,7 @@ class TestSplitUrlRefusedWithoutRouting:
                 experiments, "split_url_routing_available", return_value=False
             ),
             patch.object(
-                experiments.deps, "get_experiment_access", return_value=source
+                experiments.deps, "get_experiment_read_access", return_value=source
             ),
         ):
             with pytest.raises(HTTPException) as exc:

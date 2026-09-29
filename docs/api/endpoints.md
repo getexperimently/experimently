@@ -37,11 +37,17 @@ The API uses two types of authentication:
 ### Authorization Levels
 1. **Regular Users**:
    - Can access their own data
-   - Can create and manage their own experiments
    - Cannot access admin endpoints
 
    - Feature flags are by role, not ownership: ADMIN and DEVELOPER may read, create,
      change and delete any flag; ANALYST and VIEWER may read any flag and change none
+   - Experiments: reading an experiment and its results under
+     `/api/v1/experiments/{experiment_id}` needs the role's READ on experiments (all four
+     roles hold it); who owns the experiment is not considered. ADMIN and DEVELOPER may create
+     experiments, clone any experiment, and update, start, pause, complete, archive or
+     annotate (`metadata`) any experiment. Scheduling and deleting an experiment also
+     require being its owner. ANALYST and VIEWER change no experiment, including one
+     they own
 
 2. **Superusers**:
    - Can access all user data

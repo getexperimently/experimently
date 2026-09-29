@@ -21358,7 +21358,7 @@
         ]
       },
       "put": {
-        "description": "Update experiment.\n\nThis endpoint allows users to update an existing experiment.\nThe user must have access to the experiment (be the owner or have permission).\n\nFields that can be updated:\n- Basic properties: name, description, hypothesis\n- Variants: if experiment is in DRAFT status\n- Metrics: if experiment is in DRAFT status\n\nReturns:\n    ExperimentResponse: The updated experiment\n\nRaises:\n    HTTPException 403: If the user doesn't have permission to update this experiment\n    HTTPException 400: If trying to update variants/metrics for non-DRAFT experiment\n    HTTPException 404: If the experiment doesn't exist",
+        "description": "Update experiment.\n\nThis endpoint allows users to update an existing experiment.\nThe caller's role must hold UPDATE on experiments; who created the\nexperiment is not considered.\n\nFields that can be updated:\n- Basic properties: name, description, hypothesis\n- Variants: if experiment is in DRAFT status\n- Metrics: if experiment is in DRAFT status\n\nReturns:\n    ExperimentResponse: The updated experiment\n\nRaises:\n    HTTPException 403: If the caller's role does not hold UPDATE on experiments\n    HTTPException 400: If trying to update variants/metrics for non-DRAFT experiment\n    HTTPException 404: If the experiment doesn't exist",
         "operationId": "update_experiment_api_v1_experiments__experiment_id__put",
         "parameters": [
           {
@@ -21470,7 +21470,7 @@
     },
     "/api/v1/experiments/{experiment_id}/archive": {
       "post": {
-        "description": "Archive an experiment.\n\nThis endpoint archives an experiment, changing its status to ARCHIVED.\nArchiving an experiment:\n- Makes it inactive for user assignments\n- Preserves all collected data for historical analysis\n- Moves it to the archive section in the UI\n\nThis is the preferred alternative to deletion for experiments that are no longer\nactive but whose data should be preserved.\n\nReturns:\n    ExperimentResponse: The updated experiment with ARCHIVED status\n\nRaises:\n    HTTPException 400: If the experiment is already archived\n    HTTPException 403: If the user doesn't have permission to archive this experiment",
+        "description": "Archive an experiment.\n\nThis endpoint archives an experiment, changing its status to ARCHIVED.\nArchiving an experiment:\n- Makes it inactive for user assignments\n- Preserves all collected data for historical analysis\n- Moves it to the archive section in the UI\n\nThis is the preferred alternative to deletion for experiments that are no longer\nactive but whose data should be preserved.\n\nReturns:\n    ExperimentResponse: The updated experiment with ARCHIVED status\n\nRaises:\n    HTTPException 400: If the experiment is already archived\n    HTTPException 403: If the caller's role does not hold UPDATE on experiments",
         "operationId": "archive_experiment_api_v1_experiments__experiment_id__archive_post",
         "parameters": [
           {
@@ -21571,7 +21571,7 @@
     },
     "/api/v1/experiments/{experiment_id}/clone": {
       "post": {
-        "description": "Clone an experiment.\n\nThis endpoint creates a new experiment that is a copy of an existing experiment.\nThe cloned experiment will:\n- Have a name prefixed with \"Copy of\"\n- Be in DRAFT status\n- Have the same variants, metrics, and configuration as the original\n- Have the current user as the owner\n\nThis is useful for creating variations of existing experiments or repeating\nsuccessful experiments with minor modifications.\n\nReturns:\n    ExperimentResponse: The newly created cloned experiment\n\nRaises:\n    HTTPException 403: If the user doesn't have permission to view the source experiment\n    HTTPException 404: If the source experiment doesn't exist",
+        "description": "Clone an experiment.\n\nThis endpoint creates a new experiment that is a copy of an existing experiment.\nThe cloned experiment will:\n- Have a name prefixed with \"Copy of\"\n- Be in DRAFT status\n- Have the same variants, metrics, and configuration as the original\n- Have the current user as the owner\n\nThis is useful for creating variations of existing experiments or repeating\nsuccessful experiments with minor modifications.\n\nReturns:\n    ExperimentResponse: The newly created cloned experiment\n\nRaises:\n    HTTPException 403: If the caller's role does not hold READ and CREATE on experiments\n    HTTPException 404: If the source experiment doesn't exist",
         "operationId": "clone_experiment_api_v1_experiments__experiment_id__clone_post",
         "parameters": [
           {
@@ -21672,7 +21672,7 @@
     },
     "/api/v1/experiments/{experiment_id}/complete": {
       "post": {
-        "description": "Complete an experiment.\n\nThis endpoint marks an experiment as completed, changing its status to COMPLETED\nand setting the end date if not already set.\n\nCompleting an experiment:\n- Stops new user assignments\n- Finalizes data collection\n- Makes results available for final analysis\n\n**Note**: This operation is typically performed when an experiment has\ngathered sufficient data to make a decision.\n\nReturns:\n    ExperimentResponse: The updated experiment with COMPLETED status\n\nRaises:\n    HTTPException 400: If the experiment cannot be completed\n    HTTPException 403: If the user doesn't have permission to complete this experiment",
+        "description": "Complete an experiment.\n\nThis endpoint marks an experiment as completed, changing its status to COMPLETED\nand setting the end date if not already set.\n\nCompleting an experiment:\n- Stops new user assignments\n- Finalizes data collection\n- Makes results available for final analysis\n\n**Note**: This operation is typically performed when an experiment has\ngathered sufficient data to make a decision.\n\nReturns:\n    ExperimentResponse: The updated experiment with COMPLETED status\n\nRaises:\n    HTTPException 400: If the experiment cannot be completed\n    HTTPException 403: If the caller's role does not hold UPDATE on experiments",
         "operationId": "complete_experiment_api_v1_experiments__experiment_id__complete_post",
         "parameters": [
           {
@@ -21773,7 +21773,7 @@
     },
     "/api/v1/experiments/{experiment_id}/daily-results": {
       "get": {
-        "description": "Get experiment results broken down by day.\n\nThis endpoint retrieves the analytical results of an experiment by day, including:\n- Daily conversion rates for each variant\n- Daily sample sizes\n- Trend analysis over time\n\nThis is useful for visualizing how the experiment is performing over time\nand identifying any temporal patterns or anomalies.\n\nReturns:\n    List[Dict[str, Any]]: List of daily result objects\n\nRaises:\n    HTTPException 400: If the experiment has no data or is in DRAFT status\n    HTTPException 403: If the user doesn't have permission to view this experiment",
+        "description": "Get experiment results broken down by day.\n\nThis endpoint retrieves the analytical results of an experiment by day, including:\n- Daily conversion rates for each variant\n- Daily sample sizes\n- Trend analysis over time\n\nThis is useful for visualizing how the experiment is performing over time\nand identifying any temporal patterns or anomalies.\n\nReturns:\n    List[Dict[str, Any]]: List of daily result objects\n\nRaises:\n    HTTPException 400: If the experiment has no data or is in DRAFT status\n    HTTPException 403: If the caller's role does not hold READ on experiments",
         "operationId": "get_daily_experiment_results_api_v1_experiments__experiment_id__daily_results_get",
         "parameters": [
           {
@@ -21898,7 +21898,7 @@
     },
     "/api/v1/experiments/{experiment_id}/metadata": {
       "post": {
-        "description": "Update experiment metadata.\n\nThis endpoint allows updating additional metadata associated with an experiment,\nsuch as notes, insights, learnings, and other custom fields.\n\nThis metadata is separate from the core experiment configuration and can be\nupdated regardless of the experiment's status.\n\nReturns:\n    Dict[str, Any]: The updated experiment with metadata\n\nRaises:\n    HTTPException 403: If the user doesn't have permission to update this experiment\n    HTTPException 404: If the experiment doesn't exist",
+        "description": "Update experiment metadata.\n\nThis endpoint allows updating additional metadata associated with an experiment,\nsuch as notes, insights, learnings, and other custom fields.\n\nThis metadata is separate from the core experiment configuration and can be\nupdated regardless of the experiment's status.\n\nReturns:\n    Dict[str, Any]: The updated experiment with metadata\n\nRaises:\n    HTTPException 403: If the caller's role does not hold UPDATE on experiments\n    HTTPException 404: If the experiment doesn't exist",
         "operationId": "update_experiment_metadata_api_v1_experiments__experiment_id__metadata_post",
         "parameters": [
           {
@@ -22014,7 +22014,7 @@
     },
     "/api/v1/experiments/{experiment_id}/pause": {
       "post": {
-        "description": "Pause an experiment.\n\nThis endpoint pauses an active experiment, changing its status to PAUSED.\nPausing an experiment temporarily stops:\n- New user assignments (existing assignments remain in effect)\n- Data collection and analysis\n\nThe experiment can later be resumed by using the start endpoint.\n\nReturns:\n    ExperimentResponse: The updated experiment with PAUSED status\n\nRaises:\n    HTTPException 400: If the experiment cannot be paused\n    HTTPException 403: If the user doesn't have permission to pause this experiment",
+        "description": "Pause an experiment.\n\nThis endpoint pauses an active experiment, changing its status to PAUSED.\nPausing an experiment temporarily stops:\n- New user assignments (existing assignments remain in effect)\n- Data collection and analysis\n\nThe experiment can later be resumed by using the start endpoint.\n\nReturns:\n    ExperimentResponse: The updated experiment with PAUSED status\n\nRaises:\n    HTTPException 400: If the experiment cannot be paused\n    HTTPException 403: If the caller's role does not hold UPDATE on experiments",
         "operationId": "pause_experiment_api_v1_experiments__experiment_id__pause_post",
         "parameters": [
           {
@@ -22115,7 +22115,7 @@
     },
     "/api/v1/experiments/{experiment_id}/results": {
       "get": {
-        "description": "Get experiment results and statistical analysis.\n\nApplies the experiment-level access rules (permission/ownership check and\nno results for DRAFT experiments) and then delegates to the analytics\nresults engine, so this endpoint returns exactly the same payload as\n``GET /api/v1/results/{experiment_id}`` with default options.\n\nRaises:\n    HTTPException 400: If the experiment is in DRAFT status\n    HTTPException 403: If the user doesn't have permission to view this experiment\n    HTTPException 404: If the experiment does not exist",
+        "description": "Get experiment results and statistical analysis.\n\nRequires READ on experiments (who created the experiment is not\nconsidered), refuses DRAFT experiments, and then delegates to the analytics\nresults engine, so this endpoint returns exactly the same payload as\n``GET /api/v1/results/{experiment_id}`` with default options.\n\nRaises:\n    HTTPException 400: If the experiment is in DRAFT status\n    HTTPException 403: If the caller's role does not hold READ on experiments\n    HTTPException 404: If the experiment does not exist",
         "operationId": "get_experiment_results_api_v1_experiments__experiment_id__results_get",
         "parameters": [
           {
@@ -22318,7 +22318,7 @@
     },
     "/api/v1/experiments/{experiment_id}/segmented-results/{segment_by}": {
       "get": {
-        "description": "Get experiment results segmented by a specific property.\n\nThis endpoint retrieves the analytical results of an experiment segmented\nby a specific property such as country, device, browser, etc.\n\nThis is useful for understanding how the experiment performs for different\nuser segments and identifying any variations in the experiment's effect\nacross different user populations.\n\nReturns:\n    Dict[str, Any]: Segmented results object\n\nRaises:\n    HTTPException 400: If the experiment has no data or is in DRAFT status\n    HTTPException 403: If the user doesn't have permission to view this experiment",
+        "description": "Get experiment results segmented by a specific property.\n\nThis endpoint retrieves the analytical results of an experiment segmented\nby a specific property such as country, device, browser, etc.\n\nThis is useful for understanding how the experiment performs for different\nuser segments and identifying any variations in the experiment's effect\nacross different user populations.\n\nReturns:\n    Dict[str, Any]: Segmented results object\n\nRaises:\n    HTTPException 400: If the experiment has no data or is in DRAFT status\n    HTTPException 403: If the caller's role does not hold READ on experiments",
         "operationId": "get_segmented_experiment_results_api_v1_experiments__experiment_id__segmented_results__segment_by__get",
         "parameters": [
           {
@@ -22558,7 +22558,7 @@
     },
     "/api/v1/experiments/{experiment_id}/start": {
       "post": {
-        "description": "Start an experiment.\n\nThis endpoint activates an experiment, changing its status to ACTIVE\nand setting the start date if not already set.\n\nStarting an experiment makes it eligible for:\n- User traffic assignment\n- Event tracking and analysis\n- Results calculation\n\nPrerequisites for starting an experiment:\n- The experiment must be in DRAFT or PAUSED status\n- The experiment must have at least one control and one non-control variant\n- The experiment must have at least one metric defined\n\nReturns:\n    ExperimentResponse: The updated experiment with ACTIVE status\n\nRaises:\n    HTTPException 400: If the experiment cannot be started\n    HTTPException 403: If the user doesn't have permission to start this experiment",
+        "description": "Start an experiment.\n\nThis endpoint activates an experiment, changing its status to ACTIVE\nand setting the start date if not already set.\n\nStarting an experiment makes it eligible for:\n- User traffic assignment\n- Event tracking and analysis\n- Results calculation\n\nPrerequisites for starting an experiment:\n- The experiment must be in DRAFT or PAUSED status\n- The experiment must have at least one control and one non-control variant\n- The experiment must have at least one metric defined\n\nReturns:\n    ExperimentResponse: The updated experiment with ACTIVE status\n\nRaises:\n    HTTPException 400: If the experiment cannot be started\n    HTTPException 403: If the caller's role does not hold UPDATE on experiments",
         "operationId": "start_experiment_api_v1_experiments__experiment_id__start_post",
         "parameters": [
           {

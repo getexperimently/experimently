@@ -1,3 +1,4 @@
+import uuid
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -7,18 +8,18 @@ from backend.app.api.deps import (
     can_create_experiment,
     can_create_feature_flag,
     can_create_report,
-    can_delete_experiment,
     can_delete_feature_flag,
     can_delete_report,
-    can_update_experiment,
     can_update_feature_flag,
     can_update_report,
-    get_experiment_access,
+    get_experiment_change_access,
+    get_experiment_read_access,
     get_feature_flag_access,
     get_report_access,
 )
-from backend.app.core.permissions import Action, ResourceType
-from backend.app.models.user import UserRole
+from backend.app.core.permissions import ROLE_PERMISSIONS, Action, ResourceType
+from backend.app.models.experiment import Experiment
+from backend.app.models.user import User, UserRole
 
 
 # Mock users with different roles
@@ -94,119 +95,101 @@ def mock_report():
     return report
 
 
+def _real_user(role, is_superuser=False):
+    """A real ``User``: ``check_permission`` reads its actual role.
+
+    A ``MagicMock`` user passes ``check_permission`` whatever its role, so the
+    experiment access checks are exercised with real model instances.
+    """
+    return User(
+        id=uuid.uuid4(),
+        username=f"deps_{role.value}",
+        email=f"deps_{role.value}@deps.test",
+        hashed_password="not-used",
+        is_active=True,
+        is_superuser=is_superuser,
+        role=role,
+    )
+
+
+def _experiment_owned_by(user):
+    return Experiment(id=uuid.uuid4(), name="deps", owner_id=user.id)
+
+
+ALL_ROLES = [UserRole.ADMIN, UserRole.DEVELOPER, UserRole.ANALYST, UserRole.VIEWER]
+
+
 class TestExperimentPermissionDeps:
-    """Tests for experiment permission dependency functions."""
+    """``get_experiment_read_access`` and ``get_experiment_change_access``."""
 
-    @patch("backend.app.api.deps.check_permission")
-    @patch("backend.app.api.deps.check_ownership")
-    def test_get_experiment_access_superuser(
-        self, mock_check_ownership, mock_check_permission, mock_experiment, superuser
-    ):
-        """Test superuser always has access to experiments."""
-        # Arrange
-        mock_check_permission.return_value = False
-        mock_check_ownership.return_value = False
+    @pytest.mark.regression
+    @pytest.mark.parametrize("role", ALL_ROLES)
+    def test_read_access_admits_every_role_holding_read_on_any_experiment(self, role):
+        caller = _real_user(role)
+        experiment = _experiment_owned_by(_real_user(UserRole.DEVELOPER))
 
-        # Act
-        result = get_experiment_access(mock_experiment, superuser)
+        assert get_experiment_read_access(experiment, caller) is experiment
 
-        # Assert
-        assert result == mock_experiment
-        mock_check_permission.assert_not_called()
-        mock_check_ownership.assert_not_called()
-
-    @patch("backend.app.api.deps.check_permission")
-    @patch("backend.app.api.deps.check_ownership")
-    def test_get_experiment_access_admin(
-        self, mock_check_ownership, mock_check_permission, mock_experiment, admin_user
-    ):
-        """Test admin has access to experiments regardless of ownership."""
-        # Arrange
-        mock_check_permission.side_effect = lambda user, resource, action: True
-        mock_check_ownership.return_value = False
-
-        # Act
-        result = get_experiment_access(mock_experiment, admin_user)
-
-        # Assert
-        assert result == mock_experiment
-        # Verify both permission checks happened
-        mock_check_permission.assert_any_call(
-            admin_user, ResourceType.EXPERIMENT, Action.READ
-        )
-        mock_check_permission.assert_any_call(
-            admin_user, ResourceType.EXPERIMENT, Action.UPDATE
+    def test_read_access_refuses_a_role_without_read(self, monkeypatch):
+        caller = _real_user(UserRole.ANALYST)
+        experiment = _experiment_owned_by(caller)
+        monkeypatch.setitem(
+            ROLE_PERMISSIONS[UserRole.ANALYST], ResourceType.EXPERIMENT, [Action.LIST]
         )
 
-    @patch("backend.app.api.deps.check_permission")
-    @patch("backend.app.api.deps.check_ownership")
-    def test_get_experiment_access_owner(
-        self,
-        mock_check_ownership,
-        mock_check_permission,
-        mock_experiment,
-        developer_user,
-    ):
-        """Test experiment owner has access to their own experiment."""
-
-        # Arrange - use a side_effect function that tracks calls
-        def mock_check_permission_side_effect(user, resource, action):
-            if action == Action.READ:
-                return True
-            if action == Action.UPDATE:
-                return False
-            return False
-
-        mock_check_permission.side_effect = mock_check_permission_side_effect
-        mock_check_ownership.return_value = True
-
-        # Act
-        result = get_experiment_access(mock_experiment, developer_user)
-
-        # Assert
-        assert result == mock_experiment
-        # Verify both permission checks happened in the right order
-        assert len(mock_check_permission.call_args_list) >= 2
-        mock_check_permission.assert_any_call(
-            developer_user, ResourceType.EXPERIMENT, Action.READ
-        )
-        mock_check_permission.assert_any_call(
-            developer_user, ResourceType.EXPERIMENT, Action.UPDATE
-        )
-        mock_check_ownership.assert_called_with(developer_user, mock_experiment)
-
-    @patch("backend.app.api.deps.check_permission")
-    @patch("backend.app.api.deps.check_ownership")
-    def test_get_experiment_access_non_owner_no_update_permission(
-        self, mock_check_ownership, mock_check_permission, mock_experiment, analyst_user
-    ):
-        """Test non-owner without update permission is denied access if ownership check is required."""
-
-        # Arrange
-        def mock_check_permission_side_effect(user, resource, action):
-            if action == Action.READ:
-                return True
-            if action == Action.UPDATE:
-                return False
-            return False
-
-        mock_check_permission.side_effect = mock_check_permission_side_effect
-        mock_check_ownership.return_value = False
-
-        # Act & Assert
         with pytest.raises(HTTPException) as exc_info:
-            get_experiment_access(mock_experiment, analyst_user)
+            get_experiment_read_access(experiment, caller)
 
         assert exc_info.value.status_code == 403
-        assert "You don't have permission to access this experiment" in str(
-            exc_info.value.detail
+        assert exc_info.value.detail == "You don't have permission to view experiments"
+
+    def test_a_superuser_is_admitted_whatever_the_role_table_says(self, monkeypatch):
+        caller = _real_user(UserRole.VIEWER, is_superuser=True)
+        experiment = _experiment_owned_by(_real_user(UserRole.DEVELOPER))
+        monkeypatch.setitem(
+            ROLE_PERMISSIONS[UserRole.VIEWER], ResourceType.EXPERIMENT, []
         )
-        # Verify both permission checks happened
-        mock_check_permission.assert_any_call(
-            analyst_user, ResourceType.EXPERIMENT, Action.READ
+
+        assert get_experiment_read_access(experiment, caller) is experiment
+        assert get_experiment_change_access(experiment, caller) is experiment
+
+    @pytest.mark.parametrize("role", [UserRole.ADMIN, UserRole.DEVELOPER])
+    def test_change_access_admits_a_role_holding_update_on_any_experiment(self, role):
+        caller = _real_user(role)
+        experiment = _experiment_owned_by(_real_user(UserRole.DEVELOPER))
+
+        assert get_experiment_change_access(experiment, caller) is experiment
+
+    @pytest.mark.regression
+    @pytest.mark.parametrize("role", [UserRole.ANALYST, UserRole.VIEWER])
+    def test_change_access_refuses_a_role_without_update_even_as_the_owner(self, role):
+        caller = _real_user(role)
+        experiment = _experiment_owned_by(caller)
+
+        with pytest.raises(HTTPException) as exc_info:
+            get_experiment_change_access(experiment, caller)
+
+        assert exc_info.value.status_code == 403
+        assert (
+            exc_info.value.detail == "You don't have permission to update experiments"
         )
-        mock_check_permission.assert_any_call(
-            analyst_user, ResourceType.EXPERIMENT, Action.UPDATE
+
+    def test_change_access_checks_the_action_it_is_given(self, monkeypatch):
+        caller = _real_user(UserRole.DEVELOPER)
+        experiment = _experiment_owned_by(caller)
+        monkeypatch.setitem(
+            ROLE_PERMISSIONS[UserRole.DEVELOPER],
+            ResourceType.EXPERIMENT,
+            [Action.READ, Action.UPDATE, Action.LIST],
+        )
+
+        assert get_experiment_change_access(experiment, caller) is experiment
+        with pytest.raises(HTTPException) as exc_info:
+            get_experiment_change_access(experiment, caller, Action.DELETE)
+
+        assert exc_info.value.status_code == 403
+        assert (
+            exc_info.value.detail == "You don't have permission to delete experiments"
         )
 
     @patch("backend.app.api.deps.check_permission")

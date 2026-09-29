@@ -274,15 +274,15 @@ def test_feature_flag_access_by_role(viewer_user, some_flag):
     from backend.app.core.permissions import Action, can_act_on_feature_flag
     assert can_act_on_feature_flag(viewer_user, some_flag.owner_id, Action.UPDATE) is False
 
-# Experiment deps are SYNC — no asyncio needed
-def test_experiment_permission(db_session, admin_user):
-    from backend.app.api.deps import get_experiment_access
-    result = get_experiment_access(
-        experiment_id=some_exp.id,
-        current_user=admin_user,
-        db=db_session,
-    )
-    assert result is not None
+# Experiment checks are SYNC — no asyncio needed. Use a real User: a MagicMock
+# user passes check_permission whatever its role.
+def test_experiment_change_access(analyst_user, some_experiment):
+    from fastapi import HTTPException
+
+    from backend.app.api.deps import get_experiment_change_access
+    with pytest.raises(HTTPException) as exc:
+        get_experiment_change_access(some_experiment, analyst_user)
+    assert exc.value.status_code == 403
 ```
 
 ---
