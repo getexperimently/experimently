@@ -6,7 +6,7 @@ import re
 from datetime import datetime
 from typing import List, Optional
 
-from pydantic import BaseModel, ConfigDict, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Workspace
@@ -241,6 +241,18 @@ class WorkspaceInviteResponse(BaseModel):
     token: str
     expires_at: datetime
     accepted_at: Optional[datetime]
+    workspace_name: str = Field(
+        description="Name of the workspace the invitation is for."
+    )
+    inviter_username: Optional[str] = Field(
+        description=(
+            "Username of the account that created the invitation; null when "
+            "that account no longer exists. The invitation preview "
+            "(`GET /workspaces/invites/{token}`) returns it only to the "
+            "account the invitation was sent to, as it does `email` in full; "
+            "anyone else gets null."
+        )
+    )
 
     @field_validator("id", "workspace_id", mode="before")
     @classmethod
