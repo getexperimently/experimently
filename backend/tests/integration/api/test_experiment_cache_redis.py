@@ -39,7 +39,9 @@ import redis as sync_redis
 from fastapi.testclient import TestClient
 
 from backend.app.api import deps
+from backend.app.api.v1.endpoints import experiments as experiments_endpoint
 from backend.app.core.config import settings
+from backend.app.core.permissions import Action, ResourceType
 from backend.app.main import app
 from backend.app.models.experiment import Experiment
 from backend.app.schemas.experiment import ExperimentResponse
@@ -186,20 +188,33 @@ def test_the_experiment_detail_is_cached_and_served_from_the_cache(
 
 
 @pytest.fixture
-def cached_viewer_client(redis_server, db_session, viewer_user, monkeypatch):
-    """A non-superuser VIEWER, who owns nothing."""
+def cached_unreadable_client(redis_server, db_session, viewer_user, monkeypatch):
+    """A non-superuser VIEWER whose role is denied READ on experiments.
+
+    Every role carries that READ today, so the denial is planted in the
+    route's own permission check: the route then refuses this caller on its
+    role alone, whatever it decides about ownership.
+    """
+    real = experiments_endpoint.check_permission
+
+    def no_experiment_read(user, resource, action):
+        if resource == ResourceType.EXPERIMENT and action == Action.READ:
+            return False
+        return real(user, resource, action)
+
+    monkeypatch.setattr(experiments_endpoint, "check_permission", no_experiment_read)
     yield from _cached_client_for(db_session, viewer_user, monkeypatch)
 
 
 def test_a_caller_refused_the_detail_is_refused_it_from_the_cache(
-    cached_viewer_client, redis_server, make_experiment, db_session
+    cached_unreadable_client, redis_server, make_experiment, db_session
 ):
     """The cached detail is returned only after the same checks as an
     uncached read."""
     exp = make_experiment(name=f"{PREFIX}{uuid.uuid4().hex[:8]}")
     url = f"{BASE}/{exp.id}"
 
-    uncached = cached_viewer_client.get(url)
+    uncached = cached_unreadable_client.get(url)
     assert uncached.status_code == 403, uncached.text
     assert redis_server.exists(f"experiment:{exp.id}") == 0
 
@@ -210,7 +225,7 @@ def test_a_caller_refused_the_detail_is_refused_it_from_the_cache(
     redis_server.set(
         f"experiment:{exp.id}", json.dumps({**detail, "name": "from-cache"})
     )
-    cached = cached_viewer_client.get(url)
+    cached = cached_unreadable_client.get(url)
     assert cached.status_code == uncached.status_code, cached.text
     assert "from-cache" not in cached.text
 
