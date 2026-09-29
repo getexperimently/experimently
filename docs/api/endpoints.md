@@ -45,9 +45,9 @@ The API uses two types of authentication:
      `/api/v1/experiments/{experiment_id}` needs the role's READ on experiments (all four
      roles hold it); who owns the experiment is not considered. ADMIN and DEVELOPER may create
      experiments, clone any experiment, and update, start, pause, complete, archive or
-     annotate (`metadata`) any experiment. Scheduling and deleting an experiment also
-     require being its owner. ANALYST and VIEWER change no experiment, including one
-     they own
+     annotate (`metadata`) any experiment, schedule any experiment, and delete any
+     experiment in DRAFT. ANALYST and VIEWER change no experiment, including one they
+     own
 
 2. **Superusers**:
    - Can access all user data
