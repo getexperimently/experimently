@@ -10,6 +10,12 @@ Two providers share this router (selected by ``settings.AUTH_PROVIDER``):
 * ``cognito`` — AWS Cognito.  The legacy endpoints (signup, confirm, token,
   forgot/reset password, refresh, me) are unchanged; ``/login`` and
   ``/logout`` answer 404 because Cognito has its own flows.
+
+Five endpoints exist only for Cognito: ``POST /signup``, ``/confirm``,
+``/forgot-password``, ``/reset-password`` and ``/refresh``.  Under any other
+provider they answer 404 with ``COGNITO_ONLY_DETAIL`` before the request body
+is validated and before any Cognito client is created.  Under ``cognito`` their
+behaviour is unchanged.
 """
 
 from typing import Any, Optional, Union
@@ -49,6 +55,12 @@ router = APIRouter()
 
 INVALID_CREDENTIALS_DETAIL = "Invalid email or password"
 
+COGNITO_ONLY_DETAIL = (
+    "Endpoint not available: AUTH_PROVIDER is not 'cognito'. "
+    "Sign in with POST /api/v1/auth/login; "
+    "an administrator creates accounts and resets passwords."
+)
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -65,6 +77,20 @@ def _require_local_provider() -> None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Endpoint not available: AUTH_PROVIDER is not 'local'",
+        )
+
+
+def _require_cognito_provider() -> None:
+    """404 for endpoints that only exist on the Cognito provider.
+
+    Used as a route dependency, so it runs before the body is validated and
+    before the endpoint creates a ``CognitoAuthService``.  Any provider other
+    than ``cognito`` is refused.
+    """
+    if settings.AUTH_PROVIDER != "cognito":
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=COGNITO_ONLY_DETAIL,
         )
 
 
@@ -152,12 +178,15 @@ def logout_local() -> Response:
 
 
 # ---------------------------------------------------------------------------
-# Cognito endpoints (unchanged) + provider-aware /token and /me
+# Cognito-only endpoints + provider-aware /token and /me
 # ---------------------------------------------------------------------------
 
 
 @router.post(
-    "/signup", response_model=SignUpResponse, status_code=status.HTTP_201_CREATED
+    "/signup",
+    response_model=SignUpResponse,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(_require_cognito_provider)],
 )
 def signup(signup_data: SignUpRequest) -> Any:
     """
@@ -180,7 +209,11 @@ def signup(signup_data: SignUpRequest) -> Any:
         )
 
 
-@router.post("/confirm", response_model=ConfirmSignUpResponse)
+@router.post(
+    "/confirm",
+    response_model=ConfirmSignUpResponse,
+    dependencies=[Depends(_require_cognito_provider)],
+)
 def confirm_signup(confirm_data: ConfirmSignUpRequest) -> Any:
     """
     Confirm user registration with the verification code.
@@ -230,7 +263,11 @@ def login(
         )
 
 
-@router.post("/forgot-password", response_model=ForgotPasswordResponse)
+@router.post(
+    "/forgot-password",
+    response_model=ForgotPasswordResponse,
+    dependencies=[Depends(_require_cognito_provider)],
+)
 def forgot_password(forgot_password_data: ForgotPasswordRequest) -> Any:
     """
     Initiate the forgot password flow.
@@ -248,7 +285,11 @@ def forgot_password(forgot_password_data: ForgotPasswordRequest) -> Any:
         )
 
 
-@router.post("/reset-password", response_model=ConfirmForgotPasswordResponse)
+@router.post(
+    "/reset-password",
+    response_model=ConfirmForgotPasswordResponse,
+    dependencies=[Depends(_require_cognito_provider)],
+)
 def reset_password(reset_data: ConfirmForgotPasswordRequest) -> Any:
     """
     Complete the forgot password flow by setting a new password.
@@ -268,7 +309,11 @@ def reset_password(reset_data: ConfirmForgotPasswordRequest) -> Any:
         )
 
 
-@router.post("/refresh", response_model=TokenResponse)
+@router.post(
+    "/refresh",
+    response_model=TokenResponse,
+    dependencies=[Depends(_require_cognito_provider)],
+)
 def refresh_token(refresh_data: RefreshTokenRequest) -> Any:
     """
     Refresh the access token using a refresh token.

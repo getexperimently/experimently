@@ -181,7 +181,7 @@ Similarly, `FIRST_SUPERUSER_PASSWORD = "admin"` must be overridden before any pr
 **Tooling:**
 - Python: `safety check -r requirements.txt` + Snyk in CI
 - Node.js: `npm audit` + Snyk in CI
-- Containers: Trivy scan in CI (`trivy image backend:latest`)
+- Containers: Trivy scan in CI of the API and dashboard images, both profiles (`security-scan.yml`, `container-security`)
 - Automated PRs: Dependabot configured for weekly updates to `requirements.txt` and `package.json`
 
 **CI/CD Gate:** PRs introducing a new Critical dependency vulnerability must be blocked by the CI pipeline until resolved.

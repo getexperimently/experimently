@@ -230,6 +230,12 @@ jobs:
   container-security:
     name: Container Security Scan
     runs-on: ubuntu-latest
+    # Measured on #370 with warm caches: 4m31s for the whole job (the
+    # dashboard full build, from a cold `web-full` scope, took 76 s). A cold
+    # API cache costs about 8 minutes per image (see below), so the cold job is
+    # roughly 20 minutes; 30 leaves headroom and still ends a hang long before
+    # GitHub's 6-hour default.
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
 
@@ -342,14 +348,51 @@ jobs:
             type=gha,scope=api
           cache-to: type=gha,scope=api-full,mode=max
 
+      # The two dashboard images release.yml publishes (`web-images`): the same
+      # frontend/Dockerfile, with the profile as a build-arg rather than a
+      # stage. They were never scanned (#77), so half the published images had
+      # no container-vulnerability gate. The core build reads pr-qa-gate.yml's
+      # `web` cache and does not write it, because this build passes different
+      # build-args; the full build has a scope of its own.
+      # backend/tests/unit/infrastructure/test_security_scan_scope.py derives
+      # the set of images to build here from release.yml, so a third
+      # published image fails that test until it is scanned.
+      - name: Build the dashboard image (core)
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: frontend/Dockerfile
+          build-args: |
+            EXPERIMENTLY_PROFILE=core
+          load: true
+          tags: experimently-web:scan-core
+          cache-from: type=gha,scope=web
+
+      - name: Build the dashboard image (full)
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: frontend/Dockerfile
+          build-args: |
+            EXPERIMENTLY_PROFILE=full
+          load: true
+          tags: experimently-web:scan-full
+          cache-from: |
+            type=gha,scope=web-full
+            type=gha,scope=web
+          cache-to: type=gha,scope=web-full,mode=max
+
+      # One policy for all four images, the API's: HIGH/CRITICAL with a fix
+      # available fails the job.
       - name: Scan the built images
         run: |
           set -euo pipefail
           failed=0
-          for target in core full; do
-            echo "::group::trivy image ($target)"
+          for image in experimently-api:scan-core experimently-api:scan-full \
+                       experimently-web:scan-core experimently-web:scan-full; do
+            echo "::group::trivy image ($image)"
             trivy image --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 \
-              --format table "experimently-api:scan-$target" || failed=1
+              --format table "$image" || failed=1
             echo "::endgroup::"
           done
           exit "$failed"

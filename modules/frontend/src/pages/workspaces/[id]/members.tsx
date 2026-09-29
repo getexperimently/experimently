@@ -4,7 +4,12 @@ import { MODULES } from '@/services/modules';
 import { PageTitle } from '@/components/PageTitle';
 import Link from 'next/link';
 import { useRouter } from 'next/router';
-import { Workspace, WorkspaceMember, workspaceService } from '@modules/services/workspaces';
+import {
+  Workspace,
+  WorkspaceInvite,
+  WorkspaceMember,
+  workspaceService,
+} from '@modules/services/workspaces';
 
 const ROLE_BADGE: Record<WorkspaceMember['role'], { label: string; className: string }> = {
   OWNER: { label: 'Owner', className: 'bg-purple-100 text-purple-700' },
@@ -23,82 +28,183 @@ function getInitials(username: string): string {
 interface InviteModalProps {
   workspaceId: string;
   onClose: () => void;
-  onInvited: () => void;
 }
 
-function InviteModal({ workspaceId, onClose, onInvited }: InviteModalProps) {
+/** `5 Oct 2026`, in the reader's locale order. */
+function formatExpiry(expiresAt: string): string {
+  return new Date(expiresAt).toLocaleDateString(undefined, {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+  });
+}
+
+/** The dashboard address a recipient opens to accept the invitation. */
+function invitationLink(token: string): string {
+  return `${window.location.origin}/workspaces/invites/${encodeURIComponent(token)}`;
+}
+
+type CopyState = 'idle' | 'copied' | 'failed';
+
+function InviteModal({ workspaceId, onClose }: InviteModalProps) {
   const [email, setEmail] = useState('');
   const [role, setRole] = useState<WorkspaceMember['role']>('DEVELOPER');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [success, setSuccess] = useState(false);
+  const [created, setCreated] = useState<WorkspaceInvite | null>(null);
+  const [copyState, setCopyState] = useState<CopyState>('idle');
+  const linkRef = useRef<HTMLInputElement>(null);
+
+  // Esc closes the dialog, as the × and Close buttons do.
+  useEffect(() => {
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key === 'Escape') onClose();
+    }
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, [onClose]);
+
+  // The link is what the admin came for: focus and select it once it exists.
+  useEffect(() => {
+    if (created && linkRef.current) {
+      linkRef.current.focus();
+      linkRef.current.select();
+    }
+  }, [created]);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setSubmitting(true);
     setError(null);
     try {
-      await workspaceService.sendInvite(workspaceId, email, role);
-      setSuccess(true);
-      setTimeout(() => {
-        onInvited();
-      }, 1500);
+      const invite = await workspaceService.sendInvite(workspaceId, email, role);
+      setCreated(invite);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to send invite');
+      setError(err instanceof Error ? err.message : "Couldn't create the invitation.");
     } finally {
       setSubmitting(false);
     }
   }
 
+  async function handleCopy() {
+    if (!created) return;
+    const link = invitationLink(created.token);
+    try {
+      // navigator.clipboard is undefined outside a secure context (plain http).
+      if (!navigator.clipboard?.writeText) throw new Error('Clipboard unavailable');
+      await navigator.clipboard.writeText(link);
+      setCopyState('copied');
+    } catch {
+      setCopyState('failed');
+      linkRef.current?.focus();
+      linkRef.current?.select();
+    }
+  }
+
+  const done = created !== null;
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-      <div className="bg-white rounded-xl shadow-xl w-full max-w-md p-6">
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="invite-member-title"
+        className="bg-white rounded-xl shadow-xl w-full max-w-md p-6"
+      >
         <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-semibold text-slate-900">Invite Member</h2>
+          <h2 id="invite-member-title" className="text-lg font-semibold text-slate-900">
+            Invite Member
+          </h2>
           <button
+            type="button"
             onClick={onClose}
-            className="text-slate-400 hover:text-slate-600 text-xl leading-none"
+            className="text-slate-500 hover:text-slate-700 text-xl leading-none"
             aria-label="Close"
           >
             &times;
           </button>
         </div>
 
-        {success && (
-          <div className="mb-4 rounded-lg bg-green-50 border border-green-200 p-3 text-sm text-green-700">
-            Invitation sent successfully!
+        {created && (
+          <div className="mb-4 space-y-3">
+            <p
+              role="status"
+              className="rounded-lg bg-green-50 border border-green-200 p-3 text-sm text-green-700"
+            >
+              Invitation created. Send this link to {created.email}. It works only for that
+              address and expires on {formatExpiry(created.expires_at)}.
+            </p>
+            <div>
+              <label htmlFor="invite-link" className="block text-sm font-medium text-slate-700 mb-1">
+                Invitation link
+              </label>
+              <div className="flex gap-2">
+                <input
+                  id="invite-link"
+                  ref={linkRef}
+                  type="text"
+                  readOnly
+                  value={invitationLink(created.token)}
+                  onFocus={(e) => e.currentTarget.select()}
+                  className="flex-1 min-w-0 border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-700 bg-slate-50"
+                />
+                <button
+                  type="button"
+                  onClick={handleCopy}
+                  className="px-3 py-2 text-sm font-medium text-slate-700 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 transition-colors"
+                >
+                  Copy link
+                </button>
+              </div>
+              <p role="status" aria-live="polite" className="mt-1 text-xs text-slate-600">
+                {copyState === 'copied' && 'Link copied'}
+                {copyState === 'failed' && "Couldn't copy the link. Select it and copy it instead."}
+              </p>
+            </div>
           </div>
         )}
 
         {error && (
-          <div className="mb-4 rounded-lg bg-red-50 border border-red-200 p-3 text-sm text-red-700">
+          <div
+            role="alert"
+            className="mb-4 rounded-lg bg-red-50 border border-red-200 p-3 text-sm text-red-700"
+          >
             {error}
           </div>
         )}
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">
+            <label htmlFor="invite-email" className="block text-sm font-medium text-slate-700 mb-1">
               Email Address <span className="text-red-500">*</span>
             </label>
             <input
+              id="invite-email"
               type="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               required
-              disabled={success}
+              autoFocus
+              disabled={done}
+              aria-describedby="invite-email-help"
               className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-50"
               placeholder="colleague@example.com"
             />
+            <p id="invite-email-help" className="mt-1 text-xs text-slate-500">
+              Only someone signed in with this address can accept. Use the address they sign in
+              with; for single sign-on, their work email.
+            </p>
           </div>
           <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">
+            <label htmlFor="invite-role" className="block text-sm font-medium text-slate-700 mb-1">
               Role <span className="text-red-500">*</span>
             </label>
             <select
+              id="invite-role"
               value={role}
               onChange={(e) => setRole(e.target.value as WorkspaceMember['role'])}
-              disabled={success}
+              disabled={done}
+              aria-describedby="invite-role-help"
               className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-50"
             >
               {ROLES.filter((r) => r !== 'OWNER').map((r) => (
@@ -107,7 +213,7 @@ function InviteModal({ workspaceId, onClose, onInvited }: InviteModalProps) {
                 </option>
               ))}
             </select>
-            <p className="mt-1 text-xs text-slate-400">
+            <p id="invite-role-help" className="mt-1 text-xs text-slate-500">
               Owner role can only be transferred, not assigned via invite.
             </p>
           </div>
@@ -117,15 +223,15 @@ function InviteModal({ workspaceId, onClose, onInvited }: InviteModalProps) {
               onClick={onClose}
               className="px-4 py-2 text-sm font-medium text-slate-700 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 transition-colors"
             >
-              {success ? 'Close' : 'Cancel'}
+              {done ? 'Close' : 'Cancel'}
             </button>
-            {!success && (
+            {!done && (
               <button
                 type="submit"
                 disabled={submitting}
                 className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors"
               >
-                {submitting ? 'Sending...' : 'Send Invite'}
+                {submitting ? 'Creating…' : 'Create invitation'}
               </button>
             )}
           </div>
@@ -381,14 +487,7 @@ function WorkspaceMembersPage() {
       </div>
 
       {showInvite && id && (
-        <InviteModal
-          workspaceId={id}
-          onClose={() => setShowInvite(false)}
-          onInvited={() => {
-            setShowInvite(false);
-            loadData();
-          }}
-        />
+        <InviteModal workspaceId={id} onClose={() => setShowInvite(false)} />
       )}
 
       {removeTarget && (

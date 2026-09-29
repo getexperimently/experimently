@@ -52,6 +52,15 @@ The API uses two types of authentication:
 ## Usage Examples
 
 ### 1. User Registration and Authentication
+
+!!! note "Cognito only"
+    The sign-up, confirmation, password-reset and token-refresh endpoints
+    (`POST /api/v1/auth/signup`, `/confirm`, `/forgot-password`, `/reset-password`
+    and `/refresh`) are available only when `AUTH_PROVIDER=cognito`. With any other
+    provider, including the default `local`, they answer 404. With `local`, sign in
+    with `POST /api/v1/auth/login`; an administrator creates accounts and resets
+    passwords.
+
 ```bash
 # 1. Register a new user
 curl -X POST "http://localhost:8000/api/v1/auth/signup" \
@@ -205,6 +214,14 @@ curl -X POST "http://localhost:8000/api/v1/users/" \
 - Cache-Control headers are included in responses
 
 ## Authentication Endpoints
+
+!!! note "Cognito only"
+    The sign-up, confirmation, password-reset and token-refresh endpoints
+    (`POST /api/v1/auth/signup`, `/confirm`, `/forgot-password`, `/reset-password`
+    and `/refresh`) are available only when `AUTH_PROVIDER=cognito`. With any other
+    provider, including the default `local`, they answer 404. With `local`, sign in
+    with `POST /api/v1/auth/login`; an administrator creates accounts and resets
+    passwords.
 
 ### Sign Up
 - **Endpoint**: `POST /api/v1/auth/signup`
