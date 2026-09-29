@@ -21,9 +21,16 @@ on:
     branches: [main]
     types: [opened, synchronize, reopened, labeled, unlabeled, ready_for_review]
 
-concurrency:
-  group: regression-guard-${{ github.head_ref }}
-  cancel-in-progress: true
+# No `concurrency:` block, deliberately (#399). Opening a pull request with a
+# label fires `opened` and `labeled` together. With a group and
+# `cancel-in-progress: true` one of the two was cancelled, the cancelled run
+# stayed in the check rollup beside the green one, and branch protection
+# refused the merge. `cancel-in-progress: false` would not close it: a group
+# holds at most one pending run, and a newer run cancels the pending one it
+# replaces, so three events in quick succession still leave a cancelled run.
+# Keying the group on the event action leaves the same hole for two `labeled`
+# events. Without a group no run is ever cancelled; each finishes with a real
+# result for its own payload, and the job takes seconds.
 
 permissions:
   contents: read
@@ -58,7 +65,16 @@ jobs:
             exit 0
           fi
 
-          git fetch --no-tags --depth=1 origin "$BASE_SHA" 2>/dev/null || true
+          : "${BASE_SHA:?the pull_request event carries no base SHA}"
+          # The checkout (fetch-depth: 0) already holds every branch with its
+          # full history, so the base is normally here. Fetch it only if it is
+          # not, and never with --depth: a depth-limited fetch records the base
+          # as a shallow commit with no parents, and the three-dot diff below
+          # then dies `no merge base` whenever main has moved since the branch
+          # point (#399). A fetch that fails is red, not skipped.
+          if ! git cat-file -e "${BASE_SHA}^{commit}" 2>/dev/null; then
+            git fetch --no-tags origin "$BASE_SHA"
+          fi
           # Three dots: compare against the merge base, so a test file that
           # changed on main after the fork point is not counted as this
           # pull request's regression test.
