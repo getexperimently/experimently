@@ -6,7 +6,9 @@ accepting compares it: trimmed, ASCII, without regard to case), ``email`` is
 the address as stored; for everyone else -- no credentials, credentials that
 do not resolve to an account, an inactive account, any other account including
 a superuser or the workspace's owner -- it is masked, ``a•••@example.com``.
-Credentials never turn the preview into a 401.
+``inviter_username`` follows the same rule (null for anyone but the invitee);
+``workspace_name`` is returned to everyone. Credentials never turn the
+preview into a 401.
 
 The requests carry real bearer tokens and go through the real authentication
 dependencies: ``dependency_overrides`` on ``get_current_user`` would not reach
@@ -138,10 +140,13 @@ def _masked(email: str) -> str:
 
 
 def _assert_masked(resp, invited: str) -> None:
+    """Masked address, and no inviter: both are for the invitee only."""
     assert resp.status_code == 200, resp.text
     assert resp.json()["email"] == _masked(invited)
     assert invited not in resp.text
     assert invited.split("@")[0] not in resp.text
+    assert "inviter_username" in resp.json()
+    assert resp.json()["inviter_username"] is None
 
 
 # ── mask_invite_email and invite_email_for_viewer ───────────────────────────
@@ -206,12 +211,14 @@ def test_invite_email_for_viewer(viewer, expected):
 # ── Who sees the address in full ────────────────────────────────────────────
 
 
-def test_an_anonymous_preview_is_masked(client, invite, invited):
+def test_an_anonymous_preview_is_masked(client, workspace, invite, invited):
     resp = _preview(client, invite.token)
 
     _assert_masked(resp, invited)
     assert resp.json()["token"] == invite.token
     assert resp.json()["role"] == "DEVELOPER"
+    # The workspace's name is for every holder of the link.
+    assert resp.json()["workspace_name"] == workspace.name
 
 
 def test_the_preview_is_not_stored_by_shared_caches(
@@ -242,6 +249,7 @@ def test_the_invitee_sees_the_address_as_stored(client, db_session, workspace, o
 
     assert resp.status_code == 200, resp.text
     assert resp.json()["email"] == stored_on_invite
+    assert resp.json()["inviter_username"] == owner.username
 
 
 @pytest.mark.parametrize(
@@ -353,6 +361,7 @@ def test_an_active_invitee_signed_in_through_cognito_sees_the_address(
 
     assert resp.status_code == 200, resp.text
     assert resp.json()["email"] == invited
+    assert resp.json()["inviter_username"] is not None
 
 
 def test_an_inactive_invitee_sees_the_address_masked(
@@ -385,6 +394,78 @@ def test_a_first_sign_in_that_cannot_be_saved_still_gets_the_preview(
         db_session.query(User).filter(func.lower(User.email) == invited.lower()).count()
         == 1
     )
+
+
+# ── The workspace and inviter names ─────────────────────────────────────────
+
+
+def test_the_invitee_sees_the_workspace_and_inviter_names(
+    client, db_session, workspace, owner, invite, invited
+):
+    invitee = _user(db_session, invited)
+
+    resp = _preview(client, invite.token, _bearer(invitee))
+
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["workspace_name"] == workspace.name
+    assert body["workspace_name"] != workspace.slug
+    assert body["inviter_username"] == owner.username
+    assert body["email"] == invited
+    assert body["accepted_at"] is None
+
+
+def test_creating_an_invite_returns_the_link_details(client, workspace, owner):
+    """POST answers the creator with the token, the address in full and both names."""
+    address = f"{_local('carol')}@corp-example.com"
+
+    resp = client.post(
+        f"/api/v1/workspaces/{workspace.id}/invites",
+        json={"email": address, "role": "ANALYST"},
+        headers=_bearer(owner),
+    )
+
+    assert resp.status_code == 201, resp.text
+    body = resp.json()
+    assert body["email"] == address
+    assert body["role"] == "ANALYST"
+    assert body["token"]
+    assert body["workspace_name"] == workspace.name
+    assert body["inviter_username"] == owner.username
+
+
+def test_an_invite_whose_inviter_was_deleted_names_no_inviter(
+    client, db_session, workspace, invited
+):
+    """``invited_by`` becomes NULL when that user is deleted; still 200."""
+    inviter = _user(db_session, f"{_local('gone')}@corp-example.com")
+    invite = workspace_service.create_invite(
+        db_session,
+        workspace_id=workspace.id,
+        email=invited,
+        role="VIEWER",
+        invited_by=inviter.id,
+    )
+    db_session.delete(inviter)
+    db_session.commit()
+    invitee = _user(db_session, invited)
+
+    resp = _preview(client, invite.token, _bearer(invitee))
+
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["email"] == invited
+    assert resp.json()["inviter_username"] is None
+    assert resp.json()["workspace_name"] == workspace.name
+
+
+def test_an_invite_to_a_deleted_workspace_is_404(
+    client, db_session, workspace, invite, invited
+):
+    """Characterisation, not a guard: deleting a workspace deletes its invites."""
+    invitee = _user(db_session, invited)
+    workspace_service.delete_workspace(db_session, workspace.id)
+
+    assert _preview(client, invite.token, _bearer(invitee)).status_code == 404
 
 
 # ── The OpenAPI document ────────────────────────────────────────────────────

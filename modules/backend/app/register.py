@@ -98,7 +98,8 @@ MODULE_TAGS: list[dict[str, str]] = [
         "name": "Workspaces",
         "description": (
             "EP-057: Team Workspaces — group users into teams with workspace roles "
-            "(OWNER/ADMIN/DEVELOPER/ANALYST/VIEWER) and send and accept email invites. "
+            "(OWNER/ADMIN/DEVELOPER/ANALYST/VIEWER) and create and accept "
+            "invitation links; no email is sent. "
             "Workspaces do not limit access to experiments or feature flags, which is "
             "by platform role. Workspace API keys are not yet accepted by the SDK or "
             "tracking endpoints; use a platform API key."

@@ -117,10 +117,13 @@ Workspace members can be added in two ways:
 
 1. **Direct add** (ADMIN+): Look up an existing platform user by their UUID and
    add them immediately with the desired role.
-2. **Email invite** (ADMIN+): Create an invite for an email address; the
-   response contains the invite token, which you send to the recipient. The
-   token is valid for 7 days. When the recipient accepts the invite (while
-   authenticated), they are added as a member with the invited role.
+2. **Email invite** (ADMIN+): Create an invite for an email address. No email
+   is sent. The dashboard shows the invitation link after you create it, with
+   a **Copy link** button; the API response contains the token (the link is
+   `/workspaces/invites/<token>` on the dashboard's address). Send the link to
+   the recipient. The token is valid for 7 days. When the recipient accepts the
+   invite (while authenticated), they are added as a member with the invited
+   role.
    Anyone with the link can look the invitation up through the API, but only
    the invited account sees the address in full; everyone else sees it
    masked, for example `a•••@example.com`.
