@@ -157,8 +157,8 @@ curl -H "X-API-Key: your-key" \
 | ANALYST | None | None | None | All |
 | VIEWER | None | None | None | Approved experiments; all flags |
 
-Experiments and feature flags are governed by role, not ownership: the owner is recorded
-but does not decide access.
+Experiments and feature flags: what a user can do depends on their role; the owner is
+recorded but does not decide access.
 
 Permission checks in code (both return a bool; the caller raises the 403):
 

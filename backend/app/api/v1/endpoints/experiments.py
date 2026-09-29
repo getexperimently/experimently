@@ -879,6 +879,7 @@ async def delete_experiment(
         # without this the record is rolled back when the session closes.
         db.commit()
     except Exception as _audit_err:
+        db.rollback()
         logger.warning(
             f"Compliance audit logging failed for experiment delete: {_audit_err}"
         )
