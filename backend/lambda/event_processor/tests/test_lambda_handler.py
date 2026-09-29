@@ -18,6 +18,8 @@ import time
 from typing import Any, Dict
 from unittest.mock import Mock, patch
 
+import pytest
+
 
 def create_kinesis_record(event_id: str, valid: bool = True) -> Dict[str, Any]:
     """Helper to create a Kinesis record."""
@@ -124,28 +126,68 @@ class TestLambdaHandler:
 
     def test_handler_performance_benchmark(self):
         """
-        🔴 RED: Test that handler meets performance requirements.
+        A batch of 100 events is handled in one pass: one aggregation call
+        and one archive call for the whole batch, and no failures.
 
-        Given: A batch of 100 events (reduced from 500 for realistic Python perf)
-        When: handler() is called
-        Then: Processing completes in reasonable time (< 1000ms)
+        This used to assert that the handler took under 1000 ms -- a single
+        wall-clock reading, against a handler whose AWS clients were real
+        boto3 clients holding dummy credentials, so the number measured the
+        runner and the network stack as much as the code (#409). What made a
+        batch cheap was that the expensive stages are called once per batch,
+        not once per event; that is a call count. The absolute timing is
+        ``test_handler_latency_benchmark`` below, skipped unless
+        RUN_BENCHMARKS=1.
         """
-        # Arrange
         lambda_event = {
             "Records": [create_kinesis_record(f"evt_{i}") for i in range(100)]
         }
-        lambda_context = Mock()
 
         from handler import handler
 
-        # Act
-        start_time = time.time()
-        response = handler(lambda_event, lambda_context)
-        elapsed_ms = (time.time() - start_time) * 1000
+        with (
+            patch(
+                "batch_processor.aggregate_events_batch",
+                return_value={"failure_count": 0},
+            ) as aggregate,
+            patch(
+                "batch_processor.archive_to_s3_batched",
+                return_value={"success": True},
+            ) as archive,
+        ):
+            response = handler(lambda_event, Mock())
 
-        # Assert
-        assert elapsed_ms < 1000  # Should process 100 events in under 1 second
         assert response["batchItemFailures"] == []
+        assert aggregate.call_count == 1, "aggregation should be one call per batch"
+        assert archive.call_count == 1, "archival should be one call per batch"
+        assert len(aggregate.call_args.args[0]) == 100
+        assert len(archive.call_args.args[0]) == 100
+
+    @pytest.mark.benchmark
+    def test_handler_latency_benchmark(self):
+        """100 events in under 1000 ms, best of five, with AWS stubbed out."""
+        lambda_event = {
+            "Records": [create_kinesis_record(f"evt_{i}") for i in range(100)]
+        }
+
+        from handler import handler
+
+        with (
+            patch(
+                "batch_processor.aggregate_events_batch",
+                return_value={"failure_count": 0},
+            ),
+            patch(
+                "batch_processor.archive_to_s3_batched",
+                return_value={"success": True},
+            ),
+        ):
+            best = float("inf")
+            for _ in range(5):
+                start_time = time.perf_counter()
+                handler(lambda_event, Mock())
+                best = min(best, time.perf_counter() - start_time)
+
+        assert best * 1000 < 1000, f"100 events took {best * 1000:.0f} ms"
 
     def test_handler_error_rate_below_threshold(self):
         """

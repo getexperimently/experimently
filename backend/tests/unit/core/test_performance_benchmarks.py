@@ -5,11 +5,19 @@ Measures the performance impact of:
 - Rule compilation
 - Evaluation caching
 - Operator execution
+
+Every class of absolute throughput and latency checks is marked ``benchmark``
+and skipped unless ``RUN_BENCHMARKS=1`` (backend/tests/benchmark_gate.py): the
+numbers assume a quiet machine, and a shared runner is several times slower.
+They used to be skipped only when ``CI=true``, which left them failing a
+developer's run whenever other suites shared the laptop (#409).
+``TestOptimizationsAreUsed`` is not marked: it asserts the deterministic half
+-- the compile cache is hit and the evaluation cache answers -- in every run.
 """
 
-import os
 import time
 from datetime import datetime
+from unittest.mock import patch
 
 import pytest
 
@@ -23,14 +31,6 @@ from backend.app.schemas.targeting_rule import (
     RuleGroup,
     TargetingRule,
     TargetingRules,
-)
-
-# Throughput assertions below assume a quiet local machine; shared CI
-# runners are several times slower and make them flaky, so they only run
-# outside CI (GitHub Actions sets CI=true).
-pytestmark = pytest.mark.skipif(
-    os.environ.get("CI", "").lower() == "true",
-    reason="timing-sensitive benchmark; run locally",
 )
 
 
@@ -57,6 +57,7 @@ def _best_duration(run, repeats: int = 5) -> float:
     return best
 
 
+@pytest.mark.benchmark
 class TestOperatorPerformance:
     """Benchmark individual operator performance."""
 
@@ -155,6 +156,7 @@ class TestOperatorPerformance:
         assert ops_per_second > 1000  # > 1k ops/sec
 
 
+@pytest.mark.benchmark
 class TestRuleCompilationPerformance:
     """Benchmark rule compilation performance."""
 
@@ -312,6 +314,7 @@ class TestRuleCompilationPerformance:
         assert cached_duration < 0.05
 
 
+@pytest.mark.benchmark
 class TestEvaluationCachePerformance:
     """Benchmark evaluation caching performance."""
 
@@ -353,6 +356,7 @@ class TestEvaluationCachePerformance:
         assert writes_per_second > 1000  # > 1k writes/sec
 
 
+@pytest.mark.benchmark
 class TestEndToEndPerformance:
     """Benchmark end-to-end rule evaluation performance."""
 
@@ -457,6 +461,7 @@ class TestEndToEndPerformance:
         assert evaluations_per_second > 10  # > 10 complex evaluations/sec
 
 
+@pytest.mark.benchmark
 class TestPerformanceComparison:
     """Compare performance with and without optimizations."""
 
@@ -467,22 +472,22 @@ class TestPerformanceComparison:
         user_context = {"user_id": "user_123", "country": "US"}
         rule_id = "test_rule"
 
-        # Measure cache miss (first lookup)
-        start = time.time()
-        for _ in range(1000):
-            result = cache.get(rule_id, user_context)
-            assert result is None
-        miss_duration = time.time() - start
+        # Measure cache miss (first lookup), best of several runs
+        def _misses():
+            for _ in range(1000):
+                assert cache.get(rule_id, user_context) is None
+
+        miss_duration = _best_duration(_misses)
 
         # Store result
         cache.set(rule_id, user_context, True)
 
         # Measure cache hit
-        start = time.time()
-        for _ in range(1000):
-            result = cache.get(rule_id, user_context)
-            assert result is True
-        hit_duration = time.time() - start
+        def _hits():
+            for _ in range(1000):
+                assert cache.get(rule_id, user_context) is True
+
+        hit_duration = _best_duration(_hits)
 
         # Cache hits should be similar speed or faster (due to no re-evaluation)
         # Both should be very fast
@@ -534,3 +539,58 @@ class TestPerformanceComparison:
         duration = _best_duration(_run)
 
         assert duration < 0.1  # Cached compilation is very fast
+
+
+class TestOptimizationsAreUsed:
+    """The deterministic half of the benchmarks above; runs in every suite.
+
+    A speedup can only come from the optimisation being used, and that is a
+    count: the compile cache answers instead of compiling, and the evaluation
+    cache answers what was stored.
+    """
+
+    def test_compile_cache_serves_repeat_compiles(self):
+        compiler = RuleCompiler()
+        rule = TargetingRule(
+            id="cache_test",
+            rule=RuleGroup(
+                operator=LogicalOperator.AND,
+                conditions=[
+                    Condition(
+                        attribute="country",
+                        operator=OperatorType.IN,
+                        value=["US", "CA", "UK"],
+                    ),
+                    Condition(
+                        attribute="age",
+                        operator=OperatorType.BETWEEN,
+                        value=18,
+                        additional_value=65,
+                    ),
+                ],
+                groups=[],
+            ),
+            priority=1,
+            rollout_percentage=100,
+        )
+
+        with patch.object(
+            compiler, "_compile_rule", wraps=compiler._compile_rule
+        ) as compile_rule:
+            compiled = [compiler.compile(rule) for _ in range(1000)]
+
+        assert compile_rule.call_count == 1
+        assert compiler.cache_hits == 999
+        assert all(c is compiled[0] for c in compiled)
+        assert compiled[0].is_valid
+        assert compiled[0].condition_count == 2
+        assert {"country", "age"} <= compiled[0].required_attributes
+
+    def test_evaluation_cache_answers_what_was_stored(self):
+        cache = EvaluationCache()
+        user_context = {"user_id": "user_123", "country": "US"}
+
+        assert cache.get("test_rule", user_context) is None
+        cache.set("test_rule", user_context, True)
+        assert all(cache.get("test_rule", user_context) is True for _ in range(1000))
+        assert cache.get_stats()["hits"] == 1000

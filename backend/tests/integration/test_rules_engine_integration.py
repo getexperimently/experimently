@@ -8,9 +8,10 @@ Tests complex, real-world scenarios combining multiple features:
 - Performance under realistic loads
 """
 
-import time
+import timeit
 from datetime import datetime
 from typing import Any, Dict
+from unittest.mock import patch
 
 import pytest
 
@@ -643,14 +644,68 @@ class TestPerformanceIntegration:
             for i in range(1000)
         ]
 
-        # Time the batch evaluation
-        start = time.time()
-        results = service.batch_evaluate(rules, users)
-        duration = time.time() - start
+        # This asserted the batch finished in under 5 s -- one wall-clock
+        # reading, which measures the runner (#409). The absolute target lives
+        # on in the benchmark below. What makes a batch of 1000 cheap is that
+        # the rule is compiled once and every user gets the right answer.
+        compiler = service.rule_compiler
+        with patch.object(
+            compiler, "_compile_rule", wraps=compiler._compile_rule
+        ) as compile_rule:
+            results = service.batch_evaluate(rules, users)
 
         assert len(results) == 1000
-        # Should complete in under 5 seconds (target: < 1s)
-        assert duration < 5.0
+        assert compile_rule.call_count == 1, (
+            f"one rule compiled {compile_rule.call_count} times for 1000 users"
+        )
+        # Every user is in US/CA/UK and aged 20-64, so the match is decided
+        # by the two booleans.
+        for user, result in zip(users, results):
+            assert result.error is None
+            assert result.matched is (user["verified"] and user["premium"]), user
+
+    @pytest.mark.benchmark
+    def test_evaluate_1000_users_benchmark(self):
+        """The documented target: 1000 users in under 5 s (best of 5 runs)."""
+        service = RulesEvaluationService()
+        rules = TargetingRules(
+            rules=[
+                TargetingRule(
+                    id="complex_rule",
+                    rule=RuleGroup(
+                        operator=LogicalOperator.AND,
+                        conditions=[
+                            Condition(
+                                attribute="country",
+                                operator=OperatorType.IN,
+                                value=["US", "CA", "UK"],
+                            ),
+                            Condition(
+                                attribute="age",
+                                operator=OperatorType.BETWEEN,
+                                value=18,
+                                additional_value=65,
+                            ),
+                        ],
+                        groups=[],
+                    ),
+                    priority=1,
+                    rollout_percentage=100,
+                )
+            ],
+            default_rule=None,
+        )
+        users = [
+            {"user_id": f"user_{i}", "country": "US", "age": 20 + (i % 45)}
+            for i in range(1000)
+        ]
+
+        def run() -> None:
+            service.evaluation_cache.clear()
+            service.batch_evaluate(rules, users)
+
+        best = min(timeit.repeat(run, repeat=5, number=1))
+        assert best < 5.0, f"1000 users took {best:.2f} s"
 
     def test_caching_improves_repeated_evaluations(self):
         """Test that caching significantly improves repeated evaluations."""
@@ -742,13 +797,23 @@ class TestPerformanceIntegration:
         # Test with various users
         users = [{"user_id": f"user_{i}", "score": i * 5} for i in range(100)]
 
-        start = time.time()
-        results = service.batch_evaluate(rules, users)
-        duration = time.time() - start
+        # This asserted the batch took under 2 s (#409). "Efficiently" means
+        # the first matching rule ends the search: rule_0 (score > 0) matches
+        # everyone but user_0 after one condition, and user_0 -- score 0,
+        # matched by nothing -- is the only one checked against all ten.
+        with patch.object(
+            service,
+            "_evaluate_condition_enhanced",
+            wraps=service._evaluate_condition_enhanced,
+        ) as evaluate_condition:
+            results = service.batch_evaluate(rules, users)
 
         assert len(results) == 100
-        # Should be fast even with 10 rules
-        assert duration < 2.0
+        assert results[0].matched is False
+        assert all(r.matched_rule_id == "rule_0" for r in results[1:])
+        assert evaluate_condition.call_count == 99 * 1 + 1 * 10, (
+            f"{evaluate_condition.call_count} condition evaluations for 100 users"
+        )
 
 
 class TestEdgeCases:

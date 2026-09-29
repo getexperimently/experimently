@@ -8,7 +8,7 @@ Tests the high-level rules evaluation service that integrates:
 - Batch evaluation
 """
 
-import time
+import timeit
 from datetime import datetime
 from typing import Any, Dict, List
 from unittest.mock import MagicMock, Mock, patch
@@ -492,14 +492,21 @@ class TestBatchEvaluation:
         # Create many users
         user_contexts = [{"user_id": f"user_{i}", "country": "US"} for i in range(100)]
 
-        # Batch evaluate
-        start = time.time()
-        results = service.batch_evaluate(rules, user_contexts)
-        duration = time.time() - start
+        # This used to assert the batch took under 100 ms -- a single
+        # wall-clock reading (#409). What the test's name claims is that the
+        # rule is compiled once and reused, and that is a count.
+        compiler = service.rule_compiler
+        with patch.object(
+            compiler, "_compile_rule", wraps=compiler._compile_rule
+        ) as compile_rule:
+            results = service.batch_evaluate(rules, user_contexts)
 
         assert len(results) == 100
-        # Batch should be reasonably fast (< 100ms for 100 simple evaluations)
-        assert duration < 0.1
+        assert all(r.matched and r.matched_rule_id == "rule_1" for r in results)
+        assert compile_rule.call_count == 1, (
+            f"100 users, one rule, compiled {compile_rule.call_count} times"
+        )
+        assert compiler.cache_hits >= 100
 
     def test_batch_evaluation_with_cache(self):
         """Test that batch evaluation benefits from caching."""
@@ -669,52 +676,20 @@ class TestErrorHandling:
 
 
 class TestPerformance:
-    """Test performance characteristics of the service."""
+    """What makes the service fast, counted rather than timed (#409).
 
-    def test_evaluation_is_fast(self):
-        """Test that evaluation is fast for simple rules."""
-        service = RulesEvaluationService()
+    Both tests here used to compare wall-clock readings -- one against an
+    absolute second, one against another reading taken a moment earlier --
+    and the second failed CI at a load average above 30 while passing 21/21
+    alone. A timing on a shared runner measures the runner. What made these
+    paths fast is that the rule is compiled once and that a cache hit skips
+    evaluation entirely; both are counts. The absolute throughput survives as
+    a ``benchmark`` (skipped unless RUN_BENCHMARKS=1).
+    """
 
-        rules = TargetingRules(
-            rules=[
-                TargetingRule(
-                    id="rule_1",
-                    rule=RuleGroup(
-                        operator=LogicalOperator.AND,
-                        conditions=[
-                            Condition(
-                                attribute="country",
-                                operator=OperatorType.EQUALS,
-                                value="US",
-                            )
-                        ],
-                        groups=[],
-                    ),
-                    priority=1,
-                    rollout_percentage=100,
-                )
-            ],
-            default_rule=None,
-        )
-
-        # Time 1000 evaluations
-        start = time.time()
-        for i in range(1000):
-            service.evaluate(rules, {"user_id": f"user_{i}", "country": "US"})
-        duration = time.time() - start
-
-        # Should be fast (< 1 second for 1000 simple evaluations)
-        assert duration < 1.0
-
-        # Calculate ops/sec
-        ops_per_sec = 1000 / duration
-        assert ops_per_sec > 100  # At least 100 evaluations/sec
-
-    def test_cached_evaluation_is_faster(self):
-        """Test that cached evaluation is significantly faster."""
-        service = RulesEvaluationService()
-
-        rules = TargetingRules(
+    @staticmethod
+    def _rules() -> TargetingRules:
+        return TargetingRules(
             rules=[
                 TargetingRule(
                     id="rule_1",
@@ -741,25 +716,105 @@ class TestPerformance:
             default_rule=None,
         )
 
+    def test_evaluation_is_fast(self):
+        """1000 users: one compilation, and each condition evaluated once each.
+
+        This asserted 1000 evaluations took under a second. The cost of an
+        evaluation is its compilation plus its condition evaluations; neither
+        may grow per call.
+        """
+        service = RulesEvaluationService()
+        rules = self._rules()
+        compiler = service.rule_compiler
+
+        with (
+            patch.object(
+                compiler, "_compile_rule", wraps=compiler._compile_rule
+            ) as compile_rule,
+            patch.object(
+                service,
+                "_evaluate_condition_enhanced",
+                wraps=service._evaluate_condition_enhanced,
+            ) as evaluate_condition,
+        ):
+            results = [
+                service.evaluate(
+                    rules, {"user_id": f"user_{i}", "country": "US", "age": 25}
+                )
+                for i in range(1000)
+            ]
+
+        assert all(r.matched and not r.cached and r.error is None for r in results)
+        assert compile_rule.call_count == 1, (
+            f"one rule compiled {compile_rule.call_count} times over 1000 users"
+        )
+        assert evaluate_condition.call_count == 2 * 1000, (
+            f"two conditions x 1000 users, {evaluate_condition.call_count} evaluations"
+        )
+        assert service.get_metrics().total_evaluations == 1000
+
+    @pytest.mark.regression
+    def test_cached_evaluation_is_faster(self):
+        """A cache hit does not evaluate the rules at all.
+
+        #409: this compared two single timings (``cached < uncached``) and
+        failed at a load average above 30. The reason a cached evaluation is
+        faster is that it skips compilation and rule evaluation, so that is
+        what is asserted -- with the uncached pass first, as a positive
+        control that the counter sees evaluations when they happen.
+        """
+        service = RulesEvaluationService()
+        rules = self._rules()
         user_context = {"user_id": "user_123", "country": "US", "age": 25}
 
-        # Time first evaluation (cache miss)
-        start = time.time()
-        for _ in range(100):
-            service.evaluate(
-                rules, {"user_id": f"unique_{_}", "country": "US", "age": 25}
-            )
-        uncached_duration = time.time() - start
+        with (
+            patch.object(
+                service,
+                "_evaluate_targeting_rules_enhanced",
+                wraps=service._evaluate_targeting_rules_enhanced,
+            ) as evaluate_rules,
+            patch.object(
+                service, "_compile_rules", wraps=service._compile_rules
+            ) as compile_rules,
+        ):
+            uncached = [
+                service.evaluate(
+                    rules, {"user_id": f"unique_{i}", "country": "US", "age": 25}
+                )
+                for i in range(100)
+            ]
+            assert evaluate_rules.call_count == 100
+            assert not any(r.cached for r in uncached)
 
-        # Clear and prepare cache
-        service.evaluation_cache.clear()
-        service.evaluate(rules, user_context)
-
-        # Time cached evaluations
-        start = time.time()
-        for _ in range(100):
+            # Warm the cache for one user, then count what the hits cost.
+            service.evaluation_cache.clear()
             service.evaluate(rules, user_context)
-        cached_duration = time.time() - start
+            service.reset_metrics()
+            evaluate_rules.reset_mock()
+            compile_rules.reset_mock()
 
-        # Cached should be faster
-        assert cached_duration < uncached_duration
+            cached = [service.evaluate(rules, user_context) for _ in range(100)]
+
+        assert all(r.cached and r.matched for r in cached)
+        assert evaluate_rules.call_count == 0, (
+            f"100 cache hits re-evaluated the rules {evaluate_rules.call_count} times"
+        )
+        assert compile_rules.call_count == 0
+        assert service.get_metrics().cache_hits == 100
+
+    @pytest.mark.benchmark
+    def test_evaluation_throughput_benchmark(self):
+        """At least 100 evaluations a second, best of five rounds."""
+        service = RulesEvaluationService()
+        rules = self._rules()
+
+        def run() -> None:
+            for i in range(1000):
+                service.evaluate(
+                    rules,
+                    {"user_id": f"user_{i}", "country": "US", "age": 25},
+                    skip_cache=True,
+                )
+
+        best = min(timeit.repeat(run, repeat=5, number=1))
+        assert 1000 / best > 100, f"{1000 / best:.0f} evaluations/sec"

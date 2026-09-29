@@ -186,6 +186,7 @@ markers = [
     "modules: needs the modules package; skipped in a core build",
     "smoke: wiring checks that must hold for any build of this tree",
     "slow: slow running tests",
+    "benchmark: absolute wall-clock check; skipped unless RUN_BENCHMARKS=1 (backend/tests/benchmark_gate.py)",
     "api: API tests",
     "contract: API contract tests",
     "cors: CORS tests",

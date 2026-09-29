@@ -1,16 +1,37 @@
 """
-Performance benchmarks for the enhanced rules engine.
+Cost properties and latency benchmarks for the enhanced rules engine.
 
-This module provides performance tests and benchmarks for the targeting rules
-evaluation system to ensure scalability and acceptable response times.
+Two kinds of test live here, and the split is the point (#409).
+
+``TestRulesEvaluationCost`` runs in every suite. It asserts the deterministic
+property each latency number used to stand in for: how many conditions an
+evaluation looks at, that the first matching rule ends the search, that the
+validator visits each rule once, that concurrent evaluations agree with
+sequential ones. Those are counts, so a slow or overloaded runner cannot fail
+them and a genuinely more expensive engine cannot pass them.
+
+``TestRulesLatencyBenchmarks`` keeps the absolute ceilings (average and p95
+milliseconds, evaluations per second). It is marked ``benchmark`` and skipped
+unless ``RUN_BENCHMARKS=1`` (see backend/tests/benchmark_gate.py): an absolute
+number measures the machine as much as the code. Each ceiling is taken over
+the fastest of several rounds, as ``timeit`` does, so even there one stalled
+moment does not decide the result.
+
+What used to be here: ``test_single_rule_performance`` asserted a single
+measured average (``< 1 ms``) and p95 (``< 5 ms``) over 100 evaluations, in the
+required unit suite. It failed #395's Backend Gate with nothing in that pull
+request touching the rules engine, and every other test in this file had the
+same shape.
 """
 
 import random
 import string
+import threading
 import time
 from datetime import datetime
 from statistics import mean, median, stdev
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional, Tuple
+from unittest.mock import patch
 
 import pytest
 
@@ -26,91 +47,93 @@ from backend.app.schemas.targeting_rule import (
 )
 from backend.app.services.rules_evaluation_service import RulesEvaluationService
 
+# Rounds per latency benchmark; the fastest one is asserted on.
+BENCHMARK_ROUNDS = 5
+
+# The operators the per-operator checks exercise, with the value each compares to.
+OPERATORS_TO_TEST = [
+    (OperatorType.EQUALS, "US"),
+    (OperatorType.IN, ["US", "CA", "UK", "DE"]),
+    (OperatorType.CONTAINS, "premium"),
+    (
+        OperatorType.MATCH_REGEX,
+        r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$",
+    ),
+    (OperatorType.GREATER_THAN, 25),
+    (OperatorType.SEMANTIC_VERSION, "1.2.0"),
+    (OperatorType.GEO_DISTANCE, [40.7128, -74.0060]),
+    (OperatorType.JSON_PATH, "$.premium"),
+]
+
+# Metric rule ids the service reports when it did not evaluate the rules.
+NOT_EVALUATED = ("error", "validation_failed")
+
 
 def _p95(times: List[float]) -> float:
-    """The 95th-percentile sample.
-
-    The ceilings below used to be asserted on ``max(times)``. A single sample
-    on a shared CI runner can be a garbage-collection pause or a scheduler
-    preemption (one 300 ms outlier failed a 50 ms ceiling with the other 99
-    samples under 2 ms), which says nothing about the rules engine. The p95
-    still catches a real regression -- a slow operator shows up in every
-    sample -- without failing on one hiccup.
-    """
+    """The 95th-percentile sample (a single sample can be a GC pause)."""
     ordered = sorted(times)
     return ordered[max(0, int(round(0.95 * len(ordered))) - 1)]
 
 
-class TestRulesPerformanceBenchmarks:
-    """Performance benchmarks for rules evaluation."""
+def generate_random_user_context(
+    include_advanced_attrs: bool = False,
+) -> Dict[str, Any]:
+    """Generate a random user context for testing."""
+    countries = ["US", "CA", "UK", "DE", "FR", "JP", "AU", "BR"]
+    tiers = ["basic", "premium", "enterprise"]
 
-    def setup_method(self):
-        """Setup test data and benchmarking infrastructure."""
-        self.service = RulesEvaluationService()
-        self.validator = RuleValidator()
-        self.performance_results = {}
+    context = {
+        "user_id": f"user-{''.join(random.choices(string.ascii_lowercase, k=8))}",
+        "country": random.choice(countries),
+        "subscription_tier": random.choice(tiers),
+        "age": random.randint(18, 80),
+        "registered_user": random.choice([True, False]),
+        "signup_date": datetime.now().isoformat(),
+        "tags": random.choices(
+            ["beta", "early-adopter", "power-user", "mobile"],
+            k=random.randint(0, 3),
+        ),
+        "permissions": random.choices(
+            ["read", "write", "admin", "delete"], k=random.randint(1, 4)
+        ),
+    }
 
-    def generate_random_user_context(
-        self, include_advanced_attrs: bool = False
-    ) -> Dict[str, Any]:
-        """Generate a random user context for testing."""
-        countries = ["US", "CA", "UK", "DE", "FR", "JP", "AU", "BR"]
-        tiers = ["basic", "premium", "enterprise"]
-
-        context = {
-            "user_id": f"user-{''.join(random.choices(string.ascii_lowercase, k=8))}",
-            "country": random.choice(countries),
-            "subscription_tier": random.choice(tiers),
-            "age": random.randint(18, 80),
-            "registered_user": random.choice([True, False]),
-            "signup_date": datetime.now().isoformat(),
-            "tags": random.choices(
-                ["beta", "early-adopter", "power-user", "mobile"],
-                k=random.randint(0, 3),
-            ),
-            "permissions": random.choices(
-                ["read", "write", "admin", "delete"], k=random.randint(1, 4)
-            ),
-        }
-
-        if include_advanced_attrs:
-            # Add advanced attributes for complex operator testing
-            context.update(
-                {
-                    "app_version": f"{random.randint(1, 3)}.{random.randint(0, 9)}.{random.randint(0, 9)}",
-                    "location": [
-                        round(random.uniform(-90, 90), 6),  # latitude
-                        round(random.uniform(-180, 180), 6),  # longitude
-                    ],
-                    "device_info": {
-                        "os": random.choice(["iOS", "Android", "Windows"]),
-                        "version": f"{random.randint(1, 15)}.{random.randint(0, 9)}",
-                    },
-                    "user_preferences": {
-                        "theme": random.choice(["light", "dark"]),
-                        "notifications": random.choice([True, False]),
-                    },
-                }
-            )
-
-        return context
-
-    def create_simple_rule(self, rule_id: str, priority: int = 1) -> TargetingRule:
-        """Create a simple targeting rule for benchmarking."""
-        condition = Condition(
-            attribute="country", operator=OperatorType.EQUALS, value="US"
+    if include_advanced_attrs:
+        context.update(
+            {
+                "app_version": f"{random.randint(1, 3)}.{random.randint(0, 9)}.{random.randint(0, 9)}",
+                "location": [
+                    round(random.uniform(-90, 90), 6),  # latitude
+                    round(random.uniform(-180, 180), 6),  # longitude
+                ],
+                "device_info": {
+                    "os": random.choice(["iOS", "Android", "Windows"]),
+                    "version": f"{random.randint(1, 15)}.{random.randint(0, 9)}",
+                },
+                "user_preferences": {
+                    "theme": random.choice(["light", "dark"]),
+                    "notifications": random.choice([True, False]),
+                },
+            }
         )
 
-        rule_group = RuleGroup(operator=LogicalOperator.AND, conditions=[condition])
+    return context
 
-        return TargetingRule(
-            id=rule_id, rule=rule_group, rollout_percentage=100, priority=priority
-        )
 
-    def create_complex_rule(self, rule_id: str, priority: int = 1) -> TargetingRule:
-        """Create a complex targeting rule with nested groups and advanced operators."""
-        # First group: Basic demographics
-        demo_conditions = [
+def create_simple_rule(rule_id: str, priority: int = 1) -> TargetingRule:
+    """One condition: ``country == "US"``."""
+    condition = Condition(attribute="country", operator=OperatorType.EQUALS, value="US")
+    rule_group = RuleGroup(operator=LogicalOperator.AND, conditions=[condition])
+    return TargetingRule(
+        id=rule_id, rule=rule_group, rollout_percentage=100, priority=priority
+    )
+
+
+def create_complex_rule(rule_id: str, priority: int = 1) -> TargetingRule:
+    """Nested groups and advanced operators (seven conditions in three groups)."""
+    demo_group = RuleGroup(
+        operator=LogicalOperator.AND,
+        conditions=[
             Condition(
                 attribute="country", operator=OperatorType.IN, value=["US", "CA", "UK"]
             ),
@@ -122,12 +145,11 @@ class TestRulesPerformanceBenchmarks:
             Condition(
                 attribute="age", operator=OperatorType.GREATER_THAN_OR_EQUAL, value=21
             ),
-        ]
-
-        demo_group = RuleGroup(operator=LogicalOperator.AND, conditions=demo_conditions)
-
-        # Second group: Advanced attributes
-        advanced_conditions = [
+        ],
+    )
+    advanced_group = RuleGroup(
+        operator=LogicalOperator.AND,
+        conditions=[
             Condition(
                 attribute="app_version",
                 operator=OperatorType.SEMANTIC_VERSION,
@@ -140,14 +162,11 @@ class TestRulesPerformanceBenchmarks:
                 value=[40.7128, -74.0060],  # NYC coordinates
                 additional_value=100,  # 100km radius
             ),
-        ]
-
-        advanced_group = RuleGroup(
-            operator=LogicalOperator.AND, conditions=advanced_conditions
-        )
-
-        # Third group: User behavior
-        behavior_conditions = [
+        ],
+    )
+    behavior_group = RuleGroup(
+        operator=LogicalOperator.AND,
+        conditions=[
             Condition(
                 attribute="tags",
                 operator=OperatorType.CONTAINS_ANY,
@@ -158,236 +177,259 @@ class TestRulesPerformanceBenchmarks:
                 operator=OperatorType.CONTAINS_ALL,
                 value=["read", "write"],
             ),
-        ]
+        ],
+    )
+    main_group = RuleGroup(
+        operator=LogicalOperator.OR,
+        groups=[demo_group, advanced_group, behavior_group],
+    )
+    return TargetingRule(
+        id=rule_id, rule=main_group, rollout_percentage=100, priority=priority
+    )
 
-        behavior_group = RuleGroup(
-            operator=LogicalOperator.AND, conditions=behavior_conditions
-        )
 
-        # Main group: OR of all groups
-        main_group = RuleGroup(
-            operator=LogicalOperator.OR,
-            groups=[demo_group, advanced_group, behavior_group],
-        )
+def condition_count(group: RuleGroup) -> int:
+    """Every condition in *group*, nested groups included."""
+    return len(group.conditions) + sum(condition_count(g) for g in group.groups or [])
 
-        return TargetingRule(
-            id=rule_id, rule=main_group, rollout_percentage=100, priority=priority
-        )
 
-    def benchmark_evaluation_time(
-        self,
-        targeting_rules: TargetingRules,
-        user_contexts: List[Dict[str, Any]],
-        iterations: int = 1,
-    ) -> Dict[str, float]:
-        """Benchmark rule evaluation time."""
-        times = []
+def operator_rules_and_contexts(
+    operator: OperatorType, value: Any
+) -> Tuple[TargetingRules, List[Dict[str, Any]]]:
+    """A one-condition rule on ``test_attr`` and 100 contexts of a fitting type."""
+    condition = Condition(
+        attribute="test_attr",
+        operator=operator,
+        value=value,
+        additional_value=10 if operator == OperatorType.GEO_DISTANCE else None,
+    )
+    targeting_rules = TargetingRules(
+        version="1.0",
+        rules=[
+            TargetingRule(
+                id=f"test_{operator}",
+                rule=RuleGroup(operator=LogicalOperator.AND, conditions=[condition]),
+                rollout_percentage=100,
+                priority=1,
+            )
+        ],
+    )
 
-        for _ in range(iterations):
+    contexts = []
+    for _ in range(100):
+        context = generate_random_user_context(include_advanced_attrs=True)
+        if operator == OperatorType.SEMANTIC_VERSION:
+            context["test_attr"] = (
+                f"{random.randint(1, 3)}.{random.randint(0, 9)}.{random.randint(0, 9)}"
+            )
+        elif operator == OperatorType.GEO_DISTANCE:
+            context["test_attr"] = [
+                round(random.uniform(40, 41), 6),
+                round(random.uniform(-75, -73), 6),
+            ]
+        elif operator == OperatorType.JSON_PATH:
+            context["test_attr"] = {
+                "user": {"tier": random.choice(["basic", "premium"])}
+            }
+        else:
+            context["test_attr"] = random.choice(
+                ["US", "premium", "test@example.com", 30]
+            )
+        contexts.append(context)
+    return targeting_rules, contexts
+
+
+class TestRulesEvaluationCost:
+    """What an evaluation costs, counted rather than timed.
+
+    The unit of cost is a condition evaluation: that is where the engine
+    spends its time, and it is what a quadratic loop, a lost short-circuit or
+    a re-evaluation would multiply. Every test below also asserts that the
+    evaluation really happened (no error, no failed context validation) --
+    otherwise an engine that bailed out early would look very cheap.
+    """
+
+    def setup_method(self):
+        self.service = RulesEvaluationService()
+
+    def evaluate_counting(
+        self, targeting_rules: TargetingRules, user_contexts: List[Dict[str, Any]]
+    ) -> List[Tuple[Optional[TargetingRule], int]]:
+        """Evaluate each context; return (matched rule, conditions evaluated)."""
+        real = self.service._evaluate_condition_enhanced
+        outcomes = []
+        with patch.object(
+            self.service, "_evaluate_condition_enhanced", wraps=real
+        ) as counter:
             for user_context in user_contexts:
-                start_time = time.perf_counter()
-
+                counter.reset_mock()
                 matched_rule, metrics = self.service.evaluate_rules_with_validation(
                     targeting_rules=targeting_rules,
                     user_context=user_context,
                     validate_attributes=True,
                     track_metrics=True,
                 )
+                assert metrics is not None
+                assert metrics.rule_id not in NOT_EVALUATED, (
+                    f"the rules were not evaluated for {user_context}: {metrics.error}"
+                )
+                outcomes.append((matched_rule, counter.call_count))
+        assert not self.service.error_counts, dict(self.service.error_counts)
+        return outcomes
 
-                end_time = time.perf_counter()
-                evaluation_time = (
-                    end_time - start_time
-                ) * 1000  # Convert to milliseconds
-                times.append(evaluation_time)
-
-        return {
-            "avg_time_ms": mean(times),
-            "median_time_ms": median(times),
-            "min_time_ms": min(times),
-            "max_time_ms": max(times),
-            "p95_time_ms": _p95(times),
-            "std_dev_ms": stdev(times) if len(times) > 1 else 0,
-            "total_evaluations": len(times),
-        }
-
+    @pytest.mark.regression
     def test_single_rule_performance(self):
-        """Benchmark performance with a single simple rule."""
-        rule = self.create_simple_rule("simple_rule")
-        targeting_rules = TargetingRules(version="1.0", rules=[rule])
+        """A one-condition rule costs one condition evaluation, and is right.
 
-        # Generate test user contexts
-        user_contexts = [self.generate_random_user_context() for _ in range(100)]
-
-        # Benchmark evaluation
-        results = self.benchmark_evaluation_time(targeting_rules, user_contexts)
-
-        # Performance assertions
-        assert results["avg_time_ms"] < 1.0, (
-            f"Average evaluation time too high: {results['avg_time_ms']}ms"
+        #409: this asserted a measured average under 1 ms and a p95 under
+        5 ms over 100 evaluations, and failed a pull request that did not
+        touch the rules engine. What "fast" meant for a single simple rule is
+        that evaluating it looks at its one condition once -- no
+        re-evaluation, no per-call recompilation of the condition -- and gets
+        the answer right.
+        """
+        targeting_rules = TargetingRules(
+            version="1.0", rules=[create_simple_rule("simple_rule")]
         )
-        assert results["p95_time_ms"] < 5.0, (
-            f"p95 evaluation time too high: {results['p95_time_ms']}ms"
-        )
+        user_contexts = [generate_random_user_context() for _ in range(100)]
 
-        self.performance_results["single_simple_rule"] = results
+        outcomes = self.evaluate_counting(targeting_rules, user_contexts)
+
+        for user_context, (matched_rule, evaluated) in zip(user_contexts, outcomes):
+            assert evaluated == 1, (
+                f"one condition, evaluated {evaluated} times for one user"
+            )
+            expected = "simple_rule" if user_context["country"] == "US" else None
+            assert (matched_rule.id if matched_rule else None) == expected
 
     def test_multiple_simple_rules_performance(self):
-        """Benchmark performance with multiple simple rules."""
-        rules = [self.create_simple_rule(f"rule_{i}", priority=i) for i in range(10)]
+        """Cost is linear in the rules tried, and the first match ends it.
+
+        The old ceiling here was commented "should scale linearly". Ten
+        one-condition rules: a US user matches the first and costs one
+        condition; anyone else must be checked against all ten and costs ten.
+        More than that is a lost short-circuit or a rescan.
+        """
+        rules = [create_simple_rule(f"rule_{i}", priority=i) for i in range(10)]
         targeting_rules = TargetingRules(version="1.0", rules=rules)
+        user_contexts = [generate_random_user_context() for _ in range(100)]
+        # Both paths, whatever the random draw.
+        user_contexts[0]["country"] = "US"
+        user_contexts[1]["country"] = "DE"
 
-        # Generate test user contexts
-        user_contexts = [self.generate_random_user_context() for _ in range(100)]
+        outcomes = self.evaluate_counting(targeting_rules, user_contexts)
 
-        # Benchmark evaluation
-        results = self.benchmark_evaluation_time(targeting_rules, user_contexts)
-
-        # Performance assertions (should scale linearly)
-        assert results["avg_time_ms"] < 5.0, (
-            f"Average evaluation time too high: {results['avg_time_ms']}ms"
-        )
-        assert results["p95_time_ms"] < 20.0, (
-            f"p95 evaluation time too high: {results['p95_time_ms']}ms"
-        )
-
-        self.performance_results["multiple_simple_rules"] = results
+        for user_context, (matched_rule, evaluated) in zip(user_contexts, outcomes):
+            if user_context["country"] == "US":
+                assert matched_rule is not None and matched_rule.id == "rule_0"
+                assert evaluated == 1, f"matched the first rule after {evaluated}"
+            else:
+                assert matched_rule is None
+                assert evaluated == len(rules), (
+                    f"{len(rules)} one-condition rules, {evaluated} evaluations"
+                )
 
     def test_complex_rule_performance(self):
-        """Benchmark performance with complex nested rules."""
-        rule = self.create_complex_rule("complex_rule")
+        """A nested rule costs at most its own conditions, once each."""
+        rule = create_complex_rule("complex_rule")
         targeting_rules = TargetingRules(version="1.0", rules=[rule])
-
-        # Generate test user contexts with advanced attributes
+        size = condition_count(rule.rule)
         user_contexts = [
-            self.generate_random_user_context(include_advanced_attrs=True)
+            generate_random_user_context(include_advanced_attrs=True)
             for _ in range(100)
         ]
 
-        # Benchmark evaluation
-        results = self.benchmark_evaluation_time(targeting_rules, user_contexts)
+        outcomes = self.evaluate_counting(targeting_rules, user_contexts)
 
-        # Performance assertions (complex rules should still be fast)
-        assert results["avg_time_ms"] < 10.0, (
-            f"Average evaluation time too high: {results['avg_time_ms']}ms"
-        )
-        assert results["p95_time_ms"] < 50.0, (
-            f"p95 evaluation time too high: {results['p95_time_ms']}ms"
-        )
-
-        self.performance_results["single_complex_rule"] = results
+        for _, evaluated in outcomes:
+            assert 1 <= evaluated <= size, (
+                f"a rule of {size} conditions cost {evaluated} evaluations"
+            )
 
     def test_multiple_complex_rules_performance(self):
-        """Benchmark performance with multiple complex rules."""
-        rules = [
-            self.create_complex_rule(f"complex_rule_{i}", priority=i) for i in range(5)
-        ]
+        """Five identical complex rules: a match stops at the first.
+
+        A matching user costs at most one rule's conditions; a user no rule
+        matches costs at most all five rules' conditions.
+        """
+        rules = [create_complex_rule(f"complex_rule_{i}", priority=i) for i in range(5)]
         targeting_rules = TargetingRules(version="1.0", rules=rules)
-
-        # Generate test user contexts with advanced attributes
+        size = condition_count(rules[0].rule)
         user_contexts = [
-            self.generate_random_user_context(include_advanced_attrs=True)
-            for _ in range(50)
+            generate_random_user_context(include_advanced_attrs=True) for _ in range(50)
         ]
 
-        # Benchmark evaluation
-        results = self.benchmark_evaluation_time(targeting_rules, user_contexts)
+        outcomes = self.evaluate_counting(targeting_rules, user_contexts)
 
-        # Performance assertions
-        assert results["avg_time_ms"] < 25.0, (
-            f"Average evaluation time too high: {results['avg_time_ms']}ms"
-        )
-        assert results["p95_time_ms"] < 100.0, (
-            f"p95 evaluation time too high: {results['p95_time_ms']}ms"
-        )
-
-        self.performance_results["multiple_complex_rules"] = results
+        for matched_rule, evaluated in outcomes:
+            if matched_rule is not None:
+                assert matched_rule.id == "complex_rule_0"
+                assert evaluated <= size, (
+                    f"matched the first rule but evaluated {evaluated} conditions"
+                )
+            else:
+                assert evaluated <= size * len(rules)
 
     def test_large_scale_rules_performance(self):
-        """Benchmark performance with a large number of rules (stress test)."""
-        # Mix of simple and complex rules
+        """Twenty mixed rules: never more than every condition once."""
         rules = []
         for i in range(20):
             if i % 3 == 0:
-                rules.append(self.create_complex_rule(f"complex_rule_{i}", priority=i))
+                rules.append(create_complex_rule(f"complex_rule_{i}", priority=i))
             else:
-                rules.append(self.create_simple_rule(f"simple_rule_{i}", priority=i))
-
+                rules.append(create_simple_rule(f"simple_rule_{i}", priority=i))
         targeting_rules = TargetingRules(version="1.0", rules=rules)
-
-        # Generate test user contexts
+        total = sum(condition_count(r.rule) for r in rules)
         user_contexts = [
-            self.generate_random_user_context(include_advanced_attrs=True)
-            for _ in range(50)
+            generate_random_user_context(include_advanced_attrs=True) for _ in range(50)
         ]
 
-        # Benchmark evaluation
-        results = self.benchmark_evaluation_time(targeting_rules, user_contexts)
+        outcomes = self.evaluate_counting(targeting_rules, user_contexts)
 
-        # Performance assertions for stress test
-        assert results["avg_time_ms"] < 50.0, (
-            f"Average evaluation time too high under stress: {results['avg_time_ms']}ms"
-        )
-        assert results["p95_time_ms"] < 200.0, (
-            f"p95 evaluation time too high under stress: {results['p95_time_ms']}ms"
-        )
-
-        self.performance_results["large_scale_rules"] = results
+        for _, evaluated in outcomes:
+            assert 1 <= evaluated <= total, (
+                f"{total} conditions in the ruleset, {evaluated} evaluations"
+            )
 
     def test_validation_performance(self):
-        """Benchmark rule validation performance."""
-        # Create a complex rule set for validation
-        rules = []
-        for i in range(10):
-            rules.append(self.create_complex_rule(f"complex_rule_{i}", priority=i))
-
+        """The validator visits each rule exactly once, and passes these."""
+        rules = [
+            create_complex_rule(f"complex_rule_{i}", priority=i) for i in range(10)
+        ]
         targeting_rules = TargetingRules(version="1.0", rules=rules)
+        validator = RuleValidator()
 
-        # Benchmark validation
-        start_time = time.perf_counter()
-        result = self.validator.validate_targeting_rules(targeting_rules)
-        end_time = time.perf_counter()
+        with patch.object(
+            validator,
+            "_validate_targeting_rule",
+            wraps=validator._validate_targeting_rule,
+        ) as per_rule:
+            result = validator.validate_targeting_rules(targeting_rules)
 
-        validation_time = (end_time - start_time) * 1000  # Convert to milliseconds
-
-        # Performance assertions
-        assert validation_time < 100.0, f"Validation time too high: {validation_time}ms"
         assert result.is_valid, "Complex rules should be valid"
-
-        self.performance_results["validation"] = {
-            "time_ms": validation_time,
-            "is_valid": result.is_valid,
-            "issues_count": len(result.issues),
-            "complexity_score": result.complexity_score,
-        }
+        assert per_rule.call_count == len(rules), (
+            f"{len(rules)} rules, validated {per_rule.call_count} times"
+        )
 
     def test_memory_usage_scaling(self):
         """Test memory usage doesn't grow excessively with rule evaluations."""
         import tracemalloc
 
-        rule = self.create_complex_rule("memory_test_rule")
+        rule = create_complex_rule("memory_test_rule")
         targeting_rules = TargetingRules(version="1.0", rules=[rule])
 
-        # Start memory tracking
         tracemalloc.start()
-
-        # Perform many evaluations
         for i in range(1000):
-            user_context = self.generate_random_user_context(
-                include_advanced_attrs=True
-            )
             self.service.evaluate_rules_with_validation(
                 targeting_rules=targeting_rules,
-                user_context=user_context,
+                user_context=generate_random_user_context(include_advanced_attrs=True),
                 validate_attributes=True,
                 track_metrics=True,
             )
-
             # Clear metrics periodically to prevent unbounded growth
             if i % 100 == 0:
                 self.service.clear_metrics()
-
-        # Get memory usage
-        current, peak = tracemalloc.get_traced_memory()
+        _, peak = tracemalloc.get_traced_memory()
         tracemalloc.stop()
 
         # Memory usage should be reasonable (less than 10MB for this test)
@@ -395,186 +437,242 @@ class TestRulesPerformanceBenchmarks:
             f"Peak memory usage too high: {peak / 1024 / 1024:.2f} MB"
         )
 
-        self.performance_results["memory_usage"] = {
-            "current_mb": current / 1024 / 1024,
-            "peak_mb": peak / 1024 / 1024,
+    def test_concurrent_evaluation_performance(self):
+        """Four threads at once get exactly the answers one thread gets.
+
+        The old version timed this and asserted a throughput; what running it
+        concurrently can actually break is correctness -- shared state in the
+        service or engine leaking between evaluations. So every concurrent
+        answer is compared with the sequential answer for the same context,
+        with the workers released together so they genuinely overlap.
+        """
+        rule = create_complex_rule("concurrent_test_rule")
+        targeting_rules = TargetingRules(version="1.0", rules=[rule])
+        num_workers, per_worker = 4, 25
+        contexts = {
+            (w, i): {
+                **generate_random_user_context(include_advanced_attrs=True),
+                "user_id": f"worker_{w}_user_{i}",
+            }
+            for w in range(num_workers)
+            for i in range(per_worker)
         }
 
-    def test_concurrent_evaluation_performance(self):
-        """Test performance under concurrent evaluation scenarios."""
-        import queue
-        import threading
+        def answer(service: RulesEvaluationService, context: Dict[str, Any]):
+            matched_rule, metrics = service.evaluate_rules_with_validation(
+                targeting_rules=targeting_rules,
+                user_context=context,
+                validate_attributes=True,
+                track_metrics=True,
+            )
+            return (matched_rule.id if matched_rule else None, metrics.rule_id)
 
-        rule = self.create_complex_rule("concurrent_test_rule")
-        targeting_rules = TargetingRules(version="1.0", rules=[rule])
+        sequential = {key: answer(self.service, ctx) for key, ctx in contexts.items()}
 
-        # Results queue for collecting timing data
-        results_queue = queue.Queue()
+        shared = RulesEvaluationService()
+        concurrent: Dict[Tuple[int, int], Any] = {}
+        failures: List[BaseException] = []
+        start = threading.Barrier(num_workers)
 
-        def evaluate_rules_worker(worker_id: int, num_evaluations: int):
-            """Worker function for concurrent evaluations."""
-            worker_times = []
+        def worker(w: int) -> None:
+            try:
+                start.wait()
+                for i in range(per_worker):
+                    concurrent[(w, i)] = answer(shared, contexts[(w, i)])
+            except BaseException as exc:  # surfaced below, not lost in the thread
+                failures.append(exc)
 
-            for i in range(num_evaluations):
-                user_context = self.generate_random_user_context(
-                    include_advanced_attrs=True
-                )
-                user_context["user_id"] = f"worker_{worker_id}_user_{i}"
+        threads = [
+            threading.Thread(target=worker, args=(w,)) for w in range(num_workers)
+        ]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
 
+        assert not failures, failures
+        assert len(concurrent) == num_workers * per_worker
+        assert concurrent == sequential
+        assert not shared.error_counts, dict(shared.error_counts)
+
+    def test_operator_specific_performance(self):
+        """Every operator evaluates its one condition once, without erroring."""
+        for operator, value in OPERATORS_TO_TEST:
+            targeting_rules, user_contexts = operator_rules_and_contexts(
+                operator, value
+            )
+            outcomes = self.evaluate_counting(targeting_rules, user_contexts)
+            assert [evaluated for _, evaluated in outcomes] == [1] * len(
+                user_contexts
+            ), f"{operator}: one condition should cost one evaluation"
+
+
+@pytest.mark.benchmark
+class TestRulesLatencyBenchmarks:
+    """Absolute latency ceilings. Skipped unless RUN_BENCHMARKS=1.
+
+    These are the numbers the cost tests above stand in for. They are real
+    targets, but they measure the machine too, so no required job runs them.
+    """
+
+    def setup_method(self):
+        self.service = RulesEvaluationService()
+        self.validator = RuleValidator()
+
+    def benchmark_evaluation_time(
+        self,
+        targeting_rules: TargetingRules,
+        user_contexts: List[Dict[str, Any]],
+        rounds: int = BENCHMARK_ROUNDS,
+    ) -> Dict[str, float]:
+        """Per-evaluation timings (ms) of the fastest of *rounds* rounds."""
+        best: Optional[List[float]] = None
+        for _ in range(rounds):
+            times = []
+            for user_context in user_contexts:
                 start_time = time.perf_counter()
-
-                # Create separate service instance for each worker to avoid conflicts
-                worker_service = RulesEvaluationService()
-                matched_rule, metrics = worker_service.evaluate_rules_with_validation(
+                self.service.evaluate_rules_with_validation(
                     targeting_rules=targeting_rules,
                     user_context=user_context,
                     validate_attributes=True,
                     track_metrics=True,
                 )
-
-                end_time = time.perf_counter()
-                evaluation_time = (end_time - start_time) * 1000
-                worker_times.append(evaluation_time)
-
-            results_queue.put(worker_times)
-
-        # Start multiple worker threads
-        num_workers = 4
-        evaluations_per_worker = 25
-        threads = []
-
-        start_time = time.perf_counter()
-
-        for worker_id in range(num_workers):
-            thread = threading.Thread(
-                target=evaluate_rules_worker, args=(worker_id, evaluations_per_worker)
-            )
-            threads.append(thread)
-            thread.start()
-
-        # Wait for all threads to complete
-        for thread in threads:
-            thread.join()
-
-        end_time = time.perf_counter()
-        total_time = (end_time - start_time) * 1000
-
-        # Collect all timing results
-        all_times = []
-        while not results_queue.empty():
-            worker_times = results_queue.get()
-            all_times.extend(worker_times)
-
-        # Calculate performance metrics
-        concurrent_results = {
-            "total_time_ms": total_time,
-            "total_evaluations": len(all_times),
-            "avg_time_ms": mean(all_times),
-            "median_time_ms": median(all_times),
-            "max_time_ms": max(all_times),
-            "evaluations_per_second": len(all_times) / (total_time / 1000),
+                times.append((time.perf_counter() - start_time) * 1000)
+            if best is None or sum(times) < sum(best):
+                best = times
+        assert best is not None
+        return {
+            "avg_time_ms": mean(best),
+            "median_time_ms": median(best),
+            "max_time_ms": max(best),
+            "p95_time_ms": _p95(best),
+            "std_dev_ms": stdev(best) if len(best) > 1 else 0,
         }
 
-        # Performance assertions for concurrent execution
-        assert concurrent_results["avg_time_ms"] < 15.0, (
-            f"Concurrent avg time too high: {concurrent_results['avg_time_ms']}ms"
-        )
-        assert concurrent_results["evaluations_per_second"] > 50, (
-            f"Throughput too low: {concurrent_results['evaluations_per_second']} eval/sec"
-        )
-
-        self.performance_results["concurrent_evaluation"] = concurrent_results
-
-    def test_operator_specific_performance(self):
-        """Benchmark performance of different operators."""
-        operator_results = {}
-
-        # Test different operators
-        operators_to_test = [
-            (OperatorType.EQUALS, "US"),
-            (OperatorType.IN, ["US", "CA", "UK", "DE"]),
-            (OperatorType.CONTAINS, "premium"),
-            (
-                OperatorType.MATCH_REGEX,
-                r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$",
+    @pytest.mark.parametrize(
+        ("rules", "advanced", "users", "avg_ms", "p95_ms"),
+        [
+            pytest.param(
+                lambda: [create_simple_rule("simple_rule")],
+                False,
+                100,
+                1.0,
+                5.0,
+                id="single_simple_rule",
             ),
-            (OperatorType.GREATER_THAN, 25),
-            (OperatorType.SEMANTIC_VERSION, "1.2.0"),
-            (OperatorType.GEO_DISTANCE, [40.7128, -74.0060]),
-            (OperatorType.JSON_PATH, "$.premium"),
+            pytest.param(
+                lambda: [
+                    create_simple_rule(f"rule_{i}", priority=i) for i in range(10)
+                ],
+                False,
+                100,
+                5.0,
+                20.0,
+                id="multiple_simple_rules",
+            ),
+            pytest.param(
+                lambda: [create_complex_rule("complex_rule")],
+                True,
+                100,
+                10.0,
+                50.0,
+                id="single_complex_rule",
+            ),
+            pytest.param(
+                lambda: [
+                    create_complex_rule(f"complex_rule_{i}", priority=i)
+                    for i in range(5)
+                ],
+                True,
+                50,
+                25.0,
+                100.0,
+                id="multiple_complex_rules",
+            ),
+            pytest.param(
+                lambda: [
+                    create_complex_rule(f"complex_rule_{i}", priority=i)
+                    if i % 3 == 0
+                    else create_simple_rule(f"simple_rule_{i}", priority=i)
+                    for i in range(20)
+                ],
+                True,
+                50,
+                50.0,
+                200.0,
+                id="large_scale_rules",
+            ),
+        ],
+    )
+    def test_evaluation_latency(self, rules, advanced, users, avg_ms, p95_ms):
+        targeting_rules = TargetingRules(version="1.0", rules=rules())
+        user_contexts = [
+            generate_random_user_context(include_advanced_attrs=advanced)
+            for _ in range(users)
         ]
 
-        for operator, value in operators_to_test:
-            condition = Condition(
-                attribute="test_attr",
-                operator=operator,
-                value=value,
-                additional_value=10 if operator == OperatorType.GEO_DISTANCE else None,
-            )
+        results = self.benchmark_evaluation_time(targeting_rules, user_contexts)
 
-            rule_group = RuleGroup(operator=LogicalOperator.AND, conditions=[condition])
+        assert results["avg_time_ms"] < avg_ms, results
+        assert results["p95_time_ms"] < p95_ms, results
 
-            targeting_rule = TargetingRule(
-                id=f"test_{operator}",
-                rule=rule_group,
-                rollout_percentage=100,
-                priority=1,
-            )
+    def test_validation_latency(self):
+        rules = [
+            create_complex_rule(f"complex_rule_{i}", priority=i) for i in range(10)
+        ]
+        targeting_rules = TargetingRules(version="1.0", rules=rules)
 
-            targeting_rules = TargetingRules(version="1.0", rules=[targeting_rule])
+        best = float("inf")
+        for _ in range(BENCHMARK_ROUNDS):
+            start_time = time.perf_counter()
+            self.validator.validate_targeting_rules(targeting_rules)
+            best = min(best, (time.perf_counter() - start_time) * 1000)
 
-            # Generate appropriate user contexts for each operator
-            user_contexts = []
-            for _ in range(100):
-                context = self.generate_random_user_context(include_advanced_attrs=True)
+        assert best < 100.0, f"Validation time too high: {best}ms"
 
-                # Set appropriate test attribute based on operator
-                if operator == OperatorType.SEMANTIC_VERSION:
-                    context["test_attr"] = (
-                        f"{random.randint(1, 3)}.{random.randint(0, 9)}.{random.randint(0, 9)}"
-                    )
-                elif operator == OperatorType.GEO_DISTANCE:
-                    context["test_attr"] = [
-                        round(random.uniform(40, 41), 6),
-                        round(random.uniform(-75, -73), 6),
-                    ]
-                elif operator == OperatorType.JSON_PATH:
-                    context["test_attr"] = {
-                        "user": {"tier": random.choice(["basic", "premium"])}
-                    }
-                else:
-                    context["test_attr"] = random.choice(
-                        ["US", "premium", "test@example.com", 30]
-                    )
+    def test_concurrent_throughput(self):
+        rule = create_complex_rule("concurrent_test_rule")
+        targeting_rules = TargetingRules(version="1.0", rules=[rule])
+        num_workers, per_worker = 4, 25
 
-                user_contexts.append(context)
+        def worker(worker_id: int) -> None:
+            for i in range(per_worker):
+                context = generate_random_user_context(include_advanced_attrs=True)
+                context["user_id"] = f"worker_{worker_id}_user_{i}"
+                RulesEvaluationService().evaluate_rules_with_validation(
+                    targeting_rules=targeting_rules,
+                    user_context=context,
+                    validate_attributes=True,
+                    track_metrics=True,
+                )
 
-            # Benchmark this operator
-            results = self.benchmark_evaluation_time(targeting_rules, user_contexts)
-            operator_results[operator] = results
+        best = float("inf")
+        for _ in range(BENCHMARK_ROUNDS):
+            threads = [
+                threading.Thread(target=worker, args=(w,)) for w in range(num_workers)
+            ]
+            start_time = time.perf_counter()
+            for thread in threads:
+                thread.start()
+            for thread in threads:
+                thread.join()
+            best = min(best, time.perf_counter() - start_time)
 
-        # Store operator-specific performance results
-        self.performance_results["operator_performance"] = operator_results
+        evaluations_per_second = num_workers * per_worker / best
+        assert evaluations_per_second > 50, (
+            f"Throughput too low: {evaluations_per_second} eval/sec"
+        )
 
-        # Verify no operator is excessively slow
-        for operator, results in operator_results.items():
-            assert results["avg_time_ms"] < 5.0, (
-                f"Operator {operator} too slow: {results['avg_time_ms']}ms"
-            )
+    @pytest.mark.parametrize(
+        ("operator", "value"),
+        OPERATORS_TO_TEST,
+        ids=[str(o) for o, _ in OPERATORS_TO_TEST],
+    )
+    def test_operator_latency(self, operator, value):
+        targeting_rules, user_contexts = operator_rules_and_contexts(operator, value)
 
-    def teardown_method(self):
-        """Print performance results summary."""
-        print("\n" + "=" * 80)
-        print("RULES ENGINE PERFORMANCE BENCHMARK RESULTS")
-        print("=" * 80)
+        results = self.benchmark_evaluation_time(targeting_rules, user_contexts)
 
-        for test_name, results in self.performance_results.items():
-            print(f"\n{test_name.upper().replace('_', ' ')}:")
-            if isinstance(results, dict):
-                for key, value in results.items():
-                    if isinstance(value, float):
-                        print(f"  {key}: {value:.3f}")
-                    else:
-                        print(f"  {key}: {value}")
-
-        print("\n" + "=" * 80)
+        assert results["avg_time_ms"] < 5.0, (
+            f"Operator {operator} too slow: {results['avg_time_ms']}ms"
+        )

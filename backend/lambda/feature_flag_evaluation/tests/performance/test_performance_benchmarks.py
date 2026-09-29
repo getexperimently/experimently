@@ -6,15 +6,23 @@ Tests performance characteristics and validates against EP-010 requirements:
 - Target throughput: > 1000 evaluations/second
 - Cache hit rate: > 95%
 
-Following TDD (Test-Driven Development) - Performance validation phase.
+The latency and throughput targets are absolute wall-clock numbers, so they
+live in ``TestPerformanceBenchmarks``, marked ``benchmark`` and skipped unless
+``RUN_BENCHMARKS=1`` (backend/tests/benchmark_gate.py). ``TestEvaluationCost``
+runs in every suite and asserts what those numbers stand for, deterministically:
+evaluation does no I/O, concurrent evaluation agrees with sequential, a cache
+hit does not reach DynamoDB, and the rollout split is accurate (#409).
 """
 
 import statistics
 import sys
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from unittest.mock import Mock, patch
+
+import pytest
 
 # Add parent directories to path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
@@ -24,8 +32,8 @@ from evaluator import FeatureFlagEvaluator
 from models import FeatureFlagConfig, VariantConfig
 
 
-class TestPerformanceBenchmarks:
-    """Performance benchmark tests for feature flag evaluation."""
+class _Flags:
+    """The three flag shapes both classes below evaluate."""
 
     def setup_method(self):
         """Set up test fixtures."""
@@ -58,6 +66,11 @@ class TestPerformanceBenchmarks:
                 VariantConfig(key="treatment", allocation=0.5),
             ],
         )
+
+
+@pytest.mark.benchmark
+class TestPerformanceBenchmarks(_Flags):
+    """Absolute latency and throughput targets. Skipped unless RUN_BENCHMARKS=1."""
 
     # ====================================================================
     # Performance Target: < 40ms P99 latency
@@ -208,105 +221,6 @@ class TestPerformanceBenchmarks:
         )
 
     # ====================================================================
-    # Cache Performance: > 95% hit rate
-    # ====================================================================
-
-    @patch("evaluator.get_dynamodb_resource")
-    def test_cache_hit_rate_with_repeated_flags(self, mock_get_resource):
-        """Test cache achieves > 95% hit rate with realistic usage pattern."""
-        # Mock DynamoDB
-        mock_table = Mock()
-        mock_table.get_item.return_value = {
-            "Item": {
-                "flag_id": "cached_flag",
-                "key": "cached_feature",
-                "enabled": True,
-                "rollout_percentage": 100.0,
-            }
-        }
-        mock_resource = Mock()
-        mock_resource.Table.return_value = mock_table
-        mock_get_resource.return_value = mock_resource
-
-        evaluator = FeatureFlagEvaluator()
-
-        # Simulate realistic pattern: multiple evaluations of same flags
-        num_flags = 10
-        evaluations_per_flag = 100
-
-        for _ in range(evaluations_per_flag):
-            for flag_id in range(num_flags):
-                evaluator.get_flag_config_cached(f"flag_{flag_id}")
-
-        total_requests = num_flags * evaluations_per_flag
-        # First request for each flag is a miss, rest are hits
-        expected_hits = total_requests - num_flags
-        expected_hit_rate = expected_hits / total_requests
-
-        actual_hit_rate = evaluator.get_cache_hit_rate()
-
-        print(
-            f"\n[Cache] Hit rate: {actual_hit_rate:.2%} (expected: {expected_hit_rate:.2%})"
-        )
-
-        assert actual_hit_rate >= 0.95, (
-            f"Cache hit rate {actual_hit_rate:.2%} below target 95%"
-        )
-
-        # DynamoDB should only be called once per unique flag
-        assert mock_table.get_item.call_count == num_flags, (
-            f"Expected {num_flags} DynamoDB calls, got {mock_table.get_item.call_count}"
-        )
-
-    @patch("evaluator.get_dynamodb_resource")
-    def test_cache_reduces_latency(self, mock_get_resource):
-        """Test that caching significantly reduces latency."""
-        # Mock DynamoDB with artificial delay
-        mock_table = Mock()
-
-        def slow_get_item(**kwargs):
-            time.sleep(0.005)  # 5ms DynamoDB delay
-            return {
-                "Item": {
-                    "flag_id": "slow_flag",
-                    "key": "slow_feature",
-                    "enabled": True,
-                    "rollout_percentage": 100.0,
-                }
-            }
-
-        mock_table.get_item = Mock(side_effect=slow_get_item)
-        mock_resource = Mock()
-        mock_resource.Table.return_value = mock_table
-        mock_get_resource.return_value = mock_resource
-
-        evaluator = FeatureFlagEvaluator()
-
-        # First call - cache miss (with DynamoDB delay)
-        start = time.perf_counter()
-        evaluator.get_flag_config_cached("slow_feature")
-        first_call_time = (time.perf_counter() - start) * 1000
-
-        # Second call - cache hit (no DynamoDB delay)
-        start = time.perf_counter()
-        evaluator.get_flag_config_cached("slow_feature")
-        second_call_time = (time.perf_counter() - start) * 1000
-
-        print(
-            f"\n[Cache Latency] First call: {first_call_time:.2f}ms, Cached call: {second_call_time:.2f}ms"
-        )
-
-        # Cached call should be at least 2x faster
-        assert second_call_time < first_call_time / 2, (
-            "Cache should significantly reduce latency"
-        )
-
-        # Cached call should be very fast
-        assert second_call_time < 1.0, (
-            f"Cached call {second_call_time:.2f}ms should be < 1ms"
-        )
-
-    # ====================================================================
     # Batch Evaluation Performance
     # ====================================================================
 
@@ -368,6 +282,162 @@ class TestPerformanceBenchmarks:
             f"Throughput {throughput:.0f} eval/s dropped below target after many evaluations"
         )
 
+
+class TestEvaluationCost(_Flags):
+    """What the latency targets stand for, asserted without a clock.
+
+    A P99 of 40 ms for an in-memory evaluation is only at risk if evaluation
+    does I/O or contends on shared state; a throughput target only if it does
+    more work per user than it should. These are the checks that run in every
+    suite; the numbers themselves are ``TestPerformanceBenchmarks``.
+    """
+
+    @patch("evaluator.get_dynamodb_resource")
+    def test_evaluate_does_no_io_and_is_deterministic(self, mock_get_resource):
+        """1000 users on each flag shape: no DynamoDB, the same answer twice."""
+        evaluator = FeatureFlagEvaluator()
+        context = {"country": "US", "age": 25}
+
+        for flag, ctx in (
+            (self.simple_flag, None),
+            (self.targeted_flag, context),
+            (self.variant_flag, None),
+        ):
+            first = [
+                evaluator.evaluate(user_id=f"user_{i}", flag_config=flag, context=ctx)
+                for i in range(1000)
+            ]
+            again = [
+                evaluator.evaluate(user_id=f"user_{i}", flag_config=flag, context=ctx)
+                for i in range(1000)
+            ]
+            assert first == again, f"{flag.key}: evaluation is not deterministic"
+            assert all(r["enabled"] for r in first), flag.key
+
+        variants = {r["variant"] for r in first}
+        assert variants == {"control", "treatment"}, variants
+        assert mock_get_resource.call_count == 0, "evaluate() reached DynamoDB"
+
+    def test_concurrent_evaluation_matches_sequential(self):
+        """Four threads on one evaluator give exactly the sequential answers."""
+        evaluator = FeatureFlagEvaluator()
+        num_threads, per_thread = 4, 1000
+        users = [
+            [f"user_{t}_{i}" for i in range(per_thread)] for t in range(num_threads)
+        ]
+        sequential = {
+            u: evaluator.evaluate(user_id=u, flag_config=self.variant_flag)
+            for batch in users
+            for u in batch
+        }
+
+        concurrent = {}
+        failures = []
+        start = threading.Barrier(num_threads)
+
+        def worker(batch):
+            try:
+                start.wait()
+                for u in batch:
+                    concurrent[u] = evaluator.evaluate(
+                        user_id=u, flag_config=self.variant_flag
+                    )
+            except BaseException as exc:  # surfaced below, not lost in the thread
+                failures.append(exc)
+
+        threads = [threading.Thread(target=worker, args=(b,)) for b in users]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+
+        assert not failures, failures
+        assert concurrent == sequential
+
+    # ====================================================================
+    # Cache Performance: > 95% hit rate
+    # ====================================================================
+
+    @patch("evaluator.get_dynamodb_resource")
+    def test_cache_hit_rate_with_repeated_flags(self, mock_get_resource):
+        """Test cache achieves > 95% hit rate with realistic usage pattern."""
+        # Mock DynamoDB
+        mock_table = Mock()
+        mock_table.get_item.return_value = {
+            "Item": {
+                "flag_id": "cached_flag",
+                "key": "cached_feature",
+                "enabled": True,
+                "rollout_percentage": 100.0,
+            }
+        }
+        mock_resource = Mock()
+        mock_resource.Table.return_value = mock_table
+        mock_get_resource.return_value = mock_resource
+
+        evaluator = FeatureFlagEvaluator()
+
+        # Simulate realistic pattern: multiple evaluations of same flags
+        num_flags = 10
+        evaluations_per_flag = 100
+
+        for _ in range(evaluations_per_flag):
+            for flag_id in range(num_flags):
+                evaluator.get_flag_config_cached(f"flag_{flag_id}")
+
+        total_requests = num_flags * evaluations_per_flag
+        # First request for each flag is a miss, rest are hits
+        expected_hits = total_requests - num_flags
+        expected_hit_rate = expected_hits / total_requests
+
+        actual_hit_rate = evaluator.get_cache_hit_rate()
+
+        print(
+            f"\n[Cache] Hit rate: {actual_hit_rate:.2%} (expected: {expected_hit_rate:.2%})"
+        )
+
+        assert actual_hit_rate >= 0.95, (
+            f"Cache hit rate {actual_hit_rate:.2%} below target 95%"
+        )
+
+        # DynamoDB should only be called once per unique flag
+        assert mock_table.get_item.call_count == num_flags, (
+            f"Expected {num_flags} DynamoDB calls, got {mock_table.get_item.call_count}"
+        )
+
+    @patch("evaluator.get_dynamodb_resource")
+    def test_cache_reduces_latency(self, mock_get_resource):
+        """A cache hit does not go back to DynamoDB.
+
+        This used to sleep 5 ms inside the mocked DynamoDB call, time a miss
+        and a hit, and assert ``hit < miss / 2`` and ``hit < 1 ms`` -- two
+        single wall-clock readings (#409). The latency a cache saves is the
+        round-trip it skips, and that is a call count.
+        """
+        mock_table = Mock()
+        mock_table.get_item.return_value = {
+            "Item": {
+                "flag_id": "slow_flag",
+                "key": "slow_feature",
+                "enabled": True,
+                "rollout_percentage": 100.0,
+            }
+        }
+        mock_resource = Mock()
+        mock_resource.Table.return_value = mock_table
+        mock_get_resource.return_value = mock_resource
+
+        evaluator = FeatureFlagEvaluator()
+
+        first = evaluator.get_flag_config_cached("slow_feature")
+        assert mock_table.get_item.call_count == 1
+
+        second = evaluator.get_flag_config_cached("slow_feature")
+
+        assert mock_table.get_item.call_count == 1, "the hit went back to DynamoDB"
+        assert second == first
+        assert evaluator.get_cache_hit_rate() == 0.5
+
     # ====================================================================
     # Statistical Consistency
     # ====================================================================
@@ -387,29 +457,16 @@ class TestPerformanceBenchmarks:
         num_users = 10000
         enabled_count = 0
 
-        start = time.perf_counter()
         for i in range(num_users):
             result = evaluator.evaluate(
                 user_id=f"user_{i}", flag_config=partial_rollout_flag
             )
             if result["enabled"]:
                 enabled_count += 1
-        end = time.perf_counter()
 
         enabled_rate = enabled_count / num_users
-        duration = end - start
-
-        print(
-            f"\n[Rollout Accuracy] {enabled_count}/{num_users} = {enabled_rate:.2%} (target: 50%) in {duration:.2f}s"
-        )
 
         # Should be within ±1% of target (with large sample)
         assert 0.49 <= enabled_rate <= 0.51, (
             f"Rollout rate {enabled_rate:.2%} outside ±1% of target 50%"
-        )
-
-        # Should maintain good throughput
-        throughput = num_users / duration
-        assert throughput > 1000, (
-            f"Throughput {throughput:.0f} eval/s below target during accuracy test"
         )

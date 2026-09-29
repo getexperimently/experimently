@@ -4,7 +4,9 @@ Test cases for rule compilation and validation.
 Tests the rule compiler that pre-validates and optimizes targeting rules.
 """
 
+import timeit
 from datetime import datetime
+from unittest.mock import patch
 
 import pytest
 
@@ -500,45 +502,50 @@ class TestCompilerCache:
 
 
 class TestCompilerPerformance:
-    """Test compiler performance characteristics."""
+    """What makes compilation cheap, counted rather than timed (#409).
 
-    def test_compilation_time_is_fast(self):
-        """Test that compilation is fast enough."""
-        import time
+    These asserted a single compile under 10 ms and a cached compile under
+    1 ms -- one wall-clock reading each, which a busy runner can exceed with
+    nothing wrong. The deterministic claims behind them: compilation visits
+    each condition once, and a cached compile does no compilation work at all.
+    """
 
-        # Create a moderately complex rule
+    @staticmethod
+    def _twenty_condition_rule() -> TargetingRule:
         conditions = [
             Condition(attribute=f"attr_{i}", operator=OperatorType.EQUALS, value=i)
             for i in range(20)
         ]
-
-        rule_group = RuleGroup(
-            operator=LogicalOperator.AND, conditions=conditions, groups=[]
-        )
-
-        rule = TargetingRule(
+        return TargetingRule(
             id="perf_test",
             name="Performance Test",
             description="Test compilation speed",
-            rule=rule_group,
+            rule=RuleGroup(
+                operator=LogicalOperator.AND, conditions=conditions, groups=[]
+            ),
             priority=1,
             rollout_percentage=100,
         )
 
+    def test_compilation_time_is_fast(self):
+        """Compiling 20 conditions analyses each of them exactly once."""
+        rule = self._twenty_condition_rule()
         compiler = RuleCompiler()
 
-        start = time.time()
-        compiled = compiler.compile(rule)
-        duration = time.time() - start
+        with patch.object(
+            compiler, "_analyze_condition", wraps=compiler._analyze_condition
+        ) as analyze:
+            compiled = compiler.compile(rule)
 
-        # Compilation should be very fast (< 10ms for 20 conditions)
-        assert duration < 0.01
-        assert compiled is not None
+        assert compiled is not None and compiled.is_valid
+        assert compiled.condition_count == 20
+        assert compiled.required_attributes == {f"attr_{i}" for i in range(20)}
+        assert analyze.call_count == 20, (
+            f"20 conditions analysed {analyze.call_count} times"
+        )
 
     def test_cached_compilation_is_instant(self):
-        """Test that cached compilation is near-instant."""
-        import time
-
+        """A second compile of the same rule is a hit and does no work."""
         rule_group = RuleGroup(
             operator=LogicalOperator.AND,
             conditions=[
@@ -557,14 +564,31 @@ class TestCompilerPerformance:
         )
 
         compiler = RuleCompiler()
+        first = compiler.compile(rule)
 
-        # First compilation (uncached)
-        compiler.compile(rule)
+        with patch.object(
+            compiler, "_compile_rule", wraps=compiler._compile_rule
+        ) as compile_rule:
+            second = compiler.compile(rule)
 
-        # Second compilation (cached)
-        start = time.time()
-        compiler.compile(rule)
-        duration = time.time() - start
+        assert second is first
+        assert compile_rule.call_count == 0
+        assert compiler.cache_hits == 1
 
-        # Cached access should be extremely fast (< 1ms)
-        assert duration < 0.001
+    @pytest.mark.benchmark
+    def test_compilation_latency_benchmark(self):
+        """A 20-condition compile under 10 ms; a cached one under 1 ms (best of 5)."""
+        rule = self._twenty_condition_rule()
+        compiler = RuleCompiler()
+
+        cold = min(
+            timeit.repeat(
+                lambda: compiler.compile(rule, force_recompile=True),
+                repeat=5,
+                number=1,
+            )
+        )
+        warm = min(timeit.repeat(lambda: compiler.compile(rule), repeat=5, number=1))
+
+        assert cold < 0.01, f"compile took {cold * 1000:.2f} ms"
+        assert warm < 0.001, f"cached compile took {warm * 1000:.3f} ms"
