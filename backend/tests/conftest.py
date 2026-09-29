@@ -507,6 +507,8 @@ def client(db_session, monkeypatch):
     app.dependency_overrides[deps.get_current_superuser] = (
         override_get_current_superuser
     )
+    # Reaches only routes that inject get_cache_control via Depends; a route that
+    # calls deps.get_cache_control() directly (the flag list, #427) is not.
     app.dependency_overrides[deps.get_cache_control] = override_get_cache_control
     app.dependency_overrides[deps.get_api_key] = override_get_api_key
 

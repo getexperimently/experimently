@@ -6,6 +6,7 @@ experiments in the experimentation platform. It implements the core functionalit
 AB testing and feature experimentation.
 """
 
+import json
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 from uuid import UUID
@@ -106,6 +107,58 @@ router = APIRouter(
         },
     },
 )
+
+#: How long a cached experiment detail or result set lives, in seconds.
+EXPERIMENT_CACHE_TTL_SECONDS = 3600
+
+
+# The experiment cache (#428, as #100 for the flags). `deps.get_cache_control`
+# hands out a redis.asyncio client, so every call on it is awaited --
+# un-awaited, `delete` and `setex` silently do nothing and a plain `for` over
+# `scan_iter` raises TypeError, after the change has been committed. The cache
+# is best-effort: a Redis error is logged and the request carries on.
+async def _cache_get(cache_control: deps.CacheControl, key: str) -> Optional[str]:
+    if not (cache_control.enabled and cache_control.redis):
+        return None
+    try:
+        return await cache_control.redis.get(key)
+    except Exception as cache_error:
+        logger.warning("Experiment cache read failed for %s: %s", key, cache_error)
+        return None
+
+
+async def _cache_set(cache_control: deps.CacheControl, key: str, value: Any) -> None:
+    if not (cache_control.enabled and cache_control.redis):
+        return
+    try:
+        await cache_control.redis.setex(
+            key, EXPERIMENT_CACHE_TTL_SECONDS, json.dumps(value, default=str)
+        )
+    except Exception as cache_error:
+        logger.warning("Experiment cache write failed for %s: %s", key, cache_error)
+
+
+async def _invalidate_experiment_cache(
+    cache_control: deps.CacheControl, experiment_id: Optional[UUID]
+) -> None:
+    """Drop the cached detail of ``experiment_id`` and every cached list.
+
+    Lists are keyed per user, but every role sees every experiment (#83), so a
+    change drops all of them rather than only the owner's. Called after the
+    change is committed, so a Redis error is logged rather than raised.
+    """
+    if not (cache_control.enabled and cache_control.redis):
+        return
+    try:
+        if experiment_id is not None:
+            await cache_control.redis.delete(f"experiment:{experiment_id}")
+        keys = [
+            key async for key in cache_control.redis.scan_iter(match="experiments:*")
+        ]
+        if keys:
+            await cache_control.redis.delete(*keys)
+    except Exception as cache_error:
+        logger.warning("Experiment cache invalidation failed: %s", cache_error)
 
 
 def _same_experiment_type(requested: Any, stored: Any) -> bool:
@@ -357,21 +410,7 @@ async def create_experiment(
                 f"Compliance audit logging failed for experiment create: {_audit_err}"
             )
 
-        # Invalidate cache if enabled
-        if cache_control.enabled and cache_control.redis:
-            pattern = f"experiments:{current_user.id}:*"
-            try:
-                # Try async method first (for Redis.asyncio)
-                keys = await cache_control.redis.keys(pattern)
-                if keys:
-                    await cache_control.redis.delete(*keys)
-            except (AttributeError, TypeError):
-                # Fall back to sync method (scan_iter for regular Redis)
-                try:
-                    for key in cache_control.redis.scan_iter(match=pattern):
-                        cache_control.redis.delete(key)
-                except Exception as e:
-                    logger.warning(f"Cache invalidation failed: {e!s}")
+        await _invalidate_experiment_cache(cache_control, None)
 
         return ExperimentResponse.model_validate(experiment)
     except HTTPException:
@@ -432,13 +471,6 @@ async def get_experiment(
         HTTPException 403: If user doesn't have access to this experiment
     """
     try:
-        # Check cache first if enabled
-        if cache_control.enabled and cache_control.redis:
-            cache_key = f"experiment:{experiment_id}"
-            cached_data = await cache_control.redis.get(cache_key)
-            if cached_data:
-                return ExperimentResponse.model_validate_json(cached_data)
-
         # Create experiment service
         experiment_service = ExperimentService(db)
 
@@ -466,6 +498,12 @@ async def get_experiment(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="You don't have permission to access this experiment",
             )
+
+        # The cached detail is returned only after the same checks as an
+        # uncached read.
+        cached_data = await _cache_get(cache_control, f"experiment:{experiment_id}")
+        if cached_data:
+            return ExperimentResponse.model_validate_json(cached_data)
 
         # Create the response - if it's a dictionary, use model_validate directly
         if isinstance(experiment, dict):
@@ -515,13 +553,11 @@ async def get_experiment(
                 else:
                     raise
 
-        # Cache result if enabled
-        if cache_control.enabled and cache_control.redis:
-            await cache_control.redis.setex(
-                f"experiment:{experiment_id}",
-                3600,  # Cache for 1 hour
-                response.model_dump_json(),
-            )
+        await _cache_set(
+            cache_control,
+            f"experiment:{experiment_id}",
+            response.model_dump(mode="json"),
+        )
 
         return response
     except HTTPException:
@@ -664,17 +700,7 @@ async def update_experiment(
                 f"Compliance audit logging failed for experiment update: {_audit_err}"
             )
 
-        # Invalidate cache if enabled
-        if cache_control.enabled and cache_control.redis:
-            # Delete specific experiment cache
-            experiment_cache_key = f"experiment:{experiment_id}"
-            cache_control.redis.delete(experiment_cache_key)
-
-            # Delete experiment list caches
-            owner_id = updated_experiment.owner_id
-            pattern = f"experiments:{owner_id}:*"
-            for key in cache_control.redis.scan_iter(match=pattern):
-                cache_control.redis.delete(key)
+        await _invalidate_experiment_cache(cache_control, experiment_id)
 
         # Handle the response with compatibility
         try:
@@ -865,17 +891,7 @@ async def delete_experiment(
             f"Compliance audit logging failed for experiment delete: {_audit_err}"
         )
 
-    # Invalidate cache if enabled
-    if cache_control.enabled and cache_control.redis:
-        # Delete specific experiment cache
-        experiment_cache_key = f"experiment:{experiment_id}"
-        cache_control.redis.delete(experiment_cache_key)
-
-        # Delete experiment list caches
-        owner_id = experiment.owner_id
-        pattern = f"experiments:{owner_id}:*"
-        for key in cache_control.redis.scan_iter(match=pattern):
-            cache_control.redis.delete(key)
+    await _invalidate_experiment_cache(cache_control, experiment_id)
 
     # Return 204 No Content
     return Response(status_code=status.HTTP_204_NO_CONTENT)
@@ -963,17 +979,7 @@ async def start_experiment(
         # Start experiment
         started_experiment = experiment_service.start_experiment(experiment)
 
-        # Invalidate cache if enabled
-        if cache_control.enabled and cache_control.redis:
-            # Delete specific experiment cache
-            experiment_cache_key = f"experiment:{experiment_id}"
-            cache_control.redis.delete(experiment_cache_key)
-
-            # Delete experiment list caches
-            owner_id = started_experiment.owner_id
-            pattern = f"experiments:{owner_id}:*"
-            for key in cache_control.redis.scan_iter(match=pattern):
-                cache_control.redis.delete(key)
+        await _invalidate_experiment_cache(cache_control, experiment_id)
 
         return ExperimentResponse.model_validate(started_experiment)
     except HTTPException:
@@ -1036,17 +1042,7 @@ async def pause_experiment(
         db.commit()
         db.refresh(experiment)
 
-        # Invalidate cache if enabled
-        if cache_control.enabled and cache_control.redis:
-            # Delete specific experiment cache
-            experiment_cache_key = f"experiment:{experiment_id}"
-            cache_control.redis.delete(experiment_cache_key)
-
-            # Delete experiment list caches
-            owner_id = experiment.owner_id
-            pattern = f"experiments:{owner_id}:*"
-            for key in cache_control.redis.scan_iter(match=pattern):
-                cache_control.redis.delete(key)
+        await _invalidate_experiment_cache(cache_control, experiment_id)
 
         # Serialise through the service so `metrics` comes from the
         # metric_definitions relationship (the ORM `metrics` column is JSONB).
@@ -1144,18 +1140,7 @@ async def update_experiment_schedule(
         except ValueError as e:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 
-        # Invalidate cache if enabled
-        if getattr(cache_control, "enabled", False) and getattr(
-            cache_control, "redis", None
-        ):
-            # Delete specific experiment cache
-            experiment_cache_key = f"experiment:{experiment_id}"
-            cache_control.redis.delete(experiment_cache_key)
-
-            # Delete experiment list caches
-            pattern = f"experiments:{current_user.id}:*"
-            for key in cache_control.redis.scan_iter(match=pattern):
-                cache_control.redis.delete(key)
+        await _invalidate_experiment_cache(cache_control, experiment_id)
 
         return ExperimentResponse.model_validate(updated_experiment)
     except Exception as e:
@@ -1222,17 +1207,7 @@ async def complete_experiment(
         db.commit()
         db.refresh(experiment)
 
-        # Invalidate cache if enabled
-        if cache_control.enabled and cache_control.redis:
-            # Delete specific experiment cache
-            experiment_cache_key = f"experiment:{experiment_id}"
-            cache_control.redis.delete(experiment_cache_key)
-
-            # Delete experiment list caches
-            owner_id = experiment.owner_id
-            pattern = f"experiments:{owner_id}:*"
-            for key in cache_control.redis.scan_iter(match=pattern):
-                cache_control.redis.delete(key)
+        await _invalidate_experiment_cache(cache_control, experiment_id)
 
         # Serialise through the service so `metrics` comes from the
         # metric_definitions relationship (the ORM `metrics` column is JSONB).
@@ -1354,19 +1329,9 @@ async def archive_experiment(
         experiment_service = ExperimentService(db)
 
         # Archive experiment
-        archived_experiment = experiment_service.archive_experiment(experiment)
+        experiment_service.archive_experiment(experiment)
 
-        # Invalidate cache if enabled
-        if cache_control.enabled and cache_control.redis:
-            # Delete specific experiment cache
-            experiment_cache_key = f"experiment:{experiment_id}"
-            cache_control.redis.delete(experiment_cache_key)
-
-            # Delete experiment list caches
-            owner_id = archived_experiment.get("owner_id")
-            pattern = f"experiments:{owner_id}:*"
-            for key in cache_control.redis.scan_iter(match=pattern):
-                cache_control.redis.delete(key)
+        await _invalidate_experiment_cache(cache_control, experiment_id)
 
         # Serialise through the service so `metrics` comes from the
         # metric_definitions relationship (the ORM `metrics` column is JSONB).
@@ -1438,12 +1403,7 @@ async def clone_experiment(
             experiment, current_user.id
         )
 
-        # Invalidate cache if enabled
-        if cache_control.enabled and cache_control.redis:
-            # Delete experiment list caches
-            pattern = f"experiments:{current_user.id}:*"
-            for key in cache_control.redis.scan_iter(match=pattern):
-                cache_control.redis.delete(key)
+        await _invalidate_experiment_cache(cache_control, None)
 
         return ExperimentResponse.model_validate(cloned_experiment)
     except HTTPException:
@@ -1507,15 +1467,11 @@ async def get_daily_experiment_results(
                 detail="Cannot get results for experiments in DRAFT status",
             )
 
-        # Try to get from cache if enabled
-        if cache_control.enabled and cache_control.redis:
-            metric_part = f":{metric_id}" if metric_id else ""
-            cache_key = f"experiment_daily_results:{experiment_id}{metric_part}"
-            cached_data = await cache_control.redis.get(cache_key)
-            if cached_data:
-                import json
-
-                return json.loads(cached_data)
+        metric_part = f":{metric_id}" if metric_id else ""
+        cache_key = f"experiment_daily_results:{experiment_id}{metric_part}"
+        cached_data = await _cache_get(cache_control, cache_key)
+        if cached_data:
+            return json.loads(cached_data)
 
         # Create analysis service
         analysis_service = AnalysisService(db)
@@ -1533,17 +1489,7 @@ async def get_daily_experiment_results(
         except ValueError as e:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 
-        # Cache results if enabled
-        if cache_control.enabled and cache_control.redis:
-            import json
-
-            metric_part = f":{metric_id}" if metric_id else ""
-            cache_key = f"experiment_daily_results:{experiment_id}{metric_part}"
-            cache_control.redis.setex(
-                cache_key,
-                3600,  # Cache for 1 hour
-                json.dumps(results),
-            )
+        await _cache_set(cache_control, cache_key, results)
 
         return results
     except HTTPException:
@@ -1609,15 +1555,13 @@ async def get_segmented_experiment_results(
                 detail="Cannot get results for experiments in DRAFT status",
             )
 
-        # Try to get from cache if enabled
-        if cache_control.enabled and cache_control.redis:
-            metric_part = f":{metric_id}" if metric_id else ""
-            cache_key = f"experiment_segmented_results:{experiment_id}:{segment_by}{metric_part}"
-            cached_data = await cache_control.redis.get(cache_key)
-            if cached_data:
-                import json
-
-                return json.loads(cached_data)
+        metric_part = f":{metric_id}" if metric_id else ""
+        cache_key = (
+            f"experiment_segmented_results:{experiment_id}:{segment_by}{metric_part}"
+        )
+        cached_data = await _cache_get(cache_control, cache_key)
+        if cached_data:
+            return json.loads(cached_data)
 
         # Create analysis service
         analysis_service = AnalysisService(db)
@@ -1637,17 +1581,7 @@ async def get_segmented_experiment_results(
         except ValueError as e:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 
-        # Cache results if enabled
-        if cache_control.enabled and cache_control.redis:
-            import json
-
-            metric_part = f":{metric_id}" if metric_id else ""
-            cache_key = f"experiment_segmented_results:{experiment_id}:{segment_by}{metric_part}"
-            cache_control.redis.setex(
-                cache_key,
-                3600,  # Cache for 1 hour
-                json.dumps(results),
-            )
+        await _cache_set(cache_control, cache_key, results)
 
         return results
     except HTTPException:
@@ -1711,11 +1645,7 @@ async def update_experiment_metadata(
         db.refresh(experiment)
         updated_experiment = experiment_service.to_response_dict(experiment)
 
-        # Invalidate cache if enabled
-        if cache_control.enabled and cache_control.redis:
-            # Delete specific experiment cache
-            experiment_cache_key = f"experiment:{experiment_id}"
-            cache_control.redis.delete(experiment_cache_key)
+        await _invalidate_experiment_cache(cache_control, experiment_id)
 
         return updated_experiment
     except HTTPException:
