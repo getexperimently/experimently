@@ -66,6 +66,22 @@ def current_request_id() -> Optional[str]:
     return None
 
 
+def failure_detail(sentence: str) -> str:
+    """A fixed failure message for a response body, with this request's id.
+
+    ``failure_detail("Could not store the event")`` gives
+    ``"Could not store the event (request ID: <id>)."`` when
+    :func:`current_request_id` returns an id, and
+    ``"Could not store the event."`` when it does not.  The id is the one on
+    the response's ``X-Request-ID`` header and in the server log, so a
+    failure the caller reports can be found there.
+    """
+    request_id = current_request_id()
+    if request_id is None:
+        return f"{sentence}."
+    return f"{sentence} (request ID: {request_id})."
+
+
 # ---------------------------------------------------------------------------
 # structlog context-variable processor
 # ---------------------------------------------------------------------------

@@ -638,7 +638,32 @@ All endpoints may return the following error responses:
 
 ### 500 Internal Server Error
 
-An unhandled error answers with a plain-text body, not JSON:
+The SDK routes that store data answer a failure to store it with JSON: a fixed sentence
+followed by the request ID, never the error itself.
+
+```json
+{
+  "detail": "Could not store the event (request ID: 3f2c9a7e-5b1d-4c8e-9f0a-6d2b1e4c7a90)."
+}
+```
+
+| Route | `detail` |
+|---|---|
+| `POST /api/v1/tracking/assign` | `Could not assign the user to the experiment (request ID: <id>).` |
+| `POST /api/v1/tracking/track`, `POST /api/v1/tracking/events` | `Could not store the event (request ID: <id>).` |
+| `POST /api/v1/tracking/errors` | `Could not store the error report (request ID: <id>).` |
+| `POST /api/v1/tracking/errors/batch` (the whole batch) | `Could not store the error reports (request ID: <id>).` |
+
+The ID is the response's `X-Request-ID`. When that value is not 1 to 128 characters of
+`A-Z a-z 0-9 . _ : -`, it is left out and the sentence simply ends: `Could not store the event.`
+
+The two batch routes answer 200 and list each item they could not store in `errors`. An item
+refused for its own content (an unknown key, an invalid event) keeps the message saying why; an
+item the server failed to store has `error` set to `Could not store this event (request ID: <id>).`
+(`/tracking/batch`) or `Could not store this error report (request ID: <id>).`
+(`/tracking/errors/batch`).
+
+Any other unhandled error answers with a plain-text body, not JSON:
 
 ```text
 Internal Server Error

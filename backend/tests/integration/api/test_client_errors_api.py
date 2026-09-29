@@ -256,6 +256,7 @@ class TestReportErrorsBatch:
         assert all(row.feature_flag_id == flag.id for row in rows)
 
     def test_batch_reports_unknown_keys_per_item(self, admin_client, db_session, flag):
+        missing_key = unique_flag_key("missing")
         resp = admin_client.post(
             "/api/v1/tracking/errors/batch",
             json={
@@ -266,7 +267,7 @@ class TestReportErrorsBatch:
                         "message": "ok",
                     },
                     {
-                        "feature_flag_key": unique_flag_key("missing"),
+                        "feature_flag_key": missing_key,
                         "error_type": "crash",
                         "message": "bad",
                     },
@@ -284,7 +285,9 @@ class TestReportErrorsBatch:
         assert data["failure_count"] == 1
         assert len(data["errors"]) == 1
         assert data["errors"][0]["index"] == 1
-        assert "not found" in data["errors"][0]["error"]
+        assert data["errors"][0]["error"] == (
+            f"Feature flag with key '{missing_key}' not found"
+        )
 
         db_session.expire_all()
         assert len(_rows(db_session, flag)) == 2

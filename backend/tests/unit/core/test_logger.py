@@ -149,3 +149,44 @@ def test_current_request_id_is_none_without_a_bound_id():
         assert current_request_id() is None
     finally:
         _mod._log_context.reset(token)
+
+
+# ---------------------------------------------------------------------------
+# failure_detail: the fixed sentence a failed request answers
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.regression
+@pytest.mark.parametrize(
+    "bound,expected",
+    [
+        ("prb-398-1", "Could not store the event (request ID: prb-398-1)."),
+        ("a" * 129, "Could not store the event."),
+        ("<b>x</b>", "Could not store the event."),
+        (None, "Could not store the event."),
+    ],
+)
+def test_failure_detail_adds_only_a_well_formed_request_id(bound, expected):
+    import backend.app.core.logger as _mod
+    from backend.app.core.logger import failure_detail
+
+    token = _mod._log_context.set({"request_id": bound})
+    try:
+        assert failure_detail("Could not store the event") == expected
+    finally:
+        _mod._log_context.reset(token)
+
+
+@pytest.mark.regression
+def test_failure_detail_ends_the_sentence_without_a_bound_id():
+    import backend.app.core.logger as _mod
+    from backend.app.core.logger import failure_detail
+
+    token = _mod._log_context.set({})
+    try:
+        assert (
+            failure_detail("Could not store this event")
+            == "Could not store this event."
+        )
+    finally:
+        _mod._log_context.reset(token)
