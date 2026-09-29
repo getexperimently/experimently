@@ -371,6 +371,7 @@ class TestBatch:
         self, admin_client, active_experiment, db_session
     ):
         user_id = _user()
+        missing_key = "missing-" + uuid.uuid4().hex
         resp = admin_client.post(
             "/api/v1/tracking/batch",
             json={
@@ -383,7 +384,7 @@ class TestBatch:
                     {
                         "event_type": "click",
                         "user_id": user_id,
-                        "experiment_key": "missing-" + uuid.uuid4().hex,
+                        "experiment_key": missing_key,
                     },
                     {
                         "event_type": "add_to_cart",
@@ -399,7 +400,9 @@ class TestBatch:
         assert data["success_count"] == 2
         assert data["failure_count"] == 1
         assert data["errors"][0]["index"] == 1
-        assert "experiment key" in data["errors"][0]["error"]
+        assert data["errors"][0]["error"] == (
+            f"Neither experiment key '{missing_key}' nor feature flag key 'None' found"
+        )
 
         stored = (
             db_session.query(Event)

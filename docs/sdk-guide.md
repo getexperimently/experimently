@@ -21,6 +21,11 @@ No other SDK buckets locally, and experiments are always assigned by the server.
 | Track up to 100 events | `POST /api/v1/tracking/batch` | `{events: [...]}` | `{success_count, failure_count, errors}` |
 | A user's assignments | `GET /api/v1/tracking/assignments/{user_id}` | — | list |
 
+Each entry of the batch response's `errors` is `{index, event_type, user_id, error}`. `error` says
+why the item was refused (for example, neither key was found), or reads
+`Could not store this event (request ID: <id>).` when the server failed to store it; quote that ID
+when you report the failure.
+
 Conversions are matched to experiment metrics by `event_name` (exposures excluded), whatever `event_type`
 an SDK sends. Full request/response examples: [API Specs](api/specs.md#tracking-api-sdk). Per-IP rate
 limit for these paths: `SDK_RATE_LIMIT_PER_MINUTE` (default 6000/min).
@@ -449,6 +454,10 @@ const variant = await client.getVariant('my-experiment', { userId: 'user-123' })
 ```
 
 For event tracking, failures are logged but do not throw exceptions by default. Pass `throwOnError: true` to opt into strict mode.
+
+When the server fails to store an assignment, an event or an error report, it answers 500 with a
+short sentence ending in a request ID, such as `Could not store the event (request ID: <id>).` The
+same ID is on the response's `X-Request-ID` header and on the API's log line for the failure.
 
 ---
 

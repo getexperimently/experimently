@@ -19,6 +19,7 @@ tracking endpoints (see ``backend/app/api/api.py``).
 """
 
 import json
+import logging
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 from uuid import UUID
@@ -28,6 +29,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from sqlalchemy.orm import Session
 
 from backend.app.api import deps
+from backend.app.core.logger import failure_detail
 from backend.app.models.experiment import Experiment
 from backend.app.models.feature_flag import FeatureFlag
 from backend.app.models.metrics.metric import ErrorLog
@@ -35,6 +37,8 @@ from backend.app.schemas.metrics import ErrorLogCreate
 from backend.app.services.metrics_service import MetricsService
 
 router = APIRouter()
+
+logger = logging.getLogger(__name__)
 
 #: Maximum number of reports accepted by the batch endpoint.
 MAX_BATCH_SIZE = 100
@@ -295,9 +299,10 @@ async def report_client_error(
         )
     except Exception as exc:
         db.rollback()
+        logger.exception("Error report failed (%s)", type(exc).__name__)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error storing client error: {exc}",
+            detail=failure_detail("Could not store the error report"),
         )
 
     return _response(row, experiment_id)
@@ -355,7 +360,7 @@ async def report_client_errors_batch(
                 )
             )
             success_count += 1
-        except Exception as exc:  # LookupError or validation problems
+        except (LookupError, ValueError) as exc:  # unknown key or invalid report
             failure_count += 1
             failures.append(
                 {
@@ -365,6 +370,17 @@ async def report_client_errors_batch(
                     "error": str(exc),
                 }
             )
+        except Exception as exc:
+            logger.exception("Error report batch item failed (%s)", type(exc).__name__)
+            failure_count += 1
+            failures.append(
+                {
+                    "index": index,
+                    "error_type": report.error_type,
+                    "user_id": report.user_id,
+                    "error": failure_detail("Could not store this error report"),
+                }
+            )
 
     if rows:
         try:
@@ -372,9 +388,10 @@ async def report_client_errors_batch(
             db.commit()
         except Exception as exc:
             db.rollback()
+            logger.exception("Error report batch failed (%s)", type(exc).__name__)
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Error storing client errors: {exc}",
+                detail=failure_detail("Could not store the error reports"),
             )
 
     return ClientErrorBatchResponse(

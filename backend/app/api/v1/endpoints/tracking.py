@@ -7,6 +7,7 @@ in experiments and record user interactions.
 """
 
 import hashlib
+import logging
 import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
@@ -15,6 +16,7 @@ from fastapi import APIRouter, Body, Depends, HTTPException, Path, Query, status
 from sqlalchemy.orm import Session
 
 from backend.app.api import deps
+from backend.app.core.logger import failure_detail
 from backend.app.core.metrics import record_event_tracked, record_experiment_assignment
 from backend.app.models.assignment import Assignment
 from backend.app.models.bandit_state import BanditState
@@ -35,6 +37,8 @@ from backend.app.services.event_service import EventService
 
 # Create router
 router = APIRouter()
+
+logger = logging.getLogger(__name__)
 
 
 def _event_response(event: Event) -> EventResponse:
@@ -262,9 +266,10 @@ async def assign_user_to_experiment(
             detail=str(e),
         )
     except Exception as e:
+        logger.exception("Tracking assign failed (%s)", type(e).__name__)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error assigning user to experiment: {e!s}",
+            detail=failure_detail("Could not assign the user to the experiment"),
         )
 
 
@@ -374,9 +379,10 @@ async def track_event(
             detail=f"Invalid event: {e!s}",
         )
     except Exception as e:
+        logger.exception("Tracking event failed (%s)", type(e).__name__)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error tracking event: {e!s}",
+            detail=failure_detail("Could not store the event"),
         )
 
 
@@ -413,9 +419,10 @@ async def track_event_by_ids(
             detail=f"Invalid event: {e!s}",
         )
     except Exception as e:
+        logger.exception("Tracking event failed (%s)", type(e).__name__)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error tracking event: {e!s}",
+            detail=failure_detail("Could not store the event"),
         )
 
 
@@ -562,7 +569,7 @@ async def track_events_batch(
             record_event_tracked(str(event_data.event_type))
             success_count += 1
 
-        except Exception as e:
+        except ValueError as e:
             failure_count += 1
             errors.append(
                 {
@@ -570,6 +577,17 @@ async def track_events_batch(
                     "event_type": event_request.event_type,
                     "user_id": event_request.user_id,
                     "error": str(e),
+                }
+            )
+        except Exception as e:
+            logger.exception("Tracking batch item failed (%s)", type(e).__name__)
+            failure_count += 1
+            errors.append(
+                {
+                    "index": index,
+                    "event_type": event_request.event_type,
+                    "user_id": event_request.user_id,
+                    "error": failure_detail("Could not store this event"),
                 }
             )
 
