@@ -29,6 +29,7 @@ const PLATFORM_ONLY = [
   'feature-flags',
   'results',
   'workspaces',
+  'warehouse',
   'login',
 ];
 

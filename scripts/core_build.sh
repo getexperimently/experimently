@@ -671,7 +671,7 @@ step_frontend() {
         (cd "$COPY/frontend" && rm -rf .next out && EXPERIMENTLY_PROFILE=core npm run build)
         [ -d "$static" ] || die "next build produced no out/_next/static"
         local leaked
-        leaked="$(grep -rlE '/api/v1/workspaces|/api/v1/rbac/|/api/v1/hipaa' "$static" || true)"
+        leaked="$(grep -rlE '/api/v1/workspaces|/api/v1/rbac/|/api/v1/hipaa|/api/v1/warehouse/' "$static" || true)"
         if [ -n "$leaked" ]; then
             printf '%s\n' "$leaked" | sed 's/^/    /' >&2
             die "the core bundle references module routes (files above)"

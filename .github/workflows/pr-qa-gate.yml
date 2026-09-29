@@ -343,7 +343,7 @@ jobs:
           cd frontend
           rm -rf .next out
           EXPERIMENTLY_PROFILE=core npm run build
-          if grep -rlE '/api/v1/workspaces|/api/v1/rbac/|/api/v1/hipaa' out/_next/static; then
+          if grep -rlE '/api/v1/workspaces|/api/v1/rbac/|/api/v1/hipaa|/api/v1/warehouse/' out/_next/static; then
             echo "::error::core bundle references module routes"; exit 1
           fi
           # The other half: without it the grep above also passes when the

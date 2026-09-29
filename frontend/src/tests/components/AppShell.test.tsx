@@ -391,10 +391,39 @@ describe('AppShell', () => {
 
     it('installedModuleNav lists exactly the routes whose module is installed', () => {
       expect(installedModuleNav(CORE_PROFILE)).toEqual([]);
-      expect(installedModuleNav(full())).toHaveLength(MODULE_NAV_ITEMS.length);
+      expect(installedModuleNav(full())).toHaveLength(1);
+      const both = full({ modules: [MODULES.WORKSPACES, MODULES.WAREHOUSE] });
+      expect(installedModuleNav(both, makeUser())).toHaveLength(MODULE_NAV_ITEMS.length);
       expect(installedModuleNav(full({ modules: ['hipaa'] }))).toEqual([]);
       expect(installedModuleNav(full({ profile: 'core' }))).toHaveLength(1);
-      expect(MODULE_NAV_ITEMS.map((i) => i.href)).toEqual(['/workspaces']);
+      expect(MODULE_NAV_ITEMS.map((i) => i.href)).toEqual(['/workspaces', '/warehouse']);
+    });
+
+    it('offers the Warehouse link to the roles the warehouse API lets read connections', () => {
+      // The API refuses VIEWER every connection and source route, and counts
+      // a superuser as ADMIN.
+      const info = full({ modules: [MODULES.WAREHOUSE] });
+      const hrefs = (user: UserMe | null) => installedModuleNav(info, user).map((i) => i.href);
+      for (const role of ['ADMIN', 'DEVELOPER', 'ANALYST'] as const) {
+        expect(hrefs(makeUser({ role, is_superuser: false }))).toEqual(['/warehouse']);
+      }
+      expect(hrefs(makeUser({ role: 'VIEWER', is_superuser: false }))).toEqual([]);
+      expect(hrefs(makeUser({ role: 'VIEWER', is_superuser: true }))).toEqual(['/warehouse']);
+      expect(hrefs(null)).toEqual([]);
+      expect(installedModuleNav(info)).toEqual([]);
+    });
+
+    it('renders the Warehouse link for an ANALYST and not for a VIEWER', async () => {
+      signInAs(makeUser({ role: 'ANALYST', is_superuser: false }));
+      const view = renderShell(full({ modules: [MODULES.WAREHOUSE] }));
+      await waitFor(() => expect(screen.getByTestId('user-menu')).toBeInTheDocument());
+      expect(screen.getAllByTestId('nav-warehouse')[0]).toHaveAttribute('href', '/warehouse');
+      view.unmount();
+
+      signInAs(makeUser({ role: 'VIEWER', is_superuser: false }));
+      renderShell(full({ modules: [MODULES.WAREHOUSE] }));
+      await waitFor(() => expect(screen.getByTestId('user-menu')).toBeInTheDocument());
+      expect(screen.queryByTestId('nav-warehouse')).not.toBeInTheDocument();
     });
   });
 

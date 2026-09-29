@@ -52,11 +52,32 @@ export const MODULE_NAV_ITEMS: (NavItem & { module: string })[] = [
     testId: 'nav-workspaces',
     module: MODULES.WORKSPACES,
   },
+  {
+    // The warehouse API refuses VIEWER every connection and source route, so
+    // the link is not offered to one. A superuser counts as ADMIN there.
+    label: 'Warehouse',
+    href: '/warehouse',
+    testId: 'nav-warehouse',
+    module: MODULES.WAREHOUSE,
+    roles: ['ADMIN', 'DEVELOPER', 'ANALYST'],
+  },
 ];
 
-/** The module routes this instance actually serves. */
-export function installedModuleNav(info: ModulesInfo): NavItem[] {
-  return MODULE_NAV_ITEMS.filter((item) => moduleInstalled(info, item.module));
+/**
+ * The module routes this instance actually serves -- and, given a user, the
+ * ones that user's role can use (a superuser passes any role check, as the
+ * module APIs treat one as ADMIN). Without a user, role-gated items are left
+ * out.
+ */
+export function installedModuleNav(
+  info: ModulesInfo,
+  user?: Pick<UserMe, 'role' | 'is_superuser'> | null,
+): NavItem[] {
+  return MODULE_NAV_ITEMS.filter((item) => {
+    if (!moduleInstalled(info, item.module)) return false;
+    if (!item.roles) return true;
+    return !!user && (user.is_superuser === true || item.roles.includes(user.role));
+  });
 }
 
 /**
@@ -206,7 +227,7 @@ export function AppShell({ children }: AppShellProps) {
     if (item.roles) return user !== null && item.roles.includes(user.role);
     return true;
   });
-  const moduleNav = installedModuleNav({ profile, modules, version });
+  const moduleNav = installedModuleNav({ profile, modules, version }, user);
   // Not while the probe is outstanding: the provider's initial state is core,
   // so a full-profile instance would paint the "Modules" guide link on every
   // full page load and swap it for the routes when /api/v1/modules resolved.

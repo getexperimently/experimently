@@ -186,6 +186,14 @@ modules/backend/app/api/v1/endpoints/warehouse_analysis.py
 modules/backend/tests/unit/warehouse
 modules/backend/tests/integration/warehouse
 modules/backend/tests/smoke/test_warehouse_routes_contract.py
+# The dashboard's connections and sources screens under /warehouse (beta).
+# Their routes in frontend/src/pages/warehouse are one-line re-exports and
+# their core stubs live in frontend/src/modules-stub (group 11).
+modules/frontend/src/services/warehouse.ts
+modules/frontend/src/services/warehouseRoles.ts
+modules/frontend/src/components/warehouse
+modules/frontend/src/pages/warehouse
+modules/frontend/src/tests/warehouse
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 7. Third-party integrations — Jira / Salesforce / GitHub  (EP-034)

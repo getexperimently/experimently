@@ -50,5 +50,6 @@ export const PLATFORM_ONLY_PREFIXES: readonly string[] = [
   'feature-flags',
   'results',
   'workspaces',
+  'warehouse',
   'login',
 ];
