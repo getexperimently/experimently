@@ -40,7 +40,7 @@ pytestmark = [pytest.mark.smoke]
 READ = "READ"
 CHANGE_UPDATE = "CHANGE-UPDATE"
 CLONE = "CLONE"
-OWNER_ONLY = "OWNER-ONLY (OPEN 1)"
+CHANGE_DELETE = "CHANGE-DELETE"
 ROLE_ONLY = "ROLE-ONLY"
 SUPERUSER = "SUPERUSER"
 AUTHENTICATED = "AUTHENTICATED"
@@ -53,8 +53,8 @@ CLASS_REASONS = {
     CHANGE_UPDATE: "a superuser, or a role holding READ and UPDATE on experiments; "
     "any experiment, whoever created it",
     CLONE: "READ on the source experiment, and CREATE on experiments",
-    OWNER_ONLY: "UPDATE (schedule) or DELETE on experiments, and the experiment's "
-    "owner unless a superuser",
+    CHANGE_DELETE: "a superuser, or a role holding READ and DELETE on experiments; "
+    "DRAFT only, whoever created it",
     ROLE_ONLY: "a role check only (LIST, CREATE, UPDATE, READ or a named role); "
     "who created the experiment is not considered",
     SUPERUSER: "superusers only",
@@ -84,8 +84,8 @@ CORE_ROUTES = {
     ("POST", f"{E}/{{experiment_id}}/archive"): CHANGE_UPDATE,
     ("POST", f"{E}/{{experiment_id}}/metadata"): CHANGE_UPDATE,
     ("POST", f"{E}/{{experiment_id}}/clone"): CLONE,
-    ("PUT", f"{E}/{{experiment_id}}/schedule"): OWNER_ONLY,
-    ("DELETE", f"{E}/{{experiment_id}}"): OWNER_ONLY,
+    ("PUT", f"{E}/{{experiment_id}}/schedule"): CHANGE_UPDATE,
+    ("DELETE", f"{E}/{{experiment_id}}"): CHANGE_DELETE,
     ("GET", f"{E}/{{experiment_id}}/split-url/preview"): ROLE_ONLY,
     # results.py and post_stratification.py
     ("GET", R): NO_ROLE_CHECK,
