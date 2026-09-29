@@ -10,6 +10,59 @@ longer applies and release-please can generate this file directly. Until it
 does, entries below 0.2.2 are hand-written and the links in them are the
 reason why.
 
+## [0.12.0](https://github.com/getexperimently/experimently/compare/v0.11.0...v0.12.0) (2026-09-29)
+
+
+### Features
+
+* **dashboard:** run a warehouse analysis and read its results (beta) ([#421](https://github.com/getexperimently/experimently/issues/421)) ([2b5931a](https://github.com/getexperimently/experimently/commit/2b5931a1bef76ce6dc088a7ee9f9813f5ccfe599))
+* **dashboard:** warehouse connections and metric sources (beta) ([#420](https://github.com/getexperimently/experimently/issues/420)) ([ca44cef](https://github.com/getexperimently/experimently/commit/ca44cef8c626e9552ef883765cc7b0bfc311df6e))
+* **deploy:** refuse a deploy while an API 5xx alarm is firing ([#366](https://github.com/getexperimently/experimently/issues/366)) ([1366f1d](https://github.com/getexperimently/experimently/commit/1366f1dab9230012ead9d692315c42fbb86ff592))
+* **sdk:** the JavaScript SDK evaluates flags locally from the ruleset (beta) ([#368](https://github.com/getexperimently/experimently/issues/368)) ([4263f60](https://github.com/getexperimently/experimently/commit/4263f60a90e54a3b193a1e64d73ec0bcf96eb8f6))
+* **sdk:** the Python SDK evaluates flags locally from the ruleset (beta) ([#374](https://github.com/getexperimently/experimently/issues/374)) ([817963a](https://github.com/getexperimently/experimently/commit/817963a626f76fca5cf783ef77240563c52a7173))
+* **warehouse:** BigQuery connector, disabled until verified ([#371](https://github.com/getexperimently/experimently/issues/371)) ([4137f8a](https://github.com/getexperimently/experimently/commit/4137f8a001126966ee0a193b3a3a2253a9e3af8d))
+* **warehouse:** Snowflake connector with key-pair sign-in, disabled until verified ([#380](https://github.com/getexperimently/experimently/issues/380)) ([d9f2f91](https://github.com/getexperimently/experimently/commit/d9f2f91da9398a6cb1926d90e9604f43038864f7))
+* **warehouse:** warehouse analyses for proportion metrics with SRM (beta) ([#412](https://github.com/getexperimently/experimently/issues/412)) ([01a96fc](https://github.com/getexperimently/experimently/commit/01a96fc297541ff022b514f87690864abbb902ac))
+
+
+### Bug Fixes
+
+* **api:** a failed lookup in a batch no longer fails the items after it ([#414](https://github.com/getexperimently/experimently/issues/414)) ([c3bbaca](https://github.com/getexperimently/experimently/commit/c3bbacab036e29c147e196a3719c0230ad1a505f))
+* **api:** analysts and viewers can read every experiment's results, and change none ([#460](https://github.com/getexperimently/experimently/issues/460)) ([86aa27a](https://github.com/getexperimently/experimently/commit/86aa27a57a6b723de4bad78a2c36db0c5e6f0ea0))
+* **api:** creating an experiment whose key is taken answers 409 with a plain message ([#395](https://github.com/getexperimently/experimently/issues/395)) ([90d48f4](https://github.com/getexperimently/experimently/commit/90d48f4177c7d2e42f0c42edd32dcdfbdbb8845d))
+* **api:** experiment owners and permitted roles can open an experiment again ([#451](https://github.com/getexperimently/experimently/issues/451)) ([7342f48](https://github.com/getexperimently/experimently/commit/7342f48aec23197a8495297c91f0943d6ccc8410))
+* **api:** experiment routes work with the cache enabled ([#437](https://github.com/getexperimently/experimently/issues/437)) ([ae5f091](https://github.com/getexperimently/experimently/commit/ae5f091e60e7d1fb3a83599aaf40f7d90005292d))
+* **api:** feature-flag routes work with the flag cache enabled ([#427](https://github.com/getexperimently/experimently/issues/427)) ([493e782](https://github.com/getexperimently/experimently/commit/493e7824448306f3c3a9a7b4453ddaf07d382ed2))
+* **api:** integer bounds in the API description fit a JSON number ([#462](https://github.com/getexperimently/experimently/issues/462)) ([d5f852b](https://github.com/getexperimently/experimently/commit/d5f852b241e73edfc6ef8bf1f5302c0ad2276796))
+* **api:** tracking and error-report failures answer a short message with the request ID ([#411](https://github.com/getexperimently/experimently/issues/411)) ([9e96ba5](https://github.com/getexperimently/experimently/commit/9e96ba58b89c860a57d5af06e0a2c452ef25d7c2))
+* **auth:** Cognito-only auth routes answer 404 when AUTH_PROVIDER is not cognito ([#397](https://github.com/getexperimently/experimently/issues/397)) ([e8a16f8](https://github.com/getexperimently/experimently/commit/e8a16f82c4c4177a598e6d2f81efcbdb50803c07))
+* **bandit:** a partial DynamoDB count no longer replaces the complete PostgreSQL count ([#430](https://github.com/getexperimently/experimently/issues/430)) ([fb3f629](https://github.com/getexperimently/experimently/commit/fb3f629c3e9f1ea8348da57350ee77bf45c62758))
+* **ci:** regression-guard no longer fails without a merge base or blocks on a cancelled run ([#418](https://github.com/getexperimently/experimently/issues/418)) ([d2c0afc](https://github.com/getexperimently/experimently/commit/d2c0afc9c3a73664450c029f67ebc2b3204d63d1))
+* **dashboard:** creating an experiment keeps your answers on a sign-in or key error ([#415](https://github.com/getexperimently/experimently/issues/415)) ([6fd886c](https://github.com/getexperimently/experimently/commit/6fd886c3e3e9a170fa21e1669720a2e827b2e93f))
+* **dashboard:** show the request ID once when the error message already includes it ([#403](https://github.com/getexperimently/experimently/issues/403)) ([da58d9a](https://github.com/getexperimently/experimently/commit/da58d9a906326f393db14f77d3b02b11f2aaf82a))
+* **dashboard:** the experiment page offers changes only to roles that can make them ([#461](https://github.com/getexperimently/experimently/issues/461)) ([3e6bf38](https://github.com/getexperimently/experimently/commit/3e6bf3800ad3753469c7d4b73bdd46d965d9dbf8))
+* **deploy:** rollback fails loudly when a stopped deployment does not finish ([bc7bb07](https://github.com/getexperimently/experimently/commit/bc7bb0764fe908d6bff5618dc1f76624b84a6089))
+* **logging:** evaluation and assignment no longer log the user id ([#365](https://github.com/getexperimently/experimently/issues/365)) ([a254b59](https://github.com/getexperimently/experimently/commit/a254b59e53f86aa607150541721edb3a90069112))
+* **rules:** contains_all and contains_any do not match a non-list attribute instead of raising ([#423](https://github.com/getexperimently/experimently/issues/423)) ([a66db26](https://github.com/getexperimently/experimently/commit/a66db263dc682de10cbe4a0a7f4aed207a6b06cf))
+* **sdk:** the OpenFeature provider takes @openfeature/server-sdk as a peer dependency ([#367](https://github.com/getexperimently/experimently/issues/367)) ([2b1d6b2](https://github.com/getexperimently/experimently/commit/2b1d6b2c97d30edf0736618331abb832bf8c6004))
+* **tests:** the rollout schedule API tests use the configured database ([#360](https://github.com/getexperimently/experimently/issues/360)) ([e45d7c1](https://github.com/getexperimently/experimently/commit/e45d7c156b98c4cefadfd2bb249b63b0cb496438))
+* **workspaces:** show the invitation link after creating it, and fill in the invitation page ([#381](https://github.com/getexperimently/experimently/issues/381)) ([33a1a71](https://github.com/getexperimently/experimently/commit/33a1a71723da86ab792fa1a42c2f261826723688))
+* **workspaces:** the invitation preview shows the invited address in full only to that account ([#372](https://github.com/getexperimently/experimently/issues/372)) ([59536d9](https://github.com/getexperimently/experimently/commit/59536d949eec42867b7d06aa95a368d320efc591))
+
+
+### Dependencies
+
+* **backend:** pytest 9 and pytest-asyncio 1.3 ([#359](https://github.com/getexperimently/experimently/issues/359)) ([f7f8de8](https://github.com/getexperimently/experimently/commit/f7f8de8cb5b866e7c096d0f34b5b9929a8c40f76))
+
+
+### Documentation
+
+* **deploy:** disaster-recovery.md describes what the CDK actually creates ([bc7bb07](https://github.com/getexperimently/experimently/commit/bc7bb0764fe908d6bff5618dc1f76624b84a6089))
+* **llm:** the quickstart's completion steps are secret skips, not bug [#196](https://github.com/getexperimently/experimently/issues/196) ([bc7bb07](https://github.com/getexperimently/experimently/commit/bc7bb0764fe908d6bff5618dc1f76624b84a6089))
+* pages describe the infrastructure the stacks actually create ([bc7bb07](https://github.com/getexperimently/experimently/commit/bc7bb0764fe908d6bff5618dc1f76624b84a6089))
+* the FAQ describes dashboard deploys, and shell examples paste cleanly into zsh ([#422](https://github.com/getexperimently/experimently/issues/422)) ([664eab1](https://github.com/getexperimently/experimently/commit/664eab1cbe9cdccb61517020effc80fe5da31905))
+* the secrets-management rotation steps render as a code block again ([#459](https://github.com/getexperimently/experimently/issues/459)) ([ddb2d31](https://github.com/getexperimently/experimently/commit/ddb2d311dff11981e5585e59dd407c6aa5e4f749))
+
 ## [0.11.0](https://github.com/getexperimently/experimently/compare/v0.10.0...v0.11.0) (2026-09-28)
 
 
