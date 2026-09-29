@@ -30157,7 +30157,7 @@
     },
     "/api/v1/workspaces/invites/{token}": {
       "get": {
-        "description": "Get invite info by token. Public endpoint — no auth required.",
+        "description": "Get invite info by token. No sign-in needed.\n\n`email` is returned in full only to the account it was sent to (compared\nwithout regard to case); anyone else, signed in or not, gets it masked,\ne.g. `a•••@example.com`.",
         "operationId": "get_invite_api_v1_workspaces_invites__token__get",
         "parameters": [
           {
@@ -30192,6 +30192,12 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          },
+          {}
+        ],
         "summary": "Get Invite",
         "tags": [
           "Workspaces"
