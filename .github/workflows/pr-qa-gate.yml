@@ -990,7 +990,16 @@ jobs:
           tree = sqlglot.parse_one("SELECT FORMAT(\x27%.17g\x27, 1.5) AS k", read="bigquery")
           assert isinstance(tree, exp.Select), type(tree)
           assert importlib.util.find_spec("duckdb") is None, "the full image ships duckdb"
-          print("full image: sqlglot", sqlglot.__version__, "imports and parses; no duckdb")
+          # The BigQuery and Snowflake connectors sign in with PyJWT at fixed
+          # endpoints; no Google or Snowflake client library belongs in the image.
+          import jwt
+          for name in ("google.auth", "google.oauth2", "google.cloud.bigquery", "snowflake.connector"):
+              try:
+                  found = importlib.util.find_spec(name)
+              except ModuleNotFoundError:
+                  found = None
+              assert found is None, "the full image ships " + name
+          print("full image: sqlglot", sqlglot.__version__, "imports and parses; PyJWT", jwt.__version__, "; no duckdb, no Google or Snowflake client library")
           '
           docker run --rm --entrypoint python experimently-api:core -c '
           import importlib.util

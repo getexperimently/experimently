@@ -339,6 +339,9 @@ modules/backend/tests/unit/core/test_credential_crypto.py
 # warehouses' published endpoints, and the executor warehouse calls run on.
 # Nothing in it is routed. httpx and boto3 are core pins; httpcore is httpx's
 # own transport, locked in backend/requirements/runtime.lock.
+# The connectors live here too (bigquery.py and snowflake.py, which sign in with
+# the core PyJWT pin), with connectors.py deciding which a deployment may use: none until each
+# has passed a check against a real account.
 modules/backend/app/warehouse
 modules/backend/tests/unit/warehouse
 

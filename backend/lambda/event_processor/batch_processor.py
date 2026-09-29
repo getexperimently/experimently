@@ -14,14 +14,20 @@ Follows TDD (Test-Driven Development) - GREEN phase implementation.
 """
 
 import logging
+import sys
 import time
+from pathlib import Path
 from typing import Any, Dict
+
+# Add shared module to path
+sys.path.insert(0, str(Path(__file__).parent.parent / "shared"))
 
 from event_aggregator import aggregate_events_batch
 from event_enricher import enrich_events_batch
 from event_parser import parse_kinesis_events
 from event_validator import validate_events_batch
 from s3_archiver import archive_to_s3_batched
+from utils import error_name
 
 logger = logging.getLogger(__name__)
 
@@ -61,7 +67,7 @@ def send_to_dlq(
         return True
 
     except Exception as e:
-        logger.error(f"Failed to send record to DLQ: {e}")
+        logger.error(f"Failed to send record to DLQ: {error_name(e)}")
         return False
 
 
@@ -141,7 +147,7 @@ def process_batch(
                         break
 
     except Exception as e:
-        logger.error(f"Parsing stage failed completely: {e}")
+        logger.error(f"Parsing stage failed completely: {error_name(e)}")
         # If parsing fails completely, mark all as failed
         for record in records:
             sequence_number = record.get("kinesis", {}).get("sequenceNumber", "unknown")
@@ -178,7 +184,7 @@ def process_batch(
         failure_count += len(validation_errors)
 
     except Exception as e:
-        logger.error(f"Validation stage failed: {e}")
+        logger.error(f"Validation stage failed: {error_name(e)}")
         validated_events = []
 
     # STAGE 3: Enrich events
@@ -190,7 +196,7 @@ def process_batch(
         metrics["enrichment_errors"] = len(enrichment_errors)
 
     except Exception as e:
-        logger.error(f"Enrichment stage failed: {e}")
+        logger.error(f"Enrichment stage failed: {error_name(e)}")
         enriched_events = []
 
     # STAGE 4: Aggregate metrics
@@ -201,7 +207,7 @@ def process_batch(
             )
             metrics["aggregation_errors"] = aggregation_result.get("failure_count", 0)
     except Exception as e:
-        logger.error(f"Aggregation stage failed: {e}")
+        logger.error(f"Aggregation stage failed: {error_name(e)}")
         metrics["aggregation_errors"] += 1
 
     # STAGE 5: Archive to S3
@@ -211,7 +217,7 @@ def process_batch(
             if not archive_result.get("success"):
                 metrics["archive_errors"] = archive_result.get("failures", 0)
     except Exception as e:
-        logger.error(f"Archive stage failed: {e}")
+        logger.error(f"Archive stage failed: {error_name(e)}")
         metrics["archive_errors"] += 1
 
     # Calculate final counts

@@ -130,7 +130,9 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         return {"batchItemFailures": result.get("batchItemFailures", [])}
 
     except Exception as e:
-        logger.error(f"Unexpected error in handler: {e}", exc_info=True)
+        # The type only, and no traceback: an exception's text can repeat an
+        # event's values, the user id among them.
+        logger.error(f"Unexpected error in handler: {type(e).__name__}")
 
         # Return all records as failures on catastrophic error
         records = event.get("Records", [])

@@ -89,3 +89,32 @@ That masking applies to what the **middleware** logs. A keyword you pass to
 verbatim. So the rule for your own call sites stands: log the identifier, not
 the object. A `User` or a tracking payload carries an email address or an
 attribute you did not mean to persist.
+
+## What flag evaluation and assignment log
+
+The `user_id` an SDK sends is your end user's identifier, and it is often an
+email address. Evaluation and assignment run on every SDK request, so they
+log none of it:
+
+- **No line carries the end user's id or attribute values, at any level.** This
+  covers `AssignmentService`, `FeatureFlagService` evaluation, the rules
+  engine and its evaluation cache, `EventService`'s writes (exposures and
+  tracked events), and the assignment, flag-evaluation and event-processor
+  Lambda functions, including their shared DynamoDB and Kinesis helpers.
+- **Routine per-request lines are `DEBUG`**: an assignment made, a sticky
+  assignment reused, a user left out by holdout, mutual exclusion or targeting,
+  a flag evaluated. They name the experiment or flag and the variant, not the
+  user. At the production level (`INFO`) a busy installation writes none of
+  them.
+- **An error on those paths logs the exception's type (for an AWS error, with
+  its error code), not its text.** An
+  exception's text can repeat a value, and a database error repeats the row's
+  parameters, the user id among them. A flag evaluation error's full text
+  still goes to the `error_logs` table, where the safety monitor reads it.
+- A reassignment, which an operator requests, logs one `INFO` line naming the
+  experiment and the variant, not the user.
+
+To follow one user through the system, use the data that is kept for it: the
+assignments and events tables, and `error_logs`. The dashboard user's own id
+(`user_id` bound by the request middleware and in audit logs) is a separate
+field and is unchanged.

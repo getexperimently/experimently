@@ -207,7 +207,7 @@ Resolved with `license-checker-rseidelsohn --production`.
 
 These are the dashboard's **build-time** dependencies. The dashboard image runs nginx over the static Next.js export: `frontend/Dockerfile`'s runtime stage copies `frontend/out` and the nginx configuration and nothing else, so none of the packages below is redistributed in it. They are listed because anyone building the dashboard from source resolves them.
 
-#### MIT (104)
+#### MIT (103)
 
 | Package | Version |
 |---|---|
@@ -217,9 +217,8 @@ These are the dashboard's **build-time** dependencies. The dashboard image runs 
 | `@jridgewell/resolve-uri` | 3.1.2 |
 | `@jridgewell/sourcemap-codec` | 1.5.5 |
 | `@jridgewell/trace-mapping` | 0.3.31 |
-| `@next/env` | 16.3.5 |
-| `@next/swc-linux-x64-gnu` | 16.3.5 |
-| `@next/swc-linux-x64-musl` | 16.3.5 |
+| `@next/env` | 16.3.6 |
+| `@next/swc-linux-x64-gnu` | 16.3.6 |
 | `@nodelib/fs.scandir` | 2.1.5 |
 | `@nodelib/fs.stat` | 2.0.5 |
 | `@nodelib/fs.walk` | 1.2.8 |
@@ -271,7 +270,7 @@ These are the dashboard's **build-time** dependencies. The dashboard image runs 
 | `micromatch` | 4.0.8 |
 | `mz` | 2.7.0 |
 | `nanoid` | 3.3.18 |
-| `next` | 16.3.5 |
+| `next` | 16.3.6 |
 | `normalize-path` | 3.0.0 |
 | `object-assign` | 4.1.1 |
 | `object-hash` | 3.0.0 |

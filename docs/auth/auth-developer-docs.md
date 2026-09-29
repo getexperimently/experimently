@@ -2,6 +2,14 @@
 
 This document provides technical documentation for developers integrating with and extending the AWS Cognito authentication system in Experimently.
 
+!!! note "Cognito only"
+    The sign-up, confirmation, password-reset and token-refresh endpoints
+    (`POST /api/v1/auth/signup`, `/confirm`, `/forgot-password`, `/reset-password`
+    and `/refresh`) are available only when `AUTH_PROVIDER=cognito`. With any other
+    provider, including the default `local`, they answer 404. With `local`, sign in
+    with `POST /api/v1/auth/login`; an administrator creates accounts and resets
+    passwords.
+
 ## Architecture Overview
 
 The authentication system is built on AWS Cognito and provides these key capabilities:
