@@ -213,7 +213,7 @@ source venv/bin/activate && pytest -m "unit" -v
 - Experiments need a public `key` (auto-slugged on create) for the tracking API to find them.
 
 #### Multi-Armed Bandits
-- `BanditSchedulerRunner` starts in the app lifespan (`BANDIT_UPDATE_INTERVAL_MINUTES`, default 5; skipped when `APP_ENV=test`). Stats source order: DynamoDB `get_experiment_counters` → PostgreSQL (assignments + primary-metric conversions) → `BanditState` → zero priors.
+- `BanditSchedulerRunner` starts in the app lifespan (`BANDIT_UPDATE_INTERVAL_MINUTES`, default 5; skipped when `APP_ENV=test`). Stats source order: DynamoDB `get_experiment_counters` → PostgreSQL (assignments + primary-metric conversions) → `BanditState` → zero priors. DynamoDB is used only when, for every variant, its pulls and successes are both at least PostgreSQL's (#430); otherwise PostgreSQL wins, so a partial DynamoDB count never replaces the complete one.
 - `/tracking/assign` routes new users by `BanditState.variant_weights` for `optimization_type != "fixed"`; existing assignments are always kept.
 
 #### Rate limits and CORS
@@ -375,16 +375,6 @@ The `core/permissions.py` module implements a comprehensive RBAC system with fou
 - **DEVELOPER**: Can create and manage experiments and feature flags
 - **ANALYST**: Can view all data but cannot create or modify resources
 - **VIEWER**: Read-only access to approved resources
-
-#### Critical Permission Implementation Notes
-**Experiment Delete Endpoint Special Case**:
-- **Do NOT use** `can_delete_experiment` dependency function in the `delete_experiment` endpoint
-- **Design conflict**: The dependency chain requires ACTIVE experiments but delete endpoint requires DRAFT status
-- **Solution**: Use inline permission checks directly within the endpoint:
-  - Accept required `experiment_key` query parameter
-  - Retrieve experiment directly from database
-  - Perform permission checks in the endpoint
-  - Check experiment status (must be DRAFT)
 
 #### Feature Flag Permissions
 - **Access to a flag is by role, not ownership** (founder decision D11): ADMIN and
