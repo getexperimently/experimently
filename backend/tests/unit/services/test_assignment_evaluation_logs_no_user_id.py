@@ -265,3 +265,59 @@ def test_flag_metrics_failure_logs_the_type_not_the_text(logs, monkeypatch):
     _assert_clean(logs, routine=False)
     errors = logs.at("error")
     assert len(errors) == 1 and "RuntimeError" in errors[0][1], logs.records
+
+
+# -- exposure tracking and the evaluation cache --------------------------------
+
+
+def _integrity_error():
+    from sqlalchemy.exc import IntegrityError
+
+    return IntegrityError(
+        "INSERT INTO events (user_id) VALUES (%(user_id)s)",
+        {"user_id": USER},
+        Exception("duplicate key value violates unique constraint"),
+    )
+
+
+def test_exposure_write_failure_logs_the_type_not_the_parameters(monkeypatch):
+    """Assignment reaches this through track_exposure."""
+    from backend.app.services import event_service as evs
+
+    recorder = Recorder()
+    monkeypatch.setattr(evs, "logger", recorder.bind())
+    db = MagicMock()
+    db.commit.side_effect = _integrity_error()
+    assert USER in str(db.commit.side_effect)  # the probe: the text does carry it
+    service = evs.EventService(db)
+
+    with pytest.raises(Exception):
+        service.track_exposure(
+            user_id=USER, experiment_id=str(uuid4()), variant_id=str(uuid4())
+        )
+    with pytest.raises(Exception):
+        service.track_events_batch(
+            [
+                {
+                    "user_id": USER,
+                    "experiment_id": str(uuid4()),
+                    "event_type": "purchase",
+                    "event_name": "purchase",
+                }
+            ]
+        )
+
+    assert recorder.records, "nothing was captured"
+    assert recorder.with_user() == [], recorder.with_user()
+    assert [r[0] for r in recorder.records] == ["error", "error"], recorder.records
+    assert all("IntegrityError" in r[1] for r in recorder.records), recorder.records
+
+
+def test_evaluation_cache_invalidation_does_not_log_the_user(monkeypatch):
+    from backend.app.core import evaluation_cache as ec
+
+    recorder = Recorder()
+    monkeypatch.setattr(ec, "logger", recorder.bind())
+    ec.EvaluationCache().invalidate_user(USER)
+    assert recorder.records, "nothing was captured"
+    assert recorder.with_user() == [], recorder.with_user()

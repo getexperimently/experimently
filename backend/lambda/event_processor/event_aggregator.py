@@ -152,13 +152,15 @@ def aggregate_event(
             else:
                 # Re-raise for other errors or max retries exceeded
                 logger.error(
-                    f"Failed to aggregate event {enriched_event.get('event_id')}: {e}"
+                    f"Failed to aggregate event {enriched_event.get('event_id')}: "
+                    f"ClientError({error_code})"
                 )
                 raise
 
         except Exception as e:
             logger.error(
-                f"Unexpected error aggregating event {enriched_event.get('event_id')}: {e}"
+                f"Unexpected error aggregating event {enriched_event.get('event_id')}: "
+                f"{type(e).__name__}"
             )
             raise
 
@@ -196,7 +198,9 @@ def aggregate_events_batch(
             results.append(result)
 
         except Exception as e:
-            logger.error(f"Failed to aggregate event {event.get('event_id')}: {e}")
+            logger.error(
+                f"Failed to aggregate event {event.get('event_id')}: {type(e).__name__}"
+            )
             failure_count += 1
             results.append({"error": str(e)})
 

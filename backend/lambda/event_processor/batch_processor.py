@@ -178,7 +178,7 @@ def process_batch(
         failure_count += len(validation_errors)
 
     except Exception as e:
-        logger.error(f"Validation stage failed: {e}")
+        logger.error(f"Validation stage failed: {type(e).__name__}")
         validated_events = []
 
     # STAGE 3: Enrich events
@@ -190,7 +190,7 @@ def process_batch(
         metrics["enrichment_errors"] = len(enrichment_errors)
 
     except Exception as e:
-        logger.error(f"Enrichment stage failed: {e}")
+        logger.error(f"Enrichment stage failed: {type(e).__name__}")
         enriched_events = []
 
     # STAGE 4: Aggregate metrics
@@ -201,7 +201,7 @@ def process_batch(
             )
             metrics["aggregation_errors"] = aggregation_result.get("failure_count", 0)
     except Exception as e:
-        logger.error(f"Aggregation stage failed: {e}")
+        logger.error(f"Aggregation stage failed: {type(e).__name__}")
         metrics["aggregation_errors"] += 1
 
     # STAGE 5: Archive to S3

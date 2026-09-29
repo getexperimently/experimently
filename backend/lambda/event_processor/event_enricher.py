@@ -42,9 +42,7 @@ def fetch_assignment_from_dynamodb(
     """
     # Placeholder - will be implemented when DynamoDB integration is added
     # In real implementation, this would query DynamoDB assignments table
-    logger.debug(
-        f"Fetching assignment for user_id={user_id}, experiment_id={experiment_id}"
-    )
+    logger.debug(f"Fetching assignment for experiment_id={experiment_id}")
     return None
 
 
@@ -138,7 +136,9 @@ def enrich_event(validated_event: EventData) -> Dict[str, Any]:
                     )
                     enriched["time_since_assignment_seconds"] = time_since
                 except Exception as e:
-                    logger.warning(f"Failed to calculate time_since_assignment: {e}")
+                    logger.warning(
+                        f"Failed to calculate time_since_assignment: {type(e).__name__}"
+                    )
 
         # Fetch experiment metadata
         experiment_metadata = fetch_experiment_metadata(experiment_id)
@@ -151,7 +151,8 @@ def enrich_event(validated_event: EventData) -> Dict[str, Any]:
     except Exception as e:
         # Log error but don't fail - preserve original event data
         logger.error(
-            f"Error enriching event {enriched.get('event_id', 'unknown')}: {e}"
+            f"Error enriching event {enriched.get('event_id', 'unknown')}: "
+            f"{type(e).__name__}"
         )
         enriched["enrichment_error"] = True
 
@@ -179,7 +180,7 @@ def enrich_events_batch(validated_events: List[EventData]) -> List[Dict[str, Any
             enriched_events.append(enriched_event)
         except Exception as e:
             # Even if enrichment fails completely, preserve the original event
-            logger.error(f"Failed to enrich event {event.event_id}: {e}")
+            logger.error(f"Failed to enrich event {event.event_id}: {type(e).__name__}")
             event_dict = event.model_dump()
             if isinstance(event_dict.get("timestamp"), datetime):
                 event_dict["timestamp"] = event_dict["timestamp"].isoformat()

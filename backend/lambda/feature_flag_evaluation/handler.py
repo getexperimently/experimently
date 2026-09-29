@@ -302,7 +302,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
 
     except ValueError as e:
         # Handle validation errors
-        logger.warning(f"Validation error: {e!s}")
+        logger.warning(f"Validation error: {type(e).__name__}")
         return create_error_response(400, str(e))
 
     except Exception as e:

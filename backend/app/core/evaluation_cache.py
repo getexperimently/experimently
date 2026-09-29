@@ -237,8 +237,8 @@ class EvaluationCache:
             for key in keys_to_remove:
                 del self._cache[key]
 
-            logger.info(
-                f"Invalidated {len(keys_to_remove)} cache entries for user {user_id}"
+            logger.debug(
+                f"Invalidated {len(keys_to_remove)} cache entries for one user"
             )
 
     def clear(self):
