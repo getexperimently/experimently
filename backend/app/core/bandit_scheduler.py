@@ -9,11 +9,16 @@ Stats sources, in order of preference
 -------------------------------------
 1. DynamoDB real-time counters (``DynamoDBCounterService.get_experiment_counters``),
    an optional module reached through ``core.optional_modules``; a build
-   without it simply starts at source 2.
+   without it simply starts at source 2.  Used only when they are at least as
+   complete as PostgreSQL's: every variant's DynamoDB pull count must be
+   ``>=`` its PostgreSQL pull count (#426).  A partial DynamoDB count -- one
+   manual increment, a counter that started late -- never replaces the
+   complete PostgreSQL count.
 2. PostgreSQL: ``count(Assignment)`` per variant for pulls and the number of
    distinct converting users (events whose ``event_type`` equals the
    experiment's primary metric ``event_name``) for successes.  Used when
-   DynamoDB is unavailable or holds no data for the experiment.
+   DynamoDB is unavailable, holds no data for the experiment, or has fewer
+   pulls than PostgreSQL for any variant.
 3. The previously persisted ``BanditState`` row.
 4. Zero-count priors (equal weights).
 
@@ -67,6 +72,25 @@ SCHEDULER_NAME = "bandit"
 def _has_pulls(stats: Optional[Dict[str, VariantStats]]) -> bool:
     """Return True when at least one variant in ``stats`` recorded a pull."""
     return bool(stats) and any(vs.pulls > 0 for vs in stats.values())
+
+
+def _at_least_as_complete(
+    candidate: Dict[str, VariantStats],
+    reference: Optional[Dict[str, VariantStats]],
+) -> bool:
+    """Return True when ``candidate`` has at least ``reference``'s pulls per variant.
+
+    Compared variant by variant, not on the totals, so a surplus in one
+    variant cannot hide a missing count in another.  A ``reference`` that is
+    ``None`` (the source was unavailable) is trivially covered.
+    """
+    if not reference:
+        return True
+    for vid, ref in reference.items():
+        cand = candidate.get(vid)
+        if (cand.pulls if cand is not None else 0) < ref.pulls:
+            return False
+    return True
 
 
 class BanditScheduler:
@@ -384,7 +408,10 @@ class BanditScheduler:
         Sources are tried in order: DynamoDB counters, PostgreSQL
         (assignments + conversion events), the persisted BanditState, and
         finally zero-count priors.  A source is skipped when it raises or
-        when no variant has recorded a pull.
+        when no variant has recorded a pull.  DynamoDB is additionally
+        skipped when any variant has fewer pulls there than in PostgreSQL:
+        PostgreSQL's assignment rows are the complete record, and the
+        real-time counters are preferred only while they keep up with it.
 
         Parameters
         ----------
@@ -401,13 +428,20 @@ class BanditScheduler:
         dict
             ``{variant_id: VariantStats}``
         """
-        stats = self._stats_from_dynamodb(experiment_id, variant_ids)
-        if _has_pulls(stats):
-            return stats  # type: ignore[return-value]
+        dynamo_stats = self._stats_from_dynamodb(experiment_id, variant_ids)
+        pg_stats = self._stats_from_postgres(experiment_id, variant_ids, experiment)
 
-        stats = self._stats_from_postgres(experiment_id, variant_ids, experiment)
-        if _has_pulls(stats):
-            return stats  # type: ignore[return-value]
+        if _has_pulls(dynamo_stats):
+            if _at_least_as_complete(dynamo_stats, pg_stats):  # type: ignore[arg-type]
+                return dynamo_stats  # type: ignore[return-value]
+            logger.warning(
+                "BanditScheduler: DynamoDB counters for experiment %s have fewer "
+                "pulls than PostgreSQL; using PostgreSQL",
+                experiment_id,
+            )
+
+        if _has_pulls(pg_stats):
+            return pg_stats  # type: ignore[return-value]
 
         stats = self._stats_from_bandit_state(experiment_id, variant_ids)
         if stats is not None:
