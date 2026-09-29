@@ -1,0 +1,25 @@
+{
+  "_provenance": {
+    "source": "vendor documentation",
+    "vendor_docs_row": "7c",
+    "url": "https://docs.cloud.google.com/bigquery/docs/reference/rest/v2/Job",
+    "note": "jobs.get for a job that failed: status.errorResult carries a reason and a message.",
+    "real_run_id": null
+  },
+  "status": 200,
+  "body": {
+    "kind": "bigquery#job",
+    "jobReference": {
+      "projectId": "acme-analytics",
+      "jobId": "JOBID",
+      "location": "US"
+    },
+    "status": {
+      "state": "DONE",
+      "errorResult": {
+        "reason": "accessDenied",
+        "message": "UPSTREAM-SENTINEL-bq-4d1e errorResult"
+      }
+    }
+  }
+}
