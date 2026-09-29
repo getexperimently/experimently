@@ -18,7 +18,7 @@ export function KeyStatement({ statement, heading, pending }: { statement: Publi
         {heading}
       </h2>
       <p className="text-sm text-slate-800">
-        Run this in Snowflake as a role that can alter the user (for example SECURITYADMIN), then test the connection.
+        Run this in Snowflake as a role that can alter the user, then test the connection.
         {pending && ' The current key keeps working until a test with the new key passes.'}
       </p>
       <CopyBlock label="Snowflake statement" text={statement.statement} testId="warehouse-key-statement-sql" />

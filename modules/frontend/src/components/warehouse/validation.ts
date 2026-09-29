@@ -55,7 +55,7 @@ export const KEY_ENDPOINT =
   "The key names a sign-in endpoint other than Google's (https://oauth2.googleapis.com/token). Only keys for Google Cloud's public endpoints are supported.";
 export const KEY_TOO_LARGE = 'The key file is larger than 16 KiB. Paste the JSON key file itself.';
 
-/** The service-account key checks the API makes, without echoing the key. */
+/** The service-account key checks the API makes, without repeating the key. */
 export function checkServiceAccountJson(text: string): string | null {
   if (!text.trim()) return 'Paste the service-account JSON key, or choose the key file.';
   if (text.length > MAX_SERVICE_ACCOUNT_JSON_CHARS) return KEY_TOO_LARGE;

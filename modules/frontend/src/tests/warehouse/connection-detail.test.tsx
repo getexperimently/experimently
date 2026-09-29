@@ -230,9 +230,12 @@ describe('delete', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Delete' }));
     const dialog = screen.getByRole('dialog');
     const confirm = within(dialog).getByRole('button', { name: 'Delete connection' });
+    const cancel = within(dialog).getByRole('button', { name: 'Cancel' });
     confirm.focus();
     fireEvent.keyDown(dialog, { key: 'Tab' });
-    expect(within(dialog).getByRole('button', { name: 'Cancel' })).toHaveFocus();
+    expect(cancel).toHaveFocus();
+    fireEvent.keyDown(dialog, { key: 'Tab', shiftKey: true });
+    expect(confirm).toHaveFocus();
   });
 
   it('deletes on confirmation and goes back to the list', async () => {
