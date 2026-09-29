@@ -24,6 +24,7 @@ RECORDED = Path(__file__).parent / "recorded"
 #: Where each vendor's documentation lives; a recorded file's URL must be there.
 VENDOR_DOC_ROOTS = {
     "bigquery": ("https://docs.cloud.google.com/", "https://developers.google.com/"),
+    "snowflake": ("https://docs.snowflake.com/",),
 }
 
 

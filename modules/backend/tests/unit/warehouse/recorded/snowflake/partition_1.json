@@ -1,0 +1,26 @@
+{
+  "_provenance": {
+    "source": "vendor documentation",
+    "vendor_docs_row": "4",
+    "url": "https://docs.snowflake.com/en/developer-guide/sql-api/handling-responses",
+    "note": "GET ?partition=1: later partitions carry data only, no metadata.",
+    "real_run_id": null
+  },
+  "status": 200,
+  "body": {
+    "data": [
+      [
+        "control",
+        "1000",
+        "105",
+        "0.1075",
+        "-2.5",
+        "93.98125",
+        "400",
+        "380",
+        "0",
+        "+00:00"
+      ]
+    ]
+  }
+}

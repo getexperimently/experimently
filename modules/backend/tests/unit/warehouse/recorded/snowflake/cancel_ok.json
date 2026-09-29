@@ -1,0 +1,17 @@
+{
+  "_provenance": {
+    "source": "vendor documentation",
+    "vendor_docs_row": "3",
+    "url": "https://docs.snowflake.com/en/developer-guide/sql-api/reference",
+    "note": "POST .../cancel answers 200 with a CancelStatus (the documented example).",
+    "real_run_id": null
+  },
+  "status": 200,
+  "body": {
+    "code": "000604",
+    "sqlState": "57014",
+    "message": "UPSTREAM-SENTINEL-sf-7a2c canceled",
+    "statementHandle": "019c06a4-0000-df4f-0000-00100006589e",
+    "statementStatusUrl": "/api/v2/statements/019c06a4-0000-df4f-0000-00100006589e"
+  }
+}

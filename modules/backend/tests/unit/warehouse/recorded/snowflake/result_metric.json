@@ -1,0 +1,106 @@
+{
+  "_provenance": {
+    "source": "vendor documentation",
+    "vendor_docs_row": "4",
+    "url": "https://docs.snowflake.com/en/developer-guide/sql-api/handling-responses",
+    "note": "A finished metric statement: 200 ResultSet, jsonv2, every value a string; unquoted aliases come back upper case; floats are our DECFLOAT->VARCHAR text. Values synthetic.",
+    "real_run_id": null
+  },
+  "status": 200,
+  "body": {
+    "resultSetMetaData": {
+      "numRows": 2,
+      "format": "jsonv2",
+      "rowType": [
+        {
+          "name": "VARIANT",
+          "type": "text",
+          "nullable": true
+        },
+        {
+          "name": "N",
+          "type": "fixed",
+          "nullable": true
+        },
+        {
+          "name": "N_CONVERTED",
+          "type": "fixed",
+          "nullable": true
+        },
+        {
+          "name": "K",
+          "type": "text",
+          "nullable": true
+        },
+        {
+          "name": "SUM_D",
+          "type": "text",
+          "nullable": true
+        },
+        {
+          "name": "SUM_D2",
+          "type": "text",
+          "nullable": true
+        },
+        {
+          "name": "METRIC_ROWS_IN_WINDOW",
+          "type": "fixed",
+          "nullable": true
+        },
+        {
+          "name": "METRIC_ROWS_MATCHED",
+          "type": "fixed",
+          "nullable": true
+        },
+        {
+          "name": "NULL_VALUE_ROWS",
+          "type": "fixed",
+          "nullable": true
+        },
+        {
+          "name": "SESSION_OFFSET",
+          "type": "text",
+          "nullable": true
+        }
+      ],
+      "partitionInfo": [
+        {
+          "rowCount": 2,
+          "uncompressedSize": 512
+        }
+      ]
+    },
+    "data": [
+      [
+        "treatment",
+        "1000",
+        "110",
+        "0.1075",
+        "2.5",
+        "97.90625",
+        "400",
+        "380",
+        "0",
+        "+00:00"
+      ],
+      [
+        "control",
+        "1000",
+        "105",
+        "0.1075",
+        "-2.5",
+        "93.98125",
+        "400",
+        "380",
+        "0",
+        "+00:00"
+      ]
+    ],
+    "code": "090001",
+    "statementStatusUrl": "/api/v2/statements/019c06a4-0000-df4f-0000-00100006589e",
+    "sqlState": "00000",
+    "statementHandle": "019c06a4-0000-df4f-0000-00100006589e",
+    "message": "UPSTREAM-SENTINEL-sf-7a2c ok",
+    "createdOn": 1759000000000
+  }
+}
