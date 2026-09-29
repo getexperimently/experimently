@@ -8,7 +8,7 @@
 import fs from 'fs';
 import path from 'path';
 import React from 'react';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { act, render, screen, fireEvent, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import NewExperimentPage, { ROLE_CANNOT_CREATE } from '@/pages/experiments/new';
 import { apiFetch } from '@/services/api';
@@ -751,8 +751,12 @@ describe('creating', () => {
   it('one click creates one experiment even when pressed twice', async () => {
     api();
     await toReview();
-    fireEvent.click(screen.getByTestId('wizard-create'));
-    fireEvent.click(screen.getByTestId('wizard-create'));
+    const create = screen.getByTestId('wizard-create');
+    // Both presses land before React re-renders and disables the button.
+    act(() => {
+      create.click();
+      create.click();
+    });
     await waitFor(() => expect(mockRouter.push).toHaveBeenCalledWith('/experiments/exp-9'));
     expect(calls('POST')).toHaveLength(1);
     expect(mockedNavigateHard).not.toHaveBeenCalled();

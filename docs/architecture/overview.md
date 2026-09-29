@@ -351,7 +351,7 @@ The following capabilities were added after the initial platform release. See th
 
 | Component | Description | Doc |
 |-----------|-------------|-----|
-| Guided experiment builder (#27) | 5-step draft-and-submit API; no dashboard UI in this release | [experiment-wizard.md](../guides/experiment-wizard.md) |
+| Guided experiment builder (#27, #376) | Guided setup in the dashboard (browser-only, 5 steps, same create request as the form); a separate 5-step draft-and-submit API | [experiment-wizard.md](../guides/experiment-wizard.md) |
 | AI Experiment Design (#23) | Claude API–powered design suggestions, results interpretation, MCP server | [mcp-server.md](../mcp-server.md) |
 | Audit Logging & Bulk Toggle (P1-B) | Immutable audit trail, SSE real-time stream, bulk flag operations | [audit-logging.md](../api/audit-logging.md) |
 | RBAC Post-MVP (P2-A) | Custom roles, direct permission grants, effective permissions resolution | [rbac.md](../api/rbac.md) |

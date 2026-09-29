@@ -45,37 +45,25 @@ An A/B test (experiment) splits your users into groups, shows each group a diffe
 
 ### Creating an Experiment
 
-**Step 1: Define the experiment**
+**Experiments → + New Experiment** opens *guided setup*, five short steps. Your answers
+stay in this browser tab until you press **Create Experiment**; reloading starts over.
+If you prefer every field on one page, choose **Use the single-page form (advanced)** —
+your answers carry over.
 
-Navigate to **Experiments → New Experiment** and fill in:
+**Step 1: Type**
+
+Choose **A/B Test** or **Multivariate**. Split URL and bandit experiments need settings
+guided setup does not ask for; create those through the API or an SDK.
+
+**Step 2: Details**
 
 - **Name**: Descriptive name, e.g., "Homepage CTA Button Color Q1 2026"
-- **Key**: Auto-generated slug, e.g., `homepage-cta-color` — this is used in code
-- **Hypothesis**: "Changing the CTA button from blue to green will increase click-through rate by 10%"
+- **Key**: generated from the name until you edit it, e.g., `homepage_cta_button_color_q1_2026` — your code passes this as `experiment_key`
 - **Description**: Background context, links to design doc, Jira ticket
+- **Hypothesis**: "Changing the CTA button from blue to green will increase click-through rate by 10%"
 
-**Step 2: Add variants**
-
-Every experiment needs at least one control and one treatment:
-
-| Variant | Is Control | Traffic % |
-|---------|-----------|-----------|
-| Control (Blue Button) | ✅ | 50% |
-| Treatment (Green Button) | — | 50% |
-
-Traffic allocation must total ≤ 100%. The remaining percentage is excluded from the experiment.
-
-For multivariate tests, add more variants:
-
-| Variant | Is Control | Traffic % |
-|---------|-----------|-----------|
-| Control | ✅ | 34% |
-| Green Button | — | 33% |
-| Red Button | — | 33% |
-
-**Step 3: Define metrics**
-
-Choose what to measure. Every experiment should have one **primary metric** (your north star for the decision) and optional secondary metrics.
+Then choose what to measure. Mark one metric as the **primary metric** (the one you decide
+on); any others are tracked alongside it.
 
 | Metric Type | When to Use | Example |
 |-------------|-------------|---------|
@@ -86,9 +74,26 @@ Choose what to measure. Every experiment should have one **primary metric** (you
 
 The metric's **event name** must match exactly what your engineers track in code (e.g., `checkout_complete`).
 
-**Step 4: Set targeting rules (optional)**
+**Step 3: Variants**
 
-Only want to test on specific users? Add targeting rules:
+Every experiment needs a control; mark one variant as it:
+
+| Variant | Is Control | Traffic % |
+|---------|-----------|-----------|
+| Control (Blue Button) | ✅ | 50% |
+| Treatment (Green Button) | — | 50% |
+
+The traffic split must add up to exactly 100%.
+
+For multivariate tests, add more variants:
+
+| Variant | Is Control | Traffic % |
+|---------|-----------|-----------|
+| Control | ✅ | 34% |
+| Green Button | — | 33% |
+| Red Button | — | 33% |
+
+Only want to test on specific users? Add targeting rules on the same step:
 
 - Country is in [US, CA]
 - Subscription plan is "premium"
@@ -96,9 +101,22 @@ Only want to test on specific users? Add targeting rules:
 
 Users who don't match targeting rules are excluded from the experiment entirely.
 
-**Step 5: Start the experiment**
+**Step 4: Estimate (optional)**
 
-Click **Start Experiment**. The status changes to `ACTIVE`.
+Enter your baseline conversion rate and the smallest change worth detecting — a
+*relative* change, so 5% on a 12% baseline means 12% → 12.6% — and press **Calculate
+estimate**. At 80% power and 5% significance that example needs 47,034 users per variant.
+Add your daily users to see roughly how many days that takes. The estimate is advisory:
+nothing here is saved with the experiment.
+
+**Step 5: Review and create**
+
+Check the summary, use **Edit** to go back to any step, then press **Create Experiment**.
+The experiment is created as a draft and you land on its page.
+
+**Then: start the experiment**
+
+Click **Start** on the experiment's page. The status changes to `ACTIVE`.
 
 You can also schedule automatic start/end dates: go to **Experiment → Schedule** and set future dates. The experiment will auto-activate at the start date and auto-complete at the end date.
 

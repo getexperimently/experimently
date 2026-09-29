@@ -81,8 +81,9 @@ for 15 minutes.
 
 ## Step 3: Create an experiment
 
-Through the dashboard: **Experiments → + New Experiment**, add two variants and one
-metric, then **Start**. Through the API:
+Through the dashboard: **Experiments → + New Experiment** walks you through guided setup
+(type, details, variants, an optional sample-size estimate, review); create it, then
+**Start**. Through the API:
 
 ```{.bash exec}
 EXPERIMENT=$(curl -s -X POST localhost:8000/api/v1/experiments/ \

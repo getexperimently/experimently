@@ -1,13 +1,55 @@
-# Guided experiment builder (API)
+# Guided experiment builder
 
-The wizard is a 5-step guided flow for designing an experiment: it keeps a draft
-while you answer one question at a time, validates each step, and creates the
-experiment when you submit. Submitting writes a real experiment in DRAFT status,
-owned by the caller, and discards the draft.
+There are two guided ways to create an experiment, and they are unrelated: the
+dashboard's **guided setup**, and the **wizard API** described in the rest of this
+page.
 
-**This release ships the wizard as an API only.** There is no wizard screen in the
-dashboard; `/experiments/new` is a single form. Drafts are held in the API process's
-memory, so they do not survive a restart and are not shared between replicas.
+## In the dashboard: guided setup
+
+**Experiments → + New Experiment** opens guided setup, which asks for a new
+experiment in five steps:
+
+| Step | What you set |
+|------|--------------|
+| 1. Type | A/B Test or Multivariate |
+| 2. Details | Name, key, description, hypothesis, and the metrics, one of them primary |
+| 3. Variants | The variants, their traffic split (it must add up to exactly 100%), which one is the control, and optional targeting rules |
+| 4. Estimate | Optional: how many users each variant needs, and roughly how many days that takes |
+| 5. Review | Everything as it will be sent; **Create Experiment** creates it as a draft |
+
+- **Next** checks only the step you are on; **Back** never checks anything. The step
+  is in the address (`?step=details`), so the browser's Back and Forward move between
+  steps.
+- Your answers are kept **only in this browser tab**. Nothing is saved until you
+  create the experiment: reloading the page or opening a link to a later step starts
+  over at step 1, and the browser asks before you reload or close a tab with answers
+  in it.
+- **Use the single-page form (advanced)** switches to every field on one page
+  (`/experiments/new?advanced`); your answers carry over in both directions.
+- The **Estimate** step is advisory. It calls the sample-size endpoint shown
+  [below](#sample-size-guidance), treats the minimum detectable effect as a
+  *relative* change (5% of a 12% baseline is 12.6%, not 17%), and assumes users are
+  split evenly between the variants. Nothing you enter there is stored with the
+  experiment. With three or more variants it makes no correction for comparing
+  several variants against the control; the Power Calculator does, so its number is
+  higher.
+- Only ADMIN and DEVELOPER users (and superusers) can create experiments; anyone else
+  sees a note saying so instead of the form.
+- Split URL and bandit experiments need settings guided setup does not ask for;
+  create them through the API or an SDK.
+
+Guided setup sends the same `POST /api/v1/experiments` request as the single-page
+form. **It does not use the wizard API below** and creates no draft.
+
+## The wizard API
+
+The wizard API is a 5-step flow for designing an experiment from your own tooling:
+it keeps a draft while you answer one question at a time, validates each step, and
+creates the experiment when you submit. Submitting writes a real experiment in DRAFT
+status, owned by the caller, and discards the draft.
+
+The dashboard does not use it. Drafts are held in the API process's memory, so they
+do not survive a restart and are not shared between replicas.
 
 ---
 
@@ -260,7 +302,8 @@ at 50% each. Review the experiment and start it when you're ready.
 ## Sample Size Guidance
 
 The draft stores `baseline_rate` and `mde`, but the wizard doesn't compute a sample size
-from them. The experiments API does:
+from them. The experiments API does, and the dashboard's guided setup calls it on its
+Estimate step:
 
 ```{.bash exec}
 curl -s -G localhost:8000/api/v1/experiments/analysis/sample-size \
