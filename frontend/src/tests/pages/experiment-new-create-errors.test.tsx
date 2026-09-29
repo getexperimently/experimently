@@ -218,6 +218,16 @@ describe.each<View>(['guided', 'advanced'])('%s: a create that fails', (view) =>
     }
     expect(screen.getByTestId('experiment-key')).toHaveFocus();
     expect(screen.getByTestId('experiment-key')).toHaveValue('checkout_v2');
+
+    if (view === 'guided') {
+      // Back at Review with a new key, the old error is gone.
+      setValue('experiment-key', 'checkout_v3');
+      fireEvent.click(screen.getByTestId('wizard-next'));
+      fireEvent.click(screen.getByTestId('wizard-next'));
+      fireEvent.click(screen.getByTestId('wizard-next'));
+      expect(screen.getByTestId('review-key')).toHaveTextContent('checkout_v3');
+      expect(screen.queryByTestId('form-error')).not.toBeInTheDocument();
+    }
   });
 
   it('with 409 maps on the status alone: the same text with 400 is shown as the API wrote it', async () => {
