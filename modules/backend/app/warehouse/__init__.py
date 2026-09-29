@@ -13,6 +13,7 @@
 * :mod:`.connectors` -- which connectors a deployment may use (none until
   each has passed a check against a real account).
 * :mod:`.bigquery` -- the BigQuery connector, built on the modules above.
+* :mod:`.snowflake` -- the Snowflake connector, built on the same modules.
 
 Nothing here is routed; the routes build on it.
 """

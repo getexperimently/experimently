@@ -1,0 +1,16 @@
+{
+  "_provenance": {
+    "source": "vendor documentation",
+    "vendor_docs_row": "3",
+    "url": "https://docs.snowflake.com/en/developer-guide/sql-api/reference",
+    "note": "422 QueryFailureStatus for insufficient privileges. The code value is not on this page; replace with a real recording at the flip.",
+    "real_run_id": null
+  },
+  "status": 422,
+  "body": {
+    "code": "003001",
+    "message": "UPSTREAM-SENTINEL-sf-7a2c detail",
+    "statementHandle": "019c06a4-0000-df4f-0000-00100006589e",
+    "sqlState": "42501"
+  }
+}
