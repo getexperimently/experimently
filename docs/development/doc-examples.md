@@ -99,6 +99,7 @@ cd frontend && npm ci && npm run dev
 | `` ```zsh `` | a shell the runner doesn't know (on every page, enrolled or not) |
 | ` ``` ` with no language | on every page; use `text` for output |
 | a block indented four spaces | on every page: it renders as code but names no language; fence it |
+| a line starting with `#` after the page's title | on every page: the site renders it as a title-sized heading. Usually a shell block whose opening fence is missing, so its `# Step` comments show as titles; or a wrapped sentence whose next line starts with `#217`. Restore the fence or rewrap; make a real heading `##` |
 
 Blocks in other languages (`json`, `python`, `javascript`, …) aren't run and need no tag.
 

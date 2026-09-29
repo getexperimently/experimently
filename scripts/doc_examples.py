@@ -453,6 +453,57 @@ def indented_code_lines(text: str) -> list[int]:
     return found
 
 
+# python-markdown's rule (what MkDocs renders with), not CommonMark's: a line
+# that starts with `#` in the first column is a heading, space or no space, and
+# one that is indented is not. So a wrapped sentence whose next line begins
+# "#217 and ..." renders as a title too.
+_TITLE = re.compile(r"^#(?!#)")
+_HEADING = re.compile(r"^#{1,6}")
+
+
+def stray_titles(text: str) -> list[int]:
+    """1-based lines of level-1 headings that come after the page's first heading.
+
+    A page has one ``#`` heading, its title, and it comes first.  A later one is
+    what a shell block looks like when its opening fence is missing: every
+    ``# Step 1: ...`` comment renders as a title-sized heading and the commands
+    as a paragraph (#434).  Nothing inside a fence can see that, so this reads
+    the lines outside every fence, HTML comment and front matter.  A test pins
+    it to the renderer on every page.
+    """
+    lines = text.split("\n")
+    start = 0
+    if lines and lines[0].strip() == "---":
+        for number in range(1, len(lines)):
+            if lines[number].strip() in ("---", "..."):
+                start = number + 1
+                break
+    found: list[int] = []
+    seen_heading, fence, in_comment = False, None, False
+    for number, line in enumerate(lines[start:], start + 1):
+        stripped = line.strip()
+        if fence is not None:
+            if stripped and set(stripped) == {fence[0]} and len(stripped) >= len(fence):
+                fence = None
+            continue
+        if in_comment:
+            in_comment = "-->" not in line
+            continue
+        opener = _OPENER.match(line)
+        if opener and not (
+            opener.group("marker")[0] == "`" and "`" in opener.group("info")
+        ):
+            fence = opener.group("marker")
+            continue
+        if stripped.startswith("<!--"):
+            in_comment = "-->" not in stripped[4:]
+            continue
+        if seen_heading and _TITLE.match(line):
+            found.append(number)
+        seen_heading = seen_heading or bool(_HEADING.match(line))
+    return found
+
+
 # ---------------------------------------------------------------------------
 # The tag grammar
 # ---------------------------------------------------------------------------
@@ -1224,6 +1275,14 @@ def _check(path: Optional[pathlib.Path], out) -> dict[str, dict[str, int]]:
         kind, entry = status.get(rel, ("none", None))
         tally[kind] += 1
         text = (ROOT / rel).read_text(encoding="utf-8")
+        problems += [
+            f"{rel}:{line}: renders as a level-1 heading after the page's title. "
+            "A shell comment whose block lost its opening fence? Open the block "
+            "with a ```bash line. A wrapped sentence? Rewrap it so the line does "
+            "not start with '#'. A heading? Make it ## or deeper "
+            f"({AUTHORING}#tagging-a-shell-block)"
+            for line in stray_titles(text)
+        ]
         try:
             fences = parse_fences(text, rel)
         except Refused as refusal:
