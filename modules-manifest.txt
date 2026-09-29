@@ -185,6 +185,7 @@ modules/backend/app/services/warehouse_source_service.py
 modules/backend/app/api/v1/endpoints/warehouse_analysis.py
 modules/backend/tests/unit/warehouse
 modules/backend/tests/integration/warehouse
+modules/backend/tests/live_warehouse
 modules/backend/tests/smoke/test_warehouse_routes_contract.py
 # The dashboard's connections and sources screens under /warehouse (beta).
 # Their routes in frontend/src/pages/warehouse are one-line re-exports and
