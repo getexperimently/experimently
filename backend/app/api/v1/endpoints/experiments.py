@@ -449,12 +449,13 @@ async def get_experiment(
                 status_code=status.HTTP_404_NOT_FOUND, detail="Experiment not found"
             )
 
-        # The role table decides who may read an experiment, as it decides who
-        # may list them (#83): all four roles carry READ, and the list already
-        # returns this same ExperimentResponse for every experiment. There used
-        # to be an ownership requirement here as well, and it refused everyone
-        # but superusers -- the service returns a dict, `check_ownership` looks
-        # for an `owner_id` attribute, so not even the creator matched.
+        # The role table is the authority on who may read an experiment, as it
+        # is on who may list them (see 4383c8ac): all four roles carry READ,
+        # and the list already returns this same ExperimentResponse for every
+        # experiment. There used to be an ownership requirement here as well,
+        # and it refused everyone but superusers -- the service returns a dict,
+        # `check_ownership` looks for an `owner_id` attribute, so not even the
+        # creator matched.
         if not current_user.is_superuser and not check_permission(
             current_user, ResourceType.EXPERIMENT, Action.READ
         ):

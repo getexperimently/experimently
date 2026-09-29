@@ -202,9 +202,10 @@ class TestGetExperimentPermissions:
     These two used to assert 403, describing the defect as the specification:
     the inline check required ownership of every non-superuser, and because
     the service returns a dict that ``check_ownership`` could not read, it
-    refused the owner too. All four roles carry READ on experiments, as they
-    carry LIST (#83), so an analyst or viewer opens an experiment they did not
-    create. test_experiment_detail_access.py covers each role on the real
+    refused the owner too. The role table is the authority (see 4383c8ac):
+    all four roles carry READ on experiments, as they carry LIST, so an
+    analyst or viewer opens an experiment they did not create.
+    test_experiment_detail_access.py covers each role on the real
     authentication path.
     """
 

@@ -15,9 +15,9 @@ create an experiment and then not open it.
 Fixing only the ownership lookup would still have been wrong: the check
 required ownership of ADMIN, DEVELOPER and ANALYST as well, while the list
 endpoint -- which returns the same ``ExperimentResponse`` for every experiment
--- admits everyone the role table grants ``Action.LIST`` (#83, #205). The role
-table is the authority, and it grants ``Action.READ`` on experiments to all
-four roles, so all four can open any experiment.
+-- admits everyone the role table grants ``Action.LIST``. The role table is
+the authority (see 4383c8ac), and it grants ``Action.READ`` on experiments to
+all four roles, so all four can open any experiment.
 
 The tests use non-superusers throughout: a superuser bypasses every check, and
 the Browser E2E journeys passed for exactly that reason.
