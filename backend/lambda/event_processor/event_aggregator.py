@@ -12,10 +12,17 @@ Follows TDD (Test-Driven Development) - GREEN phase implementation.
 """
 
 import logging
+import sys
 from datetime import datetime
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from botocore.exceptions import ClientError
+
+# Add shared module to path
+sys.path.insert(0, str(Path(__file__).parent.parent / "shared"))
+
+from utils import error_name
 
 logger = logging.getLogger(__name__)
 
@@ -153,7 +160,7 @@ def aggregate_event(
                 # Re-raise for other errors or max retries exceeded
                 logger.error(
                     f"Failed to aggregate event {enriched_event.get('event_id')}: "
-                    f"ClientError({error_code})"
+                    f"{error_name(e)}"
                 )
                 raise
 

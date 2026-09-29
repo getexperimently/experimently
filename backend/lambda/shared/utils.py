@@ -25,10 +25,10 @@ def error_name(exc: BaseException) -> str:
     partition key it was given, and those are user ids.
     """
     response = getattr(exc, "response", None)
-    if isinstance(response, dict):
-        code = response.get("Error", {}).get("Code")
-        if code:
-            return f"{type(exc).__name__}({code})"
+    error = (response.get("Error") or {}) if isinstance(response, dict) else {}
+    code = error.get("Code") if isinstance(error, dict) else None
+    if code:
+        return f"{type(exc).__name__}({code})"
     return type(exc).__name__
 
 

@@ -125,3 +125,53 @@ def test_aggregation_failure_does_not_log_the_error_message(capture):
     assert capture.with_user() == [], capture.with_user()
     errors = [r[1] for r in capture.records if r[0] == "ERROR"]
     assert any("ValidationException" in e for e in errors), errors
+
+
+def _kinesis_event():
+    import base64
+    import json
+
+    data = base64.b64encode(json.dumps(_event()).encode()).decode()
+    return {"Records": [{"kinesis": {"data": data, "sequenceNumber": "seq-269"}}]}
+
+
+def test_batch_stage_failures_do_not_log_the_error_message(capture):
+    import batch_processor
+
+    with patch(
+        "batch_processor.parse_kinesis_events",
+        side_effect=RuntimeError(f"cannot parse record for {USER}"),
+    ):
+        batch_processor.process_batch(_kinesis_event())
+    with (
+        patch("batch_processor.aggregate_events_batch", return_value={}),
+        patch(
+            "batch_processor.archive_to_s3_batched",
+            side_effect=RuntimeError(f"cannot archive {USER}"),
+        ),
+    ):
+        batch_processor.process_batch(_kinesis_event())
+    with patch("batch_processor.sqs_client") as sqs:
+        sqs.send_message.side_effect = ClientError(
+            {"Error": {"Code": "InvalidMessageContents", "Message": f"bad {USER}"}},
+            "SendMessage",
+        )
+        assert batch_processor.send_to_dlq({"kinesis": {}}, "url", "err") is False
+
+    assert capture.with_user() == [], capture.with_user()
+    errors = [r[1] for r in capture.records if r[0] == "ERROR"]
+    assert any(e.startswith("Parsing stage failed") for e in errors), errors
+    assert any(e.startswith("Archive stage failed") for e in errors), errors
+    assert any("ClientError(InvalidMessageContents)" in e for e in errors), errors
+
+
+def test_error_name_never_raises():
+    from utils import error_name
+
+    class Odd(Exception):
+        pass
+
+    for response in (None, {}, {"Error": None}, {"Error": "text"}, {"Error": {}}):
+        exc = Odd()
+        exc.response = response
+        assert error_name(exc) == "Odd"
