@@ -16,7 +16,7 @@ import uuid
 from datetime import datetime
 from typing import Any, Dict, List, Literal, Optional
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class ConnectorOut(BaseModel):
@@ -158,7 +158,15 @@ class RunOut(BaseModel):
     error_code: Optional[str] = None
     error_message: Optional[str] = None
     #: Each statement sent: its kind, its SHA-256 and the SQL itself (View SQL).
-    statements: Optional[List[Dict[str, Any]]] = None
+    #: Returned only to the ADMIN, DEVELOPER and ANALYST roles (founder decision D34).
+    statements: Optional[List[Dict[str, Any]]] = Field(
+        default=None,
+        description=(
+            "Each statement the run sent: its kind, dialect, SHA-256 and SQL. "
+            "Returned only to the ADMIN, DEVELOPER and ANALYST roles (a superuser "
+            "counts as ADMIN); for VIEWER, or a user with no role, it is null."
+        ),
+    )
     #: Present only for a run that succeeded.
     results: Optional[Dict[str, Any]] = None
     job_metadata: Optional[List[Dict[str, Any]]] = None

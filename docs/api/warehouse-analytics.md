@@ -74,7 +74,13 @@ otherwise the warehouse numbers are the stricter ones.
 | Create, edit, validate or preview a metric source | yes | yes | yes | no |
 | Delete a metric source | yes | yes | no | no |
 | Start an analysis | yes | yes | no | no |
-| Read analyses, their results and the SQL sent | yes | yes | yes | yes |
+| Read analyses and their results | yes | yes | yes | yes |
+| Read the SQL an analysis or preview sent | yes | yes | yes | no |
+
+A superuser counts as ADMIN. A VIEWER, or a user with no role, who reads an
+analysis or a preview gets `statements: null`: the kind, dialect, SHA-256 and
+SQL of every statement are all left out. Everything else about the run is the
+same for every role.
 
 A refusal names the role needed and yours, for example
 `Creating a warehouse connection requires the ADMIN role; you are DEVELOPER.`
@@ -148,7 +154,7 @@ take credentials only in a request body.
 | `POST /sources/{source_id}/preview` | Counts and time bounds for the last 7 days, or a window you give |
 | `POST /experiments/{experiment_id}/runs` | Start an analysis (answers 202 with the run id) |
 | `GET /experiments/{experiment_id}/runs` | The experiment's analyses, newest first |
-| `GET /runs/{run_id}` | One analysis or preview: its status, results and the SQL sent |
+| `GET /runs/{run_id}` | One analysis or preview: its status, results and, for ANALYST and above, the SQL sent |
 
 A source names a table or view and maps its columns:
 
