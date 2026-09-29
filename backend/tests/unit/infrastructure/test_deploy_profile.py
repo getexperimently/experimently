@@ -16,7 +16,7 @@ This workflow builds exactly two images, each with the requested profile: the
 API's (`--target <profile>`) and, since #69, the dashboard's
 (`--build-arg EXPERIMENTLY_PROFILE=<profile>`; its Dockerfile has no stage per
 profile). An earlier dashboard build pushed to `experimentation-platform/
-frontend`, a repository nothing creates, and never succeeded (#195); the one
+frontend`, a repository nothing creates, and never succeeded; the one
 here pushes to `experimentation-platform/web`, which the CDK imports.
 
 So the profile is an input with a guard, not a default, and these checks pin
@@ -92,7 +92,7 @@ class TestTheProfileIsAnExplicitInput:
         """The API's and the dashboard's, from the release, into the two
         repositories the stacks import (#69).
 
-        #195 was a dashboard build that pushed to `experimentation-platform/
+        An earlier dashboard build pushed to `experimentation-platform/
         frontend`, which nothing creates, so it failed and took every job after
         it down. The dashboard build here pushes to
         `experimentation-platform/web`, the repository `stacks/names.py` names
@@ -101,7 +101,7 @@ class TestTheProfileIsAnExplicitInput:
         """
         text = WORKFLOW.read_text()
         assert "ECR_FRONTEND_REPO" not in text, (
-            "the dead frontend ECR repository is referenced again (#195)"
+            "the dead frontend ECR repository is referenced again"
         )
         assert "experimentation-platform/frontend" not in text
 

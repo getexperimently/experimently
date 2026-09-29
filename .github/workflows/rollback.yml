@@ -428,7 +428,13 @@ jobs:
           # (#215), never a status; READ_FAILURE_LIMIT in a row (about a
           # minute) fails the step, labelled, before anything is created.
           READ_FAILURE_LIMIT=12
+          # 60 polls 5 s apart: a stopped deployment has about five minutes to
+          # reach a final status. One that has not is NOT waited past (#225):
+          # the step fails, labelled, before anything is created, rather than
+          # leaving create-deployment to meet a group that is still busy.
+          STOP_WAIT_POLLS=60
           aws_errors="$(mktemp)"
+          trap 'rm -f "$aws_errors"' EXIT
           # Free text from AWS (an AccessDenied names the role's ARN) loses
           # every run of twelve digits before it is printed: the log is public.
           scrub() {
@@ -436,12 +442,15 @@ jobs:
           }
           for id in $IN_FLIGHT; do
             read_failures=0
-            for _ in $(seq 1 60); do
+            finished=""
+            last_status="(never read)"
+            for _ in $(seq 1 "$STOP_WAIT_POLLS"); do
               if st="$(aws deploy get-deployment --deployment-id "$id" \
                          --query deploymentInfo.status --output text 2>"$aws_errors")"; then
                 read_failures=0
+                last_status="${st:0:40}"
                 case "$st" in
-                  Stopped|Succeeded|Failed) echo "$id is $st"; break ;;
+                  Stopped|Succeeded|Failed) echo "$id is $st"; finished="$st"; break ;;
                 esac
               else
                 read_failures=$(( read_failures + 1 ))
@@ -457,6 +466,10 @@ jobs:
               fi
               sleep 5
             done
+            if [ -z "$finished" ]; then
+              echo "::error title=Stopped deployment did not finish::Deployment ${id} was stopped by this run with auto-rollback, but after ${STOP_WAIT_POLLS} polls (about 5 minutes) its last status read was ${last_status}, not Stopped, Succeeded or Failed. While it is active the deployment group is busy, so this run created no rollback deployment. Check it by hand: aws deploy get-deployment --deployment-id ${id}"
+              exit 1
+            fi
           done
 
       - name: Roll back via CodeDeploy
@@ -544,6 +557,7 @@ jobs:
           read_failures=0
           last_error=""
           aws_errors="$(mktemp)"
+          trap 'rm -f "$aws_errors"' EXIT
           # Free text from AWS (an AccessDenied names the role's ARN) loses
           # every run of twelve digits before it is printed: the log is public.
           scrub() {

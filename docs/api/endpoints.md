@@ -1719,7 +1719,7 @@ variant, and the decision.
 
 See [Split URL API Reference](split-url.md) for full documentation.
 
-Split URL experiments use `experiment_type: SPLIT_URL` and require a `split_url_config` in the request body. Variant assignment and URL redirection are handled by Lambda@Edge at the CloudFront layer.
+Split URL experiments use `experiment_type: SPLIT_URL` and require a `split_url_config` in the request body. Variant assignment and URL redirection are meant to happen in the split-URL module's Lambda@Edge router, on a CloudFront distribution. The CDK app creates no CloudFront distribution, so the router runs only if you add the module's construct to a stack yourself.
 
 **Experiment management** uses the existing experiment CRUD endpoints with `experiment_type=SPLIT_URL`:
 

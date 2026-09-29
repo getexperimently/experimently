@@ -226,7 +226,7 @@ def test_a_failed_read_of_a_failed_deployments_error_still_says_it_failed(runner
 # --- the stop step's wait for the deployments it stopped ------------------------------
 
 
-def _stop_step(runner, statuses: list):
+def _stop_step(runner, statuses: list, **overrides: str):
     runner.scenario(
         [
             rule("deploy list-deployments", answers=[BAD_ID]),
@@ -241,7 +241,9 @@ def _stop_step(runner, statuses: list):
         ]
     )
     step = _step(ROLLBACK, "Stop any deployment already in flight")
-    code, log, _, _ = runner.run(ROLLBACK, step, {"target": {"arn": TARGET}})
+    code, log, _, _ = runner.run(
+        ROLLBACK, step, {"target": {"arn": TARGET}}, **overrides
+    )
     return code, log
 
 
@@ -266,3 +268,124 @@ def test_the_stop_steps_wait_ends_labelled_on_persistent_throttling(runner):
         if c[:2] == ["deploy", "get-deployment"] and "deploymentInfo.status" in c
     ]
     assert len(polls) == STOP_LIMIT, polls
+
+
+# --- #225: a stopped deployment that never finishes ends the step, labelled ------------
+
+#: The stop step's wait polls this many times, 5 s apart, per stopped deployment.
+STOP_WAIT_POLLS = 60
+
+
+def _status_polls(runner) -> list:
+    return [
+        c
+        for c in runner.calls()
+        if c[:2] == ["deploy", "get-deployment"] and "deploymentInfo.status" in c
+    ]
+
+
+@pytest.mark.regression
+def test_a_stopped_deployment_still_in_progress_fails_the_step_labelled(runner):
+    """The issue's case: every read succeeds and the stopped deployment stays
+    InProgress. Planted defect: main's loop, which fell through after 60 polls
+    and exited 0, leaving create-deployment to meet a busy group."""
+    code, log = _stop_step(runner, ["InProgress"])
+    assert code == 1, log
+    (line,) = [
+        x
+        for x in log.splitlines()
+        if x.startswith("::error title=Stopped deployment did not finish::")
+    ]
+    assert f"Deployment {BAD_ID} was stopped by this run" in line
+    assert "its last status read was InProgress" in line
+    assert "created no rollback deployment" in line
+    assert line.endswith(f"aws deploy get-deployment --deployment-id {BAD_ID}"), line
+    # It waited the whole budget, and no longer.
+    assert len(_status_polls(runner)) == STOP_WAIT_POLLS
+    assert f"{BAD_ID} is " not in log
+
+
+@pytest.mark.regression
+def test_a_stopped_deployment_that_finishes_on_the_last_poll_is_not_an_error(runner):
+    """The boundary: Stopped on poll 60 is finished, not timed out."""
+    code, log = _stop_step(runner, ["InProgress"] * (STOP_WAIT_POLLS - 1) + ["Stopped"])
+    assert code == 0, log
+    assert f"{BAD_ID} is Stopped" in log
+    assert "Stopped deployment did not finish" not in log
+    assert len(_status_polls(runner)) == STOP_WAIT_POLLS
+
+
+@pytest.mark.regression
+def test_trailing_failed_reads_report_the_last_status_actually_read(runner):
+    """Reads that fail at the end (fewer than the read-failure limit) are not
+    a status: the error names the last status that WAS read."""
+    tail = STOP_LIMIT - 1
+    code, log = _stop_step(
+        runner, ["InProgress"] * (STOP_WAIT_POLLS - tail) + [THROTTLE] * tail
+    )
+    assert code == 1, log
+    assert "Rollback could not read AWS" not in log
+    (line,) = [
+        x for x in log.splitlines() if "title=Stopped deployment did not finish" in x
+    ]
+    assert "its last status read was InProgress" in line
+
+
+def _tmpdir(runner, tmp_path):
+    """A `mktemp` that creates its file in a directory the test can list.
+
+    Not TMPDIR: BSD mktemp (macOS) ignores it without -t, so a TMPDIR-based
+    check passes there whatever the step leaves behind."""
+    tmp = tmp_path / "tmpdir"
+    tmp.mkdir()
+    fake = runner.bin / "mktemp"
+    made = tmp_path / "mktemp.log"
+    fake.write_text(
+        "#!/bin/sh\n"
+        '[ "$#" -eq 0 ] || exit 98\n'
+        f'f="$(/usr/bin/mktemp "{tmp}/err.XXXXXX")" || exit 97\n'
+        f'echo "$f" >> "{made}"\n'
+        'echo "$f"\n'
+    )
+    fake.chmod(0o755)
+    return tmp
+
+
+def _made(tmp_path) -> list:
+    """What the fake mktemp created: empty means the step never called it,
+    and an empty directory would then prove nothing."""
+    log = tmp_path / "mktemp.log"
+    return log.read_text().split() if log.exists() else []
+
+
+@pytest.mark.regression
+@pytest.mark.parametrize("statuses", [["Stopped"], ["InProgress"]], ids=str)
+def test_the_stop_step_removes_its_error_file(runner, tmp_path, statuses):
+    tmp = _tmpdir(runner, tmp_path)
+    code, log = _stop_step(runner, statuses)
+    assert code == (0 if statuses == ["Stopped"] else 1), log
+    assert len(_made(tmp_path)) == 1
+    assert list(tmp.iterdir()) == []
+
+
+@pytest.mark.regression
+def test_the_shift_step_removes_its_error_file(runner, tmp_path):
+    tmp = _tmpdir(runner, tmp_path)
+    runner.scenario(
+        [
+            *_primary(TARGET),
+            _statuses("Ready", "InProgress"),
+            rule("deploy continue-deployment", ROLLBACK_ID, answers=[""]),
+        ]
+    )
+    step = _step(ROLLBACK, "Shift traffic and wait for it to land")
+    code, log, _, _ = runner.run(
+        ROLLBACK,
+        step,
+        {"target": {"arn": TARGET}, "codedeploy": {"deployment-id": ROLLBACK_ID}},
+        ROLLBACK_TIMEOUT_SECONDS="1800",
+    )
+    assert code == 0, log
+    assert "approved by this run" in log
+    assert len(_made(tmp_path)) == 1
+    assert list(tmp.iterdir()) == []
