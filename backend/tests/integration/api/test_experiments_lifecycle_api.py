@@ -197,28 +197,32 @@ class TestStartPausePermissions:
 
 @pytest.mark.integration
 class TestGetExperimentPermissions:
-    """GET /api/v1/experiments/{id} — ownership-based 403 branch.
+    """GET /api/v1/experiments/{id} — the role table decides who may read.
 
-    Unlike deps.get_experiment_access (used by start/pause/etc.), the inline
-    permission check in get_experiment requires ownership for *every*
-    non-superuser regardless of role, once the READ-permission check passes.
+    These two used to assert 403, describing the defect as the specification:
+    the inline check required ownership of every non-superuser, and because
+    the service returns a dict that ``check_ownership`` could not read, it
+    refused the owner too. All four roles carry READ on experiments, as they
+    carry LIST (#83), so an analyst or viewer opens an experiment they did not
+    create. test_experiment_detail_access.py covers each role on the real
+    authentication path.
     """
 
-    def test_analyst_cannot_get_other_users_experiment(
+    def test_analyst_can_get_other_users_experiment(
         self, admin_client, analyst_user, db_session
     ):
-        exp = _create_experiment(admin_client, "Get Analyst Forbidden")
+        exp = _create_experiment(admin_client, "Get Analyst Allowed")
         analyst_client = make_client_for_user(db_session, analyst_user)
         response = analyst_client.get(f"/api/v1/experiments/{exp['id']}")
-        assert response.status_code == 403, response.text
+        assert response.status_code == 200, response.text
 
-    def test_viewer_cannot_get_other_users_experiment(
+    def test_viewer_can_get_other_users_experiment(
         self, admin_client, viewer_user, db_session
     ):
-        exp = _create_experiment(admin_client, "Get Viewer Forbidden")
+        exp = _create_experiment(admin_client, "Get Viewer Allowed")
         viewer_client = make_client_for_user(db_session, viewer_user)
         response = viewer_client.get(f"/api/v1/experiments/{exp['id']}")
-        assert response.status_code == 403, response.text
+        assert response.status_code == 200, response.text
 
 
 # ---------------------------------------------------------------------------

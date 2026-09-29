@@ -15498,7 +15498,7 @@
         ]
       },
       "get": {
-        "description": "Get experiment by ID.\n\nRetrieves the detailed information for a specific experiment.\nUsers can only access experiments they own or have permission to view.\n\nReturns:\n    ExperimentResponse: The experiment details\n\nRaises:\n    HTTPException 404: If experiment not found\n    HTTPException 403: If user doesn't have access to this experiment",
+        "description": "Get experiment by ID.\n\nRetrieves the detailed information for a specific experiment.\nEvery role the role table grants READ on experiments may open any of them,\nas every role granted LIST sees all of them in the list.\n\nReturns:\n    ExperimentResponse: The experiment details\n\nRaises:\n    HTTPException 404: If experiment not found\n    HTTPException 403: If user doesn't have access to this experiment",
         "operationId": "get_experiment_api_v1_experiments__experiment_id__get",
         "parameters": [
           {

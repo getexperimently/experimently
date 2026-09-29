@@ -37,7 +37,6 @@ from backend.app.core.optional_modules import (
 from backend.app.core.permissions import (
     Action,
     ResourceType,
-    check_ownership,
     check_permission,
     get_permission_error_message,
 )
@@ -422,7 +421,8 @@ async def get_experiment(
     Get experiment by ID.
 
     Retrieves the detailed information for a specific experiment.
-    Users can only access experiments they own or have permission to view.
+    Every role the role table grants READ on experiments may open any of them,
+    as every role granted LIST sees all of them in the list.
 
     Returns:
         ExperimentResponse: The experiment details
@@ -449,22 +449,20 @@ async def get_experiment(
                 status_code=status.HTTP_404_NOT_FOUND, detail="Experiment not found"
             )
 
-        # Superusers can access all experiments
-        if current_user.is_superuser:
-            pass  # Allow access
-        # For viewers and other roles, check both permission and ownership
-        elif not check_permission(current_user, ResourceType.EXPERIMENT, Action.READ):
+        # The role table decides who may read an experiment, as it decides who
+        # may list them (#83): all four roles carry READ, and the list already
+        # returns this same ExperimentResponse for every experiment. There used
+        # to be an ownership requirement here as well, and it refused everyone
+        # but superusers -- the service returns a dict, `check_ownership` looks
+        # for an `owner_id` attribute, so not even the creator matched.
+        if not current_user.is_superuser and not check_permission(
+            current_user, ResourceType.EXPERIMENT, Action.READ
+        ):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail=get_permission_error_message(
                     ResourceType.EXPERIMENT, Action.READ
                 ),
-            )
-        # Non-superusers must be the owner (this applies to viewers)
-        elif not check_ownership(current_user, experiment):
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="You don't have permission to access this experiment",
             )
 
         # Create the response - if it's a dictionary, use model_validate directly

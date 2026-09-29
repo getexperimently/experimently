@@ -152,6 +152,49 @@ test.describe("Journey: RBAC", () => {
     });
   }
 
+  // Opening an experiment is READ, which the role table grants all four roles.
+  // The detail route used to answer 403 to every non-superuser, the creator
+  // included, and no journey noticed: the lifecycle journey opens detail pages
+  // only as the seeded admin, who is a superuser and bypasses every check, and
+  // this file stopped at the list. The seeded experiments belong to the admin,
+  // so each of these opens one it does not own.
+  for (const role of ["developer", "analyst", "viewer"] as const) {
+    test(`${role} opens an experiment from the list`, async ({ sessions }) => {
+      const page = await (await sessions(role)).newPage();
+      const experiments = new ExperimentsPage(page);
+      try {
+        await experiments.goto();
+        await expect(experiments.experimentList).toBeVisible({ timeout: 15_000 });
+        await experiments.experimentRows.first().getByTestId("experiment-link").click();
+        await expect(experiments.detail).toBeVisible({ timeout: 15_000 });
+        await expect(page.getByTestId("experiment-error")).toHaveCount(0);
+      } finally {
+        await page.close();
+      }
+    });
+  }
+
+  // The reported path end to end: guided setup redirects to the new
+  // experiment's page, and its creator -- an ordinary DEVELOPER -- must be able
+  // to open it. `createExperiment` resolves only once the detail has rendered.
+  test("developer creates an experiment and lands on its page", async ({ sessions }) => {
+    const page = await (await sessions("developer")).newPage();
+    const experiments = new ExperimentsPage(page);
+    const stamp = Date.now();
+    try {
+      const id = await experiments.createExperiment(`E2E Developer owns ${stamp}`, `e2e_dev_owns_${stamp}`);
+      expect(id).toMatch(/^[0-9a-f-]{36}$/);
+      await expect(experiments.detailName).toContainText(`E2E Developer owns ${stamp}`);
+      await expect(page.getByTestId("experiment-error")).toHaveCount(0);
+
+      // And again from a cold load, not only straight after the redirect.
+      await page.reload();
+      await expect(experiments.detail).toBeVisible({ timeout: 15_000 });
+    } finally {
+      await page.close();
+    }
+  });
+
   test("developer gets guided setup", async ({ sessions }) => {
     const page = await (await sessions("developer")).newPage();
     const experiments = new ExperimentsPage(page);
