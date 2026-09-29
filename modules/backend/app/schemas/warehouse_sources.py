@@ -27,6 +27,7 @@ from pydantic import (
     StrictBool,
     StrictInt,
     StringConstraints,
+    WithJsonSchema,
     model_validator,
 )
 
@@ -54,7 +55,18 @@ StringLiteral = Annotated[
     str, StringConstraints(min_length=1, max_length=256, pattern=LITERAL_PATTERN)
 ]
 #: A signed 64-bit integer, -2**63 to 2**63 - 1 inclusive.
-IntLiteral = Annotated[StrictInt, Field(ge=-(2**63), le=2**63 - 1)]
+#:
+#: The bounds are enforced here but described as ``format: int64`` rather than
+#: ``minimum``/``maximum``.  A bound of that size is not a number a double can
+#: hold: FastAPI's OpenAPI model types ``maximum`` as ``float``, which turned
+#: 2**63 - 1 into 2**63 in the document, and release-please's JSON updater
+#: then printed that as 9223372036854776000 in the committed snapshots.
+#: ``int64`` is OpenAPI's name for exactly this range, and it survives both.
+IntLiteral = Annotated[
+    StrictInt,
+    Field(ge=-(2**63), le=2**63 - 1),
+    WithJsonSchema({"type": "integer", "format": "int64"}),
+]
 
 ScalarLiteral = Union[StrictBool, IntLiteral, StringLiteral]
 
