@@ -15,6 +15,7 @@ import {
   experimentStatusLabel,
   experimentTypeLabel,
 } from '@/types/experiments';
+import { canChangeExperiment } from '@/utils/experimentPermissions';
 
 /** Lifecycle transitions exposed per status (mirrors the backend guards). */
 export type LifecycleAction = 'start' | 'pause' | 'complete' | 'archive';
@@ -184,9 +185,14 @@ export default function ExperimentDetailPage() {
   }
 
   const status = experiment.status;
-  const actions = ACTIONS_BY_STATUS[status] ?? [];
+  const statusActions = ACTIONS_BY_STATUS[status] ?? [];
+  const mayChange = canChangeExperiment(user);
+  // Offer only what the API would accept: a role without EXPERIMENT UPDATE is
+  // refused every lifecycle change, including on an experiment it owns.
+  const actions = mayChange ? statusActions : [];
   const isOwner = user !== null && user.id === experiment.owner_id;
   const resultsAvailable = status !== 'draft';
+  const showRoleNote = !mayChange && statusActions.length > 0;
   const primaryMetric = experiment.metrics.find((m) => m.is_primary) ?? experiment.metrics[0];
 
   return (
@@ -298,6 +304,18 @@ export default function ExperimentDetailPage() {
               )}
             </div>
           </div>
+
+          {showRoleNote && (
+            <p className="mt-4 text-sm text-slate-700" data-testid="experiment-role-note">
+              {isOwner
+                ? 'You own this experiment, but starting, pausing, completing and archiving it requires the ADMIN or DEVELOPER role; '
+                : 'Starting, pausing, completing and archiving an experiment requires the ADMIN or DEVELOPER role; '}
+              you are {user?.role || 'signed in without a role'}.{' '}
+              {resultsAvailable
+                ? 'You can read its results.'
+                : 'You can read its results once it has started.'}
+            </p>
+          )}
 
           {confirming && (
             <div

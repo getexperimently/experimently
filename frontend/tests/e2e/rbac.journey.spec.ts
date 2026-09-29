@@ -174,6 +174,59 @@ test.describe("Journey: RBAC", () => {
     });
   }
 
+  // Starting, pausing, completing and archiving need a role with EXPERIMENT
+  // UPDATE (ADMIN or DEVELOPER) or a superuser, whoever owns the experiment.
+  // An analyst or viewer opening a running experiment is offered none of
+  // them, is told why, and reads its results -- and no request they make on
+  // the way is refused by the experiments or results API.
+  for (const role of ["analyst", "viewer"] as const) {
+    test(`${role} sees no lifecycle action on a running experiment and reads its results`, async ({
+      sessions,
+    }) => {
+      const page = await (await sessions(role)).newPage();
+      const experiments = new ExperimentsPage(page);
+      const refused: string[] = [];
+      page.on("response", (response) => {
+        const { pathname } = new URL(response.url());
+        if (
+          /^\/api\/v1\/(experiments|results)\//.test(pathname) &&
+          (response.status() === 401 || response.status() === 403)
+        ) {
+          refused.push(`${response.status()} ${response.request().method()} ${pathname}`);
+        }
+      });
+      try {
+        await experiments.goto();
+        await expect(experiments.experimentList).toBeVisible({ timeout: 15_000 });
+        // Seeded ACTIVE by seed_demo_data.py and owned by the admin; no
+        // journey changes its status.
+        await experiments.clickExperiment("Checkout Button Color");
+        await experiments.expectStatus("active");
+
+        for (const button of [
+          experiments.startButton,
+          experiments.pauseButton,
+          experiments.completeButton,
+          experiments.archiveButton,
+        ]) {
+          await expect(button).toHaveCount(0);
+        }
+        await expect(experiments.actions.locator("button")).toHaveCount(0);
+        const note = page.getByTestId("experiment-role-note");
+        await expect(note).toBeVisible();
+        await expect(note).toContainText("requires the ADMIN or DEVELOPER role");
+        await expect(note).toContainText(`you are ${TEST_USERS[role].role}.`);
+
+        await experiments.viewResults();
+        await expect(page.getByTestId("results-dashboard")).toBeVisible({ timeout: 20_000 });
+        await page.waitForLoadState("networkidle");
+        expect(refused, "no experiments/results request is refused").toEqual([]);
+      } finally {
+        await page.close();
+      }
+    });
+  }
+
   // The reported path end to end: guided setup redirects to the new
   // experiment's page, and its creator -- an ordinary DEVELOPER -- must be able
   // to open it. `createExperiment` resolves only once the detail has rendered.

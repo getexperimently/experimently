@@ -22,3 +22,27 @@ export function canCreateExperiment(
   if (user.is_superuser) return true;
   return ROLES_THAT_CAN_CREATE.includes(user.role as 'ADMIN' | 'DEVELOPER');
 }
+
+/**
+ * Whether the API would accept a lifecycle change (start, pause, complete,
+ * archive) from this user.
+ *
+ * Mirrors `deps.get_experiment_change_access`: a superuser is always
+ * accepted; otherwise the role must hold EXPERIMENT UPDATE, which ADMIN and
+ * DEVELOPER do. Who created the experiment is not part of the question, so an
+ * ANALYST or VIEWER is refused on an experiment they own as well.
+ *
+ * Schedule and delete are separate routes with their own owner check; the
+ * dashboard offers neither, and this helper does not answer for them.
+ */
+const ROLES_THAT_CAN_CHANGE = ['ADMIN', 'DEVELOPER'] as const;
+
+export function canChangeExperiment(
+  user: { role?: string | null; is_superuser?: boolean } | null | undefined,
+): boolean {
+  // No session yet: keep the buttons rather than flickering them in; the
+  // API still decides.
+  if (!user) return true;
+  if (user.is_superuser) return true;
+  return ROLES_THAT_CAN_CHANGE.includes(user.role as 'ADMIN' | 'DEVELOPER');
+}
