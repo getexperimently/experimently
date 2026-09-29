@@ -62,13 +62,13 @@ await client.close();
 | Option / method | Meaning |
 |---|---|
 | `evaluation: 'server' \| 'local'` | `'server'` (default) is unchanged behaviour. |
-| `refreshIntervalMs` | How often the ruleset is refreshed: default 30 000, values below 5 000 are raised to 5 000, each wait jittered by ±10%. |
+| `refreshIntervalMs` | How often the ruleset is refreshed: default 30 000, values below 5 000 are raised to 5 000, jittered by ±10%. Waits after a failure (below) are exact, not jittered. |
 | `maxStaleMs` | Optional. When the ruleset has not been refreshed successfully for this long, flags are evaluated by the server until a refresh succeeds. Default: no limit. |
 | `ready({ timeoutMs? })` | Resolves `{ ok: true, rulesetVersion }` once flags can be answered locally, or `{ ok: false, error }` when the first fetch failed or `timeoutMs` passed. Never rejects. Evaluations never wait for it. |
 | `status()` | `{ evaluation, ready, rulesetVersion, lastRefreshAt, lastError, serverEvaluatedFlags }`. |
 | `close()` | Stops the refresh, sends the remaining evaluation counts, and from then on evaluates on the server. |
 | `source` on `FlagEvaluation` | `'local'` or `'server'` (set only in local mode). |
-| `onError(err, 'refresh' \| 'flush')` | A failed ruleset refresh, or a failed evaluation-count report. |
+| `onError(err, 'refresh' \| 'flush' \| 'evaluate')` | A failed ruleset refresh, a failed evaluation-count report, or an unexpected failure inside local evaluation (that call then goes to the server). |
 
 `evaluateFlag`, `isFeatureEnabled` and `getAllFlags` keep their signatures. A local answer uses the
 attributes passed to that call, so the "call `clearCache()` after changing attributes" caveat does
@@ -123,12 +123,14 @@ as in server mode.
 |---|---|---|
 | 200, or 304 (unchanged) | load it | replace it, or keep it |
 | 5xx, network error, timeout, or a 200 that is not a valid ruleset | evaluate on the server; retry with backoff up to 5 minutes | **keep serving it**; `onError(err, 'refresh')`; retry with backoff |
-| 429 | wait for `Retry-After` | keep serving it; wait for `Retry-After` |
+| 429 | wait `Retry-After` (never less, and never less than `refreshIntervalMs`) | keep serving it; the same wait |
 | 401 / 403 (key revoked, scope removed, owner no longer allowed) | evaluate on the server | **discard it**: every flag is evaluated by the server |
 | 404 (server older than 0.11.0), or a ruleset format this SDK does not know | evaluate on the server | discard it |
 
 401, 403, 404 and an unknown format are reported once and retried every 10 minutes, so a scope
-granted later is picked up without a restart.
+granted later is picked up without a restart. The backoff doubles from `refreshIntervalMs` up to
+exactly 5 minutes. Only the regular refresh interval is jittered: backoff steps, `Retry-After` and
+the 10-minute retry are not.
 
 ## Safety monitoring and the dashboard
 

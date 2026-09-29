@@ -45,7 +45,7 @@ await client.track('user-123', 'page_view'); // no key → fans out to every cac
 | `consistentHash(userId, flagKey)`, `md5Hex(s)`, `md5Bytes(s)` | compatibility hash utilities (not the flag bucketing function) | — |
 
 Config: `apiUrl`, `apiKey` (required); `timeoutMs` (5000), `cacheTtlMs` (300000),
-`defaultVariant` (`'control'`), `fetch`, `onError(err, 'track' | 'trackBatch' | 'refresh' | 'flush')`,
+`defaultVariant` (`'control'`), `fetch`, `onError(err, 'track' | 'trackBatch' | 'refresh' | 'flush' | 'evaluate')`,
 `evaluation` (`'server'` or `'local'`), `refreshIntervalMs` (30000, minimum 5000), `maxStaleMs`.
 Failures are never cached; concurrent calls for the same user + key share one request; a 429 is
 retried once after `Retry-After`.

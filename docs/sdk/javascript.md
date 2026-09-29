@@ -89,7 +89,7 @@ const client = new ExperimentationClient({
   cacheTtlMs: 300_000,               // Successful evaluations/assignments reused per user + key (default 5 min)
   defaultVariant: 'control',         // Returned by getVariant when assignment fails (default 'control')
   fetch: customFetch,                // Optional custom fetch (tests, polyfills); defaults to globalThis.fetch
-  onError: (err, operation) => {},   // Optional; called when track / trackBatch (or, in local mode, refresh / flush) swallow a failure
+  onError: (err, operation) => {},   // Optional; called when track / trackBatch (or, in local mode, refresh / flush / evaluate) swallow a failure
   evaluation: 'server',              // 'server' (default) or 'local' (server-side only; see Local evaluation)
 });
 ```
@@ -102,7 +102,7 @@ const client = new ExperimentationClient({
 | `cacheTtlMs` | `number` | `300000` | TTL of successful evaluations/assignments, per user + key |
 | `defaultVariant` | `string` | `'control'` | Variant name `getVariant` returns on failure |
 | `fetch` | `typeof fetch` | global `fetch` | Custom fetch implementation |
-| `onError` | `(error: ExperimentationError, op: 'track' \| 'trackBatch' \| 'refresh' \| 'flush') => void` | — | Only way to observe swallowed failures; a throwing handler is itself swallowed. `'refresh'` and `'flush'` occur only in local mode |
+| `onError` | `(error: ExperimentationError, op: 'track' \| 'trackBatch' \| 'refresh' \| 'flush' \| 'evaluate') => void` | — | Only way to observe swallowed failures; a throwing handler is itself swallowed. `'refresh'`, `'flush'` and `'evaluate'` occur only in local mode |
 | `evaluation` | `'server' \| 'local'` | `'server'` | `'local'`: answer flags in-process from `GET /api/v1/sdk/ruleset`; needs a key with the `sdk:ruleset` scope; throws in a browser |
 | `refreshIntervalMs` | `number` | `30000` | Local mode: ruleset refresh interval (minimum 5000, ±10% jitter) |
 | `maxStaleMs` | `number` | none | Local mode: evaluate on the server once the ruleset has not been refreshed for this long |

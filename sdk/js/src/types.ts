@@ -2,10 +2,11 @@ import type { ExperimentationError } from './errors';
 
 /**
  * Operations whose failures are swallowed and reported through `onError`:
- * `'refresh'` (a ruleset fetch) and `'flush'` (sending evaluation counts) occur only with
+ * `'refresh'` (a ruleset fetch), `'flush'` (sending evaluation counts) and `'evaluate'` (an
+ * unexpected failure inside local evaluation; the call then goes to the server) occur only with
  * `evaluation: 'local'`.
  */
-export type SwallowedOperation = 'track' | 'trackBatch' | 'refresh' | 'flush';
+export type SwallowedOperation = 'track' | 'trackBatch' | 'refresh' | 'flush' | 'evaluate';
 
 /** Where flags are evaluated: by the server (the default) or in-process from its ruleset. */
 export type EvaluationMode = 'server' | 'local';
@@ -25,7 +26,8 @@ export interface ClientConfig {
   fetch?: typeof fetch;
   /**
    * Called with the error whenever `track` / `trackBatch` swallow a failure, and in local mode
-   * when a ruleset refresh (`'refresh'`) or an evaluation-count report (`'flush'`) fails.
+   * when a ruleset refresh (`'refresh'`), an evaluation-count report (`'flush'`) or a local
+   * evaluation (`'evaluate'`, which then goes to the server) fails.
    * Those operations never reject; this is the only way to observe their failures.
    */
   onError?: (error: ExperimentationError, operation: SwallowedOperation) => void;
@@ -37,7 +39,10 @@ export interface ClientConfig {
    * browser. Experiments are always assigned by the server.
    */
   evaluation?: EvaluationMode;
-  /** Local mode: how often the ruleset is refreshed (default 30 000 ms, minimum 5 000 ms, ±10% jitter). */
+  /**
+   * Local mode: how often the ruleset is refreshed (default 30 000 ms, minimum 5 000 ms, ±10%
+   * jitter). Backoff, `Retry-After` and the 10-minute retry after a refusal are not jittered.
+   */
   refreshIntervalMs?: number;
   /**
    * Local mode: stop answering locally when the ruleset has not been refreshed successfully for

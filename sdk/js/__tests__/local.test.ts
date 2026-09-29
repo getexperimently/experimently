@@ -18,6 +18,7 @@ import {
 } from '../src/local';
 import type { ClientConfig, SwallowedOperation } from '../src/types';
 import { isWellFormedString } from '../src/evaluator';
+import * as evaluatorModule from '../src/evaluator';
 
 const VECTORS_PATH = join(__dirname, '..', '..', '..', 'tests', 'sdk-contract', 'ruleset-vectors.json');
 const vectors = JSON.parse(readFileSync(VECTORS_PATH, 'utf8'));
@@ -655,5 +656,123 @@ describe('construction', () => {
     const ready = client.ready({ timeoutMs: 1_000 });
     await jest.advanceTimersByTimeAsync(1_000);
     await expect(ready).resolves.toMatchObject({ ok: false });
+  });
+});
+
+// ─── Review fixes: exact waits, evaluate errors, report limits ───────────────
+
+describe('only the regular interval is jittered', () => {
+  /** Times (fake clock) at which the ruleset was requested. */
+  function pollTimes(server: FakeServer): number[] {
+    const times: number[] = [];
+    const original = server.fetch.getMockImplementation()!;
+    server.fetch.mockImplementation(async (url: string, init: RequestInit) => {
+      if (url.includes(RULESET_PATH)) times.push(Date.now());
+      return original(url, init);
+    });
+    return times;
+  }
+
+  test.each([0, 0.99999])('Retry-After is a floor (Math.random %p)', async random => {
+    (Math.random as jest.Mock).mockReturnValue(random);
+    const server = new FakeServer(ok(), { status: 429, headers: { 'Retry-After': '120' } }, { status: 304 });
+    const times = pollTimes(server);
+    const { client } = localClient(server);
+    track(client);
+    await client.ready();
+    while (times.length < 3) await jest.advanceTimersByTimeAsync(1_000);
+    expect(times[2] - times[1]).toBe(120_000);
+  });
+
+  test.each([0, 0.99999])('the backoff cap is a ceiling (Math.random %p)', async random => {
+    (Math.random as jest.Mock).mockReturnValue(random);
+    const server = new FakeServer({ status: 500 });
+    const times = pollTimes(server);
+    const { client } = localClient(server);
+    track(client);
+    await client.ready();
+    while (times.length < 8) await jest.advanceTimersByTimeAsync(10_000);
+    const gaps = times.slice(1).map((t, i) => t - times[i]);
+    expect(gaps).toEqual([30_000, 60_000, 120_000, 240_000, MAX_BACKOFF_MS, MAX_BACKOFF_MS, MAX_BACKOFF_MS]);
+  });
+
+  test.each([0, 0.99999])('the refused retry is exactly 10 minutes (Math.random %p)', async random => {
+    (Math.random as jest.Mock).mockReturnValue(random);
+    const server = new FakeServer({ status: 403, body: { detail: 'no scope' } });
+    const times = pollTimes(server);
+    const { client } = localClient(server);
+    track(client);
+    await client.ready();
+    while (times.length < 3) await jest.advanceTimersByTimeAsync(60_000);
+    expect(times[1] - times[0]).toBe(REFUSED_RETRY_MS);
+    expect(times[2] - times[1]).toBe(REFUSED_RETRY_MS);
+  });
+});
+
+describe('an unexpected failure in local evaluation', () => {
+  test('is reported as evaluate, and the call goes to the server', async () => {
+    const server = new FakeServer(ok());
+    server.userFlags = () => ({ body: { 'all-on': true } });
+    const { client, errors } = localClient(server);
+    track(client);
+    await client.ready();
+    const spy = jest.spyOn(evaluatorModule, 'evaluateLocally').mockImplementation(() => {
+      throw new Error('boom');
+    });
+    await expect(client.evaluateFlag('all-on', us)).resolves.toMatchObject({ source: 'server' });
+    await expect(client.getAllFlags('user-1', { country: 'US' })).resolves.toEqual({ 'all-on': true });
+    spy.mockRestore();
+    expect(errors.map(e => e.operation)).toEqual(['evaluate', 'evaluate']);
+    expect(errors[0].error.message).toContain('boom');
+    await client.close();
+    expect(server.requests(EVALUATIONS_PATH)).toHaveLength(0); // nothing counted locally
+  });
+});
+
+describe('evaluation report limits', () => {
+  function manyFlags(n: number) {
+    const flags = Array.from({ length: n }, (_, i) => ({
+      key: `f${String(i).padStart(5, '0')}`,
+      active: true,
+      evaluation: 'local',
+      rollout_percentage: 100,
+      rules: [],
+      default_rule: null,
+    }));
+    return { ...RULESET, version: `n${n}`, flags };
+  }
+
+  test.each([
+    [1000, [1000]],
+    [1001, [1000, 1]],
+  ])('%i flags are reported in requests of %j entries', async (n, sizes) => {
+    const server = new FakeServer(ok(manyFlags(n as number), `"n${n}"`));
+    const { client } = localClient(server);
+    await client.ready();
+    await client.getAllFlags('user-1');
+    await client.close();
+    const posts = server.requests(EVALUATIONS_PATH);
+    expect(posts.map(p => (p.body as { evaluations: unknown[] }).evaluations.length)).toEqual(sizes);
+    const total = posts
+      .flatMap(p => (p.body as { evaluations: Array<{ count: number }> }).evaluations)
+      .reduce((sum, e) => sum + e.count, 0);
+    expect(total).toBe(n);
+  });
+
+  test.each([
+    [1_000_000, 1_000_000, [[1_000_000, 1_000_000]]],
+    [1_000_001, 1_000_001, [[1_000_000, 1_000_000], [1, 1]]],
+    [1_000_001, 5, [[1_000_000, 5], [1, 0]]],
+    [2_000_000, 0, [[1_000_000, 0], [1_000_000, 0]]],
+  ])('a count of %i (%i enabled) is split at 1,000,000', async (count, enabled, expected) => {
+    const server = new FakeServer(ok());
+    const { client } = localClient(server);
+    await client.ready();
+    await client.isFeatureEnabled('all-on', us);
+    const runtime = (client as unknown as { local: { tallies: Map<string, { count: number; enabled: number }> } }).local;
+    runtime.tallies.set('all-on', { count: count as number, enabled: enabled as number });
+    await client.close();
+    const body = server.requests(EVALUATIONS_PATH)[0].body as { evaluations: Array<{ count: number; enabled_count: number }> };
+    expect(body.evaluations.map(e => [e.count, e.enabled_count])).toEqual(expected);
   });
 });

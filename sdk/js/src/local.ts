@@ -15,6 +15,10 @@
  *
  * 401/403/404 and an unknown format are reported once (until a refresh succeeds) and retried every
  * 10 minutes. "Goes to the server" means the call is made exactly as in server mode.
+ *
+ * Only the regular refresh interval is jittered (±10%). A backoff step, the 5-minute backoff cap,
+ * a `Retry-After` wait and the 10-minute retry are exact: `Retry-After` is a floor and the caps are
+ * ceilings.
  */
 import { ExperimentationError, asExperimentationError } from './errors';
 import {
@@ -47,7 +51,13 @@ const MAX_REPORT_ENTRIES = 1000;
 const MAX_ENTRY_COUNT = 1_000_000;
 const MAX_WINDOW_MS = 10 * 60_000;
 
-export type LocalOperation = 'refresh' | 'flush';
+export type LocalOperation = 'refresh' | 'flush' | 'evaluate';
+
+/** The delay before the next refresh, and whether it is the regular interval (jittered). */
+interface NextRefresh {
+  ms: number;
+  jitter: boolean;
+}
 
 export interface LocalRequestInit {
   method?: 'GET' | 'POST';
@@ -95,8 +105,8 @@ interface Tally {
   enabled: number;
 }
 
-function jitter(ms: number): number {
-  return Math.round(ms * (0.9 + Math.random() * 0.2));
+function jittered(next: NextRefresh): number {
+  return next.jitter ? Math.round(next.ms * (0.9 + Math.random() * 0.2)) : next.ms;
 }
 
 function retryAfterMs(response: Response): number | null {
@@ -136,7 +146,7 @@ export class LocalEvaluation {
 
   /** Start the first fetch and the timers. Never throws. */
   start(): void {
-    this.firstAttempt = this.refresh().then(delay => this.schedule(delay));
+    this.firstAttempt = this.refresh().then(next => this.schedule(next));
     this.scheduleFlush();
   }
 
@@ -162,7 +172,8 @@ export class LocalEvaluation {
       const answer = evaluateLocally(ruleset, flagKey, userId, context);
       if (answer !== DEFER) this.count(flagKey, answer.enabled);
       return answer;
-    } catch {
+    } catch (err) {
+      this.evaluationFailed(err);
       return DEFER;
     }
   }
@@ -186,9 +197,22 @@ export class LocalEvaluation {
       }
       for (const key of Object.keys(flags)) this.count(key, flags[key]);
       return flags;
-    } catch {
+    } catch (err) {
+      this.evaluationFailed(err);
       return DEFER;
     }
+  }
+
+  /** A bug in local evaluation: reported as `'evaluate'`; the call still goes to the server. */
+  private evaluationFailed(err: unknown): void {
+    const error = asExperimentationError(err);
+    this.transport.report(
+      new ExperimentationError(`Local evaluation failed; asking the server instead: ${error.message}`, {
+        code: 'INVALID_RESPONSE',
+        cause: err,
+      }),
+      'evaluate'
+    );
   }
 
   // ─── Lifecycle ─────────────────────────────────────────────────────────────
@@ -245,12 +269,12 @@ export class LocalEvaluation {
 
   // ─── Refresh ───────────────────────────────────────────────────────────────
 
-  private schedule(delay: number): void {
+  private schedule(next: NextRefresh): void {
     if (this.closed) return;
     this.pollTimer = setTimeout(() => {
       this.pollTimer = null;
-      void this.refresh().then(next => this.schedule(next));
-    }, jitter(delay));
+      void this.refresh().then(after => this.schedule(after));
+    }, jittered(next));
     unref(this.pollTimer);
   }
 
@@ -259,7 +283,7 @@ export class LocalEvaluation {
   }
 
   /** One refresh. Resolves to the delay before the next; never rejects. */
-  async refresh(): Promise<number> {
+  async refresh(): Promise<NextRefresh> {
     const method = 'GET';
     let response: Response;
     try {
@@ -269,7 +293,7 @@ export class LocalEvaluation {
     } catch (err) {
       return this.transient(asExperimentationError(err));
     }
-    if (this.closed) return this.interval;
+    if (this.closed) return { ms: this.interval, jitter: false };
 
     try {
       const status = response.status;
@@ -314,7 +338,8 @@ export class LocalEvaluation {
         const error = await this.transport.httpError(response, RULESET_PATH, method);
         this.lastError = error;
         this.transport.report(error, 'refresh');
-        return Math.max(retryAfterMs(response) ?? this.interval, this.interval);
+        // Retry-After is a floor: never earlier than the server asked, nor than the interval.
+        return { ms: Math.max(retryAfterMs(response) ?? this.interval, this.interval), jitter: false };
       }
       return this.transient(await this.transport.httpError(response, RULESET_PATH, method));
     } catch (err) {
@@ -322,7 +347,7 @@ export class LocalEvaluation {
     }
   }
 
-  private async load(response: Response): Promise<number> {
+  private async load(response: Response): Promise<NextRefresh> {
     let body: unknown;
     try {
       body = await response.json();
@@ -362,24 +387,24 @@ export class LocalEvaluation {
     return this.succeeded();
   }
 
-  private succeeded(): number {
+  private succeeded(): NextRefresh {
     this.lastRefreshAt = Date.now();
     this.lastError = null;
     this.failures = 0;
     this.refusal = null;
-    return this.interval;
+    return { ms: this.interval, jitter: true };
   }
 
   /** A failure that may pass: keep whatever ruleset there is, report, back off. */
-  private transient(error: ExperimentationError): number {
+  private transient(error: ExperimentationError): NextRefresh {
     this.lastError = error;
     this.failures += 1;
     this.transport.report(error, 'refresh');
-    return Math.min(this.interval * 2 ** (this.failures - 1), MAX_BACKOFF_MS);
+    return { ms: Math.min(this.interval * 2 ** (this.failures - 1), MAX_BACKOFF_MS), jitter: false };
   }
 
   /** The server refused: discard the ruleset (so nothing is answered locally), report once. */
-  private refused(kind: string, error: ExperimentationError): number {
+  private refused(kind: string, error: ExperimentationError): NextRefresh {
     this.ruleset = null;
     this.etag = null;
     this.lastError = error;
@@ -388,7 +413,7 @@ export class LocalEvaluation {
       this.refusal = kind;
       this.transport.report(error, 'refresh');
     }
-    return REFUSED_RETRY_MS;
+    return { ms: REFUSED_RETRY_MS, jitter: false };
   }
 
   // ─── Evaluation counts ─────────────────────────────────────────────────────
