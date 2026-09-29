@@ -1,0 +1,135 @@
+{
+  "_provenance": {
+    "source": "vendor documentation",
+    "vendor_docs_row": "7c",
+    "url": "https://docs.cloud.google.com/bigquery/docs/reference/rest/v2/jobs/getQueryResults",
+    "note": "getQueryResults for the metric statement: every scalar is a JSON string; the float columns are FORMAT('%.17g') text.",
+    "real_run_id": null
+  },
+  "status": 200,
+  "body": {
+    "kind": "bigquery#getQueryResultsResponse",
+    "jobReference": {
+      "projectId": "acme-analytics",
+      "jobId": "JOBID",
+      "location": "US"
+    },
+    "jobComplete": true,
+    "totalRows": "2",
+    "totalBytesProcessed": "1048576",
+    "cacheHit": false,
+    "schema": {
+      "fields": [
+        {
+          "name": "variant",
+          "type": "STRING",
+          "mode": "NULLABLE"
+        },
+        {
+          "name": "n",
+          "type": "INTEGER",
+          "mode": "NULLABLE"
+        },
+        {
+          "name": "n_converted",
+          "type": "INTEGER",
+          "mode": "NULLABLE"
+        },
+        {
+          "name": "k",
+          "type": "STRING",
+          "mode": "NULLABLE"
+        },
+        {
+          "name": "sum_d",
+          "type": "STRING",
+          "mode": "NULLABLE"
+        },
+        {
+          "name": "sum_d2",
+          "type": "STRING",
+          "mode": "NULLABLE"
+        },
+        {
+          "name": "metric_rows_in_window",
+          "type": "INTEGER",
+          "mode": "NULLABLE"
+        },
+        {
+          "name": "metric_rows_matched",
+          "type": "INTEGER",
+          "mode": "NULLABLE"
+        },
+        {
+          "name": "null_value_rows",
+          "type": "INTEGER",
+          "mode": "NULLABLE"
+        }
+      ]
+    },
+    "rows": [
+      {
+        "f": [
+          {
+            "v": "control"
+          },
+          {
+            "v": "1000"
+          },
+          {
+            "v": "100"
+          },
+          {
+            "v": "0.10500000000000001"
+          },
+          {
+            "v": "-5.0000000000000044"
+          },
+          {
+            "v": "94.474999999999994"
+          },
+          {
+            "v": "230"
+          },
+          {
+            "v": "220"
+          },
+          {
+            "v": "0"
+          }
+        ]
+      },
+      {
+        "f": [
+          {
+            "v": "treatment"
+          },
+          {
+            "v": "1000"
+          },
+          {
+            "v": "110"
+          },
+          {
+            "v": "0.10500000000000001"
+          },
+          {
+            "v": "5.0000000000000044"
+          },
+          {
+            "v": "98.474999999999994"
+          },
+          {
+            "v": "230"
+          },
+          {
+            "v": "220"
+          },
+          {
+            "v": "0"
+          }
+        ]
+      }
+    ]
+  }
+}

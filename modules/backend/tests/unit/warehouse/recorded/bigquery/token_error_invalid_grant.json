@@ -1,0 +1,14 @@
+{
+  "_provenance": {
+    "source": "vendor documentation",
+    "vendor_docs_row": "9",
+    "url": "https://developers.google.com/identity/protocols/oauth2/service-account",
+    "note": "error=invalid_grant ('Invalid JWT Signature.'); the description is replaced by a sentinel.",
+    "real_run_id": null
+  },
+  "status": 400,
+  "body": {
+    "error": "invalid_grant",
+    "error_description": "UPSTREAM-SENTINEL-bq-4d1e Invalid JWT Signature."
+  }
+}

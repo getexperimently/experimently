@@ -1,0 +1,24 @@
+{
+  "_provenance": {
+    "source": "vendor documentation",
+    "vendor_docs_row": "7c",
+    "url": "https://docs.cloud.google.com/bigquery/docs/error-messages",
+    "note": "timeout, 400: the job exceeded its time limit.",
+    "real_run_id": null
+  },
+  "status": 400,
+  "body": {
+    "error": {
+      "code": 400,
+      "message": "UPSTREAM-SENTINEL-bq-4d1e message",
+      "status": "INVALID_ARGUMENT",
+      "errors": [
+        {
+          "domain": "global",
+          "reason": "timeout",
+          "message": "UPSTREAM-SENTINEL-bq-4d1e detail"
+        }
+      ]
+    }
+  }
+}
