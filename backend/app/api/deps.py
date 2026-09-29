@@ -390,50 +390,77 @@ def get_current_superuser_or_none(
     return None
 
 
-def get_experiment_access(
+def get_experiment_read_access(
     experiment: Union[Experiment, Dict[str, Any]],
     current_user: User = Depends(get_current_active_user),
 ) -> Union[Experiment, Dict[str, Any]]:
     """
-    Check if user has access to the experiment.
+    Admit a caller who may read this experiment and its results.
 
-    This function ensures the current user has permission to access
-    the specified experiment, checking superuser status, permissions,
-    and ownership as needed.
+    A superuser, or a user whose role holds ``Action.READ`` on experiments.
+    Who created the experiment is not considered.
 
-    Called directly from endpoints (positional `experiment` arg). For the
-    dependency-injection variant that fetches the experiment from a path
-    parameter, callers should use `Depends(get_experiment_by_key)` and pass
-    the resolved experiment to this function.
+    Called directly from endpoints with the experiment already loaded, before
+    anything else the route does, a cache read included.
 
     Args:
-        experiment: The experiment to check access for
+        experiment: The experiment being read
         current_user: The current authenticated user
 
     Returns:
-        The experiment if access is allowed
+        The experiment, unchanged
 
     Raises:
-        HTTPException: If the user does not have permission to access the experiment
+        HTTPException 403: If the role does not hold READ on experiments
     """
-    # Superusers always have access
     if current_user.is_superuser:
         return experiment
 
-    # Check if user has permission to read experiments
     if not check_permission(current_user, ResourceType.EXPERIMENT, Action.READ):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=get_permission_error_message(ResourceType.EXPERIMENT, Action.READ),
         )
 
-    # Check ownership for non-admin users for modification actions
-    if not check_permission(
-        current_user, ResourceType.EXPERIMENT, Action.UPDATE
-    ) and not check_ownership(current_user, experiment):
+    return experiment
+
+
+def get_experiment_change_access(
+    experiment: Union[Experiment, Dict[str, Any]],
+    current_user: User,
+    action: Action = Action.UPDATE,
+) -> Union[Experiment, Dict[str, Any]]:
+    """
+    Admit a caller who may change this experiment.
+
+    A superuser, or a user whose role holds both ``Action.READ`` and
+    ``action`` on experiments. Who created the experiment is not considered,
+    so a role without ``action`` is refused on an experiment it created too.
+
+    Used by update, start, pause, complete, archive and metadata. Schedule
+    and delete keep their own checks in the endpoint, which also require the
+    caller to be the experiment's owner.
+
+    Args:
+        experiment: The experiment being changed
+        current_user: The current authenticated user
+        action: The action the route performs (UPDATE unless stated)
+
+    Returns:
+        The experiment, unchanged
+
+    Raises:
+        HTTPException 403: If the role does not hold READ and ``action``
+    """
+    get_experiment_read_access(experiment, current_user)
+
+    if current_user.is_superuser:
+        return experiment
+
+    if not check_permission(current_user, ResourceType.EXPERIMENT, action):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="You don't have permission to access this experiment",
+            detail=get_permission_error_message(ResourceType.EXPERIMENT, action),
         )
 
     return experiment
@@ -763,65 +790,6 @@ def can_create_experiment(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=get_permission_error_message(ResourceType.EXPERIMENT, Action.CREATE),
         )
-    return True
-
-
-def can_update_experiment(
-    experiment: Experiment = Depends(get_experiment_by_key),
-    current_user: User = Depends(get_current_user),
-) -> bool:
-    """Check if user can update an experiment."""
-    # First gate the request through the standard read/ownership check
-    get_experiment_access(experiment, current_user)
-    if not check_permission(current_user, ResourceType.EXPERIMENT, Action.UPDATE):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail=get_permission_error_message(ResourceType.EXPERIMENT, Action.UPDATE),
-        )
-    return True
-
-
-def can_delete_experiment(
-    experiment: Experiment = Depends(get_experiment_by_key),
-    current_user: User = Depends(get_current_user),
-) -> bool:
-    """
-    Check if user can delete an experiment.
-
-    WARNING: Do not use this dependency in the delete_experiment endpoint!
-    There is a design conflict where this dependency chain requires ACTIVE experiments
-    (via get_experiment_by_key) but the delete_experiment endpoint requires
-    experiments to be in DRAFT status. Use inline permission checks in the
-    delete_experiment endpoint instead.
-    """
-    # Gate through the standard read/ownership check first
-    get_experiment_access(experiment, current_user)
-    # Check if user has permission to delete experiments
-    if not check_permission(current_user, ResourceType.EXPERIMENT, Action.DELETE):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail=get_permission_error_message(ResourceType.EXPERIMENT, Action.DELETE),
-        )
-
-    # If not a superuser, check ownership
-    if not current_user.is_superuser:
-        # For Dict objects, check owner_id field
-        if isinstance(experiment, dict) and str(experiment.get("owner_id")) != str(
-            current_user.id
-        ):
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="You must be the owner to delete this experiment",
-            )
-        # For Experiment objects, check owner_id attribute
-        elif hasattr(experiment, "owner_id") and str(experiment.owner_id) != str(
-            current_user.id
-        ):
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="You must be the owner to delete this experiment",
-            )
-
     return True
 
 

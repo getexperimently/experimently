@@ -120,7 +120,7 @@ class MockExperiment:
         return self.__dict__ == other.__dict__
 
     def get(self, key, default=None):
-        """Add dictionary-style access for compatibility with deps.get_experiment_access"""
+        """Add dictionary-style access for compatibility with the experiment access checks"""
         return getattr(self, key, default)
 
     @property
@@ -321,8 +321,8 @@ class TestAuthDependencies:
 class TestExperimentAccessDependency:
     """Test experiment access dependency."""
 
-    def test_get_experiment_access_owner(self):
-        """Test get_experiment_access with experiment owner."""
+    def test_get_experiment_read_access_owner(self):
+        """Test get_experiment_read_access with experiment owner."""
         # Mock experiment
         mock_experiment = MockExperiment(id=1, owner_id=1)
 
@@ -330,13 +330,13 @@ class TestExperimentAccessDependency:
         mock_user = MockUser(id=1, is_superuser=False, role="developer")
 
         # Call function
-        experiment = deps.get_experiment_access(mock_experiment, mock_user)
+        experiment = deps.get_experiment_read_access(mock_experiment, mock_user)
 
         # Verify
         assert experiment == mock_experiment
 
-    def test_get_experiment_access_superuser(self):
-        """Test get_experiment_access with superuser."""
+    def test_get_experiment_read_access_superuser(self):
+        """Test get_experiment_read_access with superuser."""
         # Mock experiment
         mock_experiment = MockExperiment(id=1, owner_id=2)
 
@@ -344,35 +344,35 @@ class TestExperimentAccessDependency:
         mock_superuser = MockUser(id=1, is_superuser=True)
 
         # Call function
-        experiment = deps.get_experiment_access(mock_experiment, mock_superuser)
+        experiment = deps.get_experiment_read_access(mock_experiment, mock_superuser)
 
         # Verify
         assert experiment == mock_experiment
 
-    def test_get_experiment_access_not_found(self):
-        """Test get_experiment_access with non-existent experiment."""
+    def test_get_experiment_read_access_not_found(self):
+        """Test get_experiment_read_access with non-existent experiment."""
 
-        # Mock implementation of get_experiment_access that raises the correct error for None
-        def mock_get_experiment_access(experiment, current_user):
+        # Mock implementation of get_experiment_read_access that raises the correct error for None
+        def mock_get_experiment_read_access(experiment, current_user):
             if experiment is None:
                 raise HTTPException(status_code=404, detail="Experiment not found")
-            return deps.get_experiment_access(experiment, current_user)
+            return deps.get_experiment_read_access(experiment, current_user)
 
         # Patch the function with our mock implementation
         with patch(
-            "backend.app.api.deps.get_experiment_access",
-            side_effect=mock_get_experiment_access,
+            "backend.app.api.deps.get_experiment_read_access",
+            side_effect=mock_get_experiment_read_access,
         ):
             # Call function with None experiment
             with pytest.raises(HTTPException) as excinfo:
-                deps.get_experiment_access(None, MagicMock())
+                deps.get_experiment_read_access(None, MagicMock())
 
             # Verify
             assert excinfo.value.status_code == 404
             assert "Experiment not found" in excinfo.value.detail
 
-    def test_get_experiment_access_unauthorized(self):
-        """Test get_experiment_access with unauthorized user."""
+    def test_get_experiment_read_access_unauthorized(self):
+        """Test get_experiment_read_access with unauthorized user."""
         # Mock experiment
         mock_experiment = MockExperiment(id=1, owner_id=1)
 
@@ -381,7 +381,7 @@ class TestExperimentAccessDependency:
 
         # Call function
         with pytest.raises(HTTPException) as excinfo:
-            deps.get_experiment_access(mock_experiment, mock_user)
+            deps.get_experiment_read_access(mock_experiment, mock_user)
 
         # Verify
         assert excinfo.value.status_code == 403
@@ -678,7 +678,7 @@ class TestIntegrationDependencyInjection:
             assert active_user == current_user
 
             # Step 3: Get experiment with access check
-            accessed_experiment = deps.get_experiment_access(
+            accessed_experiment = deps.get_experiment_read_access(
                 mock_experiment, active_user
             )
             assert accessed_experiment == mock_experiment
@@ -726,7 +726,7 @@ class TestIntegrationDependencyInjection:
             active_user = deps.get_current_active_user(user)
 
             # Get experiment with access check
-            experiment = deps.get_experiment_access(mock_experiment, active_user)
+            experiment = deps.get_experiment_read_access(mock_experiment, active_user)
 
             # Verify
             assert user == mock_user

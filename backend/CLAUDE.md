@@ -108,21 +108,33 @@ async def update_feature_flag(
 Create is gated by the async dependency `deps.can_create_feature_flag`. The other flag
 helpers in `deps.py` are not used by any route.
 
-### Experiment Dependencies (SYNC)
+### Experiment Access (SYNC)
+
+Two synchronous checks in `deps.py`, called from the endpoint once the
+experiment is loaded (they are not `Depends` targets). Neither considers who
+owns the experiment:
+
+- `get_experiment_read_access(experiment, user)`: a superuser, or a role with
+  READ on experiments. The detail, results, daily-results and
+  segmented-results routes call it before any cache read.
+- `get_experiment_change_access(experiment, user, action=Action.UPDATE)`: a
+  superuser, or a role with READ and `action`. Update, start, pause, complete,
+  archive and metadata call it; clone calls the read check and then checks
+  CREATE. Schedule and delete keep their own inline checks, which also require
+  the owner.
 
 ```python
-# In deps.py - these are SYNC
-def get_experiment_access(...) -> Experiment:
-    check_permission(current_user, "experiment", "READ")
-    return experiment
-
-# In endpoints - no await
-@router.put("/experiments/{exp_id}")
-def update_experiment(
-    experiment: Experiment = Depends(get_experiment_access),
-    ...
+@router.post("/experiments/{experiment_id}/start")
+async def start_experiment(
+    experiment_id: UUID,
+    db: Session = Depends(deps.get_db),
+    current_user: User = Depends(deps.get_current_active_user),
 ):
-    # endpoint logic
+    experiment = db.query(Experiment).filter(Experiment.id == experiment_id).first()
+    if experiment is None:
+        raise HTTPException(404, "Experiment not found")
+    experiment = deps.get_experiment_change_access(experiment, current_user)
+    ...
 ```
 
 ### Permission Check Order
@@ -235,10 +247,9 @@ async def test_feature_flag_create_permission():
     assert result is True
 
 
-# For sync functions
-def test_experiment_permission():
-    result = get_experiment_access(...)
-    assert result is not None
+# For sync functions (a real User: a MagicMock passes check_permission)
+def test_experiment_permission(analyst_user, experiment):
+    assert get_experiment_read_access(experiment, analyst_user) is experiment
 ```
 
 ### Mocking Authentication

@@ -34,7 +34,7 @@ The dependencies are organized in a hierarchical manner, allowing for compositio
 - Base dependencies (database, Redis)
 - Authentication dependencies (get_current_user)
 - Authorization dependencies (get_current_active_user, get_current_superuser)
-- Resource-specific dependencies (get_experiment_access)
+- Resource-specific checks (get_experiment_read_access, get_experiment_change_access)
 
 ## Best Practices Used
 
@@ -58,12 +58,23 @@ async def read_items(
 
 ### Resource Authorization
 
+The experiment checks are plain functions, called from the endpoint once the
+experiment is loaded:
+
 ```python
-@router.get("/{experiment_id}")
-async def get_experiment(
-    experiment: Experiment = Depends(deps.get_experiment_access)
+@router.get("/{experiment_id}/results")
+async def get_experiment_results(
+    experiment_id: UUID,
+    db: Session = Depends(deps.get_db),
+    current_user: User = Depends(deps.get_current_active_user),
 ):
-    return experiment
+    experiment = db.query(Experiment).filter(Experiment.id == experiment_id).first()
+    if experiment is None:
+        raise HTTPException(status_code=404, detail="Experiment not found")
+    # READ on experiments; a route that changes one calls
+    # deps.get_experiment_change_access(experiment, current_user) instead.
+    deps.get_experiment_read_access(experiment, current_user)
+    ...
 ```
 
 ### Cache-Aware Endpoints

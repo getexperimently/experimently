@@ -483,35 +483,29 @@ async def test_get_experiment_found(
     # Configure mocks
     mock_experiment_service.get_experiment_by_id.return_value = mock_experiment
 
-    # Create a mock for deps.get_experiment_access to return the same mock experiment
-    with patch(
-        "backend.app.api.deps.get_experiment_access", return_value=mock_experiment
-    ):
-        # Call the endpoint
-        response = await experiments.get_experiment(
-            experiment_id=experiment_id,
-            db=mock_db,
-            current_user=mock_user,
-            cache_control=mock_cache_control,
-        )
+    # Call the endpoint
+    response = await experiments.get_experiment(
+        experiment_id=experiment_id,
+        db=mock_db,
+        current_user=mock_user,
+        cache_control=mock_cache_control,
+    )
 
-        # Verify service was called correctly
-        mock_experiment_service.get_experiment_by_id.assert_called_once_with(
-            experiment_id
-        )
+    # Verify service was called correctly
+    mock_experiment_service.get_experiment_by_id.assert_called_once_with(experiment_id)
 
-        # Convert response to dict if it's a Pydantic model (for comparison)
-        if hasattr(response, "model_dump"):
-            response_dict = response.model_dump()
-        else:
-            response_dict = response  # It's already a dict
+    # Convert response to dict if it's a Pydantic model (for comparison)
+    if hasattr(response, "model_dump"):
+        response_dict = response.model_dump()
+    else:
+        response_dict = response  # It's already a dict
 
-        # For simpler comparison, verify key fields match
-        assert str(response_dict["id"]) == str(mock_experiment.id)
-        assert response_dict["name"] == mock_experiment.name
-        assert response_dict["description"] == mock_experiment.description
-        assert response_dict["hypothesis"] == mock_experiment.hypothesis
-        assert response_dict["status"] == str(mock_experiment.status.value)
+    # For simpler comparison, verify key fields match
+    assert str(response_dict["id"]) == str(mock_experiment.id)
+    assert response_dict["name"] == mock_experiment.name
+    assert response_dict["description"] == mock_experiment.description
+    assert response_dict["hypothesis"] == mock_experiment.hypothesis
+    assert response_dict["status"] == str(mock_experiment.status.value)
 
 
 @pytest.mark.asyncio
@@ -579,7 +573,8 @@ async def test_update_experiment(
     ):
         # Mock the access dependency
         with patch(
-            "backend.app.api.deps.get_experiment_access", return_value=mock_experiment
+            "backend.app.api.deps.get_experiment_change_access",
+            return_value=mock_experiment,
         ):
             # Call the endpoint
             response = await experiments.update_experiment(
@@ -668,7 +663,8 @@ async def test_start_experiment(
     ):
         # Mock the access dependency
         with patch(
-            "backend.app.api.deps.get_experiment_access", return_value=mock_experiment
+            "backend.app.api.deps.get_experiment_change_access",
+            return_value=mock_experiment,
         ):
             # Call the endpoint
             response = await experiments.start_experiment(

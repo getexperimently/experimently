@@ -584,7 +584,8 @@ async def update_experiment(
     Update experiment.
 
     This endpoint allows users to update an existing experiment.
-    The user must have access to the experiment (be the owner or have permission).
+    The caller's role must hold UPDATE on experiments; who created the
+    experiment is not considered.
 
     Fields that can be updated:
     - Basic properties: name, description, hypothesis
@@ -595,7 +596,7 @@ async def update_experiment(
         ExperimentResponse: The updated experiment
 
     Raises:
-        HTTPException 403: If the user doesn't have permission to update this experiment
+        HTTPException 403: If the caller's role does not hold UPDATE on experiments
         HTTPException 400: If trying to update variants/metrics for non-DRAFT experiment
         HTTPException 404: If the experiment doesn't exist
     """
@@ -607,8 +608,8 @@ async def update_experiment(
                 status_code=status.HTTP_404_NOT_FOUND, detail="Experiment not found"
             )
 
-        # Check access permission
-        experiment = deps.get_experiment_access(experiment, current_user)
+        # READ and UPDATE on experiments; who created it is not considered
+        experiment = deps.get_experiment_change_access(experiment, current_user)
 
         # Only now: the module check comes *after* existence and authorisation,
         # so an unauthorised caller (or a request for a missing experiment)
@@ -929,7 +930,7 @@ async def start_experiment(
 
     Raises:
         HTTPException 400: If the experiment cannot be started
-        HTTPException 403: If the user doesn't have permission to start this experiment
+        HTTPException 403: If the caller's role does not hold UPDATE on experiments
     """
     try:
         # Get experiment
@@ -939,8 +940,8 @@ async def start_experiment(
                 status_code=status.HTTP_404_NOT_FOUND, detail="Experiment not found"
             )
 
-        # Check access permission
-        experiment = deps.get_experiment_access(experiment, current_user)
+        # READ and UPDATE on experiments; who created it is not considered
+        experiment = deps.get_experiment_change_access(experiment, current_user)
 
         # Create experiment service
         experiment_service = ExperimentService(db)
@@ -1016,7 +1017,7 @@ async def pause_experiment(
 
     Raises:
         HTTPException 400: If the experiment cannot be paused
-        HTTPException 403: If the user doesn't have permission to pause this experiment
+        HTTPException 403: If the caller's role does not hold UPDATE on experiments
     """
     try:
         # Get experiment
@@ -1026,8 +1027,8 @@ async def pause_experiment(
                 status_code=status.HTTP_404_NOT_FOUND, detail="Experiment not found"
             )
 
-        # Check access permission
-        experiment = deps.get_experiment_access(experiment, current_user)
+        # READ and UPDATE on experiments; who created it is not considered
+        experiment = deps.get_experiment_change_access(experiment, current_user)
 
         # Check if experiment can be paused
         if experiment.status != ExperimentStatus.ACTIVE:
@@ -1180,7 +1181,7 @@ async def complete_experiment(
 
     Raises:
         HTTPException 400: If the experiment cannot be completed
-        HTTPException 403: If the user doesn't have permission to complete this experiment
+        HTTPException 403: If the caller's role does not hold UPDATE on experiments
     """
     try:
         # Get experiment
@@ -1190,8 +1191,8 @@ async def complete_experiment(
                 status_code=status.HTTP_404_NOT_FOUND, detail="Experiment not found"
             )
 
-        # Check access permission
-        experiment = deps.get_experiment_access(experiment, current_user)
+        # READ and UPDATE on experiments; who created it is not considered
+        experiment = deps.get_experiment_change_access(experiment, current_user)
 
         # Check if experiment is in a valid state to be completed
         if experiment.status not in [ExperimentStatus.ACTIVE, ExperimentStatus.PAUSED]:
@@ -1237,14 +1238,14 @@ async def get_experiment_results(
     """
     Get experiment results and statistical analysis.
 
-    Applies the experiment-level access rules (permission/ownership check and
-    no results for DRAFT experiments) and then delegates to the analytics
+    Requires READ on experiments (who created the experiment is not
+    considered), refuses DRAFT experiments, and then delegates to the analytics
     results engine, so this endpoint returns exactly the same payload as
     ``GET /api/v1/results/{experiment_id}`` with default options.
 
     Raises:
         HTTPException 400: If the experiment is in DRAFT status
-        HTTPException 403: If the user doesn't have permission to view this experiment
+        HTTPException 403: If the caller's role does not hold READ on experiments
         HTTPException 404: If the experiment does not exist
     """
     experiment = db.query(Experiment).filter(Experiment.id == experiment_id).first()
@@ -1253,7 +1254,7 @@ async def get_experiment_results(
             status_code=status.HTTP_404_NOT_FOUND, detail="Experiment not found"
         )
 
-    deps.get_experiment_access(experiment, current_user)
+    deps.get_experiment_read_access(experiment, current_user)
 
     if experiment.status == ExperimentStatus.DRAFT:
         raise HTTPException(
@@ -1304,7 +1305,7 @@ async def archive_experiment(
 
     Raises:
         HTTPException 400: If the experiment is already archived
-        HTTPException 403: If the user doesn't have permission to archive this experiment
+        HTTPException 403: If the caller's role does not hold UPDATE on experiments
     """
     try:
         # Get experiment
@@ -1314,8 +1315,8 @@ async def archive_experiment(
                 status_code=status.HTTP_404_NOT_FOUND, detail="Experiment not found"
             )
 
-        # Check access permission
-        experiment = deps.get_experiment_access(experiment, current_user)
+        # READ and UPDATE on experiments; who created it is not considered
+        experiment = deps.get_experiment_change_access(experiment, current_user)
 
         # Check if experiment is already archived
         if experiment.status == ExperimentStatus.ARCHIVED:
@@ -1375,7 +1376,7 @@ async def clone_experiment(
         ExperimentResponse: The newly created cloned experiment
 
     Raises:
-        HTTPException 403: If the user doesn't have permission to view the source experiment
+        HTTPException 403: If the caller's role does not hold READ and CREATE on experiments
         HTTPException 404: If the source experiment doesn't exist
     """
     try:
@@ -1386,8 +1387,16 @@ async def clone_experiment(
                 status_code=status.HTTP_404_NOT_FOUND, detail="Experiment not found"
             )
 
-        # Check access permission for source experiment
-        experiment = deps.get_experiment_access(experiment, current_user)
+        # A clone is a new experiment: READ on the source, and CREATE, which
+        # the create route requires too.
+        experiment = deps.get_experiment_read_access(experiment, current_user)
+        if not check_permission(current_user, ResourceType.EXPERIMENT, Action.CREATE):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=get_permission_error_message(
+                    ResourceType.EXPERIMENT, Action.CREATE
+                ),
+            )
 
         # A clone stores a new experiment of the source's type, so it is held
         # to the same rule as create: a build that cannot route split-URL
@@ -1446,7 +1455,7 @@ async def get_daily_experiment_results(
 
     Raises:
         HTTPException 400: If the experiment has no data or is in DRAFT status
-        HTTPException 403: If the user doesn't have permission to view this experiment
+        HTTPException 403: If the caller's role does not hold READ on experiments
     """
     try:
         # Get experiment
@@ -1456,8 +1465,8 @@ async def get_daily_experiment_results(
                 status_code=status.HTTP_404_NOT_FOUND, detail="Experiment not found"
             )
 
-        # Check access permission
-        experiment = deps.get_experiment_access(experiment, current_user)
+        # Before the cache read: the role must hold READ on experiments
+        experiment = deps.get_experiment_read_access(experiment, current_user)
 
         # Check if experiment has results
         if experiment.status == ExperimentStatus.DRAFT:
@@ -1534,7 +1543,7 @@ async def get_segmented_experiment_results(
 
     Raises:
         HTTPException 400: If the experiment has no data or is in DRAFT status
-        HTTPException 403: If the user doesn't have permission to view this experiment
+        HTTPException 403: If the caller's role does not hold READ on experiments
     """
     try:
         # Get experiment
@@ -1544,8 +1553,8 @@ async def get_segmented_experiment_results(
                 status_code=status.HTTP_404_NOT_FOUND, detail="Experiment not found"
             )
 
-        # Check access permission
-        experiment = deps.get_experiment_access(experiment, current_user)
+        # Before the cache read: the role must hold READ on experiments
+        experiment = deps.get_experiment_read_access(experiment, current_user)
 
         # Check if experiment has results
         if experiment.status == ExperimentStatus.DRAFT:
@@ -1617,7 +1626,7 @@ async def update_experiment_metadata(
         Dict[str, Any]: The updated experiment with metadata
 
     Raises:
-        HTTPException 403: If the user doesn't have permission to update this experiment
+        HTTPException 403: If the caller's role does not hold UPDATE on experiments
         HTTPException 404: If the experiment doesn't exist
     """
     try:
@@ -1628,8 +1637,8 @@ async def update_experiment_metadata(
                 status_code=status.HTTP_404_NOT_FOUND, detail="Experiment not found"
             )
 
-        # Check access permission
-        experiment = deps.get_experiment_access(experiment, current_user)
+        # READ and UPDATE on experiments; who created it is not considered
+        experiment = deps.get_experiment_change_access(experiment, current_user)
 
         # Create experiment service
         experiment_service = ExperimentService(db)

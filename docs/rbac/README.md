@@ -55,15 +55,28 @@ The following table shows which roles can perform which actions on which resourc
 
 ## Ownership-Based Access
 
-In addition to role-based permissions, the system also supports ownership-based access:
+A user who creates a resource is recorded as its owner. What that record decides
+depends on the resource.
 
-- Users who create a resource automatically become its owner
-- Owners have full access to their own resources regardless of their role
-- Non-owners can only access resources based on their role permissions
+**Feature flags.** A flag's owner is recorded and shown, but access to flags is decided
+by role alone: ADMIN and DEVELOPER may change any flag, and ANALYST and VIEWER may change
+none, including one they own.
 
-**Feature flags are the exception.** A flag's owner is recorded and shown, but access to
-flags is decided by role alone: ADMIN and DEVELOPER may change any flag, and ANALYST and
-VIEWER may change none, including one they own.
+**Experiments.** Under `/api/v1/experiments/{experiment_id}`:
+
+- Reading an experiment (`GET /{experiment_id}`) and its results (`/results`,
+  `/daily-results`, `/segmented-results/{segment_by}`) needs the role's READ on
+  experiments. Who owns the experiment is not considered.
+- Changing one -- `PUT /{experiment_id}`, `start`, `pause`, `complete`, `archive` and
+  `metadata` -- needs the role's UPDATE on experiments. Who owns the experiment is not
+  considered, so ANALYST and VIEWER change no experiment, including one they own.
+- A clone (`POST /{experiment_id}/clone`) needs READ on the source and the role's CREATE
+  on experiments.
+- Scheduling (`PUT /{experiment_id}/schedule`) and deleting (`DELETE /{experiment_id}`)
+  need the role's UPDATE or DELETE **and** being the experiment's owner; a superuser is
+  the exception.
+
+A superuser passes every one of these checks.
 
 ## Usage in Code
 

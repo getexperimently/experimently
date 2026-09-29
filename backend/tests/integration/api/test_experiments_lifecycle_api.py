@@ -512,13 +512,14 @@ class TestGetExperimentResults:
         response = admin_client.get(f"/api/v1/experiments/{fake_id}/results")
         assert response.status_code == 404, response.text
 
-    def test_analyst_cannot_get_results_for_other_users_experiment(
+    @pytest.mark.regression
+    def test_analyst_can_get_results_for_other_users_experiment(
         self, admin_client, analyst_user, db_session
     ):
-        exp = _create_and_start(admin_client, "Results Analyst Forbidden")
+        exp = _create_and_start(admin_client, "Results Analyst Reads")
         analyst_client = make_client_for_user(db_session, analyst_user)
         response = analyst_client.get(f"/api/v1/experiments/{exp['id']}/results")
-        assert response.status_code == 403, response.text
+        assert response.status_code == 200, response.text
 
 
 # ---------------------------------------------------------------------------
@@ -639,13 +640,14 @@ class TestDailyExperimentResults:
         response = admin_client.get(f"/api/v1/experiments/{fake_id}/daily-results")
         assert response.status_code == 404, response.text
 
-    def test_viewer_cannot_get_daily_results_for_other_users_experiment(
+    @pytest.mark.regression
+    def test_viewer_can_get_daily_results_for_other_users_experiment(
         self, admin_client, viewer_user, db_session
     ):
-        exp = _create_and_start(admin_client, "Daily Results Viewer Forbidden")
+        exp = _create_and_start(admin_client, "Daily Results Viewer Reads")
         viewer_client = make_client_for_user(db_session, viewer_user)
         response = viewer_client.get(f"/api/v1/experiments/{exp['id']}/daily-results")
-        assert response.status_code == 403, response.text
+        assert response.status_code == 200, response.text
 
 
 # ---------------------------------------------------------------------------
@@ -689,15 +691,16 @@ class TestSegmentedExperimentResults:
         )
         assert response.status_code == 404, response.text
 
-    def test_analyst_cannot_get_segmented_results_for_other_users_experiment(
+    @pytest.mark.regression
+    def test_analyst_can_get_segmented_results_for_other_users_experiment(
         self, admin_client, analyst_user, db_session
     ):
-        exp = _create_and_start(admin_client, "Segmented Results Analyst Forbidden")
+        exp = _create_and_start(admin_client, "Segmented Results Analyst Reads")
         analyst_client = make_client_for_user(db_session, analyst_user)
         response = analyst_client.get(
             f"/api/v1/experiments/{exp['id']}/segmented-results/country"
         )
-        assert response.status_code == 403, response.text
+        assert response.status_code == 200, response.text
 
 
 # ---------------------------------------------------------------------------

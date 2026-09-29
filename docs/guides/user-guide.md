@@ -22,10 +22,10 @@ You'll need an account with one of the following roles:
 
 | Role | What You Can Do |
 |------|----------------|
-| **ADMIN** | Everything — manage users, all experiments, all flags |
-| **DEVELOPER** | Create and manage your own experiments; create and manage any feature flag |
+| **ADMIN** | Manage users; create experiments and change any experiment, but schedule and delete only your own; all flags |
+| **DEVELOPER** | Create experiments and change any experiment, but schedule and delete only your own; create and manage any feature flag |
 | **ANALYST** | View all experiments, results, and reports, and every feature flag (read-only) |
-| **VIEWER** | View approved experiments and their results, and every feature flag |
+| **VIEWER** | View every experiment and its results, and every feature flag (read-only) |
 
 Contact your platform admin to request access or role changes.
 
