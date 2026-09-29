@@ -177,9 +177,6 @@ source venv/bin/activate && pytest -m "unit" -v
   `backend/tests/no_real_aws.py` (the SDKs carry a copy): dummy credentials, no
   `~/.aws`, and a failing `aws` first on `PATH` that prints `NO-REAL-AWS`. A
   test that needs the CLI prepends its own fake `aws` to `PATH`; that one wins.
-  It also loads `backend/tests/no_outbound_network.py`: a test under
-  `backend/lambda/` or `modules/lambda/` that connects to anything but loopback
-  fails, even when the code under test swallows the error. Stub boto3 there.
 - Ensure PostgreSQL is running locally before tests
 - Test users must have a `hashed_password` value set to avoid integrity errors
 
