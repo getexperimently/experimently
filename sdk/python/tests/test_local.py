@@ -710,3 +710,52 @@ def test_counts_are_split_at_one_million(no_thread, count, enabled, expected):
     client.close()
     entries = server.calls(EVALUATIONS_PATH)[0]["body"]["evaluations"]
     assert [(e["count"], e["enabled_count"]) for e in entries] == expected
+
+
+# ----------------------------------------------------------------------- concurrency and fork fallbacks
+
+
+def test_concurrent_evaluations_are_counted_exactly(no_thread):
+    """N threads evaluating at once: the reported count is exactly N x calls (the tally is locked)."""
+    server = FakeServer(ok())
+    client, _ = loaded(server)
+    threads_n, calls = 16, 500
+    start = threading.Barrier(threads_n)
+    old_interval = sys.getswitchinterval()
+    sys.setswitchinterval(1e-6)  # switch threads as often as possible, so a race shows
+    try:
+
+        def work():
+            start.wait()
+            for i in range(calls):
+                client.is_feature_enabled("us-only", "user-1", US if i % 2 else FR)
+
+        workers = [threading.Thread(target=work) for _ in range(threads_n)]
+        for worker in workers:
+            worker.start()
+        for worker in workers:
+            worker.join()
+    finally:
+        sys.setswitchinterval(old_interval)
+    client.close()
+    entries = [e for p in server.calls(EVALUATIONS_PATH) for e in p["body"]["evaluations"]]
+    assert [(e["flag_key"], e["count"], e["enabled_count"]) for e in entries] == [
+        ("us-only", threads_n * calls, threads_n * calls // 2)
+    ]
+
+
+@pytest.mark.parametrize("call", ["status", "close"])
+def test_status_and_close_reinitialise_when_the_fork_hook_did_not_run(no_thread, call):
+    """The PID-check fallback also runs from status() and close(), not only from evaluations."""
+    server = FakeServer(ok())
+    client, _ = loaded(server)
+    client.is_feature_enabled("all-on", "user-1")  # a count the "parent" owns
+    runtime = client._local
+    runtime._pid = -1  # as if this process were a fork that os.register_at_fork missed
+    getattr(client, call)()
+    assert runtime._pid == os.getpid()
+    # The inherited count was dropped, so close() reports nothing from before the "fork".
+    if call == "close":
+        assert server.calls(EVALUATIONS_PATH) == []
+    else:
+        assert runtime._tallies == {}

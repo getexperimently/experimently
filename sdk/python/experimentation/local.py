@@ -333,6 +333,7 @@ class LocalEvaluation:
         return ReadyResult(False, None, error)
 
     def status(self) -> LocalEvaluationStatus:
+        self._check_pid()
         ruleset = self._ruleset
         remote = sorted(
             key
@@ -350,6 +351,7 @@ class LocalEvaluation:
 
     def close(self) -> None:
         """Stop refreshing, send the remaining counts, and answer every later call on the server."""
+        self._check_pid()
         if self._closed:
             return
         self._closed = True
