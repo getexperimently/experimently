@@ -41,8 +41,9 @@ function inviteEmailMatches(
 }
 
 /**
- * `alice@example.com` -> `a•••@example.com`, for display on this page only.
- * The invite preview API still returns the full address; this does not hide it.
+ * `alice@example.com` -> `a•••@example.com`, for display on this page.
+ * The API masks it too for anyone but the invitee; masking a masked address
+ * returns it unchanged.
  */
 function maskEmail(email: string): string {
   const trimmed = email.trim();
@@ -59,7 +60,8 @@ function AcceptInvitePage() {
 
   const [invite, setInvite] = useState<WorkspaceInvite | null>(null);
   const [isLoading, setIsLoading] = useState(true);
-  const [fetchError, setFetchError] = useState<string | null>(null);
+  // A 404 means the link itself is wrong; anything else may pass on a retry.
+  const [fetchError, setFetchError] = useState<'not_found' | 'unavailable' | null>(null);
   const [accepting, setAccepting] = useState(false);
   const [acceptError, setAcceptError] = useState<string | null>(null);
   const [accepted, setAccepted] = useState(false);
@@ -72,20 +74,39 @@ function AcceptInvitePage() {
   const mismatch =
     serverMismatch || (!!invite && !!user && !inviteEmailMatches(invite.email, user.email));
 
+  // The API returns the invited address in full only to the invitee, so the
+  // preview is fetched again whenever the signed-in account changes.
+  const userId = user?.id ?? null;
+
   useEffect(() => {
     if (!token) return;
+    let current = true;
 
     // Authentication is enforced by <RequireAuth> in _app.tsx (this route is
     // protected), which redirects anonymous visitors to /login?next=<this page>.
     workspaceService
       .getInvite(token)
-      .then(setInvite)
-      .catch((err) => {
-        const msg = err instanceof Error ? err.message : 'Failed to load invite';
-        setFetchError(msg);
+      .then((result) => {
+        if (!current) return;
+        setInvite(result);
+        setFetchError(null);
       })
-      .finally(() => setIsLoading(false));
-  }, [token, router]);
+      .catch((err) => {
+        if (!current) return;
+        setFetchError(isApiError(err) && err.status === 404 ? 'not_found' : 'unavailable');
+      })
+      .finally(() => {
+        if (current) setIsLoading(false);
+      });
+    return () => {
+      current = false;
+    };
+  }, [token, router, userId]);
+
+  // A 403 from accepting was about the previous account.
+  useEffect(() => {
+    setServerMismatch(false);
+  }, [userId]);
 
   async function handleAccept() {
     if (!token) return;
@@ -129,23 +150,53 @@ function AcceptInvitePage() {
           <div className="w-full max-w-md">
             {/* Loading */}
             {isLoading && (
-              <div className="bg-white rounded-xl border border-slate-200 p-10 text-center">
-                <div className="inline-block w-8 h-8 border-2 border-blue-600 border-t-transparent rounded-full animate-spin mb-4" />
+              <div
+                role="status"
+                className="bg-white rounded-xl border border-slate-200 p-10 text-center"
+              >
+                <div
+                  aria-hidden="true"
+                  className="inline-block w-8 h-8 border-2 border-blue-600 border-t-transparent rounded-full animate-spin mb-4"
+                />
                 <p className="text-slate-500 text-sm">Loading invitation...</p>
               </div>
             )}
 
-            {/* Fetch error */}
+            {/* Fetch error: a link that does not exist, or any other failure */}
             {!isLoading && fetchError && (
               <div className="bg-white rounded-xl border border-red-200 p-8 text-center">
                 <div className="w-14 h-14 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
-                  <svg className="w-7 h-7 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <svg aria-hidden="true" className="w-7 h-7 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
                   </svg>
                 </div>
-                <h2 className="text-lg font-semibold text-slate-900 mb-2">Invitation Not Found</h2>
-                <p className="text-sm text-slate-500 mb-6">
-                  This invitation link is invalid or has already been used.
+                <h2 className="text-lg font-semibold text-slate-900 mb-2">
+                  {fetchError === 'not_found' ? 'Invitation Not Found' : 'Invitation unavailable'}
+                </h2>
+                <p role="alert" className="text-sm text-slate-500 mb-6">
+                  {fetchError === 'not_found'
+                    ? "This invitation link isn't valid. Check you copied all of it, or ask for a new one."
+                    : "We couldn't load this invitation. Try again in a moment."}
+                </p>
+                <Link
+                  href="/workspaces"
+                  className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 transition-colors"
+                >
+                  Go to Workspaces
+                </Link>
+              </div>
+            )}
+
+            {/* Already accepted: wins over expiry and over a different account */}
+            {!isLoading && !fetchError && invite && invite.accepted_at && (
+              <div className="bg-white rounded-xl border border-slate-200 p-8 text-center">
+                <h2 className="text-lg font-semibold text-slate-900 mb-2">
+                  Invitation already used
+                </h2>
+                <p className="text-sm text-slate-600 mb-6">
+                  This invitation to{' '}
+                  <span className="font-medium">{invite.workspace_name}</span> has already been
+                  accepted. If that wasn&apos;t you, ask a workspace admin.
                 </p>
                 <Link
                   href="/workspaces"
@@ -157,10 +208,10 @@ function AcceptInvitePage() {
             )}
 
             {/* Expired invite */}
-            {!isLoading && !fetchError && invite && isTokenExpired(invite) && (
+            {!isLoading && !fetchError && invite && !invite.accepted_at && isTokenExpired(invite) && (
               <div className="bg-white rounded-xl border border-amber-200 p-8 text-center">
                 <div className="w-14 h-14 bg-amber-100 rounded-full flex items-center justify-center mx-auto mb-4">
-                  <svg className="w-7 h-7 text-amber-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <svg aria-hidden="true" className="w-7 h-7 text-amber-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
                   </svg>
                 </div>
@@ -169,7 +220,7 @@ function AcceptInvitePage() {
                   This invitation to{' '}
                   <span className="font-medium">{invite.workspace_name}</span> has expired.
                 </p>
-                <p className="text-xs text-slate-400 mb-6">
+                <p className="text-xs text-slate-500 mb-6">
                   Expired on {new Date(invite.expires_at).toLocaleDateString()}
                 </p>
                 <p className="text-sm text-slate-500 mb-6">
@@ -185,7 +236,7 @@ function AcceptInvitePage() {
             )}
 
             {/* Signed in as someone other than the invitee */}
-            {!isLoading && !fetchError && invite && !isTokenExpired(invite) && mismatch && (
+            {!isLoading && !fetchError && invite && !invite.accepted_at && !isTokenExpired(invite) && mismatch && (
               <div className="bg-white rounded-xl border border-amber-200 p-8 text-center">
                 <h2 className="text-lg font-semibold text-slate-900 mb-2">
                   This invitation is for a different account
@@ -217,12 +268,12 @@ function AcceptInvitePage() {
             )}
 
             {/* Valid invite */}
-            {!isLoading && !fetchError && invite && !isTokenExpired(invite) && !mismatch && (
+            {!isLoading && !fetchError && invite && !invite.accepted_at && !isTokenExpired(invite) && !mismatch && (
               <div className="bg-white rounded-xl border border-slate-200 p-8 text-center">
                 {accepted ? (
-                  <>
+                  <div role="status">
                     <div className="w-14 h-14 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
-                      <svg className="w-7 h-7 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <svg aria-hidden="true" className="w-7 h-7 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
                       </svg>
                     </div>
@@ -232,11 +283,11 @@ function AcceptInvitePage() {
                     <p className="text-sm text-slate-500">
                       Redirecting you to the workspace...
                     </p>
-                  </>
+                  </div>
                 ) : (
                   <>
                     <div className="w-14 h-14 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-4">
-                      <svg className="w-7 h-7 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <svg aria-hidden="true" className="w-7 h-7 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
                       </svg>
                     </div>
@@ -245,14 +296,21 @@ function AcceptInvitePage() {
                       You&apos;re invited!
                     </h2>
                     <p className="text-sm text-slate-500 mb-5">
-                      <span className="font-medium">{invite.inviter_username}</span> has invited you
+                      {invite.inviter_username ? (
+                        <>
+                          <span className="font-medium">{invite.inviter_username}</span> has
+                          invited you
+                        </>
+                      ) : (
+                        <>You&apos;ve been invited</>
+                      )}{' '}
                       to join the workspace{' '}
                       <span className="font-medium text-slate-800">{invite.workspace_name}</span> as{' '}
                       <span className="font-medium">{invite.role}</span>.
                     </p>
 
                     <div className="bg-slate-50 rounded-lg p-3 mb-5 text-sm text-slate-600">
-                      <span className="block text-xs text-slate-400 mb-1">Invitation for</span>
+                      <span className="block text-xs text-slate-500 mb-1">Invitation for</span>
                       <span className="font-medium">{invite.email}</span>
                     </div>
 
@@ -270,7 +328,7 @@ function AcceptInvitePage() {
                       {accepting ? 'Accepting...' : 'Accept Invitation'}
                     </button>
 
-                    <p className="mt-3 text-xs text-slate-400">
+                    <p className="mt-3 text-xs text-slate-500">
                       Invitation expires {new Date(invite.expires_at).toLocaleDateString()}
                     </p>
                   </>

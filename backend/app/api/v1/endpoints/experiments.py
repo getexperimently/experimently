@@ -22,10 +22,12 @@ from fastapi import (
     status,
 )
 from fastapi.encoders import jsonable_encoder
+from sqlalchemy.exc import DataError, IntegrityError
 from sqlalchemy.orm import Session
 
 from backend.app.api import deps
 from backend.app.api.v1.endpoints import results as results_endpoints
+from backend.app.core.logger import current_request_id
 from backend.app.core.logging import logger
 from backend.app.core.optional_modules import (
     SPLIT_URL_UNAVAILABLE_DETAIL,
@@ -238,6 +240,45 @@ async def list_experiments(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+#: Postgres error code for a unique constraint violation.
+_UNIQUE_VIOLATION = "23505"
+
+
+def is_experiment_key_conflict(exc: BaseException) -> bool:
+    """True when *exc* is the database refusing a second experiment with a key.
+
+    Decided from the driver's structured diagnostics, never from the message
+    text. The index name follows the schema (``ix_<schema>_experiments_key``),
+    so it is derived from the diagnostics' own schema name rather than written
+    out: the schema differs between a deployment, CI and the core build.
+    Anything without those diagnostics is not recognised, which answers the
+    generic message instead of the 409.
+    """
+    orig = getattr(exc, "orig", None)
+    if orig is None or getattr(orig, "pgcode", None) != _UNIQUE_VIOLATION:
+        return False
+    diag = getattr(orig, "diag", None)
+    if diag is None:
+        return False
+    schema = getattr(diag, "schema_name", None)
+    return (
+        getattr(diag, "table_name", None) == "experiments"
+        and schema is not None
+        and getattr(diag, "constraint_name", None) == f"ix_{schema}_experiments_key"
+    )
+
+
+def _create_failed_detail() -> str:
+    """The fixed message for a create that failed for any other reason."""
+    request_id = current_request_id()
+    if request_id is None:
+        return "Something went wrong while creating the experiment."
+    return (
+        "Something went wrong while creating the experiment "
+        f"(request ID: {request_id})."
+    )
+
+
 @router.post(
     "/",
     response_model=ExperimentResponse,
@@ -336,9 +377,33 @@ async def create_experiment(
     except HTTPException:
         # Let deliberate 4xx responses through instead of wrapping them in a 500.
         raise
+    except (IntegrityError, DataError) as e:
+        # The database refused the request's own data. Roll back first so the
+        # session stays usable, then answer without the driver's text: that
+        # goes to the server log only, tied to the request ID.
+        db.rollback()
+        key = experiment_in.key
+        if key is not None and is_experiment_key_conflict(e):
+            # Only a key the caller chose is named. A generated key that
+            # collides is not theirs; it takes the generic answer below and a
+            # retry generates a new one.
+            logger.info("Experiment create refused: key %r already exists", key)
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"An experiment with the key '{key}' already exists.",
+            )
+        logger.exception("Experiment create failed (%s)", type(e).__name__)
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=_create_failed_detail(),
+        )
     except Exception as e:
-        logger.error(f"Error creating experiment: {e!s}")
-        raise HTTPException(status_code=400, detail=str(e))
+        db.rollback()
+        logger.exception("Experiment create failed (%s)", type(e).__name__)
+        raise HTTPException(
+            status_code=500,
+            detail=_create_failed_detail(),
+        )
 
 
 @router.get(

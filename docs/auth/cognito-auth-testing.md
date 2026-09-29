@@ -2,6 +2,14 @@
 
 This document outlines the testing process for the AWS Cognito authentication implementation in our FastAPI application, showing the steps and expected outcomes for each auth flow.
 
+!!! note "Cognito only"
+    The sign-up, confirmation, password-reset and token-refresh endpoints
+    (`POST /api/v1/auth/signup`, `/confirm`, `/forgot-password`, `/reset-password`
+    and `/refresh`) are available only when `AUTH_PROVIDER=cognito`. With any other
+    provider, including the default `local`, they answer 404. With `local`, sign in
+    with `POST /api/v1/auth/login`; an administrator creates accounts and resets
+    passwords.
+
 ## Prerequisites
 
 - FastAPI application is running on `http://localhost:8000`
@@ -30,7 +38,7 @@ curl http://localhost:8000/health
 Creating a new user account:
 
 ```bash
-curl -X POST http://localhost:8000/api/v1/auth/auth/signup \
+curl -X POST http://localhost:8000/api/v1/auth/signup \
   -H "Content-Type: application/json" \
   -d '{
     "username": "testuser1",
@@ -55,7 +63,7 @@ curl -X POST http://localhost:8000/api/v1/auth/auth/signup \
 Confirming a user account with verification code:
 
 ```bash
-curl -X POST http://localhost:8000/api/v1/auth/auth/confirm \
+curl -X POST http://localhost:8000/api/v1/auth/confirm \
   -H "Content-Type: application/json" \
   -d '{
     "username": "testuser1",
@@ -76,7 +84,7 @@ curl -X POST http://localhost:8000/api/v1/auth/auth/confirm \
 Authenticating and receiving JWT tokens:
 
 ```bash
-curl -X POST http://localhost:8000/api/v1/auth/auth/token \
+curl -X POST http://localhost:8000/api/v1/auth/token \
   -H "Content-Type: application/x-www-form-urlencoded" \
   -d "username=testuser1&password=Test@Password123"
 ```
@@ -97,7 +105,7 @@ curl -X POST http://localhost:8000/api/v1/auth/auth/token \
 #### Step 1: Initiate password reset
 
 ```bash
-curl -X POST http://localhost:8000/api/v1/auth/auth/forgot-password \
+curl -X POST http://localhost:8000/api/v1/auth/forgot-password \
   -H "Content-Type: application/json" \
   -d '{
     "username": "testuser1"

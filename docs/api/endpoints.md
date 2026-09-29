@@ -52,6 +52,15 @@ The API uses two types of authentication:
 ## Usage Examples
 
 ### 1. User Registration and Authentication
+
+!!! note "Cognito only"
+    The sign-up, confirmation, password-reset and token-refresh endpoints
+    (`POST /api/v1/auth/signup`, `/confirm`, `/forgot-password`, `/reset-password`
+    and `/refresh`) are available only when `AUTH_PROVIDER=cognito`. With any other
+    provider, including the default `local`, they answer 404. With `local`, sign in
+    with `POST /api/v1/auth/login`; an administrator creates accounts and resets
+    passwords.
+
 ```bash
 # 1. Register a new user
 curl -X POST "http://localhost:8000/api/v1/auth/signup" \
@@ -205,6 +214,14 @@ curl -X POST "http://localhost:8000/api/v1/users/" \
 - Cache-Control headers are included in responses
 
 ## Authentication Endpoints
+
+!!! note "Cognito only"
+    The sign-up, confirmation, password-reset and token-refresh endpoints
+    (`POST /api/v1/auth/signup`, `/confirm`, `/forgot-password`, `/reset-password`
+    and `/refresh`) are available only when `AUTH_PROVIDER=cognito`. With any other
+    provider, including the default `local`, they answer 404. With `local`, sign in
+    with `POST /api/v1/auth/login`; an administrator creates accounts and resets
+    passwords.
 
 ### Sign Up
 - **Endpoint**: `POST /api/v1/auth/signup`
@@ -1702,7 +1719,7 @@ variant, and the decision.
 
 See [Split URL API Reference](split-url.md) for full documentation.
 
-Split URL experiments use `experiment_type: SPLIT_URL` and require a `split_url_config` in the request body. Variant assignment and URL redirection are handled by Lambda@Edge at the CloudFront layer.
+Split URL experiments use `experiment_type: SPLIT_URL` and require a `split_url_config` in the request body. Variant assignment and URL redirection are meant to happen in the split-URL module's Lambda@Edge router, on a CloudFront distribution. The CDK app creates no CloudFront distribution, so the router runs only if you add the module's construct to a stack yourself.
 
 **Experiment management** uses the existing experiment CRUD endpoints with `experiment_type=SPLIT_URL`:
 

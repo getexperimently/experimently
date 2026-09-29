@@ -6,12 +6,10 @@ Run the commands in one terminal, in order, against the stack from the
 [Quick Start](../getting-started/quick-start.md). Each uses the shell variables set by the
 ones before it.
 
-**Not yet working on a stock deployment: getting a completion.** The API image doesn't
-include the providers' client libraries, so `/complete` answers
-`502 {"detail":"LLM provider error: No module named 'openai'"}` (or `'anthropic'`) even with
-a provider key set ([#196](https://github.com/getexperimently/experimently/issues/196)).
-Steps 1, 2 and 6 work; steps 3 to 5 need completions, and our documentation checks don't
-run them until that is fixed.
+**Steps 3 to 5 need a provider key.** They call the models, so the API needs a key for
+each provider your variants use (step 3 names the variables). Steps 1, 2 and 6 need no key.
+Our documentation checks run without provider keys: they run steps 1, 2 and 6 and skip
+3 to 5.
 
 ---
 
@@ -112,7 +110,7 @@ user to a variant deterministically (the same user always gets the same model), 
 variant's prompt template with `input_variables`, and calls the model. This saves the
 evaluation's id in `$EVALUATION_ID`, for step 4:
 
-```{.bash skip reason="bug #196: the API image has no LLM provider client libraries, so /complete answers 502"}
+```{.bash skip reason="secret: calls the model, which needs a provider key (OPENAI_API_KEY, ANTHROPIC_API_KEY) set on the API"}
 COMPLETION=$(curl -s -X POST localhost:8000/api/v1/llm-experiments/$EXPERIMENT_ID/complete \
   -H "Authorization: Bearer $TOKEN" \
   -H 'content-type: application/json' \
@@ -157,7 +155,7 @@ completion answers `502 {"detail":"LLM provider error: GEMINI_API_KEY is not set
 When the customer resolves their issue (converts), submit the business metric for that
 evaluation:
 
-```{.bash skip reason="bug #196: needs the evaluation id that /complete returns"}
+```{.bash skip reason="secret: needs the evaluation id from step 3, which needs a provider key"}
 curl -s -X POST localhost:8000/api/v1/llm-experiments/$EXPERIMENT_ID/evaluate \
   -H "Authorization: Bearer $TOKEN" \
   -H 'content-type: application/json' \
@@ -166,7 +164,7 @@ curl -s -X POST localhost:8000/api/v1/llm-experiments/$EXPERIMENT_ID/evaluate \
 
 You can also submit a human rating (1–5) from your QA team:
 
-```{.bash skip reason="bug #196: needs the evaluation id that /complete returns"}
+```{.bash skip reason="secret: needs the evaluation id from step 3, which needs a provider key"}
 curl -s -X POST localhost:8000/api/v1/llm-experiments/$EXPERIMENT_ID/evaluate \
   -H "Authorization: Bearer $TOKEN" \
   -H 'content-type: application/json' \
@@ -180,7 +178,7 @@ curl -s -X POST localhost:8000/api/v1/llm-experiments/$EXPERIMENT_ID/evaluate \
 Use LLM-as-judge to score the responses on a quality dimension. The judge model is called
 through the same provider libraries:
 
-```{.bash skip reason="bug #196: the judge model is called through the provider client libraries the API image lacks"}
+```{.bash skip reason="secret: calls the judge model, which needs a provider key set on the API"}
 curl -s -X POST localhost:8000/api/v1/llm-experiments/$EXPERIMENT_ID/judge \
   -H "Authorization: Bearer $TOKEN" \
   -H 'content-type: application/json' \

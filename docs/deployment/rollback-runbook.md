@@ -593,6 +593,17 @@ and the Slack message say so, with the reason. If the fix is bad, roll back
 with Method 1 within that hour. The override is on that one deployment only,
 so the next deploy is watched again with no action from anyone.
 
+Deploy checks first. Before it builds anything, and again just before the
+snapshot and the migration, it reads the alarms the deployment group polls and
+refuses while one of them is in ALARM ("An alarm is already firing", naming
+the alarm and since when). It also refuses, whatever else is set, when the
+group watches no alarm, has its alarms disabled, or does not watch both of the
+stack's alarms: deploy the Fargate stack first. `INSUFFICIENT_DATA` does not
+refuse. The check is advisory: an alarm that goes into ALARM after it passes
+still stops the deployment, after the migration, and the run ends with the
+"Migrated, not deployed" warning. With the break-glass ticked, an alarm in
+ALARM is printed as a warning instead, and the deploy goes on unwatched.
+
 `aws cloudwatch disable-alarm-actions` and `aws cloudwatch set-alarm-state` do
 not unblock a deploy. CodeDeploy reads the alarms' state, not their actions,
 and a state set by hand lasts only until the next evaluation, about a minute.

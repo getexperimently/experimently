@@ -135,6 +135,9 @@ NOT_DOCS_TESTS = {
     "backend/tests/unit/infrastructure/test_deploy_alarm_wiring.py": (
         "printed link strings only"
     ),
+    "backend/tests/unit/infrastructure/test_refuse_alarm_active.py": (
+        "printed link strings only"
+    ),
 }
 # docs-links.test.ts (Jest) runs on a docs-only change as its pinned Python
 # twin, backend/tests/unit/docs/test_dashboard_docs_links.py.

@@ -8,7 +8,7 @@
 
 Experimently is a self-hosted experimentation platform for running A/B tests, feature flags, and controlled rollouts. It provides a complete solution for data-driven product development: design experiments, assign users to variants, track conversion events, run statistical analysis, and make shipping decisions — all in one platform.
 
-The platform includes a REST API backend (FastAPI), a React management dashboard, client SDKs (JavaScript, Python, Java, React), AWS CDK infrastructure code, and Lambda functions for real-time event processing.
+The platform includes a REST API backend (FastAPI), a React management dashboard, client SDKs (JavaScript, Python, Java, React), and AWS CDK infrastructure code.
 
 ---
 
@@ -30,12 +30,12 @@ A full production deployment uses the following AWS services:
 | Aurora PostgreSQL | Primary relational database |
 | ElastiCache Redis | Session storage and caching |
 | DynamoDB | Real-time impression and conversion counters |
-| Lambda | Experiment assignment, event processing, feature flag evaluation |
+| Lambda | No request or event processing: placeholder functions that do nothing, and a daily Glue ETL trigger in the full profile. Assignment and flag evaluation are API calls ([AWS Integration](../integrations/aws.md#lambda-functions)) |
 | CloudFront | Not created by the CDK. Only needed if you wire in the split-URL module's Lambda@Edge construct yourself |
-| Kinesis | Event streaming pipeline |
-| OpenSearch | Event indexing and ad-hoc analytics queries |
+| Kinesis | Full profile only: a stream feeding Firehose and the S3 data lake. The API does not write to it today |
+| OpenSearch | Full profile only: a domain is created; nothing writes to it today |
 | Cognito | User authentication and JWT token issuance |
-| S3 | Static asset storage, Lambda deployment packages |
+| S3 | Full profile only: the analytics data lake, Athena results and Glue scripts. The dashboard is an ECS service, not files in S3 |
 | CloudWatch | Logging, metrics, and dashboards |
 | Secrets Manager | Encrypted storage for API keys and credentials |
 | CodeDeploy | Blue/green deployments for the API service |
@@ -154,7 +154,7 @@ See [Bayesian Experimentation API](../api/bayesian.md) to enable Bayesian analys
 
 Split URL testing redirects different user segments to different URLs — for example, `/checkout` vs `/checkout-v2` — at the CDN layer using Lambda@Edge.
 
-When a user visits your domain, a Lambda@Edge function on CloudFront reads a cookie to check if the user has already been assigned. If not, it performs consistent-hash bucketing on the user ID to assign a variant, then returns a 302 redirect to the variant URL and sets a 1-year persistence cookie. On all subsequent visits, the cookie is read and the user is redirected to the same URL without re-bucketing.
+The split-URL module ships a CloudFront construct with a Lambda@Edge router, which no stack uses: you add it to a stack yourself. The router reads a cookie to check whether the visitor has already been assigned. If not, it hashes the client fingerprint (IP address and User-Agent) to pick a variant, returns a 302 redirect to the variant URL, and sets a cookie that lasts `cookie_ttl_days` (30 days by default). A request that carries a cookie naming a known variant URL passes through without being bucketed again.
 
 This approach provides zero-latency variant delivery (the redirect happens at the CDN edge, before the request reaches your origin) and works for full page-level experiments where the content differences are too large for a single-page A/B test.
 

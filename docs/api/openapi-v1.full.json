@@ -14255,6 +14255,18 @@
             "title": "Id",
             "type": "string"
           },
+          "inviter_username": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Username of the account that created the invitation; null when that account no longer exists. The invitation preview (`GET /workspaces/invites/{token}`) returns it only to the account the invitation was sent to, as it does `email` in full; anyone else gets null.",
+            "title": "Inviter Username"
+          },
           "role": {
             "title": "Role",
             "type": "string"
@@ -14266,6 +14278,11 @@
           "workspace_id": {
             "title": "Workspace Id",
             "type": "string"
+          },
+          "workspace_name": {
+            "description": "Name of the workspace the invitation is for.",
+            "title": "Workspace Name",
+            "type": "string"
           }
         },
         "required": [
@@ -14275,7 +14292,9 @@
           "role",
           "token",
           "expires_at",
-          "accepted_at"
+          "accepted_at",
+          "workspace_name",
+          "inviter_username"
         ],
         "title": "WorkspaceInviteResponse",
         "type": "object"
@@ -30157,7 +30176,7 @@
     },
     "/api/v1/workspaces/invites/{token}": {
       "get": {
-        "description": "Get invite info by token. Public endpoint — no auth required.",
+        "description": "Get invite info by token. No sign-in needed.\n\n`email` is returned in full only to the account it was sent to (compared\nwithout regard to case); anyone else, signed in or not, gets it masked,\ne.g. `a•••@example.com`.",
         "operationId": "get_invite_api_v1_workspaces_invites__token__get",
         "parameters": [
           {
@@ -30192,6 +30211,12 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          },
+          {}
+        ],
         "summary": "Get Invite",
         "tags": [
           "Workspaces"
@@ -30625,7 +30650,7 @@
     },
     "/api/v1/workspaces/{workspace_id}/invites": {
       "post": {
-        "description": "Send a workspace invite by email. Requires ADMIN role.",
+        "description": "Create a workspace invite for an email address and return its token.\n\nNo email is sent. Requires ADMIN role.",
         "operationId": "create_invite_api_v1_workspaces__workspace_id__invites_post",
         "parameters": [
           {
@@ -31111,7 +31136,7 @@
       "name": "SSO"
     },
     {
-      "description": "EP-057: Team Workspaces — group users into teams with workspace roles (OWNER/ADMIN/DEVELOPER/ANALYST/VIEWER) and send and accept email invites. Workspaces do not limit access to experiments or feature flags, which is by platform role. Workspace API keys are not yet accepted by the SDK or tracking endpoints; use a platform API key.",
+      "description": "EP-057: Team Workspaces — group users into teams with workspace roles (OWNER/ADMIN/DEVELOPER/ANALYST/VIEWER) and create and accept invitation links; no email is sent. Workspaces do not limit access to experiments or feature flags, which is by platform role. Workspace API keys are not yet accepted by the SDK or tracking endpoints; use a platform API key.",
       "name": "Workspaces"
     },
     {
