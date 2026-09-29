@@ -264,11 +264,11 @@ class TestCacheCounters:
 
         store: dict = {}
 
-        class FakeRedis:
-            def get(self, key):
+        class FakeRedis:  # async, as redis.asyncio is (#100)
+            async def get(self, key):
                 return store.get(key)
 
-            def setex(self, key, ttl, value):
+            async def setex(self, key, ttl, value):
                 store[key] = value
 
         class Control:

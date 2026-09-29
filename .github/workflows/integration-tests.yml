@@ -133,6 +133,9 @@ jobs:
           EXPERIMENTLY_REQUIRE_EDITABLE: "1"
           # The password-protected Redis must be there: a skip is a failure.
           EXPERIMENTLY_REQUIRE_REDIS_AUTH: "1"
+          # So must the `redis` service: the flag-cache tests (#100) skip
+          # without it, and here a skip is a failure.
+          EXPERIMENTLY_REQUIRE_REDIS: "1"
         run: |
           # No marker filter: 30 of the integration files carry no marker and were
           # silently deselected (570 of 1462 tests, including every regression test

@@ -6,10 +6,12 @@ APP_ENV -- turned the response cache on. The list then called `.get` on
 database is touched. The detail 500'd whenever a Redis answered, because the
 async client it builds is never awaited (#100).
 
-Three things make a test of this pass on the old code, so each is avoided:
-the routes bind `settings` at import (patching `backend.app.core.config.settings`
-reaches neither); the shared `client` fixture overrides `get_cache_control`
-to disabled; and a synchronous fake Redis hides the missing `await`.
+Things that make a test of this pass on the old code, so each is avoided:
+`deps` binds `settings` at import (patching `backend.app.core.config.settings`
+does not reach it); the shared `client` fixture overrides `get_cache_control`
+to disabled; and a synchronous fake Redis hides a missing `await`. The routes
+against a real Redis are in
+`backend/tests/integration/api/test_flag_cache_redis.py`.
 """
 
 from __future__ import annotations
@@ -71,7 +73,6 @@ def client(prod_settings):
     app.dependency_overrides[deps.get_db] = lambda: db
     try:
         with (
-            patch.object(ff, "settings", prod_settings),
             patch.object(deps, "settings", prod_settings),
             patch.object(deps, "get_redis_pool", pool),
             patch.object(ff.crud_feature_flag, "get_multi", return_value=[]),

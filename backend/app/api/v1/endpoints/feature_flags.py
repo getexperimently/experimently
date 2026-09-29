@@ -25,7 +25,6 @@ from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session
 
 from backend.app.api import deps
-from backend.app.core.config import settings
 from backend.app.core.metrics import (
     record_cache_hit,
     record_cache_miss,
@@ -54,6 +53,59 @@ from backend.app.services.feature_flag_service import FeatureFlagService
 
 # Setup logger
 logger = logging.getLogger(__name__)
+
+#: How long a cached flag detail or flag list lives, in seconds.
+FLAG_CACHE_TTL_SECONDS = 3600
+
+
+# The flag cache (#100). `deps.get_cache_control` hands out a redis.asyncio
+# client, so every call on it is awaited -- un-awaited, `get` returns a
+# coroutine (truthy, so it was served as a cache hit and `json.loads` raised: a
+# 500) and `delete` silently does nothing. The cache is best-effort: a Redis
+# error is logged and the request carries on against the database.
+async def _cache_get(cache_control: deps.CacheControl, key: str) -> Optional[str]:
+    if not (cache_control.enabled and cache_control.redis):
+        return None
+    try:
+        return await cache_control.redis.get(key)
+    except Exception as cache_error:
+        logger.warning("Flag cache read failed for %s: %s", key, cache_error)
+        return None
+
+
+async def _cache_set(cache_control: deps.CacheControl, key: str, value: Any) -> None:
+    if not (cache_control.enabled and cache_control.redis):
+        return
+    try:
+        await cache_control.redis.setex(
+            key, FLAG_CACHE_TTL_SECONDS, json.dumps(value, default=str)
+        )
+    except Exception as cache_error:
+        logger.warning("Flag cache write failed for %s: %s", key, cache_error)
+
+
+async def _invalidate_flag_cache(
+    cache_control: deps.CacheControl, flag_id: Optional[UUID]
+) -> None:
+    """Drop the cached detail of ``flag_id`` and every cached flag list.
+
+    Lists are cached per user, but every role sees every flag (#83), so a
+    change drops all of them rather than only the caller's. Called after the
+    change is committed, so a Redis error is logged rather than raised.
+    """
+    if not (cache_control.enabled and cache_control.redis):
+        return
+    try:
+        if flag_id is not None:
+            await cache_control.redis.delete(f"feature_flag:{flag_id}")
+        keys = [
+            key async for key in cache_control.redis.scan_iter(match="feature_flags:*")
+        ]
+        if keys:
+            await cache_control.redis.delete(*keys)
+    except Exception as cache_error:
+        logger.warning("Flag cache invalidation failed: %s", cache_error)
+
 
 # Create router with tag for documentation grouping
 router = APIRouter(
@@ -132,11 +184,13 @@ async def list_feature_flags(
         )
 
     cache_key = f"feature_flags:{current_user.id}:{skip}:{limit}:{status}:{search}"
+    # Called, not injected: as a dependency it would add its `skip_cache` query
+    # parameter to this stable route (docs/api snapshot).
+    cache_control = await deps.get_cache_control()
 
     # Check if we have cached data
-    if settings.CACHE_CONTROL.get("enabled", False):
-        redis_client = settings.CACHE_CONTROL.get("redis")
-        cached_data = redis_client.get(cache_key)
+    if cache_control.enabled and cache_control.redis:
+        cached_data = await _cache_get(cache_control, cache_key)
         if cached_data:
             record_cache_hit("feature_flag_list")
             cached_response = json.loads(cached_data)
@@ -172,13 +226,7 @@ async def list_feature_flags(
     )
 
     # Cache the response if caching is enabled
-    if settings.CACHE_CONTROL.get("enabled", False):
-        redis_client = settings.CACHE_CONTROL.get("redis")
-        redis_client.setex(
-            cache_key,
-            settings.CACHE_CONTROL.get("ttl", 3600),  # Default to 1 hour
-            json.dumps(response.model_dump()),
-        )
+    await _cache_set(cache_control, cache_key, response.model_dump(mode="json"))
 
     return response
 
@@ -286,16 +334,7 @@ async def create_feature_flag(
             f"Compliance audit logging failed for feature_flag create: {audit_error}"
         )
 
-    # Invalidate cache if enabled
-    try:
-        if cache_control.enabled and cache_control.redis:
-            pattern = f"feature_flags:{current_user.id}:*"
-            for key in cache_control.redis.scan_iter(match=pattern):
-                cache_control.redis.delete(key)
-    except Exception as cache_error:
-        logger.warning(
-            f"Cache invalidation failed for create operation: {cache_error!s}"
-        )
+    await _invalidate_flag_cache(cache_control, None)
 
     return response_dict
 
@@ -341,10 +380,8 @@ async def get_feature_flag(
     # Check cache first if enabled
     if cache_control.enabled and cache_control.redis:
         cache_key = f"feature_flag:{flag_id}"
-        cached_data = cache_control.redis.get(cache_key)
+        cached_data = await _cache_get(cache_control, cache_key)
         if cached_data:
-            import json
-
             record_cache_hit("feature_flag")
             return json.loads(cached_data)
         record_cache_miss("feature_flag")
@@ -360,14 +397,7 @@ async def get_feature_flag(
         )
 
     # Cache result if enabled
-    if cache_control.enabled and cache_control.redis:
-        import json
-
-        cache_control.redis.setex(
-            f"feature_flag:{flag_id}",
-            3600,  # Cache for 1 hour
-            json.dumps(feature_flag),
-        )
+    await _cache_set(cache_control, f"feature_flag:{flag_id}", feature_flag)
 
     return feature_flag
 
@@ -486,16 +516,7 @@ async def update_feature_flag(
             f"Compliance audit logging failed for feature_flag update: {audit_error}"
         )
 
-    # Invalidate cache if enabled
-    if cache_control.enabled and cache_control.redis:
-        # Delete specific feature flag cache
-        flag_cache_key = f"feature_flag:{flag_id}"
-        cache_control.redis.delete(flag_cache_key)
-
-        # Delete feature flag list caches
-        pattern = f"feature_flags:{current_user.id}:*"
-        for key in cache_control.redis.scan_iter(match=pattern):
-            cache_control.redis.delete(key)
+    await _invalidate_flag_cache(cache_control, flag_id)
 
     return updated_flag
 
@@ -607,16 +628,7 @@ async def delete_feature_flag(
             f"Compliance audit logging failed for feature_flag delete: {audit_error}"
         )
 
-    # Invalidate cache if enabled
-    if cache_control.enabled and cache_control.redis:
-        # Delete specific feature flag cache
-        flag_cache_key = f"feature_flag:{flag_id}"
-        cache_control.redis.delete(flag_cache_key)
-
-        # Delete feature flag list caches
-        pattern = "feature_flags:*"
-        for key in cache_control.redis.scan_iter(match=pattern):
-            cache_control.redis.delete(key)
+    await _invalidate_flag_cache(cache_control, flag_id)
 
     # Return 204 No Content
     return Response(status_code=status.HTTP_204_NO_CONTENT)
@@ -682,16 +694,7 @@ async def activate_feature_flag(
     # Activate feature flag
     activated_flag = feature_flag_service.activate_feature_flag(flag)
 
-    # Invalidate cache if enabled
-    if cache_control.enabled and cache_control.redis:
-        # Delete specific feature flag cache
-        flag_cache_key = f"feature_flag:{flag_id}"
-        cache_control.redis.delete(flag_cache_key)
-
-        # Delete feature flag list caches
-        pattern = "feature_flags:*"
-        for key in cache_control.redis.scan_iter(match=pattern):
-            cache_control.redis.delete(key)
+    await _invalidate_flag_cache(cache_control, flag_id)
 
     return activated_flag
 
@@ -756,16 +759,7 @@ async def deactivate_feature_flag(
     # Deactivate feature flag
     deactivated_flag = feature_flag_service.deactivate_feature_flag(flag)
 
-    # Invalidate cache if enabled
-    if cache_control.enabled and cache_control.redis:
-        # Delete specific feature flag cache
-        flag_cache_key = f"feature_flag:{flag_id}"
-        cache_control.redis.delete(flag_cache_key)
-
-        # Delete feature flag list caches
-        pattern = "feature_flags:*"
-        for key in cache_control.redis.scan_iter(match=pattern):
-            cache_control.redis.delete(key)
+    await _invalidate_flag_cache(cache_control, flag_id)
 
     return deactivated_flag
 
@@ -1055,22 +1049,7 @@ async def toggle_feature_flag(
                 f"Audit logging failed for toggle operation: {audit_error!s}"
             )
 
-        # Invalidate cache if enabled (don't fail if cache invalidation fails)
-        try:
-            if cache_control.enabled and cache_control.redis:
-                # Delete specific feature flag cache
-                flag_cache_key = f"feature_flag:{flag_id}"
-                cache_control.redis.delete(flag_cache_key)
-
-                # Delete feature flag list caches
-                pattern = "feature_flags:*"
-                for key in cache_control.redis.scan_iter(match=pattern):
-                    cache_control.redis.delete(key)
-        except Exception as cache_error:
-            # Log cache error but don't fail the toggle operation
-            logger.warning(
-                f"Cache invalidation failed for toggle operation: {cache_error!s}"
-            )
+        await _invalidate_flag_cache(cache_control, flag_id)
 
         return ToggleResponse(
             id=flag.id,
@@ -1158,18 +1137,7 @@ async def enable_feature_flag(
             reason=toggle_request.reason,
         )
 
-        # Invalidate cache if enabled
-        try:
-            if cache_control.enabled and cache_control.redis:
-                flag_cache_key = f"feature_flag:{flag_id}"
-                cache_control.redis.delete(flag_cache_key)
-                pattern = "feature_flags:*"
-                for key in cache_control.redis.scan_iter(match=pattern):
-                    cache_control.redis.delete(key)
-        except Exception as cache_error:
-            logger.warning(
-                f"Cache invalidation failed for enable operation: {cache_error!s}"
-            )
+        await _invalidate_flag_cache(cache_control, flag_id)
 
         return ToggleResponse(
             id=flag.id,
@@ -1257,18 +1225,7 @@ async def disable_feature_flag(
             reason=toggle_request.reason,
         )
 
-        # Invalidate cache if enabled
-        try:
-            if cache_control.enabled and cache_control.redis:
-                flag_cache_key = f"feature_flag:{flag_id}"
-                cache_control.redis.delete(flag_cache_key)
-                pattern = "feature_flags:*"
-                for key in cache_control.redis.scan_iter(match=pattern):
-                    cache_control.redis.delete(key)
-        except Exception as cache_error:
-            logger.warning(
-                f"Cache invalidation failed for disable operation: {cache_error!s}"
-            )
+        await _invalidate_flag_cache(cache_control, flag_id)
 
         return ToggleResponse(
             id=flag.id,
