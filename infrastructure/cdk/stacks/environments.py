@@ -66,3 +66,15 @@ def aurora_instance_count(env_name: str) -> int:
     deployment works, not to survive an AZ failure.
     """
     return 2 if env_name == "prod" else 1
+
+
+def redis_node_count(env_name: str) -> int:
+    """Nodes in the Redis replication group: a primary and two replicas in prod, one elsewhere.
+
+    The Redis stack sizes the group with it, and the monitoring stack builds
+    one CPU alarm per node from it: the nodes are ``<group id>-001`` to
+    ``<group id>-00N`` and ElastiCache publishes host-level metrics per node
+    (``CacheClusterId``), not per group. Staging runs one node (Stream I,
+    I-1d; pinned by ``infrastructure/tests/test_redis_sizing.py``).
+    """
+    return 3 if env_name == "prod" else 1

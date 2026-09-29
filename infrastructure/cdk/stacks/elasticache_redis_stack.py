@@ -9,6 +9,8 @@ from aws_cdk import (
 )
 from constructs import Construct
 
+from stacks.environments import redis_node_count
+
 
 class ElastiCacheRedisStack(Stack):
     """
@@ -67,14 +69,21 @@ class ElastiCacheRedisStack(Stack):
 
         # 3. ENVIRONMENT-SPECIFIC CONFIGURATIONS
         # Different settings based on environment
-        cluster_size = self._get_cluster_size_for_env(environment)
+        # prod: a primary and two replicas; one node elsewhere
+        # (stacks/environments.py, which the monitoring stack's per-node CPU
+        # alarms read too).
+        cluster_size = redis_node_count(environment)
         instance_type = self._get_instance_type_for_env(environment)
 
         # 4. CREATE REDIS REPLICATION GROUP
+        # The id is a literal, so its nodes' ids are too: ElastiCache names
+        # them <id>-001 to <id>-00N. The monitoring stack is given this plain
+        # string by app.py -- no cross-stack import -- to alarm on each node.
+        self.replication_group_id = f"{construct_id}-redis".lower().replace("_", "-")[:40]
         self.redis_cluster = elasticache.CfnReplicationGroup(
             self,
             "RedisCluster",
-            replication_group_id=f"{construct_id}-redis".lower().replace("_", "-")[:40],
+            replication_group_id=self.replication_group_id,
             replication_group_description=f"Redis cluster for {construct_id}",
             engine="redis",
             engine_version="7.0",
@@ -170,17 +179,6 @@ class ElastiCacheRedisStack(Stack):
             return "cache.t4g.small"
         else:  # dev, test, etc.
             return "cache.t4g.medium"  # Burstable instances for dev/test
-
-    def _get_cluster_size_for_env(self, environment: str) -> int:
-        """
-        Get the appropriate Redis cluster size based on environment.
-        """
-        if environment == "prod":
-            return 3  # Primary + 2 replicas for high availability
-        elif environment == "staging":
-            return 1  # One node: no replica, so no failover or Multi-AZ
-        else:  # dev, test, etc.
-            return 1  # Single node to save costs
 
     def _get_snapshot_retention_for_env(self, environment: str) -> int:
         """

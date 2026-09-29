@@ -182,22 +182,49 @@ class TestMonitoringFollowsTheProfile:
     """The Kinesis alarm may only exist where the Kinesis stream does."""
 
     @staticmethod
-    def _template(events_stream_name: str | None) -> dict:
+    def _classes():
         sys.path.insert(0, str(CDK_DIR))
         try:
             from stacks.monitoring_stack import MonitoringStack
             from stacks.vpc_stack import VpcStack
         finally:
             sys.path.remove(str(CDK_DIR))
+        return MonitoringStack, VpcStack
+
+    @classmethod
+    def _template(cls, events_stream_name: str | None) -> dict:
+        MonitoringStack, VpcStack = cls._classes()
         app = cdk.App()
         vpc_stack = VpcStack(app, "TestVpc")
         stack = MonitoringStack(
             app,
             "TestMonitoring",
             vpc=vpc_stack.vpc,
+            # Required (#390): the per-node Redis CPU alarms are named from it.
+            redis_replication_group_id="experimentation-redis-dev-redis",
             events_stream_name=events_stream_name,
         )
         return Template.from_stack(stack).to_json()
+
+    @pytest.mark.regression
+    @pytest.mark.parametrize("value", ["missing", "", "token"])
+    def test_the_redis_replication_group_id_is_required(self, value):
+        """No default: the CPU alarms named the literal ``Redis`` for exactly that reason (#390).
+
+        A token (the replication group's ``Ref``) is refused too: it would be a
+        cross-stack import, and the id is a literal the Redis stack already has.
+        """
+        MonitoringStack, VpcStack = self._classes()
+        app = cdk.App()
+        vpc_stack = VpcStack(app, "TestVpc")
+        kwargs = {}
+        if value == "":
+            kwargs["redis_replication_group_id"] = ""
+        elif value == "token":
+            kwargs["redis_replication_group_id"] = cdk.Fn.ref("RedisCluster")
+        with pytest.raises((TypeError, ValueError)) as excinfo:
+            MonitoringStack(app, "TestMonitoring", vpc=vpc_stack.vpc, **kwargs)
+        assert "redis_replication_group_id" in str(excinfo.value)
 
     @staticmethod
     def _kinesis_alarms(template: dict) -> list[dict]:

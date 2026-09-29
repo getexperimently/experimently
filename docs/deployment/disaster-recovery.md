@@ -48,7 +48,7 @@ because Redis holds only cache and rate-limit state.
 | API | Holds no data. Its image is in ECR (`experimentation-platform/backend`) and, for releases, GHCR. | As above | Redeploy through CodeDeploy ([Rollback Runbook](rollback-runbook.md)) |
 | ECS task definitions | Registered revisions, one per deployment | Until deregistered | Name the revision in a CodeDeploy deployment |
 | Secrets Manager | The database credentials secret (`experimentation-database-$ENV-aurora-credentials`), in the stack's region only. The CDK configures no replica regions. | Until deleted | Within its recovery window after deletion, `aws secretsmanager restore-secret`. There is no copy in another region |
-| Application logs | CloudWatch Logs only, with no export to S3. `/ecs/experimentation-backend-$ENV` and `/ecs/experimentation-dashboard-$ENV` are kept 90 days, `/ecs/experimentation-migrate-$ENV` 30 days, and `/experimentation/$ENV/application` 14 days. | As listed | Not recoverable after expiry |
+| Application logs | CloudWatch Logs only, with no export to S3. `/ecs/experimentation-backend-$ENV` and `/ecs/experimentation-dashboard-$ENV` are kept 90 days, and `/ecs/experimentation-migrate-$ENV` 30 days. | As listed | Not recoverable after expiry |
 | S3 (full profile only) | The analytics data lake bucket (versioned), and the Glue ETL stack's Athena results bucket (objects expire after 30 days) and Glue scripts bucket. None has cross-region replication. The core profile creates no bucket. | Kept when the prod stack is deleted; deleted with it elsewhere | Versioning restores an overwritten or deleted object in the data lake; nothing else |
 | Alembic migration history | Git repository | Per commit | Check out the release |
 | CDK infrastructure definitions | Git repository | Per commit | `cdk deploy` (time not measured) |
@@ -60,7 +60,15 @@ retention, replication and log figures in this table against it.
 
 ## Scenario 1: Single ECS Task Crash
 
-**Detection:** ECS replaces the task automatically. No alarm watches the number of running tasks.
+**Detection:** ECS replaces the task automatically. While another task stays healthy, no alarm
+emails. Each of the API's two target groups has a healthy-task alarm,
+`experimentation-api-healthy-blue-$ENV` and `experimentation-api-healthy-green-$ENV`: it is in
+ALARM once its target group has had no healthy target for 3 minutes. Neither alarm has an action.
+The composite `experimentation-api-no-healthy-task-$ENV` emails `ALARM_EMAIL` when both are in
+ALARM at once. Between deployments one of blue and green is empty, so the idle colour's healthy
+alarm is always in ALARM, by design; that is not an incident. In an environment that runs one
+API task (`demo`), replacing that task leaves no healthy target for a few minutes, and the
+composite sends a true "no healthy task" email for it.
 **RTO:** about a minute (target-group health checks plus task start-up; not measured).
 
 ### Response
@@ -88,11 +96,13 @@ If the running count stays below the desired count (3 in prod) for 5 minutes, go
 
 ## Scenario 2: All ECS Tasks Down
 
-**Detection:** No alarm the CDK creates fires for this. The API's 5xx alarms
-(`experimentation-api-5xx-blue-$ENV` and `-green-$ENV`, which email `ALARM_EMAIL`) count
-5xx responses *from the tasks* (`HTTPCode_Target_5XX_Count`). With no task running, the load
-balancer answers 503 itself, and those minutes count as not breaching. Nothing watches the
-running-task count either. Use an uptime check from outside AWS on `/health` to catch this.
+**Detection:** `experimentation-api-no-healthy-task-$ENV` emails `ALARM_EMAIL` once neither
+target group has had a healthy target for 3 minutes (Scenario 1 describes the two alarms it
+combines). The API's 5xx alarms (`experimentation-api-5xx-blue-$ENV` and `-green-$ENV`) do not
+fire for this: they count 5xx responses *from the tasks* (`HTTPCode_Target_5XX_Count`). With no
+task running, the load balancer answers 503 itself, and those minutes count as not breaching.
+The composite needs the alarm topic's email subscription to be confirmed, and CloudWatch to be
+reachable; an uptime check from outside AWS on `/health` covers both.
 **RTO:** about 5 minutes (target).
 
 ### Immediate Response
@@ -159,9 +169,12 @@ If not resolved within 30 minutes: escalate to Engineering Lead.
 ## Scenario 3: Aurora Database Primary Instance Failure
 
 **Detection:** Application logs show `could not connect to server` errors, and `/health`
-answers 503. No alarm the CDK creates fires for this. Its one database alarm,
-`AuroraHighCPU-$ENV`, measures CPU and names the cluster `AuroraCluster`, which is not the
-deployed cluster's identifier.
+answers 503, so `experimentation-api-no-healthy-task-$ENV` emails once no task passes its
+health check (Scenario 2). The one database alarm, `AuroraHighCPU-$ENV`, watches the writer's
+CPU (`DBClusterIdentifier` from the SSM parameter
+`/experimentation/$ENV/database/aurora-cluster-identifier`, `Role=WRITER`) and treats missing
+data as breaching, so a writer that stops publishing metrics also puts it in ALARM, after 15
+minutes.
 **RTO:** prod about 2 minutes (target), for Aurora's failover to the reader. Other environments have
 one instance and no reader, so Aurora has to replace the instance, which takes longer.
 
@@ -281,6 +294,13 @@ incident which of the options in the [Rollback Runbook](rollback-runbook.md) ("S
 Emergency — Restore from Aurora Snapshot") you will use. Then restart the API through
 CodeDeploy, as in Scenario 2, Step 4.
 
+A cluster restored beside the stack is not watched by `AuroraHighCPU-$ENV` either. The alarm
+reads the cluster identifier from the database stack's parameter
+`/experimentation/$ENV/database/aurora-cluster-identifier`, which names the stack's own
+cluster. The restored cluster is watched only once the database stack's parameter points at it
+and `experimentation-monitoring-$ENV` is redeployed. Until then the alarm watches the failed
+cluster, which publishes nothing, so it stays in ALARM.
+
 ### Verification
 
 ```bash
@@ -298,9 +318,11 @@ If restore does not complete within 30 minutes: escalate to Engineering Lead and
 ## Scenario 5: ElastiCache Redis Failure
 
 **Detection:** Application logs show Redis connection errors. `/health` reports
-`checks.redis.status` as `unhealthy` but stays ready (200) unless `REDIS_REQUIRED=true`. No
-alarm the CDK creates fires for this. Its one Redis alarm, `RedisHighCPU-$ENV`, measures CPU
-and names the cache cluster `Redis`, which is not a deployed node's identifier.
+`checks.redis.status` as `unhealthy` but stays ready (200) unless `REDIS_REQUIRED=true`. The
+Redis alarms are one per node, `RedisHighCPU-001-$ENV` (and `-002-`, `-003-` in prod), on
+`EngineCPUUtilization` for `experimentation-redis-$ENV-redis-001` and its siblings. They treat
+missing data as breaching, so a node that stops publishing metrics puts its alarm in ALARM after
+15 minutes. No alarm watches whether a node accepts connections.
 **RTO:** about 5 minutes (target).
 
 ### Application Behavior During Redis Failure

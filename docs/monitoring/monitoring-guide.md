@@ -231,23 +231,21 @@ environments can share an account:
 
 ### Existing alarms (infrastructure)
 
-| Alarm | Trigger |
-|---|---|
-| `ExperimentationApi5xxErrors` | API Gateway 5xx count >= 5 in 1 min |
-| `AssignmentLambdaErrors` | Lambda errors >= 5 in 5 min |
-| `AssignmentsTableThrottling` | DynamoDB throttled requests >= 10 in 5 min |
-| `AuroraHighCPU` | Aurora CPU >= 80% for 3 consecutive periods |
-| `KinesisProcessingDelay` | Iterator age > 5 min for 3 periods |
-| `AssignmentLambdaDuration` | p95 duration > 5 s for 3 periods |
-| `RedisHighCPU` | Redis CPU >= 80% for 3 periods |
+Every alarm name ends in the environment (`-<env>`). The ones in the
+`experimentation-fargate-<env>` stack watch the API's load balancer and log
+group; the rest are in `experimentation-monitoring-<env>`.
 
-### EP-013 application alarms
+| Alarm | Trigger | Emails the topic |
+|---|---|---|
+| `experimentation-api-5xx-blue` / `-green` | At least 5 target 5xx and at least 5% of that target group's requests in a minute, for 2 of 3 minutes. Also rolls a deployment back. | Yes |
+| `experimentation-api-healthy-blue` / `-green` | That target group has had no healthy target for 3 minutes (missing data counts). The idle colour's is in ALARM between deployments, by design. | No |
+| `experimentation-api-no-healthy-task` | Composite: both healthy alarms above are in ALARM, so no API task is healthy. | Yes |
+| `experimentation-api-error-logs` | At least 10 lines containing `ERROR` in `/ecs/experimentation-backend-<env>` in 5 minutes | Yes |
+| `AuroraHighCPU` | The Aurora writer's CPU >= 80% for 3 five-minute periods, or no data | Yes |
+| `RedisHighCPU-001` (and `-002`, `-003` in prod) | That node's `EngineCPUUtilization` >= 80% for 3 five-minute periods, or no data | Yes |
+| `KinesisProcessingDelay` (full profile) | Iterator age > 5 min for 3 periods | Yes |
 
-| Alarm | Trigger |
-|---|---|
-| `AppHighErrorRate` | 5xx requests > 10 per minute for 2 evaluation periods |
-| `AppHighLatencyP99` | p99 latency > 2 s for 3 consecutive minutes |
-| `AppHighActiveExperiments` | active experiments gauge > 100 |
+The dashboards above still graph some metrics nothing publishes (#424).
 
 ### Adding a new alarm
 
@@ -266,8 +264,11 @@ environments can share an account:
    ```
 
 2. Add the corresponding CDK `cloudwatch.Alarm` resource in
-   `infrastructure/cdk/stacks/monitoring_stack.py` following the pattern
-   of the existing EP-013 alarms at the bottom of `__init__`.
+   `infrastructure/cdk/stacks/monitoring_stack.py` (or, for a metric of the
+   load balancer or the API's log group, `fargate_service_stack.py`), on a
+   metric something deployed publishes, with an alarm action on the topic.
+   `infrastructure/tests/test_standing_alarms.py` lists every alarm the app
+   creates and fails until the new one is added there.
 
 3. Run `cdk diff` and `cdk deploy experimentation-monitoring-<env>` to apply.
    For `staging` or `prod`, `ALARM_EMAIL` must be set, or synth refuses
@@ -287,10 +288,11 @@ To add a new subscriber (email, PagerDuty webhook, etc.) update the
 
 Application logs are written to:
 ```
-/experimentation/<env>/application
+/ecs/experimentation-backend-<env>
 ```
 
-Retention: **2 weeks** (configurable via `retention` in `monitoring_stack.py`).
+This is the API tasks' `awslogs` group. Retention: **90 days** (`retention`
+on `BackendLogGroup` in `fargate_service_stack.py`).
 
 ### Useful CloudWatch Insights queries
 

@@ -41,6 +41,7 @@ CDK_DOC = REPO_ROOT / "docs" / "self-hosting" / "cdk.md"
 #: costs nothing and a shared one has to be reasoned about.
 NAME_PROPERTIES: dict[str, tuple[str, ...]] = {
     "AWS::CloudWatch::Alarm": ("AlarmName",),
+    "AWS::CloudWatch::CompositeAlarm": ("AlarmName",),
     "AWS::CloudWatch::Dashboard": ("DashboardName",),
     "AWS::CodeDeploy::Application": ("ApplicationName",),
     "AWS::CodeDeploy::DeploymentGroup": ("DeploymentGroupName",),
@@ -235,6 +236,8 @@ def test_the_name_scan_reads_the_names_that_matter(synths):
         ("AWS::Logs::LogGroup", "/ecs/experimentation-backend-staging"),
         ("AWS::SSM::Parameter", "/experimentation/staging/vpc/id"),
         ("AWS::SNS::Topic", "experimentation-alerts-staging"),
+        ("AWS::CloudWatch::CompositeAlarm", "experimentation-api-no-healthy-task-staging"),
+        ("AWS::SSM::Parameter", "/experimentation/staging/database/aurora-cluster-identifier"),
     }
     if MODULES_PRESENT:
         expected |= {
@@ -346,7 +349,6 @@ _CORE_POLICIES = {
     ("experimentation-fargate", "AWS::Logs::LogGroup", "BackendLogGroupDA10F1B2"): "Retain",
     ("experimentation-fargate", "AWS::Logs::LogGroup", "DashboardLogGroupE8E0E1A2"): "Retain",
     ("experimentation-migrations", "AWS::Logs::LogGroup", "MigrationLogs670D4322"): "Retain",
-    ("experimentation-monitoring", "AWS::Logs::LogGroup", "ApplicationLogsAF17AEF2"): "Delete",
 }
 _MODULE_POLICIES = {
     ("experimentation-analytics", "AWS::S3::Bucket", "DataLakeBucket0256EA8E"): "Retain",
