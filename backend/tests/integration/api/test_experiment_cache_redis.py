@@ -42,6 +42,8 @@ from backend.app.api import deps
 from backend.app.core.config import settings
 from backend.app.main import app
 from backend.app.models.experiment import Experiment
+from backend.app.schemas.experiment import ExperimentResponse
+from backend.app.services.experiment_service import ExperimentService
 from backend.tests.integration.conftest import make_client_for_user
 
 pytestmark = [pytest.mark.integration, pytest.mark.regression]
@@ -181,6 +183,36 @@ def test_the_experiment_detail_is_cached_and_served_from_the_cache(
     second = cached_client.get(f"{BASE}/{exp['id']}")
     assert second.status_code == 200, second.text
     assert second.json()["name"] == "from-cache"
+
+
+@pytest.fixture
+def cached_viewer_client(redis_server, db_session, viewer_user, monkeypatch):
+    """A non-superuser VIEWER, who owns nothing."""
+    yield from _cached_client_for(db_session, viewer_user, monkeypatch)
+
+
+def test_a_caller_refused_the_detail_is_refused_it_from_the_cache(
+    cached_viewer_client, redis_server, make_experiment, db_session
+):
+    """The cached detail is returned only after the same checks as an
+    uncached read."""
+    exp = make_experiment(name=f"{PREFIX}{uuid.uuid4().hex[:8]}")
+    url = f"{BASE}/{exp.id}"
+
+    uncached = cached_viewer_client.get(url)
+    assert uncached.status_code == 403, uncached.text
+    assert redis_server.exists(f"experiment:{exp.id}") == 0
+
+    # A complete, valid detail, as the route itself would have cached it.
+    detail = ExperimentResponse.model_validate(
+        ExperimentService(db_session).get_experiment_by_id(exp.id)
+    ).model_dump(mode="json")
+    redis_server.set(
+        f"experiment:{exp.id}", json.dumps({**detail, "name": "from-cache"})
+    )
+    cached = cached_viewer_client.get(url)
+    assert cached.status_code == uncached.status_code, cached.text
+    assert "from-cache" not in cached.text
 
 
 # name -> (path suffix under the experiment, cache key suffix)

@@ -471,12 +471,6 @@ async def get_experiment(
         HTTPException 403: If user doesn't have access to this experiment
     """
     try:
-        # Check cache first if enabled
-        if cache_control.enabled and cache_control.redis:
-            cached_data = await _cache_get(cache_control, f"experiment:{experiment_id}")
-            if cached_data:
-                return ExperimentResponse.model_validate_json(cached_data)
-
         # Create experiment service
         experiment_service = ExperimentService(db)
 
@@ -504,6 +498,12 @@ async def get_experiment(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="You don't have permission to access this experiment",
             )
+
+        # The cached detail is returned only after the same checks as an
+        # uncached read.
+        cached_data = await _cache_get(cache_control, f"experiment:{experiment_id}")
+        if cached_data:
+            return ExperimentResponse.model_validate_json(cached_data)
 
         # Create the response - if it's a dictionary, use model_validate directly
         if isinstance(experiment, dict):
