@@ -694,6 +694,12 @@ async def update_experiment(
 
         # Compliance audit logging (non-fatal)
         try:
+            # As on create: the service returns a dict, not a model.
+            new_name = (
+                updated_experiment.get("name")
+                if isinstance(updated_experiment, dict)
+                else getattr(updated_experiment, "name", None)
+            )
             audit = AuditLogService(db)
             audit.log(
                 action=AuditAction.UPDATE,
@@ -702,7 +708,7 @@ async def update_experiment(
                 resource_id=str(experiment_id),
                 actor_id=str(current_user.id) if current_user else None,
                 old_value=old_exp_snapshot,
-                new_value={"name": getattr(updated_experiment, "name", None)},
+                new_value={"name": new_name},
             )
             # log() only flushes, and the update above has already committed, so
             # without this the record is rolled back when the session closes.

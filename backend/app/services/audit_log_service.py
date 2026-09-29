@@ -76,6 +76,11 @@ def _get_retention_expiry(standard: str = "soc2") -> datetime:
 class AuditLogService:
     """Service for creating and querying compliance audit events.
 
+    ``log()`` only flushes, and ``get_db`` closes the session without
+    committing, so a caller whose change has already been committed must
+    commit the record itself -- and roll back if that fails, so the session
+    stays usable for the rest of the request.
+
     Usage in endpoints::
 
         audit = AuditLogService(db)
@@ -88,7 +93,9 @@ class AuditLogService:
                 actor_id=str(current_user.id),
                 new_value={"key": flag.key},
             )
+            db.commit()
         except Exception:
+            db.rollback()
             logger.warning("Compliance audit logging failed", exc_info=True)
     """
 

@@ -185,33 +185,36 @@ def _create(client, user, resource):
     )
     response = client.post(path, json=body, headers=_auth(user))
     assert response.status_code == 201, response.text
-    return response.json()["id"]
+    return response.json()["id"], body
 
 
 def _setup(client, user, route):
-    """The resource an update or delete acts on, created beforehand."""
+    """The resource an update or delete acts on, created beforehand, and the
+    body it was created with; (None, None) for a create route."""
     if route.endswith("_create"):
-        return None
+        return None, None
     return _create(client, user, ROUTES[route][0])
 
 
 def _call(client, user, route, resource_id):
-    """Make the request; return (response, id of the resource it changed)."""
+    """Make the request; return (response, id of the resource it changed,
+    the body sent)."""
     headers = _auth(user)
+    body = None
     if route == "experiment_create":
-        response = client.post(
-            f"{EXPERIMENTS}/", json=_experiment_payload(), headers=headers
-        )
+        body = _experiment_payload()
+        response = client.post(f"{EXPERIMENTS}/", json=body, headers=headers)
     elif route == "flag_create":
-        response = client.post(f"{FLAGS}/", json=_flag_payload(), headers=headers)
+        body = _flag_payload()
+        response = client.post(f"{FLAGS}/", json=body, headers=headers)
     elif route == "experiment_update":
+        body = {"name": "renamed"}
         response = client.put(
-            f"{EXPERIMENTS}/{resource_id}", json={"name": "renamed"}, headers=headers
+            f"{EXPERIMENTS}/{resource_id}", json=body, headers=headers
         )
     elif route == "flag_update":
-        response = client.put(
-            f"{FLAGS}/{resource_id}", json={"name": "renamed"}, headers=headers
-        )
+        body = {"name": "renamed"}
+        response = client.put(f"{FLAGS}/{resource_id}", json=body, headers=headers)
     elif route == "experiment_delete":
         response = client.delete(
             f"{EXPERIMENTS}/{resource_id}?experiment_key={resource_id}",
@@ -221,7 +224,35 @@ def _call(client, user, route, resource_id):
         response = client.delete(f"{FLAGS}/{resource_id}", headers=headers)
     if resource_id is None and response.status_code == 201:
         resource_id = response.json()["id"]
-    return response, resource_id
+    return response, resource_id, body
+
+
+def _expected_values(route, created, sent, user):
+    """(old_value, new_value) fields the record must carry, from the bodies
+    the test sent. None means the record carries no value at all."""
+    if route == "experiment_create":
+        return None, {"name": sent["name"]}
+    if route == "flag_create":
+        return None, {"key": sent["key"], "name": sent["name"]}
+    if route == "experiment_update":
+        return {"name": created["name"]}, {"name": sent["name"]}
+    if route == "flag_update":
+        return (
+            {"key": created["key"], "name": created["name"]},
+            {"key": created["key"], "name": sent["name"]},
+        )
+    if route == "experiment_delete":
+        return {"name": created["name"], "owner_id": str(user.id)}, None
+    return {"key": created["key"], "name": created["name"]}, None
+
+
+def _assert_values(route, which, stored, expected):
+    if expected is None:
+        assert stored is None, f"{route}: {which} should be empty, got {stored}"
+        return
+    assert stored is not None, f"{route}: {which} is empty, expected {expected}"
+    carried = {k: stored.get(k) for k in expected}
+    assert carried == expected, f"{route}: {which} {carried} != {expected}"
 
 
 def _audit_rows(fresh, route, resource_id):
@@ -261,9 +292,9 @@ def _assert_change_kept(fresh, route, resource_id):
 
 @pytest.mark.parametrize("route", list(ROUTES))
 def test_audit_record_is_saved(client, fresh, developer, after_request, route):
-    resource_id = _setup(client, developer, route)
+    resource_id, created = _setup(client, developer, route)
 
-    response, resource_id = _call(client, developer, route, resource_id)
+    response, resource_id, sent = _call(client, developer, route, resource_id)
 
     assert response.status_code == ROUTES[route][2], response.text
     rows = _audit_rows(fresh, route, resource_id)
@@ -272,8 +303,9 @@ def test_audit_record_is_saved(client, fresh, developer, after_request, route):
         f"{resource_id} in a fresh session, expected 1"
     )
     assert rows[0].actor_id == developer.id
-    if route.endswith("_create"):
-        assert (rows[0].new_value or {}).get("name"), rows[0].new_value
+    old, new = _expected_values(route, created, sent, developer)
+    _assert_values(route, "old_value", rows[0].old_value, old)
+    _assert_values(route, "new_value", rows[0].new_value, new)
     _assert_change_kept(fresh, route, resource_id)
     assert after_request[-1] is None, type(after_request[-1]).__name__
 
@@ -309,10 +341,10 @@ CASES = [(route, failure) for route in ROUTES for failure in FAILURES]
 def test_failed_audit_write_keeps_the_answer_and_the_change(
     client, fresh, developer, after_request, monkeypatch, route, failure
 ):
-    resource_id = _setup(client, developer, route)
+    resource_id, _ = _setup(client, developer, route)
     monkeypatch.setattr(AuditLogService, "log", _failing_log(failure))
 
-    response, resource_id = _call(client, developer, route, resource_id)
+    response, resource_id, _ = _call(client, developer, route, resource_id)
 
     assert response.status_code == ROUTES[route][2], response.text
     _assert_change_kept(fresh, route, resource_id)
