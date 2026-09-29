@@ -14,15 +14,19 @@ import { workspaceService } from '@modules/services/workspaces';
 const mockReplace = jest.fn().mockResolvedValue(true);
 const mockPush = jest.fn().mockResolvedValue(true);
 
+// One router object for every render, as Next.js gives a page between
+// navigations, so a refetch can only come from the page's own dependencies.
+const mockRouter = {
+  replace: mockReplace,
+  push: mockPush,
+  pathname: '/workspaces/invites/[token]',
+  asPath: '/workspaces/invites/tok123',
+  query: { token: 'tok123' },
+  isReady: true,
+};
+
 jest.mock('next/router', () => ({
-  useRouter: () => ({
-    replace: mockReplace,
-    push: mockPush,
-    pathname: '/workspaces/invites/[token]',
-    asPath: '/workspaces/invites/tok123',
-    query: { token: 'tok123' },
-    isReady: true,
-  }),
+  useRouter: () => mockRouter,
 }));
 
 jest.mock('next/head', () => {
@@ -49,9 +53,9 @@ const acceptInvite = workspaceService.acceptInvite as jest.Mock;
 const INVITED = 'alice@example.com';
 const KELVIN = 'K';
 
-function signedInAs(email: string | null) {
+function signedInAs(email: string | null, id = 'u-1') {
   mockUser = {
-    id: 'u-1',
+    id,
     email: email as string,
     username: 'someone',
     role: 'VIEWER',
@@ -186,6 +190,62 @@ describe('/workspaces/invites/[token]', () => {
     ).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Accept Invitation' })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Use a different account' })).toBeInTheDocument();
+  });
+
+  it('treats an address the API masked as a different address, even one spelled the same', async () => {
+    // The API masks the address for anyone but the invitee. An account whose
+    // own address is literally the masked string is still not the invitee.
+    const masked = 'a•••@example.com';
+    getInvite.mockResolvedValue({
+      token: 'tok123',
+      workspace_name: 'Growth',
+      inviter_username: 'owner',
+      email: masked,
+      role: 'DEVELOPER',
+      expires_at: new Date(Date.now() + 86_400_000).toISOString(),
+    });
+    signedInAs(masked);
+    renderPage();
+
+    expect(
+      await screen.findByRole('heading', { name: 'This invitation is for a different account' }),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Accept Invitation' })).not.toBeInTheDocument();
+    expect(screen.getByRole('alert')).toHaveTextContent(`It was sent to ${masked}`);
+  });
+
+  it('fetches the invitation again when the signed-in account changes', async () => {
+    const invite = {
+      token: 'tok123',
+      workspace_name: 'Growth',
+      inviter_username: 'owner',
+      role: 'DEVELOPER',
+      expires_at: new Date(Date.now() + 86_400_000).toISOString(),
+    };
+    // Another account gets the masked address; the invitee gets it in full.
+    getInvite.mockImplementation(async () => ({
+      ...invite,
+      email: mockUser?.email === INVITED ? INVITED : 'a•••@example.com',
+    }));
+    signedInAs('bob@other.com', 'u-bob');
+    const view = renderPage();
+
+    expect(
+      await screen.findByRole('heading', { name: 'This invitation is for a different account' }),
+    ).toBeInTheDocument();
+    expect(getInvite).toHaveBeenCalledTimes(1);
+
+    signedInAs(INVITED, 'u-alice');
+    view.rerender(
+      <ModulesProvider initial={{ profile: 'full', modules: ['workspaces'], version: 'test' }}>
+        <AcceptInvitePage />
+      </ModulesProvider>,
+    );
+
+    expect(await screen.findByRole('button', { name: 'Accept Invitation' })).toBeInTheDocument();
+    expect(screen.getByText(INVITED)).toBeInTheDocument();
+    expect(screen.queryByText('This invitation is for a different account')).not.toBeInTheDocument();
+    expect(getInvite).toHaveBeenCalledTimes(2);
   });
 
   it('shows any other accept failure as an alert beside the Accept button', async () => {
