@@ -107,12 +107,23 @@ export function Wizard({ state, dispatch, error, isSubmitting, onCreate, freshLo
     pinnedRef.current = index;
     setPinned(index);
     const navigate = how === 'push' ? router.push : router.replace;
+    const release = () => {
+      // The route change did not happen (the browser's Back or Forward
+      // cancelled it mid-flight, say): stop holding the step, so the view
+      // follows the address again instead of the step that never arrived.
+      if (pinnedRef.current === index) {
+        pinnedRef.current = null;
+        setPinned(null);
+      }
+    };
     navigate({ pathname: NEW_EXPERIMENT_PATH, query: { step: FORM_STEPS[index] } }, undefined, {
       shallow: true,
-    }).catch(() => {
-      // A cancelled route change leaves the URL where it was; the step shown
-      // follows the URL again from its next change.
-    });
+    }).then(
+      (moved) => {
+        if (moved === false) release();
+      },
+      release,
+    );
   };
 
   // Keep the step in the URL honest. On the page's first load the answers are

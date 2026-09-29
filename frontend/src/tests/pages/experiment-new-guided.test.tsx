@@ -358,6 +358,17 @@ describe('views and the URL', () => {
     expect(screen.getByTestId('variant-allocation-0')).toHaveValue(60);
   });
 
+  it.each([
+    ['rejects (cancelled by the browser Back button)', () => mockRouter.push.mockRejectedValueOnce(new Error('Route Cancelled'))],
+    ['resolves false', () => mockRouter.push.mockResolvedValueOnce(false)],
+  ])('a step change the router %s leaves the view on the address step', async (_label, arrange) => {
+    render(<NewExperimentPage />);
+    arrange();
+    next();
+    // The address still says step 1 (no `?step`), so the view goes back there.
+    await waitFor(() => expect(heading()).toHaveTextContent(STEP_HEADINGS.type));
+  });
+
   it('switching to the single-page form and back keeps the answers', () => {
     const { rerender } = render(<NewExperimentPage />);
     expect(screen.getByTestId('switch-to-advanced')).toHaveAttribute('href', '/experiments/new?advanced');

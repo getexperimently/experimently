@@ -72,6 +72,8 @@ test.describe("Journey: experiment lifecycle", () => {
     // Back never checks anything, and the answers survive the round trip.
     await experiments.backButton.click();
     await expect(experiments.nameInput).toHaveValue("Broken allocation");
+    // The view changes before the URL does; wait for the history entry.
+    await expect(adminPage).toHaveURL(/\/experiments\/new\?step=details$/);
     // Back is a step in the browser's history too: the browser's own Back
     // returns to Variants, answers intact.
     await adminPage.goBack();
