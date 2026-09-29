@@ -245,6 +245,145 @@ describe('ExperimentDetailPage — lifecycle actions', () => {
   });
 });
 
+describe('ExperimentDetailPage — lifecycle actions by role', () => {
+  // The API's change routes (start, pause, complete, archive) require a
+  // superuser or a role holding EXPERIMENT UPDATE -- ADMIN or DEVELOPER --
+  // whoever owns the experiment. The page offers exactly those buttons.
+  const OTHER_OWNER = 'someone-else';
+  const NOTE =
+    'Starting, pausing, completing and archiving an experiment requires the ADMIN or DEVELOPER role; ';
+
+  function signIn(user: Record<string, unknown> | null) {
+    mockUseAuth.mockReturnValue({
+      user,
+      status: user ? 'authenticated' : 'loading',
+    });
+  }
+
+  const as = (role: string, extra: Record<string, unknown> = {}) => ({
+    id: 'user-1',
+    email: `${role.toLowerCase()}@demo.com`,
+    username: role.toLowerCase(),
+    role,
+    is_superuser: false,
+    ...extra,
+  });
+
+  async function renderActive(owner = OTHER_OWNER) {
+    install(experiment({ status: 'active', owner_id: owner }));
+    render(<ExperimentDetailPage />);
+    await screen.findByTestId('experiment-detail');
+  }
+
+  const lifecycleButtons = () =>
+    ['start', 'pause', 'complete', 'archive'].filter(
+      (a) => screen.queryByTestId(`action-${a}`) !== null,
+    );
+
+  it.each(['ADMIN', 'DEVELOPER'])('%s sees Pause and Complete and no note', async (role) => {
+    signIn(as(role));
+    await renderActive();
+    expect(lifecycleButtons()).toEqual(['pause', 'complete']);
+    expect(screen.queryByTestId('experiment-role-note')).toBeNull();
+    expect(screen.getByTestId('view-results')).toHaveAttribute('href', '/results/exp-1');
+  });
+
+  it.each(['ANALYST', 'VIEWER'])(
+    '%s sees no lifecycle button, the role note, and View results',
+    async (role) => {
+      signIn(as(role));
+      await renderActive();
+      expect(lifecycleButtons()).toEqual([]);
+      expect(screen.getByTestId('experiment-actions').querySelectorAll('button')).toHaveLength(0);
+      const note = screen.getByTestId('experiment-role-note');
+      expect(note.tagName).toBe('P');
+      expect(note).toHaveClass('text-slate-700');
+      expect(note).toHaveTextContent(
+        `${NOTE}you are ${role}. You can read its results.`,
+      );
+      expect(screen.getByTestId('view-results')).toHaveAttribute('href', '/results/exp-1');
+    },
+  );
+
+  it('a superuser whose role is VIEWER sees the buttons and no note', async () => {
+    signIn(as('VIEWER', { is_superuser: true }));
+    await renderActive();
+    expect(lifecycleButtons()).toEqual(['pause', 'complete']);
+    expect(screen.queryByTestId('experiment-role-note')).toBeNull();
+  });
+
+  it('with no user yet, the buttons stay and no note is shown', async () => {
+    signIn(null);
+    await renderActive();
+    expect(lifecycleButtons()).toEqual(['pause', 'complete']);
+    expect(screen.queryByTestId('experiment-role-note')).toBeNull();
+  });
+
+  it('an ANALYST who owns the experiment gets the owner sentence and still no button', async () => {
+    signIn(as('ANALYST'));
+    await renderActive('user-1');
+    expect(screen.getByTestId('experiment-owner')).toHaveTextContent('You (analyst@demo.com)');
+    expect(lifecycleButtons()).toEqual([]);
+    expect(screen.getByTestId('experiment-role-note')).toHaveTextContent(
+      'You own this experiment, but starting, pausing, completing and archiving it requires ' +
+        'the ADMIN or DEVELOPER role; you are ANALYST. You can read its results.',
+    );
+  });
+
+  it('a draft says results come once it has started', async () => {
+    signIn(as('VIEWER'));
+    install(experiment({ status: 'draft', owner_id: OTHER_OWNER }));
+    render(<ExperimentDetailPage />);
+    await screen.findByTestId('experiment-detail');
+    expect(lifecycleButtons()).toEqual([]);
+    expect(screen.getByTestId('experiment-role-note')).toHaveTextContent(
+      `${NOTE}you are VIEWER. You can read its results once it has started.`,
+    );
+    expect(screen.getByTestId('view-results-disabled')).toBeInTheDocument();
+  });
+
+  it('an archived experiment has no actions, so no note, for any role', async () => {
+    for (const role of ['ANALYST', 'VIEWER', 'ADMIN']) {
+      signIn(as(role));
+      install(experiment({ status: 'archived', owner_id: OTHER_OWNER }));
+      const { unmount } = render(<ExperimentDetailPage />);
+      await screen.findByTestId('experiment-detail');
+      expect(lifecycleButtons()).toEqual([]);
+      expect(screen.queryByTestId('experiment-role-note')).toBeNull();
+      expect(screen.getByTestId('view-results')).toBeInTheDocument();
+      unmount();
+    }
+  });
+
+  it.each([
+    [403, "You don't have permission to update experiments"],
+    [400, 'Cannot pause experiment with status: paused'],
+  ])('a %s from the API still renders in action-error', async (status, detail) => {
+    signIn(as('DEVELOPER'));
+    mockedApiFetch.mockImplementation(
+      routedApi([
+        {
+          path: '/api/v1/experiments/exp-1',
+          handler: () => experiment({ status: 'active', owner_id: OTHER_OWNER }),
+        },
+        {
+          method: 'POST',
+          path: '/api/v1/experiments/exp-1/pause',
+          handler: () => {
+            throw apiError(status, detail);
+          },
+        },
+      ]) as unknown as typeof apiFetch,
+    );
+    render(<ExperimentDetailPage />);
+    await screen.findByTestId('experiment-detail');
+    fireEvent.click(screen.getByTestId('action-pause'));
+    expect(await screen.findByTestId('action-error')).toHaveTextContent(detail);
+    expect(screen.getByTestId('experiment-status')).toHaveTextContent('Active');
+    expect(screen.queryByTestId('experiment-role-note')).toBeNull();
+  });
+});
+
 describe('ExperimentDetailPage — error states', () => {
   it('renders a 404 view when the experiment does not exist', async () => {
     mockedApiFetch.mockImplementation(
