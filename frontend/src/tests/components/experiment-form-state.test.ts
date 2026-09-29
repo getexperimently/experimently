@@ -166,6 +166,7 @@ const METRIC_CASES: Array<[MetricFormData[], string]> = [
   [[M({ event_name: '' })], 'no event'],
   [[M({ name: '' })], 'no name'],
   [[M({ is_primary: false })], 'no primary'],
+  [[M(), M({ name: ' Conv ', event_name: 'other', is_primary: false })], 'repeated name'],
 ];
 
 const TABLE = NAME_CASES.flatMap(([name, n]) =>
@@ -191,6 +192,13 @@ describe('validateForm and its three checks', () => {
     expect(checkMetrics([])).toBe('Add at least one metric.');
     expect(checkMetrics([M({ event_name: ' ' })])).toBe('Every metric needs a name and an event name.');
     expect(checkMetrics([M({ is_primary: false })])).toBe('Choose a primary metric.');
+    expect(checkMetrics([M(), M({ is_primary: false })])).toBe('Metric names must be unique.');
+  });
+
+  it('compares metric names as they are sent: trimmed, and case-sensitive like the API', () => {
+    expect(checkMetrics([M(), M({ name: '  Conv', is_primary: false })])).toBe('Metric names must be unique.');
+    expect(checkMetrics([M(), M({ name: 'conv', is_primary: false })])).toBeNull();
+    expect(checkMetrics([M(), M({ name: 'Revenue', event_name: 'purchase', is_primary: false })])).toBeNull();
   });
 
   it.each(TABLE)('$label: validateForm is the first of name, variants, metrics', ({ state }) => {
@@ -245,7 +253,7 @@ describe('validateStep against validateForm', () => {
 
   it('with a good name and both variants and metrics wrong, details reports the metrics problem first', () => {
     const disagreeing = TABLE.filter((row) => !agreeing.includes(row));
-    expect(disagreeing).toHaveLength(16);
+    expect(disagreeing).toHaveLength(20);
     for (const { state } of disagreeing) {
       expect(firstFailingStep(state)).toBe(checkMetrics(state.metrics));
       expect(validateForm(state.name, state.variants, state.metrics)).toBe(checkVariants(state.variants));

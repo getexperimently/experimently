@@ -115,6 +115,9 @@ export function checkMetrics(metrics: MetricFormData[]): string | null {
   if (metrics.some((m) => !m.name.trim() || !m.event_name.trim())) {
     return 'Every metric needs a name and an event name.';
   }
+  // The API stores one metric per name per experiment and refuses a repeat.
+  const names = metrics.map((m) => m.name.trim());
+  if (new Set(names).size !== names.length) return 'Metric names must be unique.';
   if (!metrics.some((m) => m.is_primary)) return 'Choose a primary metric.';
   return null;
 }

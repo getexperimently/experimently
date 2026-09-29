@@ -1,5 +1,5 @@
 import React from 'react';
-import Link from 'next/link';
+import { docsUrl } from '@/services/docs';
 import { ExperimentType, EXPERIMENT_TYPE_LABELS } from '@/types/experiments';
 import { ExperimentFormAction, FORM_EXPERIMENT_TYPES } from './formState';
 import { inputClass } from './fieldStyles';
@@ -35,19 +35,16 @@ export function ExperimentTypeField({ value, dispatch }: ExperimentTypeFieldProp
         ))}
       </select>
       <p className="text-xs text-slate-400 mt-1" data-testid="experiment-type-note">
-        <Link
-          href="/docs/experiments/split-url"
-          className="text-blue-600 hover:text-blue-800 hover:underline"
-        >
+        <a href={docsUrl('api/split-url')} className="text-blue-600 hover:text-blue-800 hover:underline">
           Split URL
-        </Link>{' '}
+        </a>{' '}
         experiments need a URL configuration and{' '}
-        <Link
-          href="/docs/experiments/mab"
+        <a
+          href={docsUrl('api/multi-armed-bandit')}
           className="text-blue-600 hover:text-blue-800 hover:underline"
         >
           bandit
-        </Link>{' '}
+        </a>{' '}
         experiments need an optimization algorithm — neither can be set up from this form
         yet, so create them through the API or an SDK.
       </p>

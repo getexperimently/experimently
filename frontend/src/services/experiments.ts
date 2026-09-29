@@ -48,6 +48,12 @@ export interface SampleSizeEstimate {
   notes: string | null;
 }
 
+/** Options for `ExperimentsService.create`. */
+export interface CreateOptions {
+  /** Default true: a 401 sends the browser to the login page. */
+  redirectOn401?: boolean;
+}
+
 const BASE = '/api/v1/experiments';
 
 export const ExperimentsService = {
@@ -68,8 +74,13 @@ export const ExperimentsService = {
     return apiFetch<Experiment>(`${BASE}/${id}`);
   },
 
-  async create(data: CreateExperimentRequest): Promise<Experiment> {
-    return apiFetch<Experiment>(BASE, { method: 'POST', json: data });
+  /**
+   * `POST /api/v1/experiments`. Pass `redirectOn401: false` to get the 401 as
+   * an error instead of being sent to the login page; `/experiments/new` does,
+   * so an expired session never costs the answers on screen.
+   */
+  async create(data: CreateExperimentRequest, options: CreateOptions = {}): Promise<Experiment> {
+    return apiFetch<Experiment>(BASE, { method: 'POST', json: data, ...options });
   },
 
   /**

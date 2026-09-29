@@ -2,6 +2,7 @@ import React from 'react';
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import NewExperimentPage, { generateKey, validateForm } from '@/pages/experiments/new';
 import { apiFetch } from '@/services/api';
+import { docsUrl } from '@/services/docs';
 import { apiError, makeRouter, routedApi } from './helpers/apiMock';
 
 jest.mock('@/services/api', () => ({
@@ -87,11 +88,11 @@ describe('NewExperimentPage', () => {
     expect(note).toHaveTextContent(/bandit/i);
     expect(within(note).getByRole('link', { name: /split url/i })).toHaveAttribute(
       'href',
-      '/docs/experiments/split-url',
+      docsUrl('api/split-url'),
     );
     expect(within(note).getByRole('link', { name: /bandit/i })).toHaveAttribute(
       'href',
-      '/docs/experiments/mab',
+      docsUrl('api/multi-armed-bandit'),
     );
   });
 

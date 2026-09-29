@@ -20,6 +20,7 @@ import { BasicInfoFields } from './BasicInfoFields';
 import { VariantsEditor } from './VariantsEditor';
 import { MetricsEditor } from './MetricsEditor';
 import { EstimatePanelState, INITIAL_ESTIMATE_PANEL, SampleSizeEstimate } from './SampleSizeEstimate';
+import { CreateError } from './createErrors';
 
 export const NEW_EXPERIMENT_PATH = '/experiments/new';
 
@@ -59,9 +60,11 @@ function parseStep(raw: string | string[] | undefined): number {
 interface WizardProps {
   state: ExperimentFormState;
   dispatch: React.Dispatch<ExperimentFormAction>;
-  error: string | null;
+  error: CreateError | null;
   isSubmitting: boolean;
   onCreate: () => void;
+  /** Clear the create error, when the user goes to fix what it names. */
+  onClearError: () => void;
   /** True when this is the first view the page showed after loading. */
   freshLoad: boolean;
 }
@@ -83,7 +86,7 @@ const editButton =
  * text or number field on the first three steps presses Next, and does
  * nothing on Estimate and Review.
  */
-export function Wizard({ state, dispatch, error, isSubmitting, onCreate, freshLoad }: WizardProps) {
+export function Wizard({ state, dispatch, error, isSubmitting, onCreate, onClearError, freshLoad }: WizardProps) {
   const router = useRouter();
   const rawStep = router.query.step;
   const requested = parseStep(rawStep);
@@ -99,6 +102,9 @@ export function Wizard({ state, dispatch, error, isSubmitting, onCreate, freshLo
   const headingRef = useRef<HTMLHeadingElement>(null);
   const firstRunRef = useRef(true);
   const shownRef = useRef<number | null>(null);
+  // Set by the duplicate-key "Edit details": the next step change focuses the
+  // key field rather than the step heading.
+  const focusKeyRef = useRef(false);
 
   const current = pinned ?? (requested < 0 ? 0 : Math.min(requested, maxReachable));
   const step = FORM_STEPS[current];
@@ -157,7 +163,14 @@ export function Wizard({ state, dispatch, error, isSubmitting, onCreate, freshLo
   useEffect(() => {
     setVisitedMax((v) => Math.max(v, current));
     if (shownRef.current !== null && shownRef.current !== current) {
-      headingRef.current?.focus();
+      const key = focusKeyRef.current ? document.getElementById('experiment-key') : null;
+      focusKeyRef.current = false;
+      if (key instanceof HTMLInputElement) {
+        key.focus();
+        key.select();
+      } else {
+        headingRef.current?.focus();
+      }
       setStepError(null);
     }
     shownRef.current = current;
@@ -182,6 +195,14 @@ export function Wizard({ state, dispatch, error, isSubmitting, onCreate, freshLo
   const goTo = (index: number) => {
     if (index === current || index > maxReachable) return;
     moveTo(index, 'push');
+  };
+
+  // The key is taken: go to Details with the key field focused. The error goes
+  // too, so Review does not repeat it after the key has been changed.
+  const editKey = () => {
+    focusKeyRef.current = true;
+    onClearError();
+    goTo(FORM_STEPS.indexOf('details'));
   };
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
@@ -438,7 +459,20 @@ export function Wizard({ state, dispatch, error, isSubmitting, onCreate, freshLo
               className="rounded-lg bg-red-50 border border-red-200 p-3 text-sm text-red-700"
               data-testid="form-error"
             >
-              {error}
+              {error.message}
+              {error.editDetails && (
+                <>
+                  {' '}
+                  <button
+                    type="button"
+                    onClick={editKey}
+                    className="font-medium underline hover:text-red-900 focus:outline-none focus:ring-2 focus:ring-blue-600 rounded"
+                    data-testid="form-error-edit-details"
+                  >
+                    Edit details
+                  </button>
+                </>
+              )}
             </div>
           )}
         </section>
