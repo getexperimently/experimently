@@ -6,12 +6,13 @@ invite lifecycle, and workspace-scoped API key management.
 """
 
 import uuid
-from typing import List
+from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Path, status
+from fastapi import APIRouter, Depends, HTTPException, Path, Response, status
 from sqlalchemy.orm import Session
 
-from backend.app.api.deps import get_current_active_user, get_db
+from backend.app.api.deps import get_current_active_user, get_current_user, get_db
+from backend.app.core.security import oauth2_scheme
 from backend.app.models.user import User
 from modules.backend.app.models.workspace import (
     Workspace,
@@ -49,14 +50,16 @@ from modules.backend.app.services.workspace_service import (
     WorkspaceNotFound,
     WorkspaceSlugInvalid,
     WorkspaceSlugTaken,
+    invite_email_for_viewer,
     workspace_service,
 )
 
 router = APIRouter()
 
-#: The invite preview: an email recipient who may not have an account yet
-#: looks the invitation up by its token before accepting.  No user
-#: authentication, so the registration mounts it behind nothing.
+#: The invite preview: a recipient who may not have an account yet looks the
+#: invitation up by its token before accepting.  Sign-in is optional (it only
+#: decides whether the invited address is shown in full), so the registration
+#: mounts it behind nothing.
 public_router = APIRouter()
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -458,21 +461,59 @@ def create_invite(
     )
 
 
-@public_router.get("/invites/{token}", response_model=WorkspaceInviteResponse)
+def _invite_viewer(
+    bearer: Optional[str] = Depends(oauth2_scheme),
+    db: Session = Depends(get_db),
+) -> Optional[User]:
+    """The signed-in account looking at an invitation, or ``None``.
+
+    Sign-in is optional here: no credentials, credentials that do not resolve
+    to an account, and an inactive account are all ``None`` rather than an
+    error, so the preview answers the same way with or without them.
+    """
+    try:
+        user = get_current_user(token=bearer, db=db)
+    except HTTPException:
+        # This request's session is the one get_current_user used, and it can
+        # write (a first Cognito sign-in creates the user row). If that write
+        # failed, the session has to be rolled back before the invite lookup
+        # uses it.
+        db.rollback()
+        return None
+    return user if user.is_active else None
+
+
+@public_router.get(
+    "/invites/{token}",
+    response_model=WorkspaceInviteResponse,
+    # Sign-in is optional: the empty entry beside the bearer scheme says so.
+    openapi_extra={"security": [{}]},
+)
 def get_invite(
+    response: Response,
     token: str = Path(...),
     db: Session = Depends(get_db),
+    viewer: Optional[User] = Depends(_invite_viewer),
 ):
-    """Get invite info by token. Public endpoint — no auth required."""
+    """Get invite info by token. No sign-in needed.
+
+    `email` is returned in full only to the account it was sent to (compared
+    without regard to case); anyone else, signed in or not, gets it masked,
+    e.g. `a•••@example.com`.
+    """
     try:
         invite = workspace_service.get_invite_by_token(db, token)
     except InviteNotFound as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc))
 
+    # The body depends on who is asking, so no shared cache may keep it.
+    response.headers["Cache-Control"] = "private, no-store"
     return WorkspaceInviteResponse(
         id=str(invite.id),
         workspace_id=str(invite.workspace_id),
-        email=invite.email,
+        email=invite_email_for_viewer(
+            invite.email, viewer.email if viewer is not None else None
+        ),
         role=invite.role.value,
         token=invite.token,
         expires_at=invite.expires_at,
