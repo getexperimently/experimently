@@ -393,8 +393,13 @@ async def create_experiment(
 
         # Compliance audit logging (non-fatal)
         try:
-            exp_id = getattr(experiment, "id", None)
-            exp_name = getattr(experiment, "name", None)
+            # The service returns the experiment as a dict, not a model, so
+            # getattr() alone recorded neither the id nor the name.
+            if isinstance(experiment, dict):
+                exp_id, exp_name = experiment.get("id"), experiment.get("name")
+            else:
+                exp_id = getattr(experiment, "id", None)
+                exp_name = getattr(experiment, "name", None)
             audit = AuditLogService(db)
             audit.log(
                 action=AuditAction.CREATE,
@@ -404,7 +409,11 @@ async def create_experiment(
                 actor_id=str(current_user.id) if current_user else None,
                 new_value={"name": exp_name},
             )
+            # log() only flushes, and the create above has already committed, so
+            # without this the record is rolled back when the session closes.
+            db.commit()
         except Exception as _audit_err:
+            db.rollback()
             logger.warning(
                 f"Compliance audit logging failed for experiment create: {_audit_err}"
             )
@@ -695,7 +704,11 @@ async def update_experiment(
                 old_value=old_exp_snapshot,
                 new_value={"name": getattr(updated_experiment, "name", None)},
             )
+            # log() only flushes, and the update above has already committed, so
+            # without this the record is rolled back when the session closes.
+            db.commit()
         except Exception as _audit_err:
+            db.rollback()
             logger.warning(
                 f"Compliance audit logging failed for experiment update: {_audit_err}"
             )
