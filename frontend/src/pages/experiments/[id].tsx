@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/router';
 import { PageTitle } from '@/components/PageTitle';
+import WarehouseAnalysisSection from '@modules/components/warehouse/runs/WarehouseAnalysisSection';
 import { useAuth } from '@/contexts/AuthContext';
 import { isApiError } from '@/services/api';
 import { ExperimentsService } from '@/services/experiments';
@@ -443,6 +444,9 @@ export default function ExperimentDetailPage() {
             )}
           </section>
         </div>
+
+        {/* Warehouse analysis (beta): the `warehouse` module; renders nothing without it. */}
+        <WarehouseAnalysisSection experiment={experiment} />
 
         {/* SDK hint */}
         {experiment.key && (

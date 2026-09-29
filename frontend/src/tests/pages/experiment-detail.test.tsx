@@ -1,6 +1,7 @@
 import React from 'react';
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import ExperimentDetailPage, { ACTIONS_BY_STATUS } from '@/pages/experiments/[id]';
+import { ModulesProvider } from '@/contexts/ModulesContext';
 import { apiFetch } from '@/services/api';
 import { Experiment } from '@/types/experiments';
 import { apiError, makeRouter, routedApi } from './helpers/apiMock';
@@ -283,5 +284,46 @@ describe('ExperimentDetailPage — error states', () => {
 
     fireEvent.click(screen.getByTestId('experiment-retry'));
     expect(await screen.findByTestId('experiment-detail')).toBeInTheDocument();
+  });
+});
+
+describe('ExperimentDetailPage — warehouse analysis section (the `warehouse` module)', () => {
+  // A core build (`modules/` deleted, or EXPERIMENTLY_PROFILE=core) resolves
+  // `@modules/*` to the stub, which renders nothing. Asked of the resolver
+  // itself, so the test follows whichever tree actually answered.
+  const full = !require
+    .resolve('@modules/components/warehouse/runs/WarehouseAnalysisSection')
+    .includes('modules-stub');
+  const RUNS = '/api/v1/warehouse/analysis/experiments/exp-1/runs';
+  const warehouseCalls = () =>
+    mockedApiFetch.mock.calls.filter(([p]) => String(p).startsWith('/api/v1/warehouse/'));
+
+  function renderWith(modules: string[]) {
+    return render(
+      <ModulesProvider initial={{ profile: 'full', modules, version: 'test' }}>
+        <ExperimentDetailPage />
+      </ModulesProvider>,
+    );
+  }
+
+  it('shows the section and asks for the runs only in a full build with the module installed', async () => {
+    install(experiment({ status: 'active' }));
+    renderWith(['warehouse']);
+    expect(await screen.findByTestId('experiment-detail')).toBeInTheDocument();
+    if (full) {
+      expect(await screen.findByTestId('warehouse-analysis')).toBeInTheDocument();
+      await waitFor(() => expect(calledWith('GET', RUNS)).toBe(true));
+    } else {
+      expect(screen.queryByTestId('warehouse-analysis')).toBeNull();
+      expect(warehouseCalls()).toEqual([]);
+    }
+  });
+
+  it('shows no section and calls no warehouse route when the module is not installed', async () => {
+    install(experiment({ status: 'active' }));
+    renderWith([]);
+    expect(await screen.findByTestId('experiment-detail')).toBeInTheDocument();
+    expect(screen.queryByTestId('warehouse-analysis')).toBeNull();
+    expect(warehouseCalls()).toEqual([]);
   });
 });
