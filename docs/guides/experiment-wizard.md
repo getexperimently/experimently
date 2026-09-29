@@ -12,7 +12,7 @@ experiment in five steps:
 | Step | What you set |
 |------|--------------|
 | 1. Type | A/B Test or Multivariate |
-| 2. Details | Name, key, description, hypothesis, and the metrics, one of them primary |
+| 2. Details | Name, key, description, hypothesis, and the metrics (each with its own name), one of them primary |
 | 3. Variants | The variants, their traffic split (it must add up to exactly 100%), which one is the control, and optional targeting rules |
 | 4. Estimate | Optional: how many users each variant needs, and roughly how many days that takes |
 | 5. Review | Everything as it will be sent; **Create Experiment** creates it as a draft |
@@ -35,6 +35,10 @@ experiment in five steps:
   higher.
 - Only ADMIN and DEVELOPER users (and superusers) can create experiments; anyone else
   sees a note saying so instead of the form.
+- If **Create Experiment** fails, you stay where you are with every answer kept, in
+  either view. A key another experiment already has is named, with **Edit details** to
+  change it. If your session has ended, sign in again in another tab, then press
+  **Create Experiment** again.
 - Split URL and bandit experiments need settings guided setup does not ask for;
   create them through the API or an SDK.
 

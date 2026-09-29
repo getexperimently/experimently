@@ -176,8 +176,11 @@ test.describe("Journey: experiment lifecycle", () => {
     adminPage.on("response", (response) => {
       const request = response.request();
       const { pathname } = new URL(request.url());
-      if (request.method() === "POST" && /\/api\/v1\/experiments\/?$/.test(pathname)) {
-        creates.push(response.status());
+      // The API redirects /experiments to /experiments/ (307); count answers only.
+      const status = response.status();
+      const redirect = status >= 300 && status < 400;
+      if (request.method() === "POST" && /\/api\/v1\/experiments\/?$/.test(pathname) && !redirect) {
+        creates.push(status);
       }
     });
     const name = `E2E Keeps answers ${STAMP}`;
