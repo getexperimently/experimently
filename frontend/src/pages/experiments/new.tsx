@@ -14,13 +14,18 @@ import {
 } from '@/components/experiments/new/formState';
 import { useOptionalAuth } from '@/contexts/AuthContext';
 import { canCreateExperiment } from '@/utils/experimentPermissions';
+import {
+  CreateError,
+  CreateView,
+  describeCreateError,
+  ROLE_CANNOT_CREATE,
+} from '@/components/experiments/new/createErrors';
 
 // The form's state, validation and payload live in `formState.ts`; these stay
 // importable from the page for the code and tests that already use them.
 export { generateKey, validateForm, FORM_EXPERIMENT_TYPES } from '@/components/experiments/new/formState';
 
-export const ROLE_CANNOT_CREATE =
-  'Your role can view experiments but not create them. Ask an admin to create it or to change your role.';
+export { ROLE_CANNOT_CREATE, SESSION_EXPIRED_CREATE } from '@/components/experiments/new/createErrors';
 
 const INITIAL_SNAPSHOT = JSON.stringify(createInitialFormState());
 
@@ -34,7 +39,7 @@ export default function NewExperimentPage() {
   const auth = useOptionalAuth();
   const [state, dispatch] = useReducer(experimentFormReducer, undefined, createInitialFormState);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<CreateError | null>(null);
   const submittingRef = useRef(false);
   // Cleared synchronously before the page navigates away after a create, so
   // the unsaved-answers warning never fires for work that was saved.
@@ -49,24 +54,29 @@ export default function NewExperimentPage() {
     if (router.isReady) shownViewRef.current = true;
   }, [router.isReady]);
 
-  const submit = async () => {
+  const submit = async (view: CreateView) => {
     if (submittingRef.current) return;
     setError(null);
 
     const problem = validateForm(state.name, state.variants, state.metrics);
     if (problem) {
-      setError(problem);
+      setError({ message: problem });
       return;
     }
 
     submittingRef.current = true;
     setIsSubmitting(true);
     let createdId: string;
+    let sentKey: string | undefined;
     try {
-      const created = await ExperimentsService.create(buildCreatePayload(state));
+      // No login redirect on a 401: that would discard every answer. The
+      // session copy says what to do instead, and the answers stay.
+      const payload = buildCreatePayload(state);
+      sentKey = payload.key;
+      const created = await ExperimentsService.create(payload, { redirectOn401: false });
       createdId = created.id;
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to create experiment');
+      setError(describeCreateError(err, sentKey, view));
       submittingRef.current = false;
       setIsSubmitting(false);
       return;
@@ -87,7 +97,7 @@ export default function NewExperimentPage() {
 
   const handleAdvancedSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    void submit();
+    void submit('advanced');
   };
 
   // Nothing reads the query before the router has it: a static export renders
@@ -172,7 +182,8 @@ export default function NewExperimentPage() {
               dispatch={dispatch}
               error={error}
               isSubmitting={isSubmitting}
-              onCreate={() => void submit()}
+              onCreate={() => void submit('guided')}
+              onClearError={() => setError(null)}
               freshLoad={freshLoad}
             />
           </>

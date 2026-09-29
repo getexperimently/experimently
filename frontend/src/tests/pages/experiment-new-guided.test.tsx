@@ -412,6 +412,30 @@ describe('per-step checks', () => {
     );
   });
 
+  it('Next on Details refuses two metrics with the same name', () => {
+    render(<NewExperimentPage />);
+    next();
+    setValue('experiment-name', 'X');
+    fireEvent.click(screen.getByTestId('add-metric'));
+    setValue('metric-name-1', ' Conversion ');
+    setValue('metric-event-1', 'purchase');
+    next();
+    expect(screen.getByTestId('step-error')).toHaveTextContent('Metric names must be unique.');
+    expect(heading()).toHaveTextContent(STEP_HEADINGS.details);
+  });
+
+  it('the single-page form refuses two metrics with the same name and sends nothing', async () => {
+    routerAt({ advanced: '' });
+    render(<NewExperimentPage />);
+    setValue('experiment-name', 'X');
+    fireEvent.click(screen.getByTestId('add-metric'));
+    setValue('metric-name-1', 'Conversion');
+    setValue('metric-event-1', 'purchase');
+    fireEvent.click(screen.getByTestId('submit-experiment'));
+    expect(await screen.findByTestId('form-error')).toHaveTextContent('Metric names must be unique.');
+    expect(mockedApiFetch).not.toHaveBeenCalled();
+  });
+
   it('Next on Variants refuses allocations that do not add up to 100%', () => {
     render(<NewExperimentPage />);
     next();

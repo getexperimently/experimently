@@ -6,17 +6,27 @@ import { BasicInfoFields } from './BasicInfoFields';
 import { ExperimentTypeField } from './ExperimentTypeField';
 import { VariantsEditor } from './VariantsEditor';
 import { MetricsEditor } from './MetricsEditor';
+import { CreateError } from './createErrors';
 
 interface AdvancedFormProps {
   state: ExperimentFormState;
   dispatch: React.Dispatch<ExperimentFormAction>;
-  error: string | null;
+  error: CreateError | null;
   isSubmitting: boolean;
   onSubmit: (e: React.FormEvent) => void;
 }
 
 /** Every field of a new experiment on one page, submitted with one button. */
 export function AdvancedForm({ state, dispatch, error, isSubmitting, onSubmit }: AdvancedFormProps) {
+  // The key field is on this page: take the user straight to it.
+  const focusKey = () => {
+    const key = document.getElementById('experiment-key');
+    if (key instanceof HTMLInputElement) {
+      key.focus();
+      key.select();
+    }
+  };
+
   return (
     <form onSubmit={onSubmit} className="space-y-6" data-testid="new-experiment-form" noValidate>
       {/* Basic info */}
@@ -48,7 +58,20 @@ export function AdvancedForm({ state, dispatch, error, isSubmitting, onSubmit }:
           className="rounded-lg bg-red-50 border border-red-200 p-3 text-sm text-red-700"
           data-testid="form-error"
         >
-          {error}
+          {error.message}
+          {error.editDetails && (
+            <>
+              {' '}
+              <button
+                type="button"
+                onClick={focusKey}
+                className="font-medium underline hover:text-red-900 focus:outline-none focus:ring-2 focus:ring-blue-600 rounded"
+                data-testid="form-error-edit-details"
+              >
+                Edit details
+              </button>
+            </>
+          )}
         </div>
       )}
 

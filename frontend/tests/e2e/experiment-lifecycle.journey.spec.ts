@@ -1,5 +1,6 @@
 import { test, expect } from "./fixtures/auth.fixture";
 import { ExperimentsPage } from "./pages/experiments.page";
+import { TOKEN_STORAGE_KEY } from "./env";
 
 /**
  * Journey 2 — experiment lifecycle.
@@ -167,6 +168,71 @@ test.describe("Journey: experiment lifecycle", () => {
 
     // The SDK snippet carries the key the tracking API expects.
     await expect(adminPage.getByTestId("sdk-hint")).toContainText(EXPERIMENT_KEY);
+  });
+
+  test("a taken key or an expired session at Create keeps every answer", async ({ adminPage }) => {
+    const experiments = new ExperimentsPage(adminPage);
+    const creates: number[] = [];
+    adminPage.on("response", (response) => {
+      const request = response.request();
+      const { pathname } = new URL(request.url());
+      // The API redirects /experiments to /experiments/ (307); count answers only.
+      const status = response.status();
+      const redirect = status >= 300 && status < 400;
+      if (request.method() === "POST" && /\/api\/v1\/experiments\/?$/.test(pathname) && !redirect) {
+        creates.push(status);
+      }
+    });
+    const name = `E2E Keeps answers ${STAMP}`;
+
+    await experiments.gotoGuided();
+    await experiments.nextStep("Name it and choose what to measure");
+    await experiments.nameInput.fill(name);
+    // The key the previous test created.
+    await experiments.keyInput.fill(EXPERIMENT_KEY);
+    await experiments.nextStep("Set up the versions users will see");
+    await experiments.nextStep("How many users will you need?");
+    await experiments.nextStep("Check and create");
+
+    // Taken key: the API answers 409; the page says so in its own words.
+    await experiments.createStepButton.click();
+    // Exactly the page's sentence and its button: nothing of the API's body.
+    await expect(experiments.formError).toHaveText(
+      `An experiment with the key “${EXPERIMENT_KEY}” already exists. ` +
+        "Choose a different key on the Details step. Edit details",
+    );
+    await expect(adminPage).toHaveURL(/\/experiments\/new\?step=review$/);
+    await expect(adminPage.getByTestId("review-name")).toContainText(name);
+
+    // "Edit details" goes to the key field, ready to change.
+    await adminPage.getByTestId("form-error-edit-details").click();
+    await expect(experiments.stepHeading).toHaveText("Name it and choose what to measure");
+    await expect(experiments.keyInput).toBeFocused();
+    await experiments.keyInput.fill(`e2e_keeps_answers_${STAMP}`);
+    await experiments.nextStep("Set up the versions users will see");
+    await experiments.nextStep("How many users will you need?");
+    await experiments.nextStep("Check and create");
+    await expect(experiments.formError).toHaveCount(0);
+
+    // The session ends while the tab is open: the API answers 401, and the
+    // page stays where it is with the answers, instead of going to /login.
+    // The session is shared by every admin test in this worker, so put the
+    // token back afterwards.
+    const token = await adminPage.evaluate((key) => window.localStorage.getItem(key), TOKEN_STORAGE_KEY);
+    expect(token).toBeTruthy();
+    await adminPage.evaluate((key) => window.localStorage.removeItem(key), TOKEN_STORAGE_KEY);
+    await experiments.createStepButton.click();
+    await expect(experiments.formError).toContainText("Your session has expired.");
+    await expect(experiments.formError).toContainText("Your answers are still here.");
+    await expect(adminPage).toHaveURL(/\/experiments\/new\?step=review$/);
+    await expect(adminPage.getByTestId("review-name")).toContainText(name);
+    await expect(adminPage.getByTestId("review-key")).toContainText(`e2e_keeps_answers_${STAMP}`);
+    expect(creates).toEqual([409, 401]);
+
+    await adminPage.evaluate(([key, value]) => window.localStorage.setItem(key, value), [
+      TOKEN_STORAGE_KEY,
+      token as string,
+    ]);
   });
 
   test("the new experiment appears in the list and opens from it", async ({ adminPage }) => {
