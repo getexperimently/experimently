@@ -1,0 +1,26 @@
+{
+  "_provenance": {
+    "source": "vendor documentation",
+    "vendor_docs_row": "7c",
+    "url": "https://docs.cloud.google.com/bigquery/docs/reference/rest/v2/Job",
+    "note": "JobStatistics2.statementType lists values other than SELECT; SCRIPT for a multi-statement query.",
+    "real_run_id": null
+  },
+  "status": 200,
+  "body": {
+    "kind": "bigquery#job",
+    "configuration": {
+      "dryRun": true
+    },
+    "statistics": {
+      "totalBytesProcessed": "0",
+      "query": {
+        "totalBytesProcessed": "0",
+        "statementType": "SCRIPT"
+      }
+    },
+    "status": {
+      "state": "DONE"
+    }
+  }
+}

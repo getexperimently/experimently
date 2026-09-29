@@ -16,6 +16,7 @@ from backend.app.core.security import oauth2_scheme
 from backend.app.models.user import User
 from modules.backend.app.models.workspace import (
     Workspace,
+    WorkspaceInvite,
     WorkspaceMember,
     WorkspaceMemberRole,
 )
@@ -51,6 +52,7 @@ from modules.backend.app.services.workspace_service import (
     WorkspaceSlugInvalid,
     WorkspaceSlugTaken,
     invite_email_for_viewer,
+    invite_email_matches,
     workspace_service,
 )
 
@@ -439,7 +441,10 @@ def create_invite(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
 ):
-    """Send a workspace invite by email. Requires ADMIN role."""
+    """Create a workspace invite for an email address and return its token.
+
+    No email is sent. Requires ADMIN role.
+    """
     _get_workspace_or_404(db, workspace_id)
     _require_role(db, workspace_id, current_user.id, "ADMIN")
 
@@ -450,14 +455,32 @@ def create_invite(
         role=payload.role,
         invited_by=current_user.id,
     )
+    return _invite_to_response(
+        invite, email=invite.email, inviter_username=_inviter_username(invite)
+    )
+
+
+def _inviter_username(invite: WorkspaceInvite) -> Optional[str]:
+    """The inviting account's username, or ``None`` when it no longer exists."""
+    inviter = invite.inviter
+    return inviter.username if inviter is not None else None
+
+
+def _invite_to_response(
+    invite: WorkspaceInvite, *, email: str, inviter_username: Optional[str]
+) -> WorkspaceInviteResponse:
+    """The API shape of an invite, with ``email`` and ``inviter_username``
+    as the caller decided the viewer may see them."""
     return WorkspaceInviteResponse(
         id=str(invite.id),
         workspace_id=str(invite.workspace_id),
-        email=invite.email,
+        email=email,
         role=invite.role.value,
         token=invite.token,
         expires_at=invite.expires_at,
         accepted_at=invite.accepted_at,
+        workspace_name=invite.workspace.name,
+        inviter_username=inviter_username,
     )
 
 
@@ -508,16 +531,14 @@ def get_invite(
 
     # The body depends on who is asking, so no shared cache may keep it.
     response.headers["Cache-Control"] = "private, no-store"
-    return WorkspaceInviteResponse(
-        id=str(invite.id),
-        workspace_id=str(invite.workspace_id),
-        email=invite_email_for_viewer(
-            invite.email, viewer.email if viewer is not None else None
-        ),
-        role=invite.role.value,
-        token=invite.token,
-        expires_at=invite.expires_at,
-        accepted_at=invite.accepted_at,
+    viewer_email = viewer.email if viewer is not None else None
+    # The inviter's username goes only to the invitee, by the same rule that
+    # decides whether `email` is shown in full.
+    is_invitee = invite_email_matches(invite.email, viewer_email)
+    return _invite_to_response(
+        invite,
+        email=invite_email_for_viewer(invite.email, viewer_email),
+        inviter_username=_inviter_username(invite) if is_invitee else None,
     )
 
 

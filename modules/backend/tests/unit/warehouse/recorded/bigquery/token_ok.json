@@ -1,0 +1,15 @@
+{
+  "_provenance": {
+    "source": "vendor documentation",
+    "vendor_docs_row": "9",
+    "url": "https://developers.google.com/identity/protocols/oauth2/service-account",
+    "note": "Successful access token response; values synthetic.",
+    "real_run_id": null
+  },
+  "status": 200,
+  "body": {
+    "access_token": "synthetic-access-token-for-tests",
+    "token_type": "Bearer",
+    "expires_in": 3599
+  }
+}

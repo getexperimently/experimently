@@ -44,10 +44,16 @@ export interface CreateWorkspaceAPIKeyResponse extends WorkspaceAPIKey {
 export interface WorkspaceInvite {
   token: string;
   workspace_name: string;
-  inviter_username: string;
+  /**
+   * `null` when the inviting account no longer exists. The invitation preview
+   * returns it only to the account the invitation was sent to.
+   */
+  inviter_username: string | null;
+  /** The invited address; the preview masks it for anyone but the invitee. */
   email: string;
   role: string;
   expires_at: string;
+  accepted_at: string | null;
 }
 
 export const workspaceService = {

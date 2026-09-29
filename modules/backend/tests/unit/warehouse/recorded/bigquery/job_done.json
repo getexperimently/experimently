@@ -1,0 +1,32 @@
+{
+  "_provenance": {
+    "source": "vendor documentation",
+    "vendor_docs_row": "7c",
+    "url": "https://docs.cloud.google.com/bigquery/docs/reference/rest/v2/jobs/get",
+    "note": "jobs.get after completion: statistics.query.totalBytesBilled (10 MB minimum billing).",
+    "real_run_id": null
+  },
+  "status": 200,
+  "body": {
+    "kind": "bigquery#job",
+    "jobReference": {
+      "projectId": "acme-analytics",
+      "jobId": "JOBID",
+      "location": "US"
+    },
+    "statistics": {
+      "creationTime": "1759000000000",
+      "startTime": "1759000000100",
+      "endTime": "1759000002600",
+      "totalBytesProcessed": "1048576",
+      "query": {
+        "totalBytesProcessed": "1048576",
+        "totalBytesBilled": "10485760",
+        "statementType": "SELECT"
+      }
+    },
+    "status": {
+      "state": "DONE"
+    }
+  }
+}
