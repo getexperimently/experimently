@@ -2,8 +2,10 @@
 
 This is exported as a utility so that ``{user_id}:{flag_key}`` buckets can be
 reproduced offline (and verified against ``tests/sdk-contract/golden-vectors.json``).
-Nothing in the client uses it to decide a variant: assignment and flag
-evaluation are always made by the server.
+It is NOT the function the server buckets flag rollouts with (that is
+``int(md5(...).hexdigest(), 16) % 100``, "md5-mod100-v1", which local
+evaluation reproduces in :mod:`experimentation.evaluator`), and nothing in the
+client uses it to decide a variant or a flag.
 
 Algorithm:
   1. Concatenate ``"{user_id}:{flag_key}"`` and UTF-8 encode it.

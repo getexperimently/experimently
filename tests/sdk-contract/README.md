@@ -32,8 +32,8 @@ python tests/sdk-contract/hash_contract.py python js edge react-native go
 
 The hash is a utility only, and it is not the function the server buckets flag rollouts with. Since the
 September 2026 SDK rewiring assignment and flag evaluation are decided by the backend; the one exception is
-the opt-in, server-side local evaluation of the JavaScript SDK (below), which reproduces the server's own
-`md5-mod100-v1` flag bucketing, not this hash.
+the opt-in, server-side local evaluation of the JavaScript and Python SDKs (below), which reproduces the
+server's own `md5-mod100-v1` flag bucketing, not this hash.
 
 ## Ruleset vectors (server-side local evaluation, #226)
 
@@ -66,8 +66,9 @@ exactly `expected`, and for every `must_local` case it answers locally with exac
 
 Which SDKs run it: the JavaScript SDK (`sdk/js/__tests__/evaluator.test.ts` runs its evaluator over
 every case and pins the local count, the operator list and the whitespace list against this file;
-`sdk/js/__tests__/local.test.ts` runs the cases through the public client). Both run in the JS job of
-`SDK Unit Tests`, which every change under `tests/sdk-contract/` triggers.
+`sdk/js/__tests__/local.test.ts` runs the cases through the public client), and the Python SDK
+(`sdk/python/tests/test_evaluator.py` and `test_local.py`, the same checks). They run in the `js` and
+`python` jobs of `SDK Unit Tests`, which every change under `tests/sdk-contract/` triggers.
 
 Contexts are listed in their key order, which matters: the server flattens nested objects
 first-writer-wins. No context relies on the order of integer-like keys, which JavaScript objects
@@ -87,7 +88,7 @@ to the cached assignment and flag. Before the SDKs it checks `GET /api/v1/sdk/ru
 seed's plain key gets 403, its `sdk:ruleset` key gets the ruleset with `sdk_contract_flag` in it,
 and sending the ETag back gets 304 (the `ruleset (server)` row; `EXPERIMENTLY_LOCAL_API_KEY`
 overrides the scoped key). After the SDKs, each SDK with a local mode runs its local smoke with that
-key (the `js (local)` row): the runner reads the database before and after, through the backend's own
+key (the `python (local)` and `js (local)` rows): the runner reads the database before and after, through the backend's own
 `SafetyService.get_error_metrics`, and requires no new per-user evaluation row (no evaluate call),
 the safety denominator grown by exactly the local evaluations, and the error count by exactly the
 errors the smoke posted. The runner therefore needs the backend's Python environment and `POSTGRES_*`.

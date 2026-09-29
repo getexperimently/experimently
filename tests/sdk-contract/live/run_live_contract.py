@@ -97,6 +97,7 @@ MANIFEST: dict[str, tuple[str, tuple[str, ...]]] = {
 # (with EXPERIMENTLY_LOCAL_API_KEY set). Run after every SDK above, because the
 # errors it posts count against the shared contract flag.
 LOCAL_MANIFEST: dict[str, tuple[str, tuple[str, ...]]] = {
+    "python": ("python sdk/python/examples/local_eval_smoke.py", ("python",)),
     "js": ("cd sdk/js && npm run build --silent && node examples/local_eval_smoke.mjs", ("node", "npm")),
 }
 
