@@ -129,6 +129,37 @@ def invite_email_matches(
     return invited is not None and accepting is not None and invited == accepting
 
 
+#: What stands in for the hidden part of a masked address.
+INVITE_EMAIL_MASK = "•••"
+
+
+def mask_invite_email(email: Optional[str]) -> str:
+    """``alice@example.com`` -> ``a•••@example.com``.
+
+    The first character and everything from the last ``@`` are kept; an
+    address with no ``@``, or nothing before it, becomes ``•••``. Masking a
+    masked address returns it unchanged. The invite page's ``maskEmail`` does
+    the same.
+    """
+    trimmed = email.strip() if isinstance(email, str) else ""
+    at = trimmed.rfind("@")
+    if at <= 0:
+        return INVITE_EMAIL_MASK
+    return trimmed[0] + INVITE_EMAIL_MASK + trimmed[at:]
+
+
+def invite_email_for_viewer(invite_email: str, viewer_email: Optional[str]) -> str:
+    """The invited address as the invitation preview returns it to a viewer.
+
+    In full, as stored, when ``viewer_email`` is the invited address under
+    :func:`invite_email_matches` (the rule accepting uses); masked with
+    :func:`mask_invite_email` for anyone else, including no viewer at all.
+    """
+    if invite_email_matches(invite_email, viewer_email):
+        return invite_email
+    return mask_invite_email(invite_email)
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Data classes
 # ─────────────────────────────────────────────────────────────────────────────
