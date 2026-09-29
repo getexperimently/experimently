@@ -1,6 +1,9 @@
 """Session set-up for the founder-run real-account check.
 
-Collected only under ``-m warehouse_live`` (see ``selection.py``).  Before any
+Collected only under ``-m warehouse_live`` (see ``selection.py``); a live file
+or node id named on the command line without it stops the session (exit 4)
+before anything else, since the directory ignore does not apply to named
+paths.  Before any
 test runs, the target and its credentials are read from the environment
 (:func:`~.harness.load_config`); anything missing stops the session with a
 message naming what to set -- nothing is skipped.  Tests for the other
@@ -15,7 +18,11 @@ from typing import Any, Dict, List, Optional
 import pytest
 
 from modules.backend.tests.live_warehouse import harness
-from modules.backend.tests.live_warehouse.selection import MARKER, is_live_path
+from modules.backend.tests.live_warehouse.selection import (
+    MARKER,
+    is_live_path,
+    selects_live_marker,
+)
 
 _STATE: Dict[str, Any] = {}
 
@@ -32,7 +39,22 @@ def _prefix(target: str) -> str:
 
 def pytest_collection_modifyitems(session, config, items):
     live = [item for item in items if is_live_path(item.path)]
-    if not live or config.option.collectonly:
+    if not live:
+        return
+    # The second gate.  pytest_ignore_collect (modules/backend/tests/conftest.py)
+    # is not consulted for a file or node id named on the command line, so
+    # `pytest .../test_bigquery_live.py` reaches here without -m.  Refuse it
+    # before the credentials are read: with WAREHOUSE_LIVE_* exported it would
+    # otherwise run against the real account.
+    markexpr = config.getoption("markexpr", "")
+    if not selects_live_marker(markexpr):
+        pytest.exit(
+            "warehouse_live check refused to start: live tests were named without "
+            f"-m {MARKER} (got -m {markexpr!r}). They call a real warehouse; run "
+            f"`pytest -m {MARKER} modules/backend/tests/live_warehouse/`.",
+            returncode=4,
+        )
+    if config.option.collectonly:
         return
     try:
         live_config = harness.load_config()

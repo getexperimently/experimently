@@ -51,13 +51,19 @@ from modules.backend.tests.live_warehouse.selection import ignore_live_directory
 
 
 def pytest_ignore_collect(collection_path, config):
-    """Never collect ``live_warehouse/`` unless ``-m`` selects ``warehouse_live``.
+    """Gate 1 of 2: ignore ``live_warehouse/`` unless ``-m`` selects ``warehouse_live``.
 
     That directory is the founder-run check against real warehouse accounts.
-    It is ignored -- not collected, so not skipped either -- by every CI
-    command, all of which run without that marker expression.  The rule is in
-    ``live_warehouse/selection.py``; ``unit/warehouse/test_live_check_harness.py``
-    runs the CI commands and checks it.
+    When pytest reaches it by walking a directory (``pytest modules/backend/tests``,
+    a bare ``pytest``, the directory itself), it is ignored -- not collected, so
+    not skipped either -- unless the marker expression selects it.
+
+    pytest does not consult this hook for a file or node id named on the
+    command line, so a named live file IS collected.  Gate 2, in
+    ``live_warehouse/conftest.py``, then stops the session (exit 4) before any
+    credential is read unless ``-m`` selects ``warehouse_live``.  The rule both
+    use is in ``live_warehouse/selection.py``;
+    ``unit/warehouse/test_live_check_harness.py`` runs both paths.
     """
     return ignore_live_directory(collection_path, config.getoption("markexpr", ""))
 

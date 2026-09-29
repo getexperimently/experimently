@@ -209,6 +209,58 @@ def test_a_target_without_its_variables_names_every_one_missing(tmp_path):
     assert list(tmp_path.iterdir()) == []  # no evidence for a run that never started
 
 
+@pytest.mark.parametrize(
+    "target",
+    [
+        f"{LIVE}/test_bigquery_live.py",
+        f"{LIVE}/test_bigquery_live.py::test_bq_sign_in",
+    ],
+    ids=["file", "node-id"],
+)
+@pytest.mark.parametrize("markexpr", [None, "unit", "not warehouse_live"])
+def test_a_named_live_file_without_the_marker_refuses_even_with_credentials(
+    tmp_path, target, markexpr
+):
+    """pytest_ignore_collect does not see named paths; the second gate must.
+
+    Complete (fake) credentials are exported, as they are mid-check: without
+    the gate this would reach the adapters.
+    """
+    key_file = tmp_path / "sa.json"
+    key_file.write_text(_sa_json())
+    evidence = tmp_path / "evidence"
+    env = {
+        **_bq_env(key_file),
+        harness.ENV_EVIDENCE_DIR: str(evidence),
+        harness.ENV_BQ_LOCATION: "US",
+        # A billing project BigQueryConnection refuses before any request is
+        # built: if this gate ever regresses, the session fails offline
+        # instead of sending the fake key to Google.
+        harness.ENV_BQ_PROJECT: "NOT_A_PROJECT",
+    }
+    args = ["-q", target] if markexpr is None else ["-q", "-m", markexpr, target]
+    run = _pytest(*args, env=env)
+    out = run.stdout + run.stderr
+    assert run.returncode == 4, out[-3000:]
+    assert f"without -m {selection.MARKER}" in out, out[-3000:]
+    assert not re.search(r"\d+ (passed|failed|error)", out), out[-3000:]
+    assert not evidence.exists()  # no session was started
+
+
+def test_a_named_live_file_with_the_marker_passes_the_second_gate(tmp_path):
+    """The gate is not a blanket refusal: with -m it goes on to read credentials."""
+    run = _pytest(
+        "-q",
+        "-m",
+        selection.MARKER,
+        f"{LIVE}/test_bigquery_live.py::test_bq_sign_in",
+        env={harness.ENV_EVIDENCE_DIR: str(tmp_path)},
+    )
+    out = run.stdout + run.stderr
+    assert run.returncode == 4, out[-3000:]
+    assert harness.ENV_TARGET in out and "without -m" not in out, out[-3000:]
+
+
 def test_load_config_refusals(tmp_path):
     with pytest.raises(harness.LiveConfigError, match=harness.ENV_TARGET):
         harness.load_config({})
