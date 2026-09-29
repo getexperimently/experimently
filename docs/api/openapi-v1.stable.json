@@ -21252,6 +21252,7 @@
     },
     "/api/v1/openfeature/flags": {
       "get": {
+        "deprecated": true,
         "description": "Returns all feature flag definitions accessible to this API key. OpenFeature providers fetch this endpoint once on initialization to warm their local flag cache and perform client-side evaluation without a per-flag network round-trip.",
         "operationId": "get_openfeature_flags_api_v1_openfeature_flags_get",
         "responses": {
@@ -21278,8 +21279,7 @@
         "tags": [
           "OpenFeature",
           "OpenFeature"
-        ],
-        "deprecated": true
+        ]
       }
     },
     "/api/v1/power/curve": {

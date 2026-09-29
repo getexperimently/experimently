@@ -22,7 +22,7 @@ import uuid
 from pathlib import Path
 
 import pytest
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel, TypeAdapter, ValidationError
 
 from modules.backend.app.schemas import warehouse_connections as wc
 from modules.backend.app.schemas import warehouse_runs as wr
@@ -419,6 +419,16 @@ def test_cap_value_is_strict(cap):
 @pytest.mark.parametrize("cap", [500, 500.5, 1e15, 1e-05])
 def test_cap_value_accepts_json_numbers(cap):
     assert ws.MetricSourceCreate.model_validate(_metric(cap_value=cap)).cap_value == cap
+
+
+@pytest.mark.regression
+def test_filter_integers_are_described_as_int64_not_as_bounds():
+    # 2**63 - 1 is not a number a double holds; written as `maximum` it came
+    # back from the 0.12.0 release pull request as 9223372036854776000.
+    assert TypeAdapter(ws.IntLiteral).json_schema() == {
+        "type": "integer",
+        "format": "int64",
+    }
 
 
 def test_filter_integers_span_int64():

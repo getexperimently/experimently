@@ -135,6 +135,26 @@ def build_document(full: bool = False, profile: Optional[str] = None) -> Dict[st
     }
 
 
+def integral_floats_as_ints(node: Any) -> Any:
+    """Write a whole-number float as an integer: ``1.0`` becomes ``1``.
+
+    FastAPI's OpenAPI model types ``minimum``/``maximum`` as ``float``, so an
+    integer field's ``ge=1`` arrives as ``1.0``.  JSON has one number type, so
+    the two are the same document, but release-please's JSON updater rewrites
+    these files with JavaScript, which prints ``1.0`` as ``1`` (release 0.11.0
+    did exactly that to three bounds).  Writing the JavaScript form here keeps
+    a release's diff to the version string
+    (``backend/tests/smoke/test_openapi_release_rewrite.py``).
+    """
+    if isinstance(node, dict):
+        return {key: integral_floats_as_ints(value) for key, value in node.items()}
+    if isinstance(node, list):
+        return [integral_floats_as_ints(value) for value in node]
+    if isinstance(node, float) and node.is_integer():
+        return int(node)
+    return node
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
@@ -160,8 +180,13 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
-    document = build_document(full=args.full, profile=args.profile)
-    text = json.dumps(document, indent=2, sort_keys=True) + "\n"
+    document = integral_floats_as_ints(
+        build_document(full=args.full, profile=args.profile)
+    )
+    # ensure_ascii=False and whole-number floats as ints: the form JavaScript's
+    # JSON.stringify prints, which is what release-please's JSON updater writes
+    # back when it bumps info.version -- so a release changes only the version.
+    text = json.dumps(document, indent=2, sort_keys=True, ensure_ascii=False) + "\n"
 
     if args.output == "-":
         sys.stdout.write(text)
@@ -171,7 +196,7 @@ def main(argv: list[str] | None = None) -> int:
     if not output.is_absolute():
         output = PROJECT_ROOT / output
     output.parent.mkdir(parents=True, exist_ok=True)
-    output.write_text(text)
+    output.write_text(text, encoding="utf-8")
 
     profile = f" ({args.profile})" if args.profile else ""
     shown = (

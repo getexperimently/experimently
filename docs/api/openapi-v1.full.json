@@ -14187,8 +14187,7 @@
                 "type": "boolean"
               },
               {
-                "maximum": 9223372036854775808,
-                "minimum": -9223372036854775808,
+                "format": "int64",
                 "type": "integer"
               },
               {
@@ -14204,8 +14203,7 @@
                       "type": "boolean"
                     },
                     {
-                      "maximum": 9223372036854775808,
-                      "minimum": -9223372036854775808,
+                      "format": "int64",
                       "type": "integer"
                     },
                     {
