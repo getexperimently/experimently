@@ -99,7 +99,7 @@ Built using modern, scalable architecture leveraging AWS services:
 - **Data controls**: retention settings and export endpoints (right-to-erasure tooling is on the roadmap)
 - **Complete Audit Logs**: record of all actions
 - **RBAC**: 4-tier role system (Admin, Developer, Analyst, Viewer)
-- **Encryption**: At-rest (KMS) and in-transit (TLS 1.2+)
+- **Encryption**: At rest (KMS) and in transit (HTTPS at the load balancer)
 
 ---
 
@@ -207,7 +207,7 @@ Refer to the documentation for:
   per-flag safety monitoring with automatic rollback; the `compliance` and `hipaa` modules add
   tamper-evident audit signing, compliance report packs and PHI encryption. We do not hold SOC 2,
   ISO 27001 or HIPAA attestations and do not claim them.
-- **Encryption**: AES-256 at rest (KMS) and TLS 1.2+ in transit when deployed with the provided CDK
+- **Encryption**: AES-256 at rest (KMS) and HTTPS in transit at the load balancer when deployed with the provided CDK
 - **Network Security**: VPC isolation, security groups, and an HTTPS-only load balancer (HTTP redirects to HTTPS) in front of the API and the dashboard (CDK deployment). The CDK does not deploy a WAF or CloudFront
 
 ---
