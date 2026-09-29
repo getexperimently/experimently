@@ -19,6 +19,35 @@ export interface ExperimentListParams {
   sort_order?: 'asc' | 'desc';
 }
 
+/**
+ * Query for `GET /api/v1/experiments/analysis/sample-size`. Rates are
+ * fractions (0.12, not 12) and `minimum_detectable_effect` is RELATIVE: 0.05
+ * compares 12% with 12.6%, not with 17%.
+ */
+export interface SampleSizeQuery {
+  baseline_rate: number;
+  minimum_detectable_effect: number;
+  statistical_power: number;
+  significance_level: number;
+  variant_count: number;
+  /** Users per day; the duration is estimated only when this and `traffic_allocation` are both sent. */
+  daily_traffic?: number;
+  /** Fraction (0, 1] of `daily_traffic` that enters the experiment. */
+  traffic_allocation?: number;
+}
+
+export interface SampleSizeEstimate {
+  baseline_rate: number;
+  minimum_detectable_effect: number;
+  statistical_power: number;
+  significance_level: number;
+  is_one_sided: boolean;
+  samples_per_variant: number;
+  total_samples: number;
+  estimated_duration_days: { days: number; weeks: number; months: number } | null;
+  notes: string | null;
+}
+
 const BASE = '/api/v1/experiments';
 
 export const ExperimentsService = {
@@ -41,6 +70,18 @@ export const ExperimentsService = {
 
   async create(data: CreateExperimentRequest): Promise<Experiment> {
     return apiFetch<Experiment>(BASE, { method: 'POST', json: data });
+  },
+
+  /**
+   * The users needed per variant, and the days that takes when daily traffic
+   * is given. Advisory: nothing is stored. A 401 here does not send the user
+   * to the login page, so an estimate never costs them the answers on screen.
+   */
+  async estimateSampleSize(query: SampleSizeQuery): Promise<SampleSizeEstimate> {
+    return apiFetch<SampleSizeEstimate>(`${BASE}/analysis/sample-size`, {
+      query: { ...query },
+      redirectOn401: false,
+    });
   },
 
   async update(id: string, data: Partial<Experiment>): Promise<Experiment> {

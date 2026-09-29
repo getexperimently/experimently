@@ -12,25 +12,7 @@ import { useApi } from '@/hooks/useApi';
 import { PageTitle } from '@/components/PageTitle';
 import { FirstRunChecklist } from '@/components/experiments/FirstRunChecklist';
 import { useOptionalAuth } from '@/contexts/AuthContext';
-
-/**
- * Whether the API would accept a create from this user.
- *
- * Mirrors `check_permission(user, EXPERIMENT, CREATE)`: a superuser bypasses
- * the role table, otherwise ADMIN and DEVELOPER hold CREATE. A user with a
- * custom role or a direct grant (`GET /api/v1/rbac/users/{id}/permissions`)
- * is not covered here — they are offered the button only if their built-in
- * role allows it, so the UI is never more permissive than the API.
- */
-const ROLES_THAT_CAN_CREATE = ['ADMIN', 'DEVELOPER'] as const;
-
-function canCreateExperiment(user: { role?: string; is_superuser?: boolean } | null | undefined) {
-  // No session yet (the page renders before the context resolves): show the
-  // button rather than flickering it in.
-  if (!user) return true;
-  if (user.is_superuser) return true;
-  return ROLES_THAT_CAN_CREATE.includes(user.role as 'ADMIN' | 'DEVELOPER');
-}
+import { canCreateExperiment } from '@/utils/experimentPermissions';
 
 const STATUS_FILTERS: Array<{ label: string; value: ExperimentStatus | 'all' }> = [
   { label: 'All', value: 'all' },

@@ -43,7 +43,7 @@
 | Doc | Description |
 |-----|-------------|
 | [MCP Server](mcp-server.md) | AI coding assistant integration, experiment design tools |
-| [Experiment Wizard](guides/experiment-wizard.md) | No-code 5-step experiment builder |
+| [Guided experiment builder](guides/experiment-wizard.md) | Guided setup in the dashboard, and the separate 5-step wizard API |
 
 ---
 

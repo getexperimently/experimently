@@ -5,7 +5,7 @@ import { ExperimentsPage } from "./pages/experiments.page";
  * Journey 2 — experiment lifecycle.
  *
  * The core click-path an evaluator walks in their first ten minutes:
- * list → `/experiments/new` → detail → start → pause → resume → complete →
+ * list → guided setup at `/experiments/new` → detail → start → pause → resume → complete →
  * results → archive. It runs against a real backend with the demo admin, and
  * every step asserts on `data-testid`s rendered by `src/pages/experiments/`
  * and `src/pages/results/`.
@@ -48,24 +48,95 @@ test.describe("Journey: experiment lifecycle", () => {
     await experiments.filterByStatus("all");
   });
 
-  test("the create form refuses an allocation that does not add up to 100%", async ({
-    adminPage,
-  }) => {
+  test("guided setup refuses an allocation that does not add up to 100%", async ({ adminPage }) => {
     const experiments = new ExperimentsPage(adminPage);
-    await experiments.gotoNew();
+    await experiments.gotoGuided();
 
-    await expect(experiments.form).toBeVisible();
+    await expect(experiments.guided).toBeVisible();
+    await expect(experiments.stepHeading).toHaveText("What kind of experiment?");
+    await experiments.nextStep("Name it and choose what to measure");
     // Ships with Control/Treatment at 50/50 and one conversion metric.
-    await expect(experiments.variantNameInputs).toHaveCount(2);
     await expect(experiments.metricNameInputs).toHaveCount(1);
-
     await experiments.nameInput.fill("Broken allocation");
-    await experiments.variantAllocationInputs.nth(1).fill("30");
-    await experiments.submitButton.click();
+    await experiments.nextStep("Set up the versions users will see");
+    await expect(adminPage).toHaveURL(/\/experiments\/new\?step=variants$/);
+    await expect(experiments.variantNameInputs).toHaveCount(2);
 
-    await expect(experiments.formError).toBeVisible();
-    await expect(experiments.formError).toContainText("add up to 100%");
-    await expect(adminPage).toHaveURL(/\/experiments\/new$/);
+    await experiments.variantAllocationInputs.nth(1).fill("30");
+    await experiments.nextButton.click();
+
+    await expect(experiments.stepError).toContainText("add up to 100%");
+    await expect(experiments.stepHeading).toHaveText("Set up the versions users will see");
+    await expect(adminPage).toHaveURL(/\/experiments\/new\?step=variants$/);
+
+    // Back never checks anything, and the answers survive the round trip.
+    await experiments.backButton.click();
+    await expect(experiments.nameInput).toHaveValue("Broken allocation");
+    // The view changes before the URL does; wait for the history entry.
+    await expect(adminPage).toHaveURL(/\/experiments\/new\?step=details$/);
+    // Back is a step in the browser's history too: the browser's own Back
+    // returns to Variants, answers intact.
+    await adminPage.goBack();
+    await expect(experiments.stepHeading).toHaveText("Set up the versions users will see");
+    await expect(adminPage).toHaveURL(/\/experiments\/new\?step=variants$/);
+    await expect(experiments.variantAllocationInputs.nth(1)).toHaveValue("30");
+
+    // Leaving with answers in the tab asks first (the browser's own prompt).
+    let prompt = "";
+    adminPage.once("dialog", async (dialog) => {
+      prompt = dialog.type();
+      await dialog.accept();
+    });
+    await adminPage.close({ runBeforeUnload: true });
+    await expect.poll(() => prompt).toBe("beforeunload");
+  });
+
+  test("Enter never creates anything from the Estimate step or Review", async ({ adminPage }) => {
+    const experiments = new ExperimentsPage(adminPage);
+    let posts = 0;
+    adminPage.on("request", (request) => {
+      const { pathname } = new URL(request.url());
+      if (request.method() === "POST" && /\/api\/v1\/experiments\/?$/.test(pathname)) posts += 1;
+    });
+    await experiments.gotoGuided();
+    await experiments.nextStep("Name it and choose what to measure");
+    await experiments.nameInput.fill(`Enter probe ${STAMP}`);
+    // Enter in a text field on the first three steps is Next.
+    await experiments.nameInput.press("Enter");
+    await expect(experiments.stepHeading).toHaveText("Set up the versions users will see");
+    await experiments.nextStep("How many users will you need?");
+
+    await experiments.estimateBaseline.fill("12");
+    await experiments.estimateBaseline.press("Enter");
+    await experiments.estimateMde.fill("5");
+    await experiments.estimateMde.press("Enter");
+    await expect(experiments.stepHeading).toHaveText("How many users will you need?");
+
+    await experiments.nextStep("Check and create");
+    await experiments.stepHeading.press("Enter");
+    await expect(experiments.stepHeading).toHaveText("Check and create");
+    await expect(adminPage).toHaveURL(/\/experiments\/new\?step=review$/);
+
+    // A fresh load at a later step starts over, with the notice. The reload
+    // leaves a tab with answers in it, so the browser asks first.
+    adminPage.on("dialog", (dialog) => dialog.accept());
+    await adminPage.reload();
+    await expect(experiments.stepHeading).toHaveText("What kind of experiment?");
+    await expect(adminPage.getByTestId("wizard-fresh-notice")).toContainText("Start from the first step.");
+    await expect(adminPage).toHaveURL(/\/experiments\/new\?step=type$/);
+    expect(posts).toBe(0);
+  });
+
+  test("the single-page form at ?advanced still creates an experiment", async ({ adminPage }) => {
+    const experiments = new ExperimentsPage(adminPage);
+    const id = await experiments.createExperimentAdvanced(
+      `E2E Advanced ${STAMP}`,
+      `e2e_advanced_${STAMP}`,
+      { metricEventName: "purchase" },
+    );
+    expect(id).toMatch(/^[0-9a-f-]{36}$/);
+    await expect(experiments.detailName).toHaveText(`E2E Advanced ${STAMP}`);
+    await experiments.expectStatus("draft");
   });
 
   test("creates a draft experiment and lands on its detail page", async ({ adminPage }) => {
@@ -73,6 +144,8 @@ test.describe("Journey: experiment lifecycle", () => {
     experimentId = await experiments.createExperiment(EXPERIMENT_NAME, EXPERIMENT_KEY, {
       description: "Automated E2E lifecycle experiment",
       metricEventName: "purchase",
+      // The pinned answer (backend test_sample_size_pinned_answer.py), end to end.
+      estimate: { baselinePct: "12", mdePct: "5", perVariant: "47,034 users per variant" },
     });
     expect(experimentId).toMatch(/^[0-9a-f-]{36}$/);
 

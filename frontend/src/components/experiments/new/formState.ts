@@ -154,6 +154,19 @@ export function validateStep(step: FormStep, state: ExperimentFormState): string
   }
 }
 
+/**
+ * The furthest step (an index into `FORM_STEPS`) a step-by-step view may show:
+ * the first step that still has a problem, or `review` when none has. A fresh
+ * form reaches `details`, because a new experiment has no name yet.
+ */
+export function maxReachableStep(state: ExperimentFormState): number {
+  const review = FORM_STEPS.indexOf('review');
+  for (let i = 0; i < review; i += 1) {
+    if (validateStep(FORM_STEPS[i], state) !== null) return i;
+  }
+  return review;
+}
+
 // --- payload -----------------------------------------------------------------
 
 /** The `POST /api/v1/experiments` body for the form as it stands. */

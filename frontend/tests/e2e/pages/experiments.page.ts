@@ -2,8 +2,9 @@ import { type Page, type Locator, expect } from "@playwright/test";
 import { CommonPage } from "./common.page";
 
 /**
- * Page object for the experiments list (`/experiments`), the create form
- * (`/experiments/new`) and the detail page (`/experiments/[id]`).
+ * Page object for the experiments list (`/experiments`), guided setup
+ * (`/experiments/new`), the single-page form (`/experiments/new?advanced`) and
+ * the detail page (`/experiments/[id]`).
  *
  * Every selector is a `data-testid` rendered by the corresponding page in
  * `src/pages/experiments/`; keep the two in sync.
@@ -36,6 +37,19 @@ export class ExperimentsPage {
   readonly metricEventInputs: Locator;
   readonly submitButton: Locator;
   readonly formError: Locator;
+
+  // Guided setup
+  readonly guided: Locator;
+  readonly stepHeading: Locator;
+  readonly stepError: Locator;
+  readonly nextButton: Locator;
+  readonly backButton: Locator;
+  readonly createStepButton: Locator;
+  readonly notAllowed: Locator;
+  readonly estimateBaseline: Locator;
+  readonly estimateMde: Locator;
+  readonly estimateCalculate: Locator;
+  readonly estimatePerVariant: Locator;
 
   // Detail page
   readonly detail: Locator;
@@ -85,6 +99,19 @@ export class ExperimentsPage {
     this.submitButton = page.getByTestId("submit-experiment");
     this.formError = page.getByTestId("form-error");
 
+    // Guided setup
+    this.guided = page.getByTestId("guided-setup");
+    this.stepHeading = page.getByTestId("wizard-step-heading");
+    this.stepError = page.getByTestId("step-error");
+    this.nextButton = page.getByTestId("wizard-next");
+    this.backButton = page.getByTestId("wizard-back");
+    this.createStepButton = page.getByTestId("wizard-create");
+    this.notAllowed = page.getByTestId("create-not-allowed");
+    this.estimateBaseline = page.getByTestId("estimate-baseline");
+    this.estimateMde = page.getByTestId("estimate-mde");
+    this.estimateCalculate = page.getByTestId("estimate-calculate");
+    this.estimatePerVariant = page.getByTestId("estimate-per-variant");
+
     // Detail
     this.detail = page.getByTestId("experiment-detail");
     this.detailName = page.getByTestId("experiment-name");
@@ -109,8 +136,20 @@ export class ExperimentsPage {
     await this.common.navigateTo("/experiments");
   }
 
-  async gotoNew() {
+  /** Guided setup, the default view of `/experiments/new`. */
+  async gotoGuided() {
     await this.common.navigateTo("/experiments/new");
+  }
+
+  /** The single-page form. `?advanced` is presence-only: no value. */
+  async gotoNew() {
+    await this.common.navigateTo("/experiments/new?advanced");
+  }
+
+  /** Press Next and wait for the step it moves to. */
+  async nextStep(heading: string | RegExp) {
+    await this.nextButton.click();
+    await expect(this.stepHeading).toHaveText(heading);
   }
 
   async gotoExperiment(id: string) {
@@ -124,12 +163,47 @@ export class ExperimentsPage {
   }
 
   /**
-   * Fill the create form and submit. The form ships with Control/Treatment
+   * Walk guided setup and create. The form ships with Control/Treatment
    * variants (50/50) and one conversion metric, so name + key are enough for
-   * a valid `ExperimentCreate` payload. Resolves with the new experiment id
-   * once the detail page has loaded.
+   * a valid `ExperimentCreate` payload. With `estimate`, the Estimate step is
+   * calculated against the real API on the way. Resolves with the new
+   * experiment id once the detail page has loaded.
    */
   async createExperiment(
+    name: string,
+    key: string,
+    options: {
+      description?: string;
+      metricEventName?: string;
+      estimate?: { baselinePct: string; mdePct: string; perVariant: string };
+    } = {},
+  ): Promise<string> {
+    await this.gotoGuided();
+    await expect(this.stepHeading).toHaveText("What kind of experiment?");
+    await this.nextStep("Name it and choose what to measure");
+    await this.nameInput.fill(name);
+    await this.keyInput.fill(key);
+    if (options.description) {
+      await this.descriptionInput.fill(options.description);
+    }
+    if (options.metricEventName) {
+      await this.metricEventInputs.first().fill(options.metricEventName);
+    }
+    await this.nextStep("Set up the versions users will see");
+    await this.nextStep("How many users will you need?");
+    if (options.estimate) {
+      await this.estimateBaseline.fill(options.estimate.baselinePct);
+      await this.estimateMde.fill(options.estimate.mdePct);
+      await this.estimateCalculate.click();
+      await expect(this.estimatePerVariant).toHaveText(options.estimate.perVariant, { timeout: 15_000 });
+    }
+    await this.nextStep("Check and create");
+    await this.createStepButton.click();
+    return this.landOnDetail();
+  }
+
+  /** The same, through the single-page form at `?advanced`. */
+  async createExperimentAdvanced(
     name: string,
     key: string,
     options: { description?: string; metricEventName?: string } = {},
@@ -144,7 +218,11 @@ export class ExperimentsPage {
       await this.metricEventInputs.first().fill(options.metricEventName);
     }
     await this.submitButton.click();
-    await this.page.waitForURL(/\/experiments\/[^/]+$/, { timeout: 15_000 });
+    return this.landOnDetail();
+  }
+
+  private async landOnDetail(): Promise<string> {
+    await this.page.waitForURL(/\/experiments\/(?!new)[^/?]+$/, { timeout: 15_000 });
     await expect(this.detail).toBeVisible({ timeout: 15_000 });
     const match = this.page.url().match(/\/experiments\/([^/?#]+)/);
     return match ? match[1] : "";

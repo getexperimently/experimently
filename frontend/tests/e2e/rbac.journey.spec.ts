@@ -9,9 +9,9 @@ import { ExperimentsPage } from "./pages/experiments.page";
  * (`NAV_ITEMS` in AppShell, `<RequireAuth>` / `withAdminGuard`) are
  * convenience only — the API is the enforcement, and they have to ask the same
  * question it does: the admin area is gated on `is_superuser`, because every
- * endpoint under /api/v1/admin is `Depends(deps.get_current_superuser)` (#84) — so the write path is checked
- * against the real 403 as well: an ANALYST or VIEWER who submits the create
- * form must see the refusal, not a screen that looks like it worked.
+ * endpoint under /api/v1/admin is `Depends(deps.get_current_superuser)` (#84). The
+ * create page asks the API's own create question too: an ANALYST or VIEWER
+ * who opens it sees a notice instead of a form that could only earn a 403.
  */
 
 /** Nav items the AppShell renders for a role (`NAV_ITEMS` in AppShell.tsx). */
@@ -122,29 +122,45 @@ test.describe("Journey: RBAC", () => {
   // Create is a different question: a DEVELOPER may create experiments -- the
   // API allows it and the nav test above asserts they get the button. Only
   // ANALYST and VIEWER are refused.
+  // /experiments/new asks the same question as the API (superuser, ADMIN or
+  // DEVELOPER): anyone else gets a notice in place of either view, and no
+  // create request can be sent from it.
   for (const role of ["analyst", "viewer"] as const) {
     test(`${role} cannot create an experiment and the UI says so`, async ({ sessions }) => {
       const page = await (await sessions(role)).newPage();
       const experiments = new ExperimentsPage(page);
-      const name = `RBAC ${role} ${Date.now()}`;
+      let posts = 0;
+      page.on("request", (request) => {
+        const { pathname } = new URL(request.url());
+        if (request.method() === "POST" && /\/api\/v1\/experiments\/?$/.test(pathname)) posts += 1;
+      });
       try {
-        await experiments.gotoNew();
-        await expect(experiments.form).toBeVisible();
-
-        await experiments.nameInput.fill(name);
-        await experiments.metricEventInputs.first().fill("purchase");
-        await experiments.submitButton.click();
-
-        // The API answers 403; the form must surface it rather than pretending.
-        await expect(experiments.formError).toBeVisible({ timeout: 15_000 });
-        await expect(experiments.formError).toContainText(/permission/i);
-        await expect(page).toHaveURL(/\/experiments\/new$/);
-        await expect(experiments.detail).toHaveCount(0);
-        // The form is still the create form, not a detail page pretending to be one.
-        await expect(experiments.submitButton).toBeEnabled();
+        for (const open of [() => experiments.gotoGuided(), () => experiments.gotoNew()]) {
+          await open();
+          await expect(experiments.notAllowed).toBeVisible({ timeout: 15_000 });
+          await expect(experiments.notAllowed).toContainText(
+            "Your role can view experiments but not create them.",
+          );
+          await expect(experiments.guided).toHaveCount(0);
+          await expect(experiments.form).toHaveCount(0);
+          await expect(experiments.nameInput).toHaveCount(0);
+        }
+        expect(posts).toBe(0);
       } finally {
         await page.close();
       }
     });
   }
+
+  test("developer gets guided setup", async ({ sessions }) => {
+    const page = await (await sessions("developer")).newPage();
+    const experiments = new ExperimentsPage(page);
+    try {
+      await experiments.gotoGuided();
+      await expect(experiments.guided).toBeVisible({ timeout: 15_000 });
+      await expect(experiments.notAllowed).toHaveCount(0);
+    } finally {
+      await page.close();
+    }
+  });
 });
