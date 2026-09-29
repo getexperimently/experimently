@@ -233,6 +233,11 @@ def _values_equal(actual_value: Any, expected_value: Any) -> bool:
         return False
 
 
+def _substring_of(item: Any, text: str) -> bool:
+    """Whether *item* is a substring of *text*; an item that is not a string is not."""
+    return isinstance(item, str) and item in text
+
+
 def apply_operator(
     operator: OperatorType,
     actual_value: Any,
@@ -496,8 +501,10 @@ def apply_operator(
 
         if not isinstance(actual_value, (list, tuple, set)):
             if isinstance(actual_value, str):
-                # Handle special case for strings
-                return all(item in actual_value for item in expected_value)
+                # A string attribute matches by substring, and only a string
+                # item can be a substring: any other item does not match, where
+                # `1 in "abc"` would raise TypeError (#270).
+                return all(_substring_of(item, actual_value) for item in expected_value)
             logger.debug(
                 "%s: a %s is not a list", operator, type(actual_value).__name__
             )
@@ -513,8 +520,8 @@ def apply_operator(
 
         if not isinstance(actual_value, (list, tuple, set)):
             if isinstance(actual_value, str):
-                # Handle special case for strings
-                return any(item in actual_value for item in expected_value)
+                # As CONTAINS_ALL: a non-string item does not match (#270).
+                return any(_substring_of(item, actual_value) for item in expected_value)
             logger.debug(
                 "%s: a %s is not a list", operator, type(actual_value).__name__
             )
