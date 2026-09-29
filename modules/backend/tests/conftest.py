@@ -47,6 +47,19 @@ from backend.tests.conftest import (  # fixture re-exports
     test_db,
     test_experiment,
 )
+from modules.backend.tests.live_warehouse.selection import ignore_live_directory
+
+
+def pytest_ignore_collect(collection_path, config):
+    """Never collect ``live_warehouse/`` unless ``-m`` selects ``warehouse_live``.
+
+    That directory is the founder-run check against real warehouse accounts.
+    It is ignored -- not collected, so not skipped either -- by every CI
+    command, all of which run without that marker expression.  The rule is in
+    ``live_warehouse/selection.py``; ``unit/warehouse/test_live_check_harness.py``
+    runs the CI commands and checks it.
+    """
+    return ignore_live_directory(collection_path, config.getoption("markexpr", ""))
 
 
 def pytest_collection_modifyitems(config, items):
