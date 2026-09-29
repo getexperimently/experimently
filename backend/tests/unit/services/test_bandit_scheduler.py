@@ -857,6 +857,202 @@ class TestBanditSchedulerStatsFallback:
 
 
 # ===========================================================================
+# TestDynamoDBCompleteness — #426: a partial DynamoDB count never replaces
+# the complete PostgreSQL count
+# ===========================================================================
+
+
+def _fake_counter_provider(per_variant: Optional[Dict[str, tuple]], raises=None):
+    """A ``counters.service`` provider answering a fake service class.
+
+    ``per_variant`` maps variant id -> ``(assignments, conversions)``; the
+    fake mirrors the duck-typed shape the scheduler reads
+    (``counters.variants[i].variant_id/assignments/conversions``).  No real
+    DynamoDB is touched.
+    """
+
+    class _FakeCounterService:
+        def get_experiment_counters(self, experiment_id):
+            if raises is not None:
+                raise raises
+            variants = []
+            for vid, (assignments, conversions) in (per_variant or {}).items():
+                vc = MagicMock()
+                vc.variant_id = vid
+                vc.assignments = assignments
+                vc.conversions = conversions
+                variants.append(vc)
+            counters = MagicMock()
+            counters.variants = variants
+            return counters
+
+    return lambda: _FakeCounterService
+
+
+class TestDynamoDBCompleteness:
+    """DynamoDB is used only when every variant has >= PostgreSQL's pulls
+    and successes."""
+
+    def _setup(self):
+        db = MagicMock()
+        scheduler = BanditScheduler(db=db)
+        exp = _make_experiment(str(uuid.uuid4()))
+        exp.metric_definitions = [_mock_metric("purchase", True)]
+        exp.metrics = None
+        vid1, vid2 = (str(v.id) for v in exp.variants)
+        return scheduler, exp, vid1, vid2
+
+    def _stats(self, scheduler, exp, vids, dynamo, pg_pulls, pg_conv, pg_raises=None):
+        pulls_patch = (
+            patch.object(
+                scheduler, "_count_assignments_by_variant", side_effect=pg_raises
+            )
+            if pg_raises is not None
+            else patch.object(
+                scheduler, "_count_assignments_by_variant", return_value=pg_pulls
+            )
+        )
+        with (
+            _counter_capability(dynamo),
+            pulls_patch,
+            patch.object(
+                scheduler, "_count_conversions_by_variant", return_value=pg_conv
+            ),
+        ):
+            return scheduler.get_variant_stats_from_counters(
+                exp.id, list(vids), experiment=exp
+            )
+
+    @pytest.mark.regression
+    def test_partial_dynamodb_count_loses_to_larger_postgres_count(self):
+        """One manual increment in DynamoDB must not replace 200 PostgreSQL
+        assignments (the #426 defect: any DynamoDB pull used to win)."""
+        scheduler, exp, vid1, vid2 = self._setup()
+        stats = self._stats(
+            scheduler,
+            exp,
+            (vid1, vid2),
+            dynamo=_fake_counter_provider({vid1: (1, 1)}),
+            pg_pulls={vid1: 100, vid2: 100},
+            pg_conv={vid1: 30, vid2: 10},
+        )
+        assert stats[vid1].pulls == 100
+        assert stats[vid1].successes == 30
+        assert stats[vid2].pulls == 100
+        assert stats[vid2].successes == 10
+
+    @pytest.mark.regression
+    def test_larger_dynamodb_total_but_one_variant_short_uses_postgres(self):
+        """Compared per variant: a surplus in one variant cannot hide a
+        missing count in another."""
+        scheduler, exp, vid1, vid2 = self._setup()
+        stats = self._stats(
+            scheduler,
+            exp,
+            (vid1, vid2),
+            dynamo=_fake_counter_provider({vid1: (500, 50), vid2: (5, 1)}),
+            pg_pulls={vid1: 100, vid2: 100},
+            pg_conv={vid1: 30, vid2: 10},
+        )
+        assert stats[vid1].pulls == 100
+        assert stats[vid2].pulls == 100
+
+    @pytest.mark.regression
+    def test_complete_pulls_but_partial_dynamodb_successes_uses_postgres(self):
+        """Equal pulls are not enough: DynamoDB with 1 conversion per variant
+        against PostgreSQL's 30 and 10 would understate the conversion rate."""
+        scheduler, exp, vid1, vid2 = self._setup()
+        stats = self._stats(
+            scheduler,
+            exp,
+            (vid1, vid2),
+            dynamo=_fake_counter_provider({vid1: (100, 1), vid2: (100, 1)}),
+            pg_pulls={vid1: 100, vid2: 100},
+            pg_conv={vid1: 30, vid2: 10},
+        )
+        assert stats[vid1].pulls == 100
+        assert stats[vid1].successes == 30
+        assert stats[vid2].successes == 10
+
+    @pytest.mark.regression
+    def test_dynamodb_used_when_postgres_has_no_pulls(self):
+        scheduler, exp, vid1, vid2 = self._setup()
+        stats = self._stats(
+            scheduler,
+            exp,
+            (vid1, vid2),
+            dynamo=_fake_counter_provider({vid1: (7, 2), vid2: (3, 1)}),
+            pg_pulls={},
+            pg_conv={},
+        )
+        assert stats[vid1].pulls == 7
+        assert stats[vid1].successes == 2
+        assert stats[vid2].pulls == 3
+
+    @pytest.mark.regression
+    def test_dynamodb_used_when_postgres_is_unavailable(self):
+        scheduler, exp, vid1, vid2 = self._setup()
+        stats = self._stats(
+            scheduler,
+            exp,
+            (vid1, vid2),
+            dynamo=_fake_counter_provider({vid1: (7, 2), vid2: (3, 1)}),
+            pg_pulls=None,
+            pg_conv={},
+            pg_raises=RuntimeError("database is down"),
+        )
+        assert stats[vid1].pulls == 7
+        assert stats[vid2].pulls == 3
+
+    @pytest.mark.regression
+    def test_dynamodb_used_when_equal_to_postgres(self):
+        """Equal pulls: DynamoDB keeps its documented first place."""
+        scheduler, exp, vid1, vid2 = self._setup()
+        stats = self._stats(
+            scheduler,
+            exp,
+            (vid1, vid2),
+            dynamo=_fake_counter_provider({vid1: (100, 41), vid2: (100, 11)}),
+            pg_pulls={vid1: 100, vid2: 100},
+            pg_conv={vid1: 30, vid2: 10},
+        )
+        # The successes tell the sources apart: 41/11 are DynamoDB's.
+        assert stats[vid1].successes == 41
+        assert stats[vid2].successes == 11
+
+    @pytest.mark.regression
+    def test_dynamodb_used_when_ahead_of_postgres(self):
+        """Real-time counters ahead of PostgreSQL are the fresher source."""
+        scheduler, exp, vid1, vid2 = self._setup()
+        stats = self._stats(
+            scheduler,
+            exp,
+            (vid1, vid2),
+            dynamo=_fake_counter_provider({vid1: (105, 33), vid2: (102, 12)}),
+            pg_pulls={vid1: 100, vid2: 100},
+            pg_conv={vid1: 30, vid2: 10},
+        )
+        assert stats[vid1].pulls == 105
+        assert stats[vid1].successes == 33
+        assert stats[vid2].pulls == 102
+
+    @pytest.mark.regression
+    def test_dynamodb_unavailable_falls_through_to_postgres(self):
+        scheduler, exp, vid1, vid2 = self._setup()
+        stats = self._stats(
+            scheduler,
+            exp,
+            (vid1, vid2),
+            dynamo=_fake_counter_provider(None, raises=RuntimeError("no table")),
+            pg_pulls={vid1: 20, vid2: 20},
+            pg_conv={vid1: 4, vid2: 2},
+        )
+        assert stats[vid1].pulls == 20
+        assert stats[vid1].successes == 4
+        assert stats[vid2].successes == 2
+
+
+# ===========================================================================
 # TestBanditSchedulerRunner — asyncio background loop
 # ===========================================================================
 

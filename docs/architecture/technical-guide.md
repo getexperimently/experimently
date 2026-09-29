@@ -366,7 +366,7 @@ Five background jobs start with the API process (`lifespan` in `backend/app/main
 | Rollout scheduler | 15 min | Advances feature-flag rollout stages |
 | Metrics scheduler | 15 min | Aggregates raw metrics |
 | Safety monitor | 5 min | Checks per-flag safety thresholds, triggers rollbacks |
-| Bandit scheduler | `BANDIT_UPDATE_INTERVAL_MINUTES` (5) | Recomputes multi-armed bandit weights (DynamoDB counters → PostgreSQL fallback) |
+| Bandit scheduler | `BANDIT_UPDATE_INTERVAL_MINUTES` (5) | Recomputes multi-armed bandit weights (DynamoDB counters when their pulls and successes are at least PostgreSQL's, else PostgreSQL) |
 
 ### Experiment Scheduler (every 15 min)
 

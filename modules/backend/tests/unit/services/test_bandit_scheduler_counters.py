@@ -68,10 +68,23 @@ def test_get_variant_stats_from_counters_uses_dynamodb():
 
     # The registered provider resolves the class at each call, so patching it
     # at its definition site (the service module) is what the scheduler sees.
-    with patch(_COUNTER_SERVICE, return_value=mock_counter_service):
+    # PostgreSQL is consulted too (#426): DynamoDB wins only while every
+    # variant has at least PostgreSQL's pulls, which it does here.
+    with (
+        patch(_COUNTER_SERVICE, return_value=mock_counter_service),
+        patch.object(
+            scheduler,
+            "_count_assignments_by_variant",
+            return_value={vid1: 90, vid2: 100},
+        ) as count_pulls,
+        patch.object(
+            scheduler, "_count_conversions_by_variant", return_value={vid1: 1}
+        ),
+    ):
         stats = scheduler.get_variant_stats_from_counters(exp_id, [vid1, vid2])
 
     mock_counter_service.get_experiment_counters.assert_called_once_with(str(exp_id))
+    count_pulls.assert_called_once_with(exp_id)
     assert set(stats) == {vid1, vid2}
     # assignments -> pulls, conversions -> successes, failures = pulls - successes
     assert stats[vid1].pulls == 100
@@ -79,8 +92,7 @@ def test_get_variant_stats_from_counters_uses_dynamodb():
     assert stats[vid1].failures == 60
     assert stats[vid2].successes == 20
     assert stats[vid2].failures == 80
-    # DynamoDB had data, so PostgreSQL was never consulted
-    db.query.assert_not_called()
+    # 100/40 and 100/20 are DynamoDB's numbers; PostgreSQL's were 90/1 and 100/0.
 
 
 def test_falls_back_to_postgres_when_dynamodb_has_no_pulls():
