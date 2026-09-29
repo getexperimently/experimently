@@ -45,6 +45,11 @@ npm --prefix experimently/sdk/openfeature ci
 npm --prefix experimently/sdk/openfeature run build
 ```
 
+`@openfeature/server-sdk` is a **peer dependency** of the provider (`^1.7.0`), so your app installs
+it. Installed as a package (from npm, or an `npm pack` tarball of `sdk/openfeature`), the provider
+resolves your app's copy rather than bringing its own. A directory install, as below, is a symlink,
+so the provider resolves the copy in `sdk/openfeature/node_modules` instead.
+
 Then, in your app, install the two directories (`@openfeature/server-sdk` itself is on npm):
 
 ```bash
