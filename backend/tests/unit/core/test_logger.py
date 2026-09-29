@@ -107,3 +107,45 @@ def test_get_logger_accepts_module_name():
     # __name__ is a common call pattern — must not raise
     logger = get_logger(__name__)
     assert logger is not None
+
+
+# ---------------------------------------------------------------------------
+# current_request_id: the id a response body may show
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.regression
+@pytest.mark.parametrize(
+    "bound,expected",
+    [
+        ("prb-b-123", "prb-b-123"),
+        ("a" * 128, "a" * 128),
+        ("a" * 129, None),
+        ("abc\n", None),
+        ("<b>x</b>", None),
+        ("", None),
+        (12345, None),
+        (None, None),
+    ],
+)
+def test_current_request_id_shows_only_a_well_formed_id(bound, expected):
+    import backend.app.core.logger as _mod
+    from backend.app.core.logger import current_request_id
+
+    token = _mod._log_context.set({"request_id": bound})
+    try:
+        assert current_request_id() == expected
+    finally:
+        _mod._log_context.reset(token)
+
+
+@pytest.mark.regression
+def test_current_request_id_is_none_without_a_bound_id():
+    import backend.app.core.logger as _mod
+    from backend.app.core.logger import current_request_id
+
+    token = _mod._log_context.set({})
+    try:
+        assert current_request_id() is None
+    finally:
+        _mod._log_context.reset(token)
