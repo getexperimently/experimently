@@ -434,7 +434,7 @@ reason = "run on a kind cluster by the chart-kind workflow (scripts/chart_kind.s
 "docs/deployment/disaster-recovery.md" = { comments = 0, unlabelled = 0, syntax = 1 }
 "docs/deployment/iam-permissions.md" = { comments = 0, unlabelled = 1, syntax = 1 }
 "docs/deployment/rollback-runbook.md" = { comments = 0, unlabelled = 1, syntax = 0 }
-"docs/deployment/secrets-management.md" = { comments = 0, unlabelled = 1, syntax = 0 }
+"docs/deployment/secrets-management.md" = { comments = 0, unlabelled = 0, syntax = 0 }
 "docs/development/database/migrations.md" = { comments = 0, unlabelled = 1, syntax = 1 }
 "docs/development/guidelines.md" = { comments = 0, unlabelled = 2, syntax = 0 }
 "docs/development/testing-guide.md" = { comments = 0, unlabelled = 0, syntax = 0 }

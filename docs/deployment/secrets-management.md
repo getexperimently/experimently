@@ -321,24 +321,32 @@ echo "JWT secret rotated. All existing sessions are now invalid."
 
 ### Rotate Database Password Immediately
 
-# Step 1: Generate new password. token_urlsafe uses only letters, digits, `-`
-# and `_`, none of which Aurora refuses in a master password.
-# master password, so use a URL-safe alphabet.
-NEW_DB_PASSWORD=$(python3 -c "import secrets; print(secrets.token_urlsafe(32))")
+Step 1: Generate a new password. `token_urlsafe` uses only letters, digits, `-` and `_`, none of which Aurora refuses in a master password:
 
-# Step 2: Set it on the cluster FIRST
+```bash
+NEW_DB_PASSWORD=$(python3 -c "import secrets; print(secrets.token_urlsafe(32))")
+```
+
+Step 2: Set it on the cluster FIRST:
+
+```bash
 aws rds modify-db-cluster \
   --db-cluster-identifier <the cluster in experimentation-database-prod> \
   --master-user-password "$NEW_DB_PASSWORD" \
   --apply-immediately
+```
 
-# Step 3: Put the same password in the database stack's secret (the tasks read
-# its `username` and `password` fields)
+Step 3: Put the same password in the database stack's secret (the tasks read its `username` and `password` fields):
+
+```bash
 aws secretsmanager put-secret-value \
   --secret-id experimentation-database-prod-aurora-credentials \
   --secret-string "$(python3 -c 'import json, sys; print(json.dumps({"username": "postgres", "password": sys.argv[1]}))' "$NEW_DB_PASSWORD")"
+```
 
-# Step 4: Force ECS restart to reconnect with new credentials
+Step 4: Force an ECS restart so the tasks reconnect with the new credentials, and wait for it to settle:
+
+```bash
 aws ecs update-service \
   --cluster experimentation-prod \
   --service experimentation-backend-prod \
@@ -353,22 +361,33 @@ aws ecs wait services-stable \
 
 For application-level API keys managed by the platform itself:
 
-```bash
-# Step 1: Revoke the compromised key. Only its SHA-256 hash is stored, so hash the leaked key first
-KEY_HASH=$(printf '%s' "$LEAKED_KEY" | shasum -a 256 | cut -d' ' -f1)
-# Then, connected to Aurora, deactivate that row (every request with the key then gets 401):
-# UPDATE experimentation.api_keys SET is_active = false WHERE key = '<KEY_HASH>' RETURNING id, name, user_id;
+Step 1: Revoke the compromised key. Only its SHA-256 hash is stored, so hash the leaked key first:
 
-# Step 2: Issue a new key to the legitimate owner via the API
+```bash
+KEY_HASH=$(printf '%s' "$LEAKED_KEY" | shasum -a 256 | cut -d' ' -f1)
+```
+
+Then, connected to Aurora, deactivate that row (every request with the key then gets 401):
+
+```sql
+UPDATE experimentation.api_keys SET is_active = false WHERE key = '<KEY_HASH>' RETURNING id, name, user_id;
+```
+
+Step 2: Issue a new key to the legitimate owner via the API:
+
+```bash
 curl -X POST \
   -H "Authorization: Bearer $ADMIN_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"name": "Replacement key for owner X"}' \
   https://api.experimentation.example.com/api/v1/api-keys
+```
 
-# Step 3: Notify the owner of the new key via secure channel (not Slack or email)
+Step 3: Notify the owner of the new key through a secure channel (not Slack or email).
 
-# Step 4: Audit all requests made with the compromised key in CloudWatch
+Step 4: Audit all requests made with the compromised key in CloudWatch:
+
+```bash
 aws logs filter-log-events \
   --log-group-name /experimentation-platform/api \
   --filter-pattern '"api_key_prefix":"eptk_XXXXX"' \

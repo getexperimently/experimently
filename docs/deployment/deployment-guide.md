@@ -381,8 +381,8 @@ And every 5xx the API answers counts, its deliberate ones included: `501` on a
 module's route under the core profile, and `503` from `/health/ready` for a
 caller other than the load balancer. Staging traffic may be too low to reach
 the threshold at all, so a quiet staging deploy proves nothing about the
-alarms. A rollback in the hour after the shift is not announced in
-#deployments; the run summary gives the time the alarms stop watching and the
+alarms. A rollback in the hour after the shift is not announced in the
+`#deployments` channel; the run summary gives the time the alarms stop watching and the
 command that shows whether one happened.
 
 **One deploy per environment per hour.** For an hour after the shift,

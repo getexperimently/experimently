@@ -15,6 +15,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import pathlib
+import re
 import sys
 import textwrap
 
@@ -1364,6 +1365,82 @@ def test_an_indented_curl_block_is_refused_on_any_page(repo):
         "README.md:5: an indented code block; use a fenced block with a language "
         "(`text` for output) (docs/development/doc-examples.md#tagging-a-shell-block)"
     ]
+
+
+# A shell block whose opening fence is missing (#434): its comments render as
+# page titles and its commands as a paragraph. The closing fence then opens a
+# block of its own, which is why the old check saw only "a fence with no
+# language" on this page.
+LOST_OPENER = (
+    "# Secrets\n\n## Rotation\n\n### Rotate the password\n\n"
+    "# Step 1: Generate a new password\n"
+    "NEW=$(openssl rand -hex 16)\n\n"
+    "# Step 2: Set it\n"
+    'aws rds modify-db-cluster --master-user-password "$NEW"\n'
+    "```\n"
+)
+
+STRAY = {
+    "lost opener": (LOST_OPENER, [7, 10]),
+    "restored": (LOST_OPENER.replace("# Step 1", "```bash\n# Step 1"), []),
+    "title only": ("# P\n\ntext\n", []),
+    "second title": ("# P\n\n## A\n\n# Q\n", [5]),
+    "title not first heading": ("## A\n\n# P\n", [3]),
+    "indented is not a heading": ("# P\n\n   # Q\n", []),
+    "indented four is code": ("# P\n\n    # Q\n", []),
+    "no space is still a heading": ("# P\n\n#hashtag\n", [3]),
+    "a wrapped sentence": ("# P\n\nthe routes in issues\n#217 and #219.\n", [4]),
+    "not at the start": ("# P\n\nissues #217\nand #219.\n", []),
+    "level two is fine": ("# P\n\n## Q\n\n## R\n", []),
+    "in a fence": ("# P\n\n```bash\n# Step 1\n```\n", []),
+    "in a tilde fence": ("# P\n\n~~~bash\n# Step 1\n~~~\n", []),
+    "in an html comment": ("# P\n\n<!--\n# Q\n-->\n", []),
+}
+
+
+@pytest.mark.regression
+@pytest.mark.parametrize("name", STRAY)
+def test_a_title_after_the_first_heading_is_found_where_the_site_renders_one(name):
+    """What the check calls a stray title is an <h1> after the page's first
+    heading in what MkDocs renders."""
+    text, lines = STRAY[name]
+    assert dx.stray_titles(text) == lines
+    html = _render(text)
+    first = re.search(r"<h[1-6][ >]", html)
+    h1s = len(re.findall(r"<h1[ >]", html))
+    leading = 1 if first and first.group().startswith("<h1") else 0
+    assert h1s - leading == len(lines)
+
+
+def test_no_page_renders_a_title_the_check_cannot_see():
+    """Pinned to the renderer on every walked page, so the rule cannot drift."""
+    drift = {}
+    for rel in sorted(dx.walk(REPO)):
+        text = (REPO / rel).read_text(encoding="utf-8")
+        html = _render(text)
+        first = re.search(r"<h[1-6][ >]", html)
+        leading = 1 if first and first.group().startswith("<h1") else 0
+        rendered = len(re.findall(r"<h1[ >]", html)) - leading
+        if rendered != len(dx.stray_titles(text)):
+            drift[rel] = (rendered, dx.stray_titles(text))
+    assert drift == {}
+
+
+def test_front_matter_is_not_the_page():
+    """MkDocs strips the YAML front matter before rendering; so does the rule."""
+    assert dx.stray_titles("---\ntitle: x\n# a yaml comment\n---\n# P\n") == []
+
+
+@pytest.mark.regression
+def test_a_shell_block_that_lost_its_opening_fence_is_refused(repo):
+    write(repo, "docs/lost.md", LOST_OPENER)
+    body = GOOD.replace(
+        'universe = ["docs/p.md"]', 'universe = ["docs/lost.md", "docs/p.md"]'
+    )
+    stray = [p for p in problems_of(enrol(repo, body)) if "level-1 heading" in p]
+    assert [p.split(":", 2)[1] for p in stray] == ["7", "10"]
+    assert all(p.startswith("docs/lost.md:") for p in stray)
+    assert "lost its opening fence" in stray[0]
 
 
 @pytest.mark.regression
