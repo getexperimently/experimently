@@ -6,7 +6,11 @@ Every SDK talks to the same small public API surface, authenticated with an API 
 ## Endpoint contract
 
 All SDK traffic uses the `X-API-Key` header and addresses experiments and flags by their public **keys**.
-The server decides bucketing; SDKs must not bucket locally.
+The server decides bucketing. The one exception is opt-in and server-side only: the JavaScript SDK's
+[local evaluation](sdk/local-evaluation.md) (beta) answers flags from the server's ruleset
+(`GET /api/v1/sdk/ruleset`, which needs a key with the `sdk:ruleset` scope) with the server's own
+bucketing (`md5-mod100-v1`), and asks the server whenever it cannot give exactly the server's answer.
+No other SDK buckets locally, and experiments are always assigned by the server.
 
 | Purpose | Method and path | Body / query | Response |
 |---|---|---|---|
@@ -34,7 +38,9 @@ JavaScript and Python SDKs send the context today; the other SDKs will follow.
 Every SDK was rewired to the contract above in September 2026: the server decides assignment and flag
 evaluation, results are cached per user + key, and `track` fans out to the user's cached assignments and
 flags when no key is given. The MD5 consistent hash remains exported by each SDK as a compatibility utility
-(the golden-vector tests still cover it) but nothing buckets locally any more.
+(the golden-vector tests still cover it). It is not the function the server buckets flag rollouts with,
+and nothing uses it to decide a flag or a variant; local evaluation (JavaScript, opt-in) uses the server's
+`md5-mod100-v1` bucketing instead.
 
 "Verified live" means the SDK's `contract_smoke` entry point passed
 `tests/sdk-contract/live/run_live_contract.py` against a running backend (see
@@ -44,7 +50,7 @@ this on every pull request for the SDKs whose toolchain is available on Linux.
 | SDK | Location | Unit tests | Verified live | Docs |
 |---|---|---|---|---|
 | React | `sdk/react` | 215 (jest) | yes — also runs the ShopLab demo | [react.md](sdk/react.md) |
-| JavaScript / TypeScript | `sdk/js` | 105 (jest) | yes | [javascript.md](sdk/javascript.md) |
+| JavaScript / TypeScript | `sdk/js` | 171 (jest) | yes, including local evaluation | [javascript.md](sdk/javascript.md), [local-evaluation.md](sdk/local-evaluation.md) |
 | OpenFeature (JS) | `sdk/openfeature` | 51 (jest) | yes | [openfeature.md](sdk/openfeature.md) |
 | Edge (Cloudflare Workers) | `sdk/edge` | 101 (jest) | yes | [edge.md](sdk/edge.md) |
 | React Native | `sdk/react-native` | jest | unit tests only (no device runtime) | [react-native.md](sdk/react-native.md) |
@@ -175,7 +181,7 @@ npm install @getexperimently/js-sdk
 ```
 
 Build it from a clone of this repository instead. `npm pack` writes
-`getexperimently-js-sdk-1.0.0.tgz`:
+`getexperimently-js-sdk-1.1.0.tgz`:
 
 ```bash
 cd sdk/js
@@ -185,7 +191,7 @@ npm ci && npm run build && npm pack
 Then, in your app, install the packed tarball:
 
 ```bash
-npm install /path/to/experimently/sdk/js/getexperimently-js-sdk-1.0.0.tgz
+npm install /path/to/experimently/sdk/js/getexperimently-js-sdk-1.1.0.tgz
 ```
 
 ### Quick Start

@@ -735,7 +735,9 @@ GET /api/v1/feature-flags/evaluate/{flag_key}?user_id={user_id}
 ```
 
 Evaluates one flag for a user. Authenticated with an API key (`X-API-Key` header). The server
-applies the flag's status, targeting rules and rollout percentage; SDKs never bucket locally.
+applies the flag's status, targeting rules and rollout percentage. A server-side SDK in local-evaluation
+mode (beta, [Local evaluation](../sdk/local-evaluation.md)) answers from the flag ruleset instead, giving
+the same result, and calls this endpoint for anything it cannot answer exactly.
 
 **Example Request**
 

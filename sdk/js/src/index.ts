@@ -15,7 +15,8 @@
  * ```
  */
 
-export { ExperimentationClient } from './client';
+export { ExperimentationClient, BROWSER_LOCAL_EVALUATION_MESSAGE } from './client';
+export type { ReadyResult, LocalEvaluationStatus } from './local';
 export { ExperimentationError } from './errors';
 export type { ExperimentationErrorCode } from './errors';
 export { consistentHash, md5Hex, md5Bytes } from './hash';
@@ -29,6 +30,7 @@ export type {
   BatchResult,
   AssignmentRecord,
   SwallowedOperation,
+  EvaluationMode,
   AssignResponse,
   FlagEvaluateResponse,
   BatchResponse,

@@ -13,6 +13,16 @@ Before the SDKs, it checks the local-evaluation ruleset endpoint
 ``sdk:ruleset`` key gets the ruleset with ``sdk_contract_flag`` in it, and
 sending the ETag back gets 304.
 
+After the SDKs, each SDK with a local-evaluation mode (``LOCAL_MANIFEST``) runs
+its ``local_eval_smoke`` with the ``sdk:ruleset`` key: N evaluations of
+``sdk_contract_flag`` answered in-process, the counts sent on close, then E
+client errors posted. The runner reads the database around it (the same
+``POSTGRES_*`` the backend uses, through the backend's own
+``SafetyService.get_error_metrics``) and requires that the step added no
+per-user server evaluation (no evaluate call was made), exactly N evaluations
+to the safety denominator and exactly E errors, so the flag's error rate is
+non-zero and computed over the local traffic.
+
 Prerequisites
     1. A backend at ``$EXPERIMENTLY_API_URL`` (default http://localhost:8000)
        seeded with ``python backend/scripts/seed_sdk_contract.py`` (creates the
@@ -81,6 +91,13 @@ MANIFEST: dict[str, tuple[str, tuple[str, ...]]] = {
     "dotnet": ("dotnet run --project sdk/dotnet/examples/ContractSmoke", ("dotnet",)),
     "elixir": ("cd sdk/elixir && mix run examples/contract_smoke.exs", ("mix",)),
     "flutter": ("cd sdk/flutter && dart run example/contract_smoke.dart", ("dart",)),
+}
+
+# SDKs with a local-evaluation mode -> the command that runs their local smoke
+# (with EXPERIMENTLY_LOCAL_API_KEY set). Run after every SDK above, because the
+# errors it posts count against the shared contract flag.
+LOCAL_MANIFEST: dict[str, tuple[str, tuple[str, ...]]] = {
+    "js": ("cd sdk/js && npm run build --silent && node examples/local_eval_smoke.mjs", ("node", "npm")),
 }
 
 EXPECTED_VARIANTS = {"control", "treatment"}
@@ -159,8 +176,86 @@ def check_ruleset(api_url: str, plain_key: str, scoped_key: str, flag_key: str) 
     return "PASS", f"403 unscoped, 200 scoped ({len(doc['flags'])} flags), 304 on ETag"
 
 
-def run_one(sdk: str, command: str, env: dict[str, str], timeout: int) -> tuple[str, str]:
-    """Return (status, detail) where status is PASS / FAIL."""
+def _flag_counters(flag_key: str) -> dict[str, int]:
+    """What the server has recorded for *flag_key*, read from the database.
+
+    ``total_evaluations`` and ``error_count`` come from the safety monitor's own
+    ``get_error_metrics`` (its 15-minute window), so a local evaluation that is
+    not counted there is invisible to automatic rollback. ``server_user_rows``
+    counts the per-user evaluation rows only the evaluate endpoints write.
+    """
+    sys.path.insert(0, str(REPO_ROOT))
+    from backend.app.db.session import SessionLocal
+    from backend.app.models import register_core_models
+    from backend.app.models.feature_flag import FeatureFlag
+    from backend.app.models.metrics.metric import MetricType, RawMetric
+    from backend.app.services.safety_service import SafetyService
+
+    register_core_models()
+    db = SessionLocal()
+    try:
+        flag = db.query(FeatureFlag).filter(FeatureFlag.key == flag_key).first()
+        if flag is None:
+            raise RuntimeError(f"flag {flag_key!r} is not in the database")
+        metrics = SafetyService(db).get_error_metrics(db, flag.id)
+        server_user_rows = (
+            db.query(RawMetric)
+            .filter(
+                RawMetric.feature_flag_id == flag.id,
+                RawMetric.metric_type == MetricType.FLAG_EVALUATION.value,
+                RawMetric.user_id.isnot(None),
+            )
+            .count()
+        )
+        return {
+            "total_evaluations": int(metrics["total_evaluations"]),
+            "error_count": int(metrics["error_count"]),
+            "server_user_rows": int(server_user_rows),
+        }
+    finally:
+        db.close()
+
+
+def run_local(sdk: str, command: str, env: dict[str, str], timeout: int, flag_key: str) -> tuple[str, str]:
+    """An SDK's local-evaluation smoke, judged by what the server recorded."""
+    try:
+        before = _flag_counters(flag_key)
+    except Exception as exc:  # the backend package or its database is not reachable
+        return "FAIL", f"cannot read the database for the flag counters: {exc}"
+    status, detail, payload = _run_command(command, env, timeout)
+    if status != "PASS":
+        return status, detail
+    problems: list[str] = []
+    if payload.get("sdk") != sdk or payload.get("mode") != "local":
+        problems.append(f"sdk/mode are {payload.get('sdk')!r}/{payload.get('mode')!r}")
+    evaluations = payload.get("evaluations")
+    errors = payload.get("errors_posted")
+    if not isinstance(evaluations, int) or evaluations < 1 or not isinstance(errors, int) or errors < 1:
+        return "FAIL", f"the smoke reported evaluations={evaluations!r}, errors_posted={errors!r}"
+    after = _flag_counters(flag_key)
+    delta = {key: after[key] - before[key] for key in after}
+    if delta["server_user_rows"] != 0:
+        problems.append(f"{delta['server_user_rows']} evaluate call(s) reached the server; local mode must make none")
+    if delta["total_evaluations"] != evaluations:
+        problems.append(
+            f"the safety denominator grew by {delta['total_evaluations']}, expected the {evaluations} local evaluations"
+        )
+    if delta["error_count"] != errors:
+        problems.append(f"the error count grew by {delta['error_count']}, expected {errors}")
+    if not after["total_evaluations"] or not after["error_count"]:
+        problems.append(f"the error rate is not computable from {after}")
+    if problems:
+        return "FAIL", "; ".join(problems)
+    rate = after["error_count"] / after["total_evaluations"]
+    return (
+        "PASS",
+        f"{evaluations} local evaluations, 0 evaluate calls; denominator +{evaluations}, "
+        f"errors +{errors}, error rate {rate:.3f}",
+    )
+
+
+def _run_command(command: str, env: dict[str, str], timeout: int) -> tuple[str, str, dict]:
+    """Run a smoke command; (status, detail, the JSON object on its last stdout line)."""
     started = time.time()
     try:
         proc = subprocess.run(
@@ -173,22 +268,32 @@ def run_one(sdk: str, command: str, env: dict[str, str], timeout: int) -> tuple[
             timeout=timeout,
         )
     except subprocess.TimeoutExpired:
-        return "FAIL", f"timed out after {timeout}s"
+        return "FAIL", f"timed out after {timeout}s", {}
     elapsed = time.time() - started
     stdout_lines = [line for line in proc.stdout.strip().splitlines() if line.strip()]
     if proc.returncode != 0:
         tail = (proc.stderr.strip().splitlines() or stdout_lines or ["(no output)"])[-1]
-        return "FAIL", f"exit {proc.returncode}: {tail[:300]}"
+        return "FAIL", f"exit {proc.returncode}: {tail[:300]}", {}
     if not stdout_lines:
-        return "FAIL", "no JSON line on stdout"
+        return "FAIL", "no JSON line on stdout", {}
     try:
         payload = json.loads(stdout_lines[-1])
     except json.JSONDecodeError:
-        return "FAIL", f"last stdout line is not JSON: {stdout_lines[-1][:200]}"
+        return "FAIL", f"last stdout line is not JSON: {stdout_lines[-1][:200]}", {}
+    if not isinstance(payload, dict):
+        return "FAIL", f"last stdout line is not a JSON object: {stdout_lines[-1][:200]}", {}
+    return "PASS", f"{elapsed:.1f}s", payload
+
+
+def run_one(sdk: str, command: str, env: dict[str, str], timeout: int) -> tuple[str, str]:
+    """Return (status, detail) where status is PASS / FAIL."""
+    status, detail, payload = _run_command(command, env, timeout)
+    if status != "PASS":
+        return status, detail
     problems = validate(sdk, payload)
     if problems:
         return "FAIL", "; ".join(problems)
-    return "PASS", f"{payload['assign']['variant_name']} in {elapsed:.1f}s"
+    return "PASS", f"{payload['assign']['variant_name']} in {detail}"
 
 
 def main() -> int:
@@ -241,6 +346,22 @@ def main() -> int:
         status, detail = run_one(sdk, command, env, args.timeout)
         results.append((sdk, status, detail))
         print(f"{status:4} {sdk:<20} {detail}", flush=True)
+
+    # Local evaluation, after every SDK above (its errors count against the shared flag).
+    for sdk in [s for s in selected if s in LOCAL_MANIFEST]:
+        name = f"{sdk} (local)"
+        command, tools = LOCAL_MANIFEST[sdk]
+        missing = [t for t in tools if shutil.which(t) is None]
+        if missing:
+            results.append((name, "FAIL" if args.strict else "SKIP", f"missing toolchain: {', '.join(missing)}"))
+            continue
+        if not local_key:
+            results.append((name, "FAIL" if args.strict else "SKIP", "no sdk:ruleset key"))
+            continue
+        local_env = dict(env, EXPERIMENTLY_LOCAL_API_KEY=local_key)
+        status, detail = run_local(sdk, command, local_env, args.timeout, env["CONTRACT_FLAG_KEY"])
+        results.append((name, status, detail))
+        print(f"{status:4} {name:<20} {detail}", flush=True)
 
     print("\nSummary")
     for sdk, status, detail in results:

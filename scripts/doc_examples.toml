@@ -131,6 +131,7 @@ universe = [
     "docs/sdk/ios.md",
     "docs/sdk/java.md",
     "docs/sdk/javascript.md",
+    "docs/sdk/local-evaluation.md",
     "docs/sdk/openfeature.md",
     "docs/sdk/php.md",
     "docs/sdk/python.md",
