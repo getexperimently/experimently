@@ -590,9 +590,9 @@ def _declared_node_dependencies(pkg_dir: str) -> int:
     First-party ones are excluded because `node_rows` excludes them from the
     rows, and comparing a count that includes them against a list that does
     not made a correctly installed tree look uninstalled. `sdk/openfeature`
-    declares two, one of them `@getexperimently/js-sdk`; dropping the other to
-    a peer dependency would have sent an operator to run an `npm ci` that had
-    already been run.
+    declares one, `@getexperimently/js-sdk`, and takes `@openfeature/server-sdk`
+    as a peer dependency; counting the first-party one could send an operator
+    to run an `npm ci` that had already been run.
     """
     manifest = ROOT / pkg_dir / "package.json"
     if not manifest.exists():

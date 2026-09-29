@@ -462,6 +462,8 @@ REFUSALS = {
     "ECR repository": "aws ecr describe-repositories",
     "dashboard ECR repository": 'for repo in "$ECR_BACKEND_REPO" "$ECR_DASHBOARD_REPO"',
     "earlier deployment still active": "scripts/refuse_active_deployment.py",
+    # #148 PR-3 (#297): an API alarm in ALARM, before anything is built.
+    "API alarm firing": "--stage before-build",
     "dashboard service": "scripts/dashboard_revision.py serving --refuse-unsteady",
 }
 
@@ -813,6 +815,11 @@ def test_the_loop_may_only_approve_and_read():
     assert refuse.OPERATIONS == {
         ("deploy", "list-deployments"),
         ("deploy", "get-deployment"),
+    }
+    alarms = _module("refuse_alarm_active")
+    assert alarms.OPERATIONS == {
+        ("deploy", "get-deployment-group"),
+        ("cloudwatch", "describe-alarms"),
     }
 
 

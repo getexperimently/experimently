@@ -349,6 +349,17 @@ def test_the_policy_upgrade_step_is_written_down():
         "account before the first `cdk deploy` that adds the alarms." in text
     )
     assert "`AccessDenied` in the middle of an incident" in text
+    # #148 PR-3 (#297), EM condition 11: the pre-flight's two reads, and the
+    # re-apply before the first deploy that runs it.
+    assert "`codedeploy:GetDeploymentGroup`" in text
+    assert "`cloudwatch:DescribeAlarms`" in text
+    assert (
+        "Roles created from a policy before the pre-flight lack "
+        "`codedeploy:GetDeploymentGroup` and `cloudwatch:DescribeAlarms`; "
+        "re-apply this policy in every account before the first deploy of a "
+        "release that includes the pre-flight." in text
+    )
+    assert "Could not read the API's alarms" in text
 
 
 def test_the_guide_has_the_ordered_checklist():
