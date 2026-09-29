@@ -372,6 +372,7 @@ async def report_client_errors_batch(
             )
         except Exception as exc:
             logger.exception("Error report batch item failed (%s)", type(exc).__name__)
+            db.rollback()
             failure_count += 1
             failures.append(
                 {
