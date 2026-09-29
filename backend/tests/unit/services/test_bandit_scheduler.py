@@ -1098,7 +1098,12 @@ class TestBanditSchedulerRunner:
         assert runner.is_running is True
         assert runner.task is not None
 
-        await asyncio.sleep(0.1)
+        # Poll for the first pass rather than sleeping a fixed 0.1 s (#433):
+        # the pass runs in a worker thread (asyncio.to_thread), and on a busy
+        # machine nothing bounds when that thread gets to run.
+        deadline = asyncio.get_running_loop().time() + 5.0
+        while runner.run_count < 1 and asyncio.get_running_loop().time() < deadline:
+            await asyncio.sleep(0.01)
         await runner.stop()
 
         assert runner.is_running is False
