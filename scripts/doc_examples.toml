@@ -12,8 +12,8 @@
 # scripts/doc_examples.py), and each page's residual counts can only fall.
 
 [meta]
-documents = 32
-exec = 157
+documents = 33
+exec = 163
 universe = [
     ".github/pull_request_template.md",
     "CHANGELOG.md",
@@ -197,6 +197,13 @@ environment = "stack"
 exec = 9
 skip = 0
 expects = 12
+
+[[document]]
+path = "docs/sdk/local-evaluation.md"
+environment = "stack"
+exec = 6
+skip = 0
+expects = 10
 
 [[document]]
 path = "README.md"

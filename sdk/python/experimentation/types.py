@@ -61,13 +61,16 @@ class FlagEvaluation:
 
     ``reason`` says why the server decided as it did (``"targeting_rule"``,
     ``"rollout"``, ``"inactive"`` or ``"error"``); ``None`` when the server did
-    not send one.
+    not send one. A local answer carries the reason the server would have given.
+    ``source`` is set only with ``evaluation="local"``: ``"local"`` when answered
+    in-process from the ruleset, ``"server"`` when the server evaluated it.
     """
 
     key: str
     enabled: bool
     config: Any = None
     reason: Optional[str] = None
+    source: Optional[str] = None
 
 
 @dataclass

@@ -13,6 +13,7 @@ Usage::
 
 from .client import BATCH_LIMIT, ExperimentationClient
 from .hashing import consistent_hash, md5_hex
+from .local import LocalEvaluationStatus, ReadyResult
 from .transport import Response, Transport, TransportError, UrllibTransport
 from .types import Assignment, BatchResult, ExperimentationError, FlagEvaluation
 from .version import __version__
@@ -24,6 +25,8 @@ __all__ = [
     "ExperimentationClient",
     "ExperimentationError",
     "FlagEvaluation",
+    "LocalEvaluationStatus",
+    "ReadyResult",
     "Response",
     "Transport",
     "TransportError",

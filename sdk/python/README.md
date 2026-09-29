@@ -1,8 +1,11 @@
 # experimently (Python)
 
 Synchronous, dependency-free Python client for the Experimently public API.
-Experiment assignment and feature-flag evaluation are decided **by the server** (sticky per
-user + experiment); the SDK caches the answers per user + key and never buckets locally.
+Experiment assignment and feature-flag evaluation are decided **by the server** by default (sticky
+per user + experiment); the SDK caches the answers per user + key. Server-side code can opt in to
+**local evaluation** (`evaluation="local"`, beta): flags are answered in-process from the server's
+ruleset, with the server's answers, and anything that cannot be answered exactly goes to the
+server. See [`docs/sdk/local-evaluation.md`](../../docs/sdk/local-evaluation.md).
 
 Requires Python 3.9+. HTTP goes through the standard library (`urllib`), so there is nothing
 else to install.
@@ -64,7 +67,8 @@ default_variant="control", transport=None)`. Instances are thread-safe.
 | `get_assignments(user_id, active_only=True)` | `list[dict]` from the server | raises `ExperimentationError` |
 | `cached_assignments(user_id)` / `cached_flags(user_id)` | cached, unexpired entries | — |
 | `clear_cache()` | — | — |
-| `consistent_hash(user_id, flag_key)` / `md5_hex(user_id, flag_key)` | cross-SDK MD5 bucket in `[0, 1)` / hex digest | pure functions; **not** used to decide variants |
+| `ready(timeout_seconds=None)`, `status()`, `close()` / `with` | local mode: readiness, ruleset state, shutdown (sends evaluation counts) | never raise |
+| `consistent_hash(user_id, flag_key)` / `md5_hex(user_id, flag_key)` | cross-SDK MD5 bucket in `[0, 1)` / hex digest | pure functions; **not** the flag bucketing function |
 
 `ExperimentationError` carries `.status` (HTTP status, `None` for network errors/timeouts) and
 `.body` (raw response text). Failures are never cached, so the next call retries. A `429` is
@@ -145,5 +149,5 @@ assert transport.last.query == {"user_id": "user-1"}
 
 ```bash
 source venv/bin/activate
-python -m pytest sdk/python/tests -q -o addopts="" -p no:cacheprovider   # 97 tests, HTTP is faked
+python -m pytest sdk/python/tests -q -o addopts="" -p no:cacheprovider   # 182 tests, HTTP is faked; runs on Python 3.9+
 ```

@@ -1,12 +1,15 @@
 # Python SDK
 
-`experimently` (v1.0.0) is a synchronous, dependency-free Python client for the
+`experimently` (v1.1.0) is a synchronous, dependency-free Python client for the
 Experimently public API: experiment assignment, feature-flag evaluation and event
 tracking. Requires Python 3.9+; HTTP goes through the standard library (`urllib`).
 
-Flag evaluation and experiment assignment are decided **by the server**: every call goes to the
-public API with your `X-API-Key`, the server buckets the user (sticky per user + experiment), and
-the SDK caches the answer per user + key. Nothing is bucketed locally.
+By default, flag evaluation and experiment assignment are decided **by the server**: every call
+goes to the public API with your `X-API-Key`, the server buckets the user (sticky per user +
+experiment), and the SDK caches the answer per user + key. In server-side code you can opt in to
+[local evaluation](#local-evaluation-server-side-beta) (`evaluation="local"`): flags are then
+answered in-process from the server's ruleset, with the server's answers, and experiments stay on
+the server.
 
 Source: `sdk/python`. The OpenFeature provider in `sdk/openfeature-python` is built on top of this
 client (see [openfeature.md](openfeature.md)).
@@ -66,6 +69,10 @@ ExperimentationClient(
     cache_ttl_seconds: float = 300,  # how long a successful assignment/evaluation is reused per user + key
     default_variant: str = "control",# what get_variant returns on failure
     transport: Transport | None = None,  # inject your own HTTP layer (tests use experimentation.testing.FakeTransport)
+    evaluation: str = "server",      # "server" (default) or "local" (server-side only; see Local evaluation)
+    refresh_interval_seconds: float = 30,  # local mode: ruleset refresh (minimum 5, ±10% jitter)
+    max_stale_seconds: float | None = None,  # local mode: evaluate on the server once the ruleset is this old
+    on_error=None,                   # local mode: on_error(error, "refresh" | "flush" | "evaluate")
 )
 ```
 
@@ -89,12 +96,16 @@ is in.
 | `get_assignments(user_id, active_only=True)` | `list[dict]` — the user's assignments from the server (not cached) | raises `ExperimentationError` |
 | `cached_assignments(user_id)` / `cached_flags(user_id)` | cached, unexpired entries for the user | — |
 | `clear_cache()` | — | — |
-| `consistent_hash(user_id, flag_key)` / `md5_hex(user_id, flag_key)` | cross-SDK MD5 bucket in `[0, 1)` / hex digest | pure functions; **not** used to decide variants |
+| `ready(timeout_seconds=None)` | `ReadyResult(ok, ruleset_version, error)`, truthy when ready; `ReadyResult(ok=True)` at once in server mode | never raises |
+| `status()` | `LocalEvaluationStatus(evaluation, ready, ruleset_version, last_refresh_at, last_error, server_evaluated_flags)` | — |
+| `close()`, `with ExperimentationClient(...) as client:` | local mode: stops the refresh thread and sends the remaining evaluation counts; a no-op in server mode | never raises |
+| `consistent_hash(user_id, flag_key)` / `md5_hex(user_id, flag_key)` | cross-SDK MD5 bucket in `[0, 1)` / hex digest | pure functions; **not** the flag bucketing function and not used to decide variants or flags |
 
 `Assignment` and `FlagEvaluation` are frozen dataclasses. `ExperimentationError` carries
 `.status` (HTTP status, `None` for network errors and timeouts) and `.body` (raw response text).
 `FlagEvaluation.reason` (`"targeting_rule"`, `"rollout"`, `"inactive"` or `"error"`) says why the
-server decided; it is `None` when the server does not send one.
+server decided; it is `None` when the server does not send one. `FlagEvaluation.source` is set only
+in local mode: `"local"` when answered in-process, `"server"` when the server evaluated it.
 
 ### Enrolment: `assigned` and `reason`
 
@@ -156,9 +167,38 @@ Every request carries `X-API-Key: <key>`, `Content-Type: application/json` and
 | `track` with a key | `POST /api/v1/tracking/track` | `{event_type, event_name, user_id, experiment_key?, feature_flag_key?, value?, metadata?, timestamp?}` | ignored |
 | `track` without keys, `track_batch` | `POST /api/v1/tracking/batch` | `{events: [<track body>, …]}` (max 100 per request) | `{success_count, failure_count, errors}` |
 | `get_assignments` | `GET /api/v1/tracking/assignments/{user_id}?active_only=true` | — | list of dicts |
+| local mode: ruleset refresh | `GET /api/v1/sdk/ruleset` (beta) | `If-None-Match: "<version>"` | the ruleset and `ETag`; `304` when unchanged |
+| local mode: evaluation counts | `POST /api/v1/tracking/evaluations` (beta) | `{evaluations: [{flag_key, count, enabled_count, window_start, window_end}]}` | `{accepted, errors}` |
 
 These SDK paths share a per-IP rate-limit ceiling of `SDK_RATE_LIMIT_PER_MINUTE` requests
 (default 6000) on the backend; the SDK honours `Retry-After` on `429` as described above.
+
+---
+
+## Local evaluation (server-side, beta)
+
+With `evaluation="local"` the client downloads the flag ruleset (`GET /api/v1/sdk/ruleset`),
+refreshes it on a daemon thread every `refresh_interval_seconds` (30 s by default, 5 s minimum),
+and answers `get_feature_flag`, `is_feature_enabled` and `get_all_flags` in-process whenever it can
+give exactly the server's answer; otherwise it makes the usual request. Experiments are always
+assigned by the server. It needs an Experimently server at 0.11.0 or later and a key with the
+`sdk:ruleset` scope, and it is for server-side code only.
+
+```python
+from experimentation import ExperimentationClient
+
+with ExperimentationClient(api_url, server_key, evaluation="local") as client:
+    client.ready(timeout_seconds=5)                       # optional; never raises
+    flag = client.get_feature_flag("new_search", "user-123", {"country": "US"})
+    print(flag.enabled, flag.reason, flag.source)         # source: "local" or "server"
+```
+
+A change made in the dashboard reaches the process at its next successful refresh. While the API
+is unreachable the last ruleset keeps being served (set `max_stale_seconds` to bound that); a 401
+or 403 on refresh discards it. A client created before `os.fork()` (gunicorn `--preload`) keeps
+working in each child, which starts its own refresh thread and reports only its own evaluations.
+What is answered locally, the refresh failure table, safety monitoring and troubleshooting:
+[Local evaluation](local-evaluation.md).
 
 ---
 
@@ -208,6 +248,6 @@ Verified against a live backend: **yes (2026-09-11)** — fixtures seeded with
 
 ```bash
 source venv/bin/activate
-python -m pytest sdk/python/tests -q -o addopts="" -p no:cacheprovider   # 97 tests, HTTP is faked
+python -m pytest sdk/python/tests -q -o addopts="" -p no:cacheprovider   # 182 tests, HTTP is faked
 python tests/sdk-contract/hash_contract.py python                      # this SDK's hash vs the golden vectors
 ```

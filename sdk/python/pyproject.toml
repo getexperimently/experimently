@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "experimently"
-version = "1.0.0"
+version = "1.1.0"
 description = "Python client for the Experimently public API (experiments, feature flags, event tracking)"
 readme = "README.md"
 license = {text = "MIT"}

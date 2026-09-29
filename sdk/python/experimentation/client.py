@@ -2,9 +2,12 @@
 
 * Dependency-free: HTTP goes through :mod:`urllib` from the standard library
   (or any injected :class:`~experimentation.transport.Transport`).
-* **The server decides.** Experiment assignment and flag evaluation come from
-  ``POST /api/v1/tracking/assign`` and
-  ``GET /api/v1/feature-flags/evaluate/{key}``; nothing is bucketed locally.
+* **The server decides** by default. Experiment assignment and flag evaluation
+  come from ``POST /api/v1/tracking/assign`` and
+  ``GET /api/v1/feature-flags/evaluate/{key}``. With ``evaluation="local"``
+  (server-side code, beta) flags are answered in-process from the server's
+  ruleset whenever the answer is provably the server's, and by the server
+  otherwise; experiments always stay on the server.
 * Successful assignments/evaluations are cached per user + key for
   ``cache_ttl_seconds``; failures are never cached.
 * ``get_assignment``/``get_feature_flag``/``get_all_flags``/``get_assignments``
@@ -20,10 +23,18 @@ import json
 import logging
 import time
 from datetime import datetime, timezone
-from typing import Any, Dict, Iterable, List, Mapping, Optional, Union
+from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Union
 from urllib.parse import quote, urlencode
 
 from .cache import UserKeyCache
+from .evaluator import DEFER
+from .local import (
+    DEFAULT_REFRESH_INTERVAL_SECONDS,
+    MIN_REFRESH_INTERVAL_SECONDS,
+    LocalEvaluation,
+    LocalEvaluationStatus,
+    ReadyResult,
+)
 from .transport import Response, Transport, UrllibTransport
 from .types import Assignment, BatchResult, ExperimentationError, FlagEvaluation
 from .version import __version__
@@ -94,6 +105,20 @@ class ExperimentationClient:
             (default ``"control"``).
         transport: Optional :class:`~experimentation.transport.Transport`
             (tests use :class:`experimentation.testing.FakeTransport`).
+        evaluation: ``"server"`` (default): every flag is evaluated by the
+            server. ``"local"``: flags are evaluated in-process from
+            ``GET /api/v1/sdk/ruleset`` (beta) whenever the answer is provably
+            the server's, and by the server otherwise. Server-side code only:
+            the key needs the ``sdk:ruleset`` scope. Experiments are always
+            assigned by the server.
+        refresh_interval_seconds: Local mode: how often the ruleset is
+            refreshed (default 30, minimum 5, +/-10% jitter).
+        max_stale_seconds: Local mode: stop answering locally once the ruleset
+            has not been refreshed for this long (default: no limit).
+        on_error: Called as ``on_error(error, operation)`` when a local-mode
+            ruleset refresh (``"refresh"``), evaluation-count report
+            (``"flush"``) or local evaluation (``"evaluate"``; that call then
+            goes to the server) fails. Those never raise.
     """
 
     def __init__(
@@ -104,6 +129,10 @@ class ExperimentationClient:
         cache_ttl_seconds: float = 300,
         default_variant: str = "control",
         transport: Optional[Transport] = None,
+        evaluation: str = "server",
+        refresh_interval_seconds: float = DEFAULT_REFRESH_INTERVAL_SECONDS,
+        max_stale_seconds: Optional[float] = None,
+        on_error: Optional[Callable[[ExperimentationError, str], None]] = None,
     ) -> None:
         if not api_url:
             raise ValueError("api_url is required")
@@ -124,12 +153,83 @@ class ExperimentationClient:
             "Accept": "application/json",
             "User-Agent": _USER_AGENT,
         }
+        if evaluation not in ("server", "local"):
+            raise ValueError("evaluation must be 'server' or 'local'")
+        self.evaluation = evaluation
+        self._on_error = on_error
+        self._local: Optional[LocalEvaluation] = None
+        if evaluation == "local":
+            interval = refresh_interval_seconds
+            if isinstance(interval, bool) or not isinstance(interval, (int, float)) or not (0 <= interval < float("inf")):
+                raise ValueError("refresh_interval_seconds must be a finite number of seconds")
+            if max_stale_seconds is not None and (
+                isinstance(max_stale_seconds, bool)
+                or not isinstance(max_stale_seconds, (int, float))
+                or not max_stale_seconds > 0
+            ):
+                raise ValueError("max_stale_seconds must be a positive number of seconds")
+            self._local = LocalEvaluation(
+                send=self._send_raw,
+                report=self._report,
+                refresh_interval_seconds=max(float(interval), MIN_REFRESH_INTERVAL_SECONDS),
+                max_stale_seconds=max_stale_seconds,
+                json_default=_json_default,
+            )
+
+    # ------------------------------------------------------- local evaluation
+
+    def _send_raw(self, method: str, path: str, headers: Mapping[str, str], body: Optional[bytes]) -> Response:
+        """One request with the client's headers plus ``headers``; any status comes back."""
+        return self._send(method, self.api_url + path, body, extra_headers=headers)
+
+    def _report(self, error: ExperimentationError, operation: str) -> None:
+        logger.warning("local evaluation %s failed: %s", operation, error)
+        if self._on_error is None:
+            return
+        try:
+            self._on_error(error, operation)
+        except Exception:  # noqa: BLE001 - a failing handler must not stop the poller
+            logger.exception("on_error handler raised")
+
+    def ready(self, timeout_seconds: Optional[float] = None) -> ReadyResult:
+        """Wait until flags can be answered locally, the first ruleset fetch has finished, or
+        ``timeout_seconds`` passed. Never raises; the result is truthy when ready. In server
+        mode it returns ``ReadyResult(ok=True)`` at once. Evaluations never wait for it: until
+        a ruleset is loaded they are made on the server."""
+        if self._local is None:
+            return ReadyResult(True)
+        return self._local.ready(timeout_seconds)
+
+    def status(self) -> LocalEvaluationStatus:
+        """Where flags are being evaluated, and the state of the ruleset."""
+        if self._local is None:
+            return LocalEvaluationStatus(evaluation="server", ready=True)
+        return self._local.status()
+
+    def close(self) -> None:
+        """Local mode: stop refreshing the ruleset and send the evaluation counts not yet sent;
+        later calls are evaluated by the server. A no-op in server mode. Never raises."""
+        if self._local is not None:
+            self._local.close()
+
+    def __enter__(self) -> "ExperimentationClient":
+        return self
+
+    def __exit__(self, *exc_info: Any) -> None:
+        self.close()
 
     # ------------------------------------------------------------------ HTTP
 
-    def _send(self, method: str, url: str, data: Optional[bytes]) -> Response:
+    def _send(
+        self,
+        method: str,
+        url: str,
+        data: Optional[bytes],
+        extra_headers: Optional[Mapping[str, str]] = None,
+    ) -> Response:
+        headers = self._headers if not extra_headers else {**extra_headers, **self._headers}
         try:
-            return self._transport.send(method, url, self._headers, data, self.timeout_seconds)
+            return self._transport.send(method, url, headers, data, self.timeout_seconds)
         except ExperimentationError:
             raise
         except Exception as exc:  # noqa: BLE001 - normalise any transport failure
@@ -261,8 +361,27 @@ class ExperimentationClient:
         targeting rules can evaluate against it. Cached per user + key only —
         attributes are assumed stable per user; call :meth:`clear_cache` after
         changing them. Raises :class:`ExperimentationError` (``status == 404``
-        when the flag is not ACTIVE or unknown).
+        for a flag key the server does not know; an inactive flag is
+        ``enabled=False, reason="inactive"``).
+
+        With ``evaluation="local"``, a flag the ruleset can answer is answered
+        in-process from the attributes passed (no request, no cache read) with
+        ``source="local"``; anything else is evaluated by the server as above,
+        with ``source="server"``.
         """
+        if self._local is not None:
+            answer = self._local.answer(flag_key, user_id, user_attributes)
+            if answer is not DEFER:
+                local = FlagEvaluation(
+                    key=flag_key,
+                    enabled=answer["enabled"],
+                    config=None,
+                    reason=answer["reason"],
+                    source="local",
+                )
+                # Recorded for the key-less track() fan-out, as a server answer is.
+                self._flags.set(user_id, flag_key, local)
+                return local
         cached = self._flags.get(user_id, flag_key)
         if cached is not None:
             return cached
@@ -288,6 +407,7 @@ class ExperimentationClient:
             enabled=bool(data.get("enabled", False)),
             config=data.get("config"),
             reason=reason if isinstance(reason, str) else None,
+            source="server" if self._local is not None else None,
         )
         self._flags.set(user_id, flag_key, evaluation)
         return evaluation
@@ -314,7 +434,15 @@ class ExperimentationClient:
         ``GET /api/v1/feature-flags/user/{user_id}[?context=<url-encoded JSON>]`` (not cached).
 
         ``user_attributes`` (when non-empty) is sent as ``context`` for targeting rules.
+
+        With ``evaluation="local"`` the answer is computed in-process when every
+        active flag can be answered locally for these attributes; otherwise the
+        whole call goes to the server.
         """
+        if self._local is not None:
+            flags = self._local.answer_all(user_id, user_attributes)
+            if flags is not DEFER:
+                return dict(flags)
         context = _context_param(user_attributes)
         data = self._request(
             "GET",
