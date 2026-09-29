@@ -581,6 +581,7 @@ async def track_events_batch(
             )
         except Exception as e:
             logger.exception("Tracking batch item failed (%s)", type(e).__name__)
+            db.rollback()
             failure_count += 1
             errors.append(
                 {

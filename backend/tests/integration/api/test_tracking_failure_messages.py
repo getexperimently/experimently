@@ -455,7 +455,7 @@ def _fail_nth_flag_lookup(monkeypatch, db_session: Session, n: int) -> None:
     monkeypatch.setattr(Session, "query", query)
 
 
-def test_a_failed_lookup_in_an_event_batch_answers_the_fixed_sentence(
+def test_a_failed_lookup_in_an_event_batch_fails_only_that_item(
     admin_client: TestClient, db_session, experiment, flag, monkeypatch
 ) -> None:
     users = [_user() for _ in range(3)]
@@ -489,22 +489,21 @@ def test_a_failed_lookup_in_an_event_batch_answers_the_fixed_sentence(
     assert resp.status_code == 200, resp.text
     assert resp.headers["x-request-id"] == REQUEST_ID
     body = resp.json()
-    # As on main: the failed lookup leaves the request's transaction unusable,
-    # so the item after it fails too. Only the text of the answer changes here.
-    assert body["success_count"] == 1
-    assert body["failure_count"] == 2
+    # The failed item is rolled back on its own, so the item after it is
+    # still stored.
+    assert body["success_count"] == 2
+    assert body["failure_count"] == 1
     assert [(e["index"], e["error"]) for e in body["errors"]] == [
         (1, _with_id(BATCH_ITEM)),
-        (2, _with_id(BATCH_ITEM)),
     ]
     stored = [
         _committed(db_session, "select count(*) from events where user_id = :u", u=user)
         for user in users
     ]
-    assert stored == [1, 0, 0]
+    assert stored == [1, 0, 1]
 
 
-def test_a_failed_lookup_in_an_error_report_batch_answers_the_fixed_sentence(
+def test_a_failed_lookup_in_an_error_report_batch_fails_only_that_item(
     admin_client: TestClient, db_session, flag, monkeypatch
 ) -> None:
     _fail_nth_flag_lookup(monkeypatch, db_session, 2)
@@ -524,15 +523,23 @@ def test_a_failed_lookup_in_an_error_report_batch_answers_the_fixed_sentence(
         headers={"X-Request-ID": REQUEST_ID},
     )
 
-    assert resp.status_code == 500
-    assert resp.json() == {"detail": _with_id(REPORTS)}
+    # The failed item is rolled back on its own, so the reports around it are
+    # still stored.
+    assert resp.status_code == 200, resp.text
+    assert resp.headers["x-request-id"] == REQUEST_ID
+    body = resp.json()
+    assert body["success_count"] == 2
+    assert body["failure_count"] == 1
+    assert [(e["index"], e["error"]) for e in body["errors"]] == [
+        (1, _with_id(REPORT_ITEM)),
+    ]
     assert (
         _committed(
             db_session,
             "select count(*) from error_logs where feature_flag_id = :f",
             f=str(flag.id),
         )
-        == 0
+        == 2
     )
 
 
