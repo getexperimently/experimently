@@ -31,6 +31,7 @@ workflow cannot slip into the role unexamined. `--check` is run by
 from __future__ import annotations
 
 import argparse
+import ast
 import json
 import re
 import sys
@@ -60,6 +61,7 @@ END = "<!-- END GENERATED -->"
 #: CLI service name -> IAM service prefix.
 SERVICES = {
     "cloudformation": "cloudformation",
+    "cloudwatch": "cloudwatch",
     "deploy": "codedeploy",
     "ecr": "ecr",
     "ecs": "ecs",
@@ -205,6 +207,42 @@ def sources() -> list[Path]:
     return seen
 
 
+def declared_operations(source: str) -> set[tuple[str, str]]:
+    """The `(service, verb)` pairs a script's module-level `OPERATIONS` lists."""
+    pairs: set[tuple[str, str]] = set()
+    for node in ast.parse(source).body:
+        targets = node.targets if isinstance(node, ast.Assign) else []
+        if not any(isinstance(t, ast.Name) and t.id == "OPERATIONS" for t in targets):
+            continue
+        for item in ast.walk(node.value):
+            if (
+                isinstance(item, ast.Tuple)
+                and len(item.elts) == 2
+                and all(
+                    isinstance(e, ast.Constant) and isinstance(e.value, str)
+                    for e in item.elts
+                )
+            ):
+                pairs.add((item.elts[0].value, item.elts[1].value))
+    return pairs
+
+
+def _check_declared_operations(path: Path) -> None:
+    """A script's `OPERATIONS` allow-list is its AWS calls: every service in it
+    must be mapped. The tuple scan below skips unmapped services, because
+    scripts hold other string pairs (`("blue", "green")`); without this, an
+    operation on a new service was dropped from the role in silence (#297:
+    `("cloudwatch", "describe-alarms")` was, until `cloudwatch` was mapped).
+    """
+    for service, verb in sorted(declared_operations(path.read_text(encoding="utf-8"))):
+        if service not in SERVICES:
+            raise SystemExit(
+                f"{path.name}: OPERATIONS lists aws {service} {verb}, and the CLI "
+                f"service {service!r} is not mapped to an IAM prefix in "
+                "scripts/iam_actions.py; add it deliberately"
+            )
+
+
 def _join_continuations(text: str) -> str:
     """Fold shell line continuations, so `aws ecs \\` + `update-service` is one call.
 
@@ -248,6 +286,7 @@ def calls(paths: list[Path] | None = None) -> dict[str, set[str]]:
             text = _code(path.read_text(encoding="utf-8"))
             _flag_implied(text, where, found)
             if path.suffix == ".py":
+                _check_declared_operations(path)
                 for service, verb in _PY_OPERATION.findall(text):
                     if service in SERVICES:
                         for action in iam_actions_for(service, verb):
