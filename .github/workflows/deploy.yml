@@ -289,8 +289,9 @@ jobs:
       CODEDEPLOY_APPLICATION: experimentation-platform-${{ inputs.environment }}
       CODEDEPLOY_DEPLOYMENT_GROUP: experimentation-${{ inputs.environment }}
       # The deployment group's two 5xx alarms, one per target group (#148;
-      # stacks/names.py api_5xx_alarm_name). Named in the copy only: this
-      # workflow never reads or changes them.
+      # stacks/names.py api_5xx_alarm_name). The pre-flight reads their
+      # state (scripts/refuse_alarm_active.py); this workflow never changes
+      # them.
       API_ALARM_BLUE: experimentation-api-5xx-blue-${{ inputs.environment }}
       API_ALARM_GREEN: experimentation-api-5xx-green-${{ inputs.environment }}
       FARGATE_STACK: experimentation-fargate-${{ inputs.environment }}
@@ -495,6 +496,29 @@ jobs:
       # (PE v2 C7).
       - name: Refuse while an earlier deployment is still active
         run: python3 scripts/refuse_active_deployment.py "$CODEDEPLOY_APPLICATION" "$CODEDEPLOY_DEPLOYMENT_GROUP"
+
+      # CodeDeploy stops every deployment to the API's group while one of its
+      # 5xx alarms is in ALARM, and this workflow creates the deployment only
+      # after the snapshot and the migration (#148 PR-3, #297). So it asks
+      # first, read-only: the alarm names from the deployment group (what
+      # CodeDeploy will poll), then their states. Refused on ALARM, naming the
+      # alarm; refused whatever the break-glass says when the group watches no
+      # alarm, has its alarms disabled or does not watch both of the stack's.
+      # INSUFFICIENT_DATA passes. With the break-glass ticked, an alarm in
+      # ALARM is a warning and the deploy goes on unwatched. Advisory: an
+      # alarm that fires after this passes still stops the deployment after
+      # the migration, which is why it runs again just before the snapshot.
+      - name: Refuse while an API alarm is firing (before the build)
+        env:
+          OVERRIDE_ALARMS: ${{ inputs.override_alarms }}
+        run: |
+          set -euo pipefail
+          overridden=()
+          if [ "$OVERRIDE_ALARMS" = "true" ]; then overridden=(--alarms-overridden); fi
+          python3 scripts/refuse_alarm_active.py --stage before-build \
+            --application "$CODEDEPLOY_APPLICATION" --group "$CODEDEPLOY_DEPLOYMENT_GROUP" \
+            --environment "$TARGET_ENV" --expect "$API_ALARM_BLUE" --expect "$API_ALARM_GREEN" \
+            ${overridden[@]+"${overridden[@]}"}
 
       # For the rollback line in the summary: the revision serving BEFORE this
       # deploy. The PRIMARY task set, not services[0].taskDefinition, which on
@@ -716,6 +740,21 @@ jobs:
             echo "reused=$reused"
           } >> "$GITHUB_OUTPUT"
           echo "dashboard image: $ECR_DASHBOARD_REPO@$digest (tag $IMAGE_TAG, commit $RELEASE_COMMIT)"
+
+      # The same check again, immediately before the snapshot and the
+      # migration it exists to protect (PE condition 11): the build above
+      # takes minutes, and an alarm can go into ALARM meanwhile.
+      - name: Refuse while an API alarm is firing (before the migration)
+        env:
+          OVERRIDE_ALARMS: ${{ inputs.override_alarms }}
+        run: |
+          set -euo pipefail
+          overridden=()
+          if [ "$OVERRIDE_ALARMS" = "true" ]; then overridden=(--alarms-overridden); fi
+          python3 scripts/refuse_alarm_active.py --stage before-migration \
+            --application "$CODEDEPLOY_APPLICATION" --group "$CODEDEPLOY_DEPLOYMENT_GROUP" \
+            --environment "$TARGET_ENV" --expect "$API_ALARM_BLUE" --expect "$API_ALARM_GREEN" \
+            ${overridden[@]+"${overridden[@]}"}
 
       # Always, before the migration. The check this replaces compared the
       # CLI's `None` (its text for an empty result) with "NONE", so it never
