@@ -8,6 +8,10 @@ string-typed positions, each with its maximum length and pattern.  Adding any
 free-text field -- whatever it is called -- fails here until it is listed with
 its bounds, and a string without a maximum length or a pattern cannot be
 listed at all.
+
+The walk covers every position a JSON value can take: properties, array items,
+and a map's keys (``{key}``) and values (``{}``).  A map whose keys are not
+constrained, or whose values may be anything, is itself a free-text position.
 """
 
 from __future__ import annotations
@@ -20,6 +24,8 @@ from pathlib import Path
 import pytest
 from pydantic import BaseModel, ValidationError
 
+from modules.backend.app.schemas import warehouse_connections as wc
+from modules.backend.app.schemas import warehouse_runs as wr
 from modules.backend.app.schemas import warehouse_sources as ws
 
 pytestmark = pytest.mark.unit
@@ -33,6 +39,9 @@ LITERAL = ("text", 256, ws.LITERAL_PATTERN)
 UUID = ("format", "uuid")
 OPERATOR = ("enum", ("eq", "in", "is_not_null", "is_null", "ne", "not_in"))
 METRIC_TYPE = ("enum", ("mean", "proportion"))
+DATETIME = ("format", "date-time")
+CONNECTION_NAME = ("text", 200, ws.NAME_PATTERN)
+SNOWFLAKE_OBJECT = ("text", 255, wc.SNOWFLAKE_OBJECT_PATTERN)
 
 _FILTER = {
     "filters[].column": {IDENT},
@@ -70,8 +79,67 @@ def _prefixed(prefix: str, d: dict) -> dict:
     return {f"{prefix}.{k}": v for k, v in d.items()}
 
 
+_SNOWFLAKE = {
+    "name": {CONNECTION_NAME},
+    "warehouse_type": {("enum", ("snowflake",))},
+    "account": {("text", 300, wc.SNOWFLAKE_ACCOUNT_PATTERN)},
+    "user": {SNOWFLAKE_OBJECT},
+    "role": {SNOWFLAKE_OBJECT},
+    "warehouse": {SNOWFLAKE_OBJECT},
+}
+_BIGQUERY = {
+    "name": {CONNECTION_NAME},
+    "warehouse_type": {("enum", ("bigquery",))},
+    "billing_project": {("text", 30, wc.BIGQUERY_PROJECT_PATTERN)},
+    "location": {("text", 64, wc.BIGQUERY_LOCATION_PATTERN)},
+}
+_SERVICE_ACCOUNT = {
+    "service_account_json": {
+        ("text", wc.MAX_SERVICE_ACCOUNT_JSON_CHARS, wc.SERVICE_ACCOUNT_JSON_PATTERN)
+    }
+}
+_ATHENA = {
+    "name": {CONNECTION_NAME},
+    "warehouse_type": {("enum", ("athena",))},
+    "region": {("text", 32, wc.AWS_REGION_PATTERN)},
+    "role_arn": {("text", 600, wc.ROLE_ARN_PATTERN)},
+    "workgroup": {("text", 128, wc.ATHENA_WORKGROUP_PATTERN)},
+    "database": {("text", 255, wc.ATHENA_DATABASE_PATTERN)},
+}
+_WINDOW = {"window_start": {DATETIME}, "window_end": {DATETIME}}
+_RUN = {
+    **_WINDOW,
+    "connection_id": {UUID},
+    "assignment_source_id": {UUID},
+    "metric_source_ids[]": {UUID},
+    "variant_map{key}": {("text", 64, ws.NAME_PATTERN)},
+    "variant_map{}": {UUID},
+    "correction_method": {("enum", ("benjamini_hochberg", "bonferroni", "none"))},
+}
+
 #: (model, position) -> the set of string shapes allowed there.
 ALLOWLIST = {
+    **_prefixed("_Limits", {"name": {CONNECTION_NAME}}),
+    **_prefixed("_SnowflakeFields", _SNOWFLAKE),
+    **_prefixed("SnowflakeConnectionCreate", _SNOWFLAKE),
+    **_prefixed("SnowflakeConnectionUpdate", _SNOWFLAKE),
+    **_prefixed("_BigQueryFields", _BIGQUERY),
+    **_prefixed("BigQueryConnectionCreate", {**_BIGQUERY, **_SERVICE_ACCOUNT}),
+    **_prefixed("BigQueryConnectionUpdate", {**_BIGQUERY, **_SERVICE_ACCOUNT}),
+    **_prefixed("BigQueryConnectionTest", {**_BIGQUERY, **_SERVICE_ACCOUNT}),
+    **_prefixed("_AthenaFields", _ATHENA),
+    **_prefixed("AthenaConnectionCreate", _ATHENA),
+    **_prefixed("AthenaConnectionUpdate", _ATHENA),
+    **_prefixed("AthenaConnectionTest", _ATHENA),
+    **_prefixed("_Window", _WINDOW),
+    **_prefixed("RunCreate", _RUN),
+    **_prefixed(
+        "PreviewRequest",
+        {
+            **_WINDOW,
+            "experiment_key": {("text", 100, wr.EXPERIMENT_KEY_PATTERN)},
+        },
+    ),
     **_prefixed("AssignmentSourceCreate", {**_ASSIGNMENT, "connection_id": {UUID}}),
     **_prefixed("AssignmentSourceUpdate", _ASSIGNMENT),
     **_prefixed("_AssignmentSourceBody", _without(_ASSIGNMENT, "kind")),
@@ -124,13 +192,30 @@ def _string_positions(model: type[BaseModel]) -> dict[str, set]:
         if node.get("type") == "object" or "properties" in node:
             for name, prop in node.get("properties", {}).items():
                 walk(prop, f"{path}.{name}" if path else name)
+            # A map: its values are at "{}" and its keys at "{key}".  Pydantic
+            # writes a key pattern as patternProperties (pattern -> value) and
+            # a key's length as propertyNames.
+            extra = node.get("additionalProperties")
+            patterned = node.get("patternProperties") or {}
+            if extra is True or extra == {}:
+                found.setdefault(f"{path}{{}}", set()).add(("any",))
+            elif isinstance(extra, dict):
+                walk(extra, f"{path}{{}}")
+            for value in patterned.values():
+                walk(value, f"{path}{{}}")
+            if extra not in (None, False) or patterned:
+                names = node.get("propertyNames") or {}
+                for pattern in list(patterned) or [names.get("pattern")]:
+                    found.setdefault(f"{path}{{key}}", set()).add(
+                        ("text", names.get("maxLength"), pattern)
+                    )
         if node.get("type") == "array":
             walk(node.get("items", {}), f"{path}[]")
         if node.get("type") == "string":
             if "enum" in node or "const" in node:
                 values = node.get("enum") or [node["const"]]
                 shape = ("enum", tuple(sorted(values)))
-            elif node.get("format") in ("uuid",):
+            elif node.get("format") in ("uuid", "date-time"):
                 shape = ("format", node["format"])
             else:
                 shape = ("text", node.get("maxLength"), node.get("pattern"))
@@ -150,7 +235,48 @@ def _all_positions() -> dict[str, set]:
 
 def test_the_request_models_are_found():
     names = {m.__name__ for m in warehouse_request_models()}
-    assert {"AssignmentSourceCreate", "MetricSourceCreate", "SourceFilterIn"} <= names
+    assert {
+        "AssignmentSourceCreate",
+        "MetricSourceCreate",
+        "SourceFilterIn",
+        "BigQueryConnectionCreate",
+        "SnowflakeConnectionCreate",
+        "AthenaConnectionCreate",
+        "RunCreate",
+        "PreviewRequest",
+    } <= names
+
+
+class _Map(BaseModel):
+    labels: dict[str, str]
+
+
+class _Anything(BaseModel):
+    extra: dict
+
+
+class _Expression(BaseModel):
+    expression: str
+
+
+@pytest.mark.parametrize(
+    ("model", "position"),
+    [
+        (_Map, "labels{key}"),
+        (_Map, "labels{}"),
+        (_Anything, "extra{}"),
+        (_Expression, "expression"),
+    ],
+)
+def test_the_walk_sees_free_text_in_every_position(model, position):
+    """A model the walk would pass unseen is a hole in the gate itself: map
+    keys and values are positions, and an unbounded one is free text."""
+    positions = _string_positions(model)
+    assert position in positions
+    assert all(
+        shape[0] == "any" or (shape[0] == "text" and None in shape[1:])
+        for shape in positions[position]
+    )
 
 
 def test_every_string_field_is_bounded_and_patterned():

@@ -177,11 +177,11 @@ jobs:
           POSTGRES_PASSWORD: postgres
         run: python -m pytest modules/backend/tests -p no:cov -q --tb=short --junitxml=module-junit.xml
 
-      # The warehouse query tests must all RUN: a skip there (a missing
-      # duckdb or sqlglot turned into a skip, say) would leave the SQL
-      # semantics and the identifier gate unchecked under a green job.
+      # The warehouse tests must all RUN: a skip there (a missing duckdb or
+      # sqlglot turned into a skip, say) would leave the SQL semantics, the
+      # identifier gate, the runner and the routes unchecked under a green job.
       - name: No warehouse test was skipped
-        run: python3 scripts/check_junit_skips.py module-junit.xml modules/backend/tests/unit/warehouse
+        run: python3 scripts/check_junit_skips.py module-junit.xml modules/backend/tests/unit/warehouse modules/backend/tests/integration/warehouse
 
   base-requirements-only:
     needs: changes

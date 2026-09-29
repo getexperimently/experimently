@@ -23,6 +23,9 @@ Statements
 * :func:`build_diagnostics_query` -- one per run, over the assignment source
   only: exposure rows, rows with a NULL unit or variant, units, units seen in
   more than one variant, and distinct variant values.
+* :func:`build_assignment_preview_query` and :func:`build_metric_preview_query`
+  -- a source preview: counts per variant label, NULL counts and the earliest
+  and latest time, as whole epoch seconds.  Aggregates only.
 
 Semantics (the DuckDB fixtures in the module tests pin each one):
 
@@ -82,6 +85,7 @@ from modules.backend.app.core.warehouse_identifiers import (
     render_float_literal,
     render_table,
     utc_text,
+    validate_experiment_key,
     validate_table_parts,
 )
 
@@ -105,6 +109,8 @@ METRIC_CTES: Final = frozenset(
     {"exposures", "units", "events", "per_unit", "y", "k", "diag"}
 )
 DIAGNOSTICS_CTES: Final = frozenset({"exposures", "units"})
+ASSIGNMENT_PREVIEW_CTES: Final = frozenset({"exposures", "per_variant", "totals"})
+METRIC_PREVIEW_CTES: Final = frozenset({"events"})
 
 MetricType = Literal["proportion", "mean"]
 
@@ -128,6 +134,9 @@ class SqlDialect:
     time_column: Callable[[str], str]
     #: An extra SELECT expression returning the session's UTC offset, or None.
     session_offset: Optional[str] = None
+    #: A time expression -> whole seconds since 1970-01-01 UTC, an integer.
+    #: Used by the previews only; a dialect without it cannot preview.
+    epoch_seconds: Optional[Callable[[str], str]] = None
 
 
 def _identity(expr: str) -> str:
@@ -146,6 +155,7 @@ SNOWFLAKE_SQL: Final = SqlDialect(
     # sets to UTC; LTZ and TZ convert exactly.
     time_column=lambda c: f"CAST({c} AS TIMESTAMP_TZ)",
     session_offset="TO_CHAR(CURRENT_TIMESTAMP(), 'TZH:TZM')",
+    epoch_seconds=lambda e: f"DATE_PART(EPOCH_SECOND, {e})",
 )
 
 BIGQUERY_SQL: Final = SqlDialect(
@@ -157,6 +167,7 @@ BIGQUERY_SQL: Final = SqlDialect(
     add_hours=lambda e, h: f"TIMESTAMP_ADD({e}, INTERVAL {h} HOUR)",
     serialise=lambda x: f"FORMAT('%.17g', {x})",
     time_column=_identity,
+    epoch_seconds=lambda e: f"UNIX_SECONDS({e})",
 )
 
 ATHENA_SQL: Final = SqlDialect(
@@ -168,6 +179,7 @@ ATHENA_SQL: Final = SqlDialect(
     add_hours=lambda e, h: f"date_add('hour', {h}, {e})",
     serialise=lambda x: f"format('%.17g', {x})",
     time_column=_identity,
+    epoch_seconds=lambda e: f"CAST(floor(to_unixtime({e})) AS BIGINT)",
 )
 
 #: The dialects a connection can have (the DuckDB set lives in the tests).
@@ -212,7 +224,7 @@ class AnalysisWindow:
 class BuiltQuery:
     """A generated statement and what it may read."""
 
-    kind: Literal["metric", "diagnostics"]
+    kind: Literal["metric", "diagnostics", "preview"]
     dialect: str
     sql: str
     #: The table references we rendered, as tuples of their parts.
@@ -240,10 +252,12 @@ def _where(conditions: Sequence[str]) -> str:
 def _exposures_cte(
     dialect: SqlDialect,
     assignment: AssignmentMapping,
-    experiment_key: str,
+    experiment_key: Optional[str],
     start: str,
     end: str,
 ) -> str:
+    """The exposures in the window; for one experiment unless the key is None
+    (a source preview across every experiment in the table)."""
     rules = dialect.identifiers
     table = render_table(rules, assignment.table)
     unit = render_column(rules, assignment.unit_id, "columns.unit_id")
@@ -253,7 +267,11 @@ def _exposures_cte(
         render_column(rules, assignment.exposed_at, "columns.exposed_at")
     )
     conditions = [
-        f"{key} = {render_experiment_key(experiment_key)}",
+        *(
+            [f"{key} = {render_experiment_key(experiment_key)}"]
+            if experiment_key is not None
+            else []
+        ),
         f"{exposed} >= {start}",
         f"{exposed} < {end}",
         *render_filters(rules, assignment.filters, "filters"),
@@ -314,6 +332,7 @@ def build_metric_query(
     window: AnalysisWindow,
 ) -> BuiltQuery:
     """The per-metric statement: per-variant counts and centred sums."""
+    validate_experiment_key(experiment_key)
     _check_metric(metric)
     rules = dialect.identifiers
     start, end = _window_literals(dialect, window)
@@ -428,6 +447,7 @@ def build_diagnostics_query(
     window: AnalysisWindow,
 ) -> BuiltQuery:
     """The per-run statement over the assignment source only."""
+    validate_experiment_key(experiment_key)
     start, end = _window_literals(dialect, window)
     select = [
         "(SELECT COUNT(*) FROM exposures) AS exposure_rows",
@@ -455,6 +475,123 @@ def build_diagnostics_query(
     tables = frozenset({validate_table_parts(dialect.identifiers, assignment.table)})
     built = BuiltQuery(kind="diagnostics", dialect=dialect.name, sql=sql, tables=tables)
     verify_generated_sql(built, DIAGNOSTICS_CTES)
+    return built
+
+
+def _epoch(dialect: SqlDialect) -> Callable[[str], str]:
+    if dialect.epoch_seconds is None:
+        raise _refuse_internal()
+    return dialect.epoch_seconds
+
+
+def build_assignment_preview_query(
+    dialect: SqlDialect,
+    assignment: AssignmentMapping,
+    window: AnalysisWindow,
+    experiment_key: Optional[str] = None,
+) -> BuiltQuery:
+    """A source preview over an assignment source: aggregates only.
+
+    One row per variant label (at most 51, the largest first), each carrying
+    the same totals: rows in the window, rows with no unit or no variant, and
+    the earliest and latest exposure as whole epoch seconds (and, on
+    Snowflake, the session's UTC offset, which the connector checks).  With no
+    rows in the window there is exactly one row, whose label is NULL.  No
+    row-level value leaves the warehouse.
+    """
+    if experiment_key is not None:
+        validate_experiment_key(experiment_key)
+    epoch = _epoch(dialect)
+    start, end = _window_literals(dialect, window)
+    offset_total = offset_select = ""
+    if dialect.session_offset:
+        offset_total = f",\n    MIN({dialect.session_offset}) AS session_offset"
+        offset_select = ",\n  t.session_offset AS session_offset"
+    sql = (
+        "WITH "
+        + _exposures_cte(dialect, assignment, experiment_key, start, end)
+        + ",\nper_variant AS (\n"  # nosec B608 - only _exposures_cte output and fixed text, verify_generated_sql re-parses
+        "  SELECT variant, COUNT(DISTINCT unit_id) AS units\n"
+        "  FROM exposures\n"
+        "  WHERE variant IS NOT NULL\n"
+        "  GROUP BY variant\n"
+        "  ORDER BY units DESC, variant\n"
+        f"  LIMIT {VARIANT_ROW_LIMIT}\n"
+        "),\ntotals AS (\n"
+        "  SELECT COUNT(*) AS total_rows,\n"
+        "    COUNT(CASE WHEN unit_id IS NULL THEN 1 END) AS null_unit_rows,\n"
+        "    COUNT(CASE WHEN variant IS NULL THEN 1 END) AS null_variant_rows,\n"
+        f"    MIN({epoch('exposed_at')}) AS earliest,\n"
+        f"    MAX({epoch('exposed_at')}) AS latest{offset_total}\n"
+        "  FROM exposures\n"
+        ")\n"
+        "SELECT t.total_rows AS total_rows, t.null_unit_rows AS null_unit_rows,\n"
+        "  t.null_variant_rows AS null_variant_rows, t.earliest AS earliest,\n"
+        f"  t.latest AS latest, v.variant AS variant, v.units AS units{offset_select}\n"
+        "FROM totals AS t\n"
+        "LEFT JOIN per_variant AS v ON 1 = 1\n"
+        "ORDER BY v.units DESC, v.variant\n"
+        f"LIMIT {VARIANT_ROW_LIMIT}\n"
+    )
+    tables = frozenset({validate_table_parts(dialect.identifiers, assignment.table)})
+    built = BuiltQuery(kind="preview", dialect=dialect.name, sql=sql, tables=tables)
+    verify_generated_sql(built, ASSIGNMENT_PREVIEW_CTES)
+    return built
+
+
+def build_metric_preview_query(
+    dialect: SqlDialect,
+    metric: MetricMapping,
+    window: AnalysisWindow,
+) -> BuiltQuery:
+    """A source preview over a metric source: one row of aggregates.
+
+    Rows in the window, rows with no unit, rows whose value is NULL (a mean
+    metric; 0 for a proportion), and the earliest and latest event as whole
+    epoch seconds.
+    """
+    _check_metric(metric)
+    epoch = _epoch(dialect)
+    rules = dialect.identifiers
+    start, end = _window_literals(dialect, window)
+    table = render_table(rules, metric.table)
+    unit = render_column(rules, metric.unit_id, "columns.unit_id")
+    event_at = dialect.time_column(
+        render_column(rules, metric.event_at, "columns.event_at")
+    )
+    columns = [
+        f"CAST({unit} AS {dialect.string_type}) AS unit_id",
+        f"{event_at} AS event_at",
+    ]
+    null_values = "0"
+    if metric.metric_type == "mean":
+        value = render_column(rules, metric.value, "columns.value")  # type: ignore[arg-type]
+        columns.append(f"CAST({value} AS {dialect.double_type}) AS metric_value")
+        null_values = "COUNT(CASE WHEN metric_value IS NULL THEN 1 END)"
+    conditions = [
+        f"{event_at} >= {start}",
+        f"{event_at} < {end}",
+        *render_filters(rules, metric.filters, "filters"),
+    ]
+    offset = ""
+    if dialect.session_offset:
+        offset = f",\n  MIN({dialect.session_offset}) AS session_offset"
+    sql = (
+        "WITH events AS (\n"  # nosec B608 - names pass render_column/render_table (fullmatch, then quoted), literals are rendered or refused, verify_generated_sql re-parses
+        f"  SELECT {', '.join(columns)}\n"
+        f"  FROM {table}\n"
+        f"  WHERE {_where(conditions)}\n"
+        ")\n"
+        "SELECT COUNT(*) AS total_rows,\n"
+        "  COUNT(CASE WHEN unit_id IS NULL THEN 1 END) AS null_unit_rows,\n"
+        f"  {null_values} AS null_value_rows,\n"
+        f"  MIN({epoch('event_at')}) AS earliest,\n"
+        f"  MAX({epoch('event_at')}) AS latest{offset}\n"
+        "FROM events\n"
+    )
+    tables = frozenset({validate_table_parts(rules, metric.table)})
+    built = BuiltQuery(kind="preview", dialect=dialect.name, sql=sql, tables=tables)
+    verify_generated_sql(built, METRIC_PREVIEW_CTES)
     return built
 
 

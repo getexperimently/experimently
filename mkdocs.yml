@@ -119,7 +119,7 @@ nav:
   - Integrations: api/integrations.md
 - Integrations:
   - AWS: integrations/aws.md
-  - Data Warehouses: api/warehouse-analytics.md
+  - Warehouse analysis (beta): api/warehouse-analytics.md
   - Salesforce: integrations/salesforce.md
   - GitHub: integrations/github.md
   - Slack & Email: api/alerting.md

@@ -24,7 +24,10 @@ What lives here, by manifest group:
   with.  Optional; when set in staging or production it must be well formed.
 * warehouse calls: ``WAREHOUSE_MAX_CONCURRENT_JOBS`` and
   ``WAREHOUSE_MAX_CONCURRENT_RUNS``, the size of the warehouse executor
-  (``modules.backend.app.warehouse.executor``) and its per-organisation cap.
+  (``modules.backend.app.warehouse.executor``) and its per-organisation cap;
+  ``WAREHOUSE_MAX_QUERY_TIMEOUT_SECONDS``, ``WAREHOUSE_MAX_BYTES_PER_QUERY``
+  and ``WAREHOUSE_MAX_RUNS_PER_DAY``, the ceilings a connection's own limits
+  may not exceed.
 
 Module code reads them as ``from modules.backend.app.settings import
 settings`` -- the same shape as the core singleton, so a test patches
@@ -109,6 +112,15 @@ class ModulesSettings(BaseSettings):
     #: Of those, how many analyses and previews one organisation (today: this
     #: deployment) may have running at once.  Connection tests are not counted.
     WAREHOUSE_MAX_CONCURRENT_RUNS: int = Field(default=2, ge=1, le=32)
+    #: The highest ``query_timeout_seconds`` a warehouse connection may set.
+    WAREHOUSE_MAX_QUERY_TIMEOUT_SECONDS: int = Field(default=1800, ge=10, le=86400)
+    #: The highest ``max_bytes_per_query`` a BigQuery or Athena connection may
+    #: set (default 200 GiB).
+    WAREHOUSE_MAX_BYTES_PER_QUERY: int = Field(
+        default=214_748_364_800, ge=10_000_000, le=10**15
+    )
+    #: The highest ``max_runs_per_day`` a warehouse connection may set.
+    WAREHOUSE_MAX_RUNS_PER_DAY: int = Field(default=200, ge=1, le=10_000)
 
     model_config = SettingsConfigDict(
         case_sensitive=True,

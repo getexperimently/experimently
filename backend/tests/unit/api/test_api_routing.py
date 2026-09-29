@@ -108,8 +108,9 @@ class TestAPIRouting:
         # Check tags for specific routes (exclude export routes that use the
         # "Export" tag even if the path contains /experiments, and exclude
         # segment sub-routes like /segments/{id}/experiments which use the
-        # "Segments" tag, and exclude mutual-exclusion-group sub-routes which
-        # use the "Mutual Exclusion Groups" tag)
+        # "Segments" tag, exclude mutual-exclusion-group sub-routes which
+        # use the "Mutual Exclusion Groups" tag, and exclude the warehouse
+        # analysis runs of an experiment, which use "Warehouse analysis")
         for path, methods in openapi_schema["paths"].items():
             if (
                 "/experiments" in path
@@ -117,6 +118,7 @@ class TestAPIRouting:
                 and "/segments/" not in path
                 and "/mutual-exclusion-groups/" not in path
                 and "/ws/" not in path
+                and "/warehouse/analysis/" not in path
             ):
                 for method in methods.values():
                     assert "Experiments" in method["tags"], (

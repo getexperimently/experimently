@@ -344,7 +344,7 @@ The following capabilities were added after the initial platform release. See th
 
 | Component | Description | Doc |
 |-----------|-------------|-----|
-| Warehouse Analytics (#26) | Removed; being rebuilt (#312) | [warehouse-analytics.md](../api/warehouse-analytics.md) |
+| Warehouse analysis (#312) | Beta; no warehouse available yet | [warehouse-analytics.md](../api/warehouse-analytics.md) |
 | Real-time DynamoDB Counters (P2-B) | Atomic ADD operations, bulk counter updates, Lambda integration | [dynamodb-readme.md](../infrastructure/dynamodb-readme.md) |
 
 ### Platform Experience
