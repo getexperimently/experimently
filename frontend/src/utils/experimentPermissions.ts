@@ -32,8 +32,9 @@ export function canCreateExperiment(
  * DEVELOPER do. Who created the experiment is not part of the question, so an
  * ANALYST or VIEWER is refused on an experiment they own as well.
  *
- * Schedule and delete are separate routes with their own owner check; the
- * dashboard offers neither, and this helper does not answer for them.
+ * Schedule uses the same check. Delete checks EXPERIMENT DELETE instead, which
+ * ADMIN and DEVELOPER also hold; the dashboard offers neither, and this helper
+ * does not answer for them.
  */
 const ROLES_THAT_CAN_CHANGE = ['ADMIN', 'DEVELOPER'] as const;
 

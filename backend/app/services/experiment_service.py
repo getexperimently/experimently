@@ -1,7 +1,7 @@
 # backend/app/services/experiment_service.py
 import logging
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Union
 from uuid import UUID
 
 from fastapi.encoders import jsonable_encoder
@@ -828,31 +828,6 @@ class ExperimentService:
             f"Cloned experiment {experiment.id} to {new_experiment.id}: {new_experiment.name}"
         )
         return self._experiment_to_dict(new_experiment)
-
-    def check_experiment_access(
-        self, experiment_id: Union[str, UUID], user_id: Union[str, UUID]
-    ) -> Tuple[bool, Optional[Experiment]]:
-        """
-        Check if a user has access to an experiment.
-
-        Args:
-            experiment_id: Experiment ID to check
-            user_id: User ID to check access for
-
-        Returns:
-            Tuple containing (has_access, experiment)
-        """
-        experiment = (
-            self.db.query(Experiment).filter(Experiment.id == experiment_id).first()
-        )
-
-        if not experiment:
-            return False, None
-
-        # Check if user is owner or has access rights
-        has_access = str(experiment.owner_id) == str(user_id)
-
-        return has_access, experiment
 
     def search_experiments(
         self,
