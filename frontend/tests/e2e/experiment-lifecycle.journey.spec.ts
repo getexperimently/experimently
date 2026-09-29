@@ -72,8 +72,12 @@ test.describe("Journey: experiment lifecycle", () => {
     // Back never checks anything, and the answers survive the round trip.
     await experiments.backButton.click();
     await expect(experiments.nameInput).toHaveValue("Broken allocation");
+    // Back is a step in the browser's history too: the browser's own Back
+    // returns to Variants, answers intact.
     await adminPage.goBack();
-    await expect(experiments.stepHeading).toHaveText("What kind of experiment?");
+    await expect(experiments.stepHeading).toHaveText("Set up the versions users will see");
+    await expect(adminPage).toHaveURL(/\/experiments\/new\?step=variants$/);
+    await expect(experiments.variantAllocationInputs.nth(1)).toHaveValue("30");
 
     // Leaving with answers in the tab asks first (the browser's own prompt).
     let prompt = "";
