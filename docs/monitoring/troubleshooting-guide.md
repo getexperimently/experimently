@@ -19,8 +19,10 @@ This guide provides solutions to common issues with Experimently's monitoring an
 **Solutions:**
 
 1. **Verify AWS Credentials**
+
+   Test AWS CLI access:
+
    ```bash
-   # Test AWS CLI access
    aws cloudwatch list-dashboards --region us-west-2 --profile experimentation-platform
    ```
 
@@ -184,11 +186,16 @@ This guide provides solutions to common issues with Experimently's monitoring an
    ```
 
 2. **Validate Dashboard JSON**
-   ```bash
-   # For system health dashboard
-   cat infrastructure/cloudwatch/system-health-dashboard.json | python -m json.tool
 
-   # For API performance dashboard
+   For system health dashboard:
+
+   ```bash
+   cat infrastructure/cloudwatch/system-health-dashboard.json | python -m json.tool
+   ```
+
+   For API performance dashboard:
+
+   ```bash
    cat infrastructure/cloudwatch/api-performance-dashboard.json | python -m json.tool
    ```
 

@@ -23,9 +23,12 @@ fails today. Install from a clone of this repository with the second line, or wi
 with `pip install "experimently @ git+https://github.com/getexperimently/experimently.git#subdirectory=sdk/python"`.
 
 ```bash
-pip install experimently        # once published
-pip install -e sdk/python              # from this repository
+pip install experimently
+pip install -e sdk/python
 ```
+
+- `pip install experimently`: once published
+- `pip install -e sdk/python`: from this repository
 
 ---
 
@@ -230,7 +233,12 @@ plus a 2-event batch) against a live backend and prints one JSON line:
 
 ```bash
 EXPERIMENTLY_API_KEY=<key> python sdk/python/examples/contract_smoke.py
-# {"sdk":"python","assign":{"variant_name":"control","is_control":true,"sticky":true},"flag":{"enabled":true},"track":{"ok":true},"fanout":{"ok":true}}
+```
+
+It prints:
+
+```text
+{"sdk":"python","assign":{"variant_name":"control","is_control":true,"sticky":true},"flag":{"enabled":true},"track":{"ok":true},"fanout":{"ok":true}}
 ```
 
 Env: `EXPERIMENTLY_API_URL` (default `http://localhost:8000`), `EXPERIMENTLY_API_KEY` (required),
@@ -248,6 +256,9 @@ Verified against a live backend: **yes (2026-09-11)** — fixtures seeded with
 
 ```bash
 source venv/bin/activate
-python -m pytest sdk/python/tests -q -o addopts="" -p no:cacheprovider   # 182 tests, HTTP is faked
-python tests/sdk-contract/hash_contract.py python                      # this SDK's hash vs the golden vectors
+python -m pytest sdk/python/tests -q -o addopts="" -p no:cacheprovider
+python tests/sdk-contract/hash_contract.py python
 ```
+
+- `python -m pytest sdk/python/tests -q -o addopts="" -p no:cacheprovider`: 182 tests, HTTP is faked
+- `python tests/sdk-contract/hash_contract.py python`: this SDK's hash vs the golden vectors

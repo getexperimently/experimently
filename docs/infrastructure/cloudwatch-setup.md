@@ -44,23 +44,29 @@ This document outlines the setup and configuration of CloudWatch logging for the
 ### 1. Configure AWS CLI
 ```bash
 aws configure
-# Enter your AWS Access Key ID
-# Enter your AWS Secret Access Key
-# Enter your preferred region (e.g., us-east-1)
-# Enter your preferred output format (json)
 ```
 
+It asks for your AWS access key ID, your secret access key, your preferred region (for example `us-east-1`) and your preferred output format (`json`).
+
 ### 2. Create Log Groups
+
+Development environment:
+
 ```bash
-# Development environment
 aws logs create-log-group --log-group-name /experimentation-platform/development
 aws logs put-retention-policy --log-group-name /experimentation-platform/development --retention-in-days 30
+```
 
-# Staging environment
+Staging environment:
+
+```bash
 aws logs create-log-group --log-group-name /experimentation-platform/staging
 aws logs put-retention-policy --log-group-name /experimentation-platform/staging --retention-in-days 30
+```
 
-# Production environment
+Production environment:
+
+```bash
 aws logs create-log-group --log-group-name /experimentation-platform/production
 aws logs put-retention-policy --log-group-name /experimentation-platform/production --retention-in-days 30
 ```

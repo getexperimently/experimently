@@ -153,10 +153,9 @@ release you rolled back from.
 > that cannot pull an image. **Never pick a revision by subtracting 1** —
 > read the image off a candidate before you deploy it.
 
+Option A: List recent task definitions for the family (newest first) WITH the image each one carries, so a CloudFormation-registered revision is visible rather than a number in a list:
+
 ```bash
-# Option A: List recent task definitions for the family (newest first) WITH
-# the image each one carries, so a CloudFormation-registered revision is
-# visible rather than a number in a list.
 for arn in $(aws ecs list-task-definitions \
       --family-prefix experimentation-backend-$ENV \
       --sort DESC --max-results 10 --query 'taskDefinitionArns' --output text); do
@@ -174,23 +173,21 @@ arn:...:experimentation-backend-$ENV:44  ...backend@sha256:9f2c…   <- current 
 arn:...:experimentation-backend-$ENV:43  ...backend@sha256:41ab…   <- target (good): the last known-good release
 ```
 
+Option B: Ask which revision is actually serving traffic. NOT `services[0].taskDefinition`: on a service with a CodeDeploy deployment controller that field is "specified when the service is created with CreateService, and it can be modified with UpdateService" -- and UpdateService is the one call ECS refuses on such a service. So it names the revision CloudFormation created when the stack was first deployed, for the life of the service, and is never the running one. The PRIMARY task set is:
+
 ```bash
-# Option B: Ask which revision is actually serving traffic.
-# NOT `services[0].taskDefinition`: on a service with a CodeDeploy deployment
-# controller that field is "specified when the service is created with
-# CreateService, and it can be modified with UpdateService" -- and UpdateService
-# is the one call ECS refuses on such a service. So it names the revision
-# CloudFormation created when the stack was first deployed, for the life of the
-# service, and is never the running one. The PRIMARY task set is.
 aws ecs describe-services \
   --cluster "experimentation-$ENV" \
   --services experimentation-backend-$ENV \
   --query "services[0].taskSets[?status=='PRIMARY'].taskDefinition" \
   --output text
-# Returns: arn:...:task-definition/experimentation-backend-$ENV:44
-# Then use Option A to choose the released revision below it.
+```
 
-# Option C: Review service events to identify what was running before this deployment
+It returns an ARN such as `arn:...:task-definition/experimentation-backend-$ENV:44`. Then use Option A to choose the released revision below it.
+
+Option C: Review service events to identify what was running before this deployment:
+
+```bash
 aws ecs describe-services \
   --cluster "experimentation-$ENV" \
   --services experimentation-backend-$ENV \
@@ -266,13 +263,11 @@ It does **not** run smoke tests; `/health` is Step 5 below, by hand.
 
 Watch the GitHub Actions run. Simultaneously run:
 
+Watch the PRIMARY task set, which is what actually moves.
+
+NOT `services[0].taskDefinition`: on a CODE_DEPLOY service that field is set by CreateService and changed only by UpdateService -- the call ECS refuses here -- so it names the revision CloudFormation created and never changes. Watching it during a rollback shows nothing happening and reads as a failure:
+
 ```bash
-# Watch the PRIMARY task set, which is what actually moves.
-#
-# NOT `services[0].taskDefinition`: on a CODE_DEPLOY service that field is set
-# by CreateService and changed only by UpdateService -- the call ECS refuses
-# here -- so it names the revision CloudFormation created and never changes.
-# Watching it during a rollback shows nothing happening and reads as a failure.
 watch -n 5 'aws ecs describe-services \
   --cluster "experimentation-$ENV" \
   --services experimentation-backend-$ENV \
@@ -494,21 +489,28 @@ observed on the first staging deploy
 
 **To stop an in-progress deployment and force immediate rollback:**
 
+Step 1: Get the active deployment ID:
+
 ```bash
-# Step 1: Get the active deployment ID
 aws deploy list-deployments \
   --application-name experimentation-platform-$ENV \
   --deployment-group-name "experimentation-$ENV" \
   --include-only-statuses InProgress \
   --query 'deployments[0]' \
   --output text
+```
 
-# Step 2: Stop the deployment and trigger automatic rollback to blue environment
+Step 2: Stop the deployment and trigger automatic rollback to blue environment:
+
+```bash
 aws deploy stop-deployment \
   --deployment-id d-XXXXXXXXX \
   --auto-rollback-enabled
+```
 
-# Step 3: Confirm rollback status
+Step 3: Confirm rollback status:
+
+```bash
 aws deploy get-deployment \
   --deployment-id d-XXXXXXXXX \
   --query 'deploymentInfo.{Status:status,RollbackInfo:rollbackInfo}'
@@ -629,13 +631,13 @@ Before touching the database, confirm all of the following:
 - The failure correlates with the migration that ran during this deployment
 - Application rollback alone did not resolve the issue
 
+Check migration logs from the ECS migration task:
+
 ```bash
-# Check migration logs from the ECS migration task
 aws logs filter-log-events \
   --log-group-name /ecs/experimentation-migrate-$ENV \
   --filter-pattern '"alembic"' \
   --start-time $(date -u -v-1H +%s000 2>/dev/null || date -u --date='1 hour ago' +%s000)
-
 ```
 
 The current revision is printed by the Database Migration workflow's
@@ -686,39 +688,26 @@ aws rds restore-db-cluster-to-point-in-time \
   --db-cluster-identifier "$CLUSTER-restored" \
   --source-db-cluster-identifier "$CLUSTER" \
   --restore-to-time "2026-03-01T14:25:00Z" \
-  --db-subnet-group-name <the cluster's DB subnet group> \
-  --vpc-security-group-ids <aurora-sg-id>
+  --db-subnet-group-name "<the cluster's DB subnet group>" \
+  --vpc-security-group-ids "<aurora-sg-id>"
+```
 
-# ---------------------------------------------------------------------------
-# STOP. A restore to a NEW cluster cannot be picked up by a redeploy today.
-#
-# Both backend task definitions take POSTGRES_SERVER from the database STACK's
-# writer endpoint, and POSTGRES_USER and POSTGRES_PASSWORD from the generated
-# secret of the stack, as CloudFormation imports, issue 78. A cluster restored
-# beside the stack is not that endpoint, so there is no connection string in
-# Secrets Manager to update, and a new deployment would bring the tasks back
-# pointing at the original cluster -- while this runbook reported success. The
-# restored cluster also keeps the master password of the snapshot, which is
-# the one in the secret only if it has not been rotated since.
-#
-# So restoring to CLUSTER-restored means one of:
-#
-#   - restore IN PLACE instead, so the endpoint the tasks already resolve does
-#     not change, or
-#   - repoint the DNS name the tasks use at the restored cluster, or
-#   - change the database stack to own the restored cluster and cdk deploy
-#     it and the Fargate stack, which rewrites the imported endpoint.
-#
-# Decide which BEFORE an incident. Tracked as a gap in the deploy path.
-# ---------------------------------------------------------------------------
-#
-# The restart below is correct for this controller and is what you run once the
-# tasks would come back pointing at the right database. Through CodeDeploy,
-# naming the revision already serving: aws ecs update-service
-# --force-new-deployment is the usual way to restart a service and is not
-# documented either way for a CODE_DEPLOY-controlled service, which this one
-# is. Rather than find out during a restore, use the call that is correct for
-# this controller regardless.
+**STOP. A restore to a NEW cluster cannot be picked up by a redeploy today.**
+
+Both backend task definitions take `POSTGRES_SERVER` from the database STACK's writer endpoint, and `POSTGRES_USER` and `POSTGRES_PASSWORD` from the generated secret of the stack, as CloudFormation imports, issue 78. A cluster restored beside the stack is not that endpoint, so there is no connection string in Secrets Manager to update, and a new deployment would bring the tasks back pointing at the original cluster -- while this runbook reported success. The restored cluster also keeps the master password of the snapshot, which is the one in the secret only if it has not been rotated since.
+
+So restoring to `$CLUSTER-restored` means one of:
+
+- restore IN PLACE instead, so the endpoint the tasks already resolve does not change, or
+- repoint the DNS name the tasks use at the restored cluster, or
+- change the database stack to own the restored cluster and `cdk deploy` it and the Fargate
+  stack, which rewrites the imported endpoint.
+
+Decide which BEFORE an incident. Tracked as a gap in the deploy path.
+
+The restart below is correct for this controller and is what you run once the tasks would come back pointing at the right database. Through CodeDeploy, naming the revision already serving: `aws ecs update-service --force-new-deployment` is the usual way to restart a service and is not documented either way for a CODE_DEPLOY-controlled service, which this one is. Rather than find out during a restore, use the call that is correct for this controller regardless:
+
+```bash
 CURRENT=$(aws ecs describe-services \
   --cluster "experimentation-$ENV" \
   --services experimentation-backend-$ENV \
@@ -762,8 +751,9 @@ Complete every item before closing the incident. Do not declare the incident res
       2 in prod), on the revision you meant, `rolloutState` `COMPLETED`
 - [ ] `GET https://app.<domain>/` returns 200 with `text/html`
 
+Quick health verification commands:
+
 ```bash
-# Quick health verification commands
 curl -sf "https://app.<domain>/health" | python3 -m json.tool
 aws ecs describe-services \
   --cluster "experimentation-$ENV" \

@@ -172,7 +172,12 @@ plus a 2-event batch) against a live backend and prints one JSON line:
 
 ```bash
 EXPERIMENTLY_API_KEY=<key> dotnet run --project sdk/dotnet/examples/ContractSmoke
-# {"sdk":"dotnet","assign":{"variant_name":"control","is_control":true,"sticky":true},"flag":{"enabled":true},"track":{"ok":true},"fanout":{"ok":true}}
+```
+
+It prints:
+
+```text
+{"sdk":"dotnet","assign":{"variant_name":"control","is_control":true,"sticky":true},"flag":{"enabled":true},"track":{"ok":true},"fanout":{"ok":true}}
 ```
 
 Env: `EXPERIMENTLY_API_URL` (default `http://localhost:8000`), `EXPERIMENTLY_API_KEY` (required),
@@ -192,9 +197,11 @@ or executed here; run `dotnet test sdk/dotnet` and
 
 ```bash
 cd sdk/dotnet
-dotnet test                       # whole solution
+dotnet test
 dotnet test --filter "FullyQualifiedName~HashCompatibilityTests"
 ```
+
+- `dotnet test`: whole solution
 
 **Test coverage** (by inspection — not executed here): 89 xUnit test methods across 4 test classes.
 

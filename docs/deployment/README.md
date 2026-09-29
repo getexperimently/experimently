@@ -228,16 +228,29 @@ The last two commands below are the dashboard's: `GET /` (everything that is
 not an API path) answers 200 `text/html`, and, as a rolling service, what it
 runs is its PRIMARY deployment, not a task set.
 
-```bash
-# Through the public origin (PUBLIC_BASE_URL). /health is readiness: it runs
-# the database check, and it is what the load balancer probes.
-curl -s https://app.example.com/health
-# {"status": "...", "profile": "full", "version": "X.Y.Z", "environment": "...",
-#  "checks": {"database": {"status": "..."}, ...}}
+Through the public origin (`PUBLIC_BASE_URL`). `/health` is readiness: it runs the database check, and it is what the load balancer probes:
 
-# The smoke test the deploy runs: a real route, unauthenticated.
+```bash
+curl -s https://app.example.com/health
+```
+
+It prints:
+
+```text
+{"status": "...", "profile": "full", "version": "X.Y.Z", "environment": "...",
+ "checks": {"database": {"status": "..."}, ...}}
+```
+
+The smoke test the deploy runs: a real route, unauthenticated:
+
+```bash
 curl -s https://app.example.com/api/v1/experiments/
-# 401 {"detail":"Not authenticated"}
+```
+
+It prints:
+
+```text
+401 {"detail":"Not authenticated"}
 ```
 
 Then ask ECS what is running and serving. The block sets `ENV=staging`; for
@@ -383,21 +396,29 @@ The block sets `ENV=staging`; for production, change it to `ENV=prod`:
 
 ```bash
 ENV=staging
+```
 
-# Watch what is serving during a deployment: the PRIMARY task set moves,
-# services[0].taskDefinition does not (it is frozen at CreateService).
+Watch what is serving during a deployment: the PRIMARY task set moves, services[0].taskDefinition does not (it is frozen at CreateService):
+
+```bash
 watch -n 5 "aws ecs describe-services \
   --cluster experimentation-$ENV \
   --services experimentation-backend-$ENV \
   --query 'services[0].{Running:runningCount,Desired:desiredCount,Serving:taskSets[?status==\`PRIMARY\`].taskDefinition|[0]}'"
+```
 
-# Recent API errors
+Recent API errors:
+
+```bash
 aws logs filter-log-events \
   --log-group-name "/ecs/experimentation-backend-$ENV" \
   --filter-pattern '"level":"ERROR"' \
   --start-time $(( ($(date +%s) - 900) * 1000 ))
+```
 
-# Aurora cluster status (its identifier is generated: read it from the stack)
+Aurora cluster status (its identifier is generated: read it from the stack):
+
+```bash
 CLUSTER=$(aws cloudformation describe-stacks --stack-name "experimentation-database-$ENV" \
   --query "Stacks[0].Outputs[?OutputKey=='ClusterIdentifier'].OutputValue" --output text)
 aws rds describe-db-clusters --db-cluster-identifier "$CLUSTER" \

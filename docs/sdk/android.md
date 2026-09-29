@@ -374,8 +374,10 @@ runTest {
 ## Development and verification
 
 ```bash
-cd sdk/android && gradle :sdk:test   # JUnit 5 + MockWebServer, 78 tests (no wrapper checked in)
+cd sdk/android && gradle :sdk:test
 ```
+
+- `cd sdk/android && gradle :sdk:test`: JUnit 5 + MockWebServer, 78 tests (no wrapper checked in)
 
 `ExperimentationClientTest` (56 tests) covers the exact request for each endpoint (method, path
 encoding, `user_id` query, headers, JSON body), response mapping, sticky cache hits, TTL expiry,

@@ -122,13 +122,17 @@ User
 - Validated against AWS Cognito (production) or local DB (development)
 - Expires per `ACCESS_TOKEN_EXPIRE_MINUTES`
 
+Get token:
+
 ```bash
-# Get token
 TOKEN=$(curl -s -X POST http://localhost:8000/api/v1/auth/login \
   -d '{"username":"admin","password":"admin"}' \
   -H "Content-Type: application/json" | jq -r '.access_token')
+```
 
-# Use token
+Use token:
+
+```bash
 curl -H "Authorization: Bearer $TOKEN" http://localhost:8000/api/v1/experiments
 ```
 
@@ -432,11 +436,15 @@ Recomputes variant weights for multi-armed bandit experiments and persists them 
 
 ### Cache Invalidation
 
-```bash
-# Invalidate results cache for an experiment
-POST /api/v1/results/{id}/invalidate-cache
+Invalidate results cache for an experiment:
 
-# Force fresh feature flag state
+```bash
+POST /api/v1/results/{id}/invalidate-cache
+```
+
+Force fresh feature flag state:
+
+```bash
 GET /api/v1/feature-flags/evaluate/{flag_key}?skip_cache=true
 ```
 
@@ -475,22 +483,28 @@ experimentation.audit_logs       -- Change audit trail
 
 ## Migration Workflow
 
+Step 1: Modify the model in `backend/app/models/`.
+
+Step 2: Generate the migration:
+
 ```bash
-# 1. Modify model in backend/app/models/
-# 2. Generate migration
 cd /path/to/project
 source venv/bin/activate
 export POSTGRES_DB=experimentation POSTGRES_SCHEMA=experimentation
 python -m alembic -c backend/app/db/alembic.ini revision --autogenerate -m "add feature column"
+```
 
-# 3. Review generated file
-# backend/app/db/migrations/versions/xxxx_add_feature_column.py
-# Verify: down_revision, column types, schema prefix
+Step 3: Review the generated file, `backend/app/db/migrations/versions/xxxx_add_feature_column.py`. Verify its `down_revision`, the column types and the schema prefix.
 
-# 4. Apply
+Step 4: Apply:
+
+```bash
 python -m alembic -c backend/app/db/alembic.ini upgrade heads
+```
 
-# 5. Verify
+Step 5: Verify:
+
+```bash
 python -m alembic -c backend/app/db/alembic.ini current
 ```
 

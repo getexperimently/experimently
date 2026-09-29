@@ -235,8 +235,9 @@ The platform parses this field from incoming `pull_request` webhook events and c
 
 If you need to rotate the webhook secret:
 
+Step 1: Update the integration in the platform:
+
 ```bash
-# Step 1: Update the integration in the platform
 curl -X PUT http://localhost:8000/api/v1/integrations/int-uuid-here \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
@@ -246,7 +247,6 @@ curl -X PUT http://localhost:8000/api/v1/integrations/int-uuid-here \
       "webhook_secret": "new-strong-secret-here"
     }
   }'
-
-# Step 2: Update the secret in GitHub webhook settings immediately
-# (There will be a brief window during rotation where deliveries may fail)
 ```
+
+Step 2: Update the secret in GitHub webhook settings immediately (There will be a brief window during rotation where deliveries may fail)

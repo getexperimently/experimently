@@ -9,8 +9,10 @@ the API container.
 
 ```bash
 npm ci
-npm run dev          # http://localhost:3000, API at http://localhost:8000 by default
+npm run dev
 ```
+
+- `npm run dev`: http://localhost:3000, API at http://localhost:8000 by default
 
 The API must be running (`docker compose up -d --wait api` from the repository root, or
 `ENVIRONMENT=development uvicorn backend.app.main:app --reload`). Sign in with the seeded administrator
@@ -19,12 +21,17 @@ The API must be running (`docker compose up -d --wait api` from the repository r
 ## Test and build
 
 ```bash
-npm test             # jest + testing-library
-npx tsc --noEmit     # type check
+npm test
+npx tsc --noEmit
 npm run lint
-npm run build        # static export to out/ (what the container serves)
-npm run test:visual  # Playwright visual regression (needs the stack running)
+npm run build
+npm run test:visual
 ```
+
+- `npm test`: jest + testing-library
+- `npx tsc --noEmit`: type check
+- `npm run build`: static export to out/ (what the container serves)
+- `npm run test:visual`: Playwright visual regression (needs the stack running)
 
 The `Frontend Tests` CI check runs the first four. Playwright journeys live in
 `tests/e2e/` and log in through the real `/login` page.
@@ -66,9 +73,9 @@ navigation the current role cannot use.
 
 ## Container image
 
+From the repository root (the build context): the core profile by default, `--build-arg EXPERIMENTLY_PROFILE=full` for the full profile:
+
 ```bash
-# From the repository root (the build context): the core profile by default,
-# `--build-arg EXPERIMENTLY_PROFILE=full` for the full profile.
 docker build -f frontend/Dockerfile -t experimently-web:core .
 docker build -f frontend/Dockerfile -t experimently-web:full --build-arg EXPERIMENTLY_PROFILE=full .
 ```

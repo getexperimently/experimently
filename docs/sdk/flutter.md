@@ -366,7 +366,12 @@ plus a 2-event batch) against a live backend and prints one JSON line:
 ```bash
 cd sdk/flutter && flutter pub get
 EXPERIMENTLY_API_KEY=<key> dart run example/contract_smoke.dart
-# {"sdk":"flutter","assign":{"variant_name":"control","is_control":true,"sticky":true},"flag":{"enabled":true},"track":{"ok":true},"fanout":{"ok":true}}
+```
+
+It prints:
+
+```text
+{"sdk":"flutter","assign":{"variant_name":"control","is_control":true,"sticky":true},"flag":{"enabled":true},"track":{"ok":true},"fanout":{"ok":true}}
 ```
 
 The live runner (`tests/sdk-contract/live/run_live_contract.py`) invokes exactly
@@ -389,9 +394,11 @@ on a machine with the Flutter SDK.
 ```bash
 cd sdk/flutter
 flutter pub get
-flutter test                 # 70 tests: client (MockClient), hash golden vectors, SharedPreferences store
+flutter test
 flutter analyze
 ```
+
+- `flutter test`: 70 tests: client (MockClient), hash golden vectors, SharedPreferences store
 
 The test suite and the contract smoke were reviewed line by line for the server-side rewire but
 **not executed** on the development machine (no `dart`/`flutter` installed).

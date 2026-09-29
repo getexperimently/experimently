@@ -163,7 +163,12 @@ Every request carries `X-API-Key: <key>` and `Content-Type: application/json`.
 
 ```bash
 cd sdk/react && npm run build --silent && node examples/contract_smoke.mjs
-# {"sdk":"react","assign":{"variant_name":"control","is_control":true,"sticky":true},"flag":{"enabled":true},"track":{"ok":true},"fanout":{"ok":true}}
+```
+
+It prints:
+
+```text
+{"sdk":"react","assign":{"variant_name":"control","is_control":true,"sticky":true},"flag":{"enabled":true},"track":{"ok":true},"fanout":{"ok":true}}
 ```
 
 Drives the SSR entry point (`ServerClient`) plus `ExperimentationClient` for tracking under plain
@@ -180,9 +185,12 @@ back 2xx — which is what catches a path the backend does not serve.
 
 ```bash
 cd sdk/react && npm ci
-npm test            # 218 unit tests (fetch is mocked)
-npm run build       # tsc, strict
+npm test
+npm run build
 ```
+
+- `npm test`: 218 unit tests (fetch is mocked)
+- `npm run build`: tsc, strict
 
 The unit tests run in `.github/workflows/sdk-unit-tests.yml` on every pull request (react is one of
 the always-on core SDKs).

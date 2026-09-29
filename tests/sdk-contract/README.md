@@ -97,11 +97,15 @@ errors the smoke posted. The runner therefore needs the backend's Python environ
 source venv/bin/activate
 export APP_ENV=development POSTGRES_SERVER=localhost POSTGRES_DB=experimentation POSTGRES_SCHEMA=experimentation
 
-python backend/scripts/seed_sdk_contract.py          # experiment sdk_contract_ab, flag sdk_contract_flag, API keys -> live/.api_key, live/.api_key_local (sdk:ruleset)
-uvicorn backend.app.main:app --port 8000 &            # or ./demo/setup-local.sh
-python tests/sdk-contract/live/run_live_contract.py   # all SDKs whose toolchain is installed
+python backend/scripts/seed_sdk_contract.py
+uvicorn backend.app.main:app --port 8000 &
+python tests/sdk-contract/live/run_live_contract.py
 python tests/sdk-contract/live/run_live_contract.py --sdk go --sdk python --strict
 ```
+
+- `python backend/scripts/seed_sdk_contract.py`: experiment sdk_contract_ab, flag sdk_contract_flag, API keys -> live/.api_key, live/.api_key_local (sdk:ruleset)
+- `uvicorn backend.app.main:app --port 8000 &`: or ./demo/setup-local.sh
+- `python tests/sdk-contract/live/run_live_contract.py`: all SDKs whose toolchain is installed
 
 Each SDK documents its smoke command in its README; the runner's `MANIFEST` lists them. Missing
 toolchains are skipped (reported as `SKIP`) unless `--strict` is given. The seeded API key can be

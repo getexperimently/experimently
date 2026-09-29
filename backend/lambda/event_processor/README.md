@@ -110,11 +110,15 @@ Kinesis → Parse → Validate → Enrich → Aggregate → Archive → Response
 
 ### Test Coverage: 70 tests, 100% passing
 
-```bash
-# Run all tests
-pytest backend/lambda/event_processor/tests/ -v
+Run all tests:
 
-# Run specific test module
+```bash
+pytest backend/lambda/event_processor/tests/ -v
+```
+
+Run specific test module:
+
+```bash
 pytest backend/lambda/event_processor/tests/test_handler.py -v
 ```
 
@@ -153,18 +157,22 @@ This Lambda was built using Test-Driven Development (TDD):
 
 ## Deployment
 
+Package Lambda:
+
 ```bash
-# Package Lambda
 cd backend/lambda/event_processor
 zip -r function.zip handler.py *.py
+```
 
-# Deploy via AWS CLI
+Deploy via AWS CLI:
+
+```bash
 aws lambda update-function-code \
   --function-name event-processor \
   --zip-file fileb://function.zip
-
-# Or use AWS CDK/SAM for infrastructure as code
 ```
+
+Or use AWS CDK/SAM for infrastructure as code.
 
 ## Monitoring
 

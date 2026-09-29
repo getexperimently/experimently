@@ -53,6 +53,9 @@ Verified against a live backend: **yes (2026-09-11)**.
 
 ```bash
 npm install
-npm test          # 101 Jest tests (fetch mocked)
-npm run build     # ESM + .d.ts → dist/
+npm test
+npm run build
 ```
+
+- `npm test`: 101 Jest tests (fetch mocked)
+- `npm run build`: ESM + .d.ts → dist/

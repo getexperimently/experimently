@@ -230,7 +230,12 @@ ceiling (default 6000).
 
 ```bash
 bash sdk/java/examples/contract_smoke.sh
-# {"sdk":"java","assign":{"variant_name":"control","is_control":true,"sticky":true},"flag":{"enabled":true},"track":{"ok":true},"fanout":{"ok":true}}
+```
+
+It prints:
+
+```text
+{"sdk":"java","assign":{"variant_name":"control","is_control":true,"sticky":true},"flag":{"enabled":true},"track":{"ok":true},"fanout":{"ok":true}}
 ```
 
 The script builds when needed (`mvn -q -pl core -am package -DskipTests`, Maven output on stderr;
@@ -251,5 +256,7 @@ Verified against a live backend: yes (2026-09-11)
 ## Development
 
 ```bash
-cd sdk/java && mvn test   # core: 77 tests (JUnit 5, MockWebServer); spring-boot-starter: 30 tests
+cd sdk/java && mvn test
 ```
+
+- `cd sdk/java && mvn test`: core: 77 tests (JUnit 5, MockWebServer); spring-boot-starter: 30 tests

@@ -80,12 +80,18 @@ skipped -- unless that GitHub environment has its `AWS_ACCOUNT_ID` and
 
 ```bash
 source venv/bin/activate && export APP_ENV=test TESTING=true
-python -m pytest backend/tests/unit backend/tests/smoke -q -p no:cov     # Unit + Smoke
-python -m pytest backend/tests/integration -q -p no:cov                   # integration-tests
-cd frontend && npm test && npx tsc --noEmit && npm run build              # Frontend Tests
-make test-sdk                                                             # SDK Contract Tests (needs node and go)
-docker compose up -d --wait && curl -sf localhost:8000/health/ready       # Docker Smoke, first half
+python -m pytest backend/tests/unit backend/tests/smoke -q -p no:cov
+python -m pytest backend/tests/integration -q -p no:cov
+cd frontend && npm test && npx tsc --noEmit && npm run build
+make test-sdk
+docker compose up -d --wait && curl -sf localhost:8000/health/ready
 ```
+
+- `python -m pytest backend/tests/unit backend/tests/smoke -q -p no:cov`: Unit + Smoke
+- `python -m pytest backend/tests/integration -q -p no:cov`: integration-tests
+- `cd frontend && npm test && npx tsc --noEmit && npm run build`: Frontend Tests
+- `make test-sdk`: SDK Contract Tests (needs node and go)
+- `docker compose up -d --wait && curl -sf localhost:8000/health/ready`: Docker Smoke, first half
 
 Postgres must be reachable on `localhost:5432` for the backend suites (`docker compose up -d postgres`).
 

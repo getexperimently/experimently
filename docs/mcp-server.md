@@ -130,12 +130,16 @@ curl -X GET "http://localhost:8000/api/v1/ai/sample-size?baseline=0.08&mde=0.05&
 
 Pre-built experiment templates for common use cases.
 
+List all templates:
+
 ```bash
-# List all templates
 curl -X GET "http://localhost:8000/api/v1/ai/templates" \
   -H "Authorization: Bearer $TOKEN"
+```
 
-# Get a specific template
+Get a specific template:
+
+```bash
 curl -X GET "http://localhost:8000/api/v1/ai/templates/checkout" \
   -H "Authorization: Bearer $TOKEN"
 ```

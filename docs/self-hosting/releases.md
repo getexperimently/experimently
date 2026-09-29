@@ -104,8 +104,10 @@ that a deployment is running what you think:
 ```bash
 docker inspect --format '{{index .Config.Labels "org.opencontainers.image.version"}}' "$IMAGE"
 docker inspect --format '{{index .Config.Labels "io.experimently.profile"}}' "$IMAGE"
-curl -s localhost:8000/api/v1/modules   # {"profile": …, "modules": […], "version": …}
+curl -s localhost:8000/api/v1/modules
 ```
+
+The last command prints `{"profile": …, "modules": […], "version": …}`.
 
 [cosign]: https://docs.sigstore.dev/cosign/overview/
 

@@ -345,12 +345,16 @@ Note: actions within each resource are returned sorted alphabetically.
 
 **Example**
 
+View your own permissions:
+
 ```bash
-# View your own permissions
 curl -H "Authorization: Bearer $TOKEN" \
   "http://localhost:8000/api/v1/rbac/users/my-user-id/permissions"
+```
 
-# Admin viewing another user's permissions
+Admin viewing another user's permissions:
+
+```bash
 curl -H "Authorization: Bearer $ADMIN_TOKEN" \
   "http://localhost:8000/api/v1/rbac/users/other-user-id/permissions"
 ```
@@ -444,8 +448,9 @@ Revoke all direct permission grants for a user+resource combination. **ADMIN onl
 
 This is the most common use case: a user who should be able to see experiments and results but never create or modify them.
 
+Step 1: Create the role:
+
 ```bash
-# Step 1: Create the role
 curl -X POST http://localhost:8000/api/v1/rbac/roles \
   -H "Authorization: Bearer $ADMIN_TOKEN" \
   -H "Content-Type: application/json" \
@@ -458,8 +463,11 @@ curl -X POST http://localhost:8000/api/v1/rbac/roles \
       {"resource": "feature_flag", "actions": ["read", "list"]}
     ]
   }'
+```
 
-# Step 2: Assign the role to a user
+Step 2: Assign the role to a user:
+
+```bash
 curl -X POST http://localhost:8000/api/v1/rbac/roles/assign \
   -H "Authorization: Bearer $ADMIN_TOKEN" \
   -H "Content-Type: application/json" \
@@ -468,8 +476,11 @@ curl -X POST http://localhost:8000/api/v1/rbac/roles/assign \
     "role_name": "read-only-experiments",
     "reason": "Stakeholder who needs to monitor experiments"
   }'
+```
 
-# Step 3: Verify the user's effective permissions
+Step 3: Verify the user's effective permissions:
+
+```bash
 curl -H "Authorization: Bearer $ADMIN_TOKEN" \
   "http://localhost:8000/api/v1/rbac/users/the-user-uuid/permissions"
 ```

@@ -214,7 +214,12 @@ ceiling (default 6000).
 
 ```bash
 cd sdk/ios && swift run contract-smoke
-# {"sdk":"ios","assign":{"variant_name":"control","is_control":true,"sticky":true},"flag":{"enabled":true},"track":{"ok":true},"fanout":{"ok":true}}
+```
+
+It prints:
+
+```text
+{"sdk":"ios","assign":{"variant_name":"control","is_control":true,"sticky":true},"flag":{"enabled":true},"track":{"ok":true},"fanout":{"ok":true}}
 ```
 
 SwiftPM build output goes to stderr (the repo runner uses `swift run -q contract-smoke`). Env:
@@ -235,5 +240,7 @@ Verified against a live backend: yes (2026-09-11)
 ```bash
 cd sdk/ios
 swift build
-swift test          # 71 XCTests; URLSession is intercepted with a URLProtocol mock
+swift test
 ```
+
+- `swift test`: 71 XCTests; URLSession is intercepted with a URLProtocol mock

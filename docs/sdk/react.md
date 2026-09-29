@@ -333,6 +333,9 @@ interface TrackEventOptions {
 
 ```bash
 cd sdk/react && npm install
-npx jest          # 215 unit tests, fetch is mocked
-npm run build     # tsc --strict
+npx jest
+npm run build
 ```
+
+- `npx jest`: 215 unit tests, fetch is mocked
+- `npm run build`: tsc --strict

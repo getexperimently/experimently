@@ -17,9 +17,12 @@ fails today. Install from a clone of this repository with the second line, or wi
 with `pip install "experimently @ git+https://github.com/getexperimently/experimently.git#subdirectory=sdk/python"`.
 
 ```bash
-pip install experimently                 # once published
-pip install -e sdk/python                # from this repository
+pip install experimently
+pip install -e sdk/python
 ```
+
+- `pip install experimently`: once published
+- `pip install -e sdk/python`: from this repository
 
 ## Quick start
 
@@ -119,7 +122,12 @@ Every request carries `X-API-Key: <key>`, `Content-Type: application/json` and `
 
 ```bash
 EXPERIMENTLY_API_KEY=<key> python sdk/python/examples/contract_smoke.py
-# {"sdk":"python","assign":{"variant_name":"treatment","is_control":false,"sticky":true},"flag":{"enabled":true},"track":{"ok":true},"fanout":{"ok":true}}
+```
+
+It prints:
+
+```text
+{"sdk":"python","assign":{"variant_name":"treatment","is_control":false,"sticky":true},"flag":{"enabled":true},"track":{"ok":true},"fanout":{"ok":true}}
 ```
 
 Env: `EXPERIMENTLY_API_URL` (default `http://localhost:8000`), `EXPERIMENTLY_API_KEY` (required),
@@ -149,5 +157,7 @@ assert transport.last.query == {"user_id": "user-1"}
 
 ```bash
 source venv/bin/activate
-python -m pytest sdk/python/tests -q -o addopts="" -p no:cacheprovider   # 182 tests, HTTP is faked; runs on Python 3.9+
+python -m pytest sdk/python/tests -q -o addopts="" -p no:cacheprovider
 ```
+
+- `python -m pytest sdk/python/tests -q -o addopts="" -p no:cacheprovider`: 182 tests, HTTP is faked; runs on Python 3.9+

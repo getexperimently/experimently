@@ -2,7 +2,7 @@
 
 The platform's AWS infrastructure is defined as code using **AWS CDK v2**, in **Python**: the app is `infrastructure/cdk/app.py`, and `infrastructure/cdk/cdk.json` runs it with `python3 app.py`. `cdk deploy --all` provisions the API, the dashboard and the data stores they need in your AWS account.
 
-**The Fargate stack runs two services behind one Application Load Balancer**: the API, and the dashboard as its own ECS service (`experimentation-dashboard-<env>`). The HTTPS listener sends `/api/*`, `/health`, `/health/*` and `/metrics` to the API and everything else to the dashboard. `cdk deploy` starts the dashboard on the `experimentation-platform/web:bootstrap` image, which you push before the first deploy ([deployment guide §1.3](../deployment/deployment-guide.md)). The Deploy workflow does not yet roll each release onto the dashboard; that is #69.
+**The Fargate stack runs two services behind one Application Load Balancer**: the API, and the dashboard as its own ECS service (`experimentation-dashboard-<env>`). The HTTPS listener sends `/api/*`, `/health`, `/health/*` and `/metrics` to the API and everything else to the dashboard. `cdk deploy` starts the dashboard on the `experimentation-platform/web:bootstrap` image, which you push before the first deploy ([deployment guide §1.3](../deployment/deployment-guide.md)). After that, the Deploy workflow rolls each release onto the dashboard: it registers a dashboard task definition with the release's image, rolls the dashboard service once the API is serving the same release, and smoke-tests it through the public URL.
 
 ---
 
@@ -21,11 +21,9 @@ The platform's AWS infrastructure is defined as code using **AWS CDK v2**, in **
 
 ```bash
 aws configure
-# AWS Access Key ID: your-access-key
-# AWS Secret Access Key: your-secret-key
-# Default region name: us-west-2
-# Default output format: json
 ```
+
+It asks for your AWS access key ID, your secret access key, the default region (`us-west-2`) and the default output format (`json`).
 
 ---
 
@@ -35,8 +33,11 @@ CDK bootstrap provisions the S3 bucket and IAM roles that CDK needs to deploy as
 
 ```bash
 cdk bootstrap aws://YOUR_ACCOUNT_ID/YOUR_REGION
+```
 
-# Example
+Example:
+
+```bash
 cdk bootstrap aws://123456789012/us-west-2
 ```
 
@@ -60,14 +61,23 @@ change it in all three workflows and use it everywhere below.
 ```bash
 export CDK_DEFAULT_ACCOUNT=123456789012
 export CDK_DEFAULT_REGION=us-west-2
+```
 
-# dev (the default), staging, prod or demo
+`ENVIRONMENT` is `dev` (the default), `staging`, `prod` or `demo`:
+
+```bash
 export ENVIRONMENT=prod
+```
 
-# Required: the ACM certificate for the load balancer's HTTPS listeners
+Required: the ACM certificate for the load balancer's HTTPS listeners:
+
+```bash
 export CERTIFICATE_ARN=arn:aws:acm:us-west-2:123456789012:certificate/your-certificate-id
+```
 
-# Required: the absolute https:// origin users reach the platform at (one host, app.<domain>)
+Required: the absolute `https://` origin users reach the platform at (one host, `app.<domain>`):
+
+```bash
 export PUBLIC_BASE_URL=https://app.example.com
 
 export ALARM_EMAIL=ops@your-domain.com
@@ -157,9 +167,12 @@ The first line the app prints says which profile it picked:
 use — overrides the choice:
 
 ```bash
-EXPERIMENTLY_PROFILE=core cdk deploy --all   # core stacks only, from a full checkout
-EXPERIMENTLY_PROFILE=full cdk deploy --all   # fail if the module stacks are absent
+EXPERIMENTLY_PROFILE=core cdk deploy --all
+EXPERIMENTLY_PROFILE=full cdk deploy --all
 ```
+
+- `EXPERIMENTLY_PROFILE=core cdk deploy --all`: core stacks only, from a full checkout
+- `EXPERIMENTLY_PROFILE=full cdk deploy --all`: fail if the module stacks are absent
 
 Two things follow from the profile, so a core deployment is consistent rather
 than half-configured:
@@ -179,11 +192,15 @@ Deploy specific stacks during development or when updating a single component:
 `cdk deploy` takes a stack **id**, which `cdk list` prints for your
 environment -- not a class name:
 
-```bash
-# Deploy only the API service (faster for code changes)
-cdk deploy experimentation-fargate-dev
+Deploy only the API service (faster for code changes):
 
-# Deploy only monitoring resources
+```bash
+cdk deploy experimentation-fargate-dev
+```
+
+Deploy only monitoring resources:
+
+```bash
 cdk deploy experimentation-monitoring-dev
 ```
 
@@ -191,11 +208,14 @@ cdk deploy experimentation-monitoring-dev
 two pins, printed by two read-only checks run from the repository root:
 
 ```bash
-python3 scripts/check_live_target_group.py --env <env>   # -> api_live_target_group
-python3 scripts/check_dashboard_image.py --env <env>     # -> dashboard_image_tag
+python3 scripts/check_live_target_group.py --env <env>
+python3 scripts/check_dashboard_image.py --env <env>
 cdk deploy experimentation-fargate-<env> \
   -c api_live_target_group=<blue|green> -c dashboard_image_tag=sha256:<hex>
 ```
+
+- `python3 scripts/check_live_target_group.py --env <env>`: prints `api_live_target_group`
+- `python3 scripts/check_dashboard_image.py --env <env>`: prints `dashboard_image_tag`
 
 Without them the deploy undoes what the release workflow did, and every probe
 stays green: the API's routes can point at the empty one of its blue and green

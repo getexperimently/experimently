@@ -135,7 +135,12 @@ Every request carries `X-API-Key`, `Content-Type: application/json` and `Accept:
 
 ```bash
 ruby -Isdk/ruby/lib sdk/ruby/examples/contract_smoke.rb
-# {"sdk":"ruby","assign":{"variant_name":"control","is_control":true,"sticky":true},"flag":{"enabled":true},"track":{"ok":true},"fanout":{"ok":true}}
+```
+
+It prints:
+
+```text
+{"sdk":"ruby","assign":{"variant_name":"control","is_control":true,"sticky":true},"flag":{"enabled":true},"track":{"ok":true},"fanout":{"ok":true}}
 ```
 
 Env: `EXPERIMENTLY_API_URL` (default `http://localhost:8000`), `EXPERIMENTLY_API_KEY` (required),
@@ -150,9 +155,12 @@ Verified against a live backend: yes (2026-09-11)
 
 ```bash
 cd sdk/ruby
-bundle install && bundle exec rspec   # 109 examples (run here on Ruby 2.6.10); HTTP stubbed with WebMock
-ruby test_standalone.rb               # stdlib only, no bundler/rspec needed
+bundle install && bundle exec rspec
+ruby test_standalone.rb
 ```
+
+- `bundle install && bundle exec rspec`: 109 examples (run here on Ruby 2.6.10); HTTP stubbed with WebMock
+- `ruby test_standalone.rb`: stdlib only, no bundler/rspec needed
 
 ## License
 
