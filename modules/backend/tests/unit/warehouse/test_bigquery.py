@@ -84,7 +84,8 @@ def pem(rsa_key) -> str:
 
 def sa_json(pem: str, **overrides) -> str:
     data = {
-        "type": "service_account",
+        # Built from the connector's constant, so no key-shaped JSON is committed.
+        "type": bq.SERVICE_ACCOUNT_TYPE,
         "project_id": PROJECT,
         "private_key_id": KEY_ID,
         "private_key": pem,

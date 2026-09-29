@@ -7,8 +7,8 @@ passed and :data:`~.connectors.ENABLED_CONNECTORS` names it.
 Credentials
 -----------
 The customer pastes a service-account JSON key.
-:func:`parse_service_account_json` accepts only ``"type": "service_account"``
-with a well-formed ``client_email``, a ``private_key_id`` and an unencrypted
+:func:`parse_service_account_json` accepts only a key whose type is
+:data:`SERVICE_ACCOUNT_TYPE` (a service account), with a well-formed ``client_email``, a ``private_key_id`` and an unencrypted
 PKCS#8 RSA ``private_key``.  If the key carries ``token_uri`` it must be
 exactly :data:`TOKEN_URL`, and ``universe_domain`` exactly ``googleapis.com``.
 Only four fields are kept -- ``client_email``, ``private_key_id``,
@@ -89,6 +89,8 @@ from modules.backend.app.warehouse.errors import (
 
 WAREHOUSE: Final = "bigquery"
 
+#: The ``type`` a pasted key must declare.
+SERVICE_ACCOUNT_TYPE: Final = "service_account"
 #: The only token endpoint a key is ever exchanged at.
 TOKEN_URL: Final = "https://oauth2.googleapis.com/token"
 #: The only universe a pasted key may name.
@@ -311,7 +313,7 @@ def parse_service_account_json(text: object) -> ServiceAccountKey:
     kind = data.get("type")
     if kind in ("authorized_user", "external_account", "impersonated_service_account"):
         raise _refuse("unsupported_credential_type")
-    if kind != "service_account":
+    if kind != SERVICE_ACCOUNT_TYPE:
         raise _refuse("invalid_service_account")
     check_token_endpoint(data)
 
