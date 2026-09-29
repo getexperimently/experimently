@@ -208,7 +208,9 @@ export function ConnectionForm({ mode, connectors, connection, onSaved, onCancel
 
   const typeEnabled = type !== null && enabledTypes.includes(type);
   const keyRequired = mode === 'create';
-  const testable = mode === 'create' && (type === 'bigquery' || type === 'athena');
+  // BigQuery only: an Athena role's trust policy needs the external ID generated on save, and a
+  // Snowflake key pair is generated on save, so both are tested after saving.
+  const testable = mode === 'create' && type === 'bigquery';
   // The UX rule: a BigQuery key is saved only once a test has passed with exactly these values.
   const testRequired = mode === 'create' && type === 'bigquery';
   const testCurrent = test !== null && test.version === version;
@@ -263,7 +265,7 @@ export function ConnectionForm({ mode, connectors, connection, onSaved, onCancel
   const runTest = async () => {
     setSubmitError(null);
     const body = validate();
-    if (!body || body.warehouse_type === 'snowflake') return;
+    if (!body || body.warehouse_type !== 'bigquery') return;
     const at = version;
     setTest({ status: 'running', message: 'Testing the connection…', version: at });
     try {

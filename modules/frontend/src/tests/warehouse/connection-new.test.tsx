@@ -317,6 +317,18 @@ describe('Snowflake (with the connector enabled)', () => {
   });
 });
 
+describe('Amazon Athena (with the connector enabled)', () => {
+  it('is saved first and tested afterwards: its external ID is generated on save', async () => {
+    svc.listConnectors.mockResolvedValue(connectors({ athena: true }));
+    renderPage();
+    expect(await screen.findByRole('radio', { name: 'Amazon Athena' })).toBeChecked();
+    expect(screen.queryByRole('button', { name: 'Test connection' })).not.toBeInTheDocument();
+    expect(screen.getByText(/Saving generates the external ID/)).toBeInTheDocument();
+    expect(screen.queryByLabelText(/output|results location/i)).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/external id/i)).not.toBeInTheDocument();
+  });
+});
+
 describe('accessibility of the form', () => {
   it('labels every field and ties help text to it', async () => {
     renderPage();
