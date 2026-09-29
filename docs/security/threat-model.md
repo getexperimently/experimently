@@ -39,7 +39,7 @@ BOUNDARY 1: Internet — Untrusted
 
   [Web Browser / SDK / Server]
          |
-         | HTTPS (TLS 1.2+)
+         | HTTPS
          v
 
 BOUNDARY 2: Edge — Partially Trusted
@@ -97,9 +97,12 @@ BOUNDARY 3: Application Layer — Trusted with Auth
                 /api/v1/tracking/*, /api/v1/results/*, /api/v1/safety/*
 
   [AWS Lambda Functions]
-    Assignment Lambda    — high-throughput variant assignment
-    Event Processor      — Kinesis stream consumer
-    Feature Flag Eval    — sub-10ms evaluation, local Redis cache
+    No Lambda serves requests. The compute stack's DatabaseAccessLambda
+    and the analytics module's AnalyticsLambda are placeholders whose
+    inline code returns 200 and does nothing; the Glue ETL module's
+    ETLTriggerLambda starts the Glue jobs on a schedule. The code under
+    backend/lambda/ (assignment, event processor, flag evaluation) is
+    not deployed by any stack.
 
          |
          | VPC subnets, security groups
@@ -108,14 +111,17 @@ BOUNDARY 3: Application Layer — Trusted with Auth
 BOUNDARY 4: Data Layer — Highly Trusted
   [Aurora PostgreSQL]  — `experimentation` schema, TLS connections required
   [ElastiCache Redis]  — session tokens, rule compilation cache, assignment cache
-  [AWS DynamoDB]       — Lambda assignment fast-path storage
+  [AWS DynamoDB]       — the counters module's real-time experiment counters
 
          |
          | AWS internal network
          v
 
 BOUNDARY 5: Analytics Pipeline — Internal
-  [Kinesis Data Streams]  →  [Event Processor Lambda]  →  [OpenSearch]
+  Full profile only. The API writes to none of it today:
+  [Kinesis Data Stream]  →  [Firehose]  →  [S3 data lake]
+  [Kinesis Data Stream]  →  [AnalyticsLambda, placeholder]
+  [OpenSearch domain]    — created; nothing writes to it
   CloudWatch Logs → SIEM
 ```
 
@@ -125,7 +131,7 @@ BOUNDARY 5: Analytics Pipeline — Internal
 |------------|-------------|-----------|
 | Dashboard users | Bearer JWT (Cognito-issued) | `oauth2_scheme` in `security.py`, RBAC in `permissions.py` |
 | SDK / server apps | `X-API-Key: eptk_<hex>` header | `deps.get_api_key()`, key hashed and looked up in `api_keys` table |
-| Lambda → RDS | IAM role (no long-lived creds) | ECS task role, Lambda execution role |
+| Lambda → RDS | None: no deployed Lambda connects to the database | The compute stack's `DatabaseAccessLambda` is a placeholder |
 | Internal schedulers | Process-local, no network auth | Background threads within the FastAPI process |
 
 ---
@@ -191,30 +197,27 @@ BOUNDARY 5: Analytics Pipeline — Internal
                        │ Port 8000      │
                        └────────┬───────┘
                                 │
-     ┌───────────┬──────────────┼────────────────┐
-     │           │              │                │
-     ▼           ▼              ▼                ▼
- ┌───────┐  ┌────────┐   ┌──────────┐   ┌────────────────┐
- │Aurora │  │ Redis  │   │ Kinesis  │   │ DynamoDB       │
- │ (RDS) │  │(cache) │   │ Stream   │   │ (Lambda store) │
- └───────┘  └────────┘   └────┬─────┘   └────────────────┘
-                               │
-                    ┌──────────▼───────────┐
-                    │  Event Processor     │
-                    │  Lambda              │
-                    └──────────┬───────────┘
-                               │
-                    ┌──────────▼───────────┐
-                    │    OpenSearch        │
-                    │  (analytics index)   │
-                    └──────────────────────┘
+     ┌───────────┬──────────────┐
+     │           │              │
+     ▼           ▼              ▼
+ ┌───────┐  ┌────────┐   ┌────────────────────┐
+ │Aurora │  │ Redis  │   │ DynamoDB           │
+ │ (RDS) │  │(cache) │   │ (counters module)  │
+ └───────┘  └────────┘   └────────────────────┘
+
+ Full profile only; the API writes to none of it today:
+ ┌──────────┐   ┌──────────┐   ┌──────────────┐
+ │ Kinesis  │──▶│ Firehose │──▶│ S3 data lake │
+ │ Stream   │   └──────────┘   └──────────────┘
+ └────┬─────┘
+      └──▶ AnalyticsLambda (placeholder: returns 200, processes nothing)
+ OpenSearch domain: created; nothing writes to it
 
 Data flows carrying PII/sensitive data:
   [1] Browser/SDK → ALB (nginx in Docker Compose): JWT/API key + user_id + event data (TLS at the ALB)
   [2] FastAPI → Aurora: user assignments, events, experiment state (TLS, VPC)
   [3] FastAPI → Redis: session tokens, rule cache (VPC, optional auth)
-  [4] FastAPI → Kinesis: event records with user_id (VPC, IAM)
-  [5] Kinesis → Event Processor Lambda → OpenSearch: aggregated events (VPC)
+  [4] FastAPI → DynamoDB: experiment counters (counters module; IAM)
 ```
 
 ---
@@ -327,6 +330,7 @@ D
 | Control | Where | What It Does |
 |---------|-------|--------------|
 | Security headers | `backend/app/middleware/security_middleware.py` | HSTS (1yr + preload), CSP (`default-src 'none'`), X-Frame-Options: DENY, X-Content-Type-Options: nosniff, Referrer-Policy, Permissions-Policy |
+| Dashboard CSP | `frontend/nginx.conf` | The dashboard's nginx sets its own Content-Security-Policy (`default-src 'self'`, `frame-ancestors 'none'`, `connect-src` from `CSP_CONNECT_SRC`) |
 | CORS allowlist | `main.py` + `settings.cors_allowed_origins` | Only configured origins (in development and test, the local apps when none is configured) may read responses cross-origin; credentials are never allowed cross-origin |
 | RBAC enforcement | `backend/app/core/permissions.py` | Role matrix applied to all endpoints via `check_permission()` |
 | bcrypt password hashing | `backend/app/core/security.py` | `CryptContext(schemes=["bcrypt"])` with auto-deprecation |
@@ -355,4 +359,3 @@ D
 | Enable AWS WAF with OWASP Core Rule Set on the ALB (none is deployed today) | P1 | Multiple |
 | Enable AWS GuardDuty across all regions | P1 | TA-4 |
 | Enable AWS Security Hub and set score target > 90% | P2 | TA-4 |
-| Implement Content-Security-Policy for dashboard frontend (Next.js) | P2 | XSS |

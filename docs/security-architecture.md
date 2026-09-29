@@ -93,7 +93,7 @@ Not in that picture, because nothing deploys it:
 - **Redis (ElastiCache)**: At-rest encryption enabled
 
 ### In Transit
-- **TLS 1.2+** required for all connections
+- **HTTPS** at the load balancer: its HTTP listener redirects to HTTPS
 - **HSTS** enforced in production with 1-year max-age
 - **Internal traffic**: VPC-internal communication uses TLS
 

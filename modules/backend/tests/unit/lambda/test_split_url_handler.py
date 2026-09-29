@@ -286,6 +286,24 @@ class TestHandlerNewAssignment:
         # 7 days = 604800 seconds
         assert "604800" in cookie
 
+    def test_cookie_ttl_defaults_to_30_days(self):
+        """The docs (architecture.md, faq.md, integrations/aws.md) say 30 days
+        by default (#125)."""
+        config = {
+            k: v for k, v in _TWO_VARIANT_CONFIG.items() if k != "cookie_ttl_days"
+        }
+        event = _make_event(config=config, client_ip="10.0.1.3")
+        result = handler(event, None)
+        cookie = result["headers"]["set-cookie"][0]["value"]
+        assert "Max-Age=2592000;" in cookie, cookie
+
+    def test_the_fingerprint_is_ip_and_user_agent_not_a_user_id(self):
+        """The docs say the router hashes IP + User-Agent (#125). Same IP,
+        different User-Agent: a different hash."""
+        assert _hash_user("1.2.3.4", "UA-one", "exp1") != _hash_user(
+            "1.2.3.4", "UA-two", "exp1"
+        )
+
     def test_custom_cookie_name_in_config(self):
         config = dict(_TWO_VARIANT_CONFIG)
         config["cookie_name"] = "my_custom_cookie"
