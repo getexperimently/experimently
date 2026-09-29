@@ -241,7 +241,7 @@ The cadence is `BANDIT_UPDATE_INTERVAL_MINUTES` (default 5). It does not run und
 For each variant the scheduler needs pulls (assignments) and successes (conversions). Sources are tried in order:
 
 1. **DynamoDB real-time counters** (`get_experiment_counters`), when the counters stack is deployed and
-   every variant has at least as many pulls there as in PostgreSQL. A partial DynamoDB count (a counter
+   every variant has at least as many pulls and successes there as in PostgreSQL. A partial DynamoDB count (a counter
    that started late, or a manual increment) is ignored in favour of PostgreSQL's complete one.
 2. **PostgreSQL**: pulls = `assignments` rows per variant; successes = distinct users with an event whose
    `event_name` matches the experiment's primary metric (see the event-matching rule in the tracking API docs).

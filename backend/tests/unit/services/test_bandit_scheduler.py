@@ -890,7 +890,8 @@ def _fake_counter_provider(per_variant: Optional[Dict[str, tuple]], raises=None)
 
 
 class TestDynamoDBCompleteness:
-    """DynamoDB is used only when every variant has >= PostgreSQL's pulls."""
+    """DynamoDB is used only when every variant has >= PostgreSQL's pulls
+    and successes."""
 
     def _setup(self):
         db = MagicMock()
@@ -955,6 +956,23 @@ class TestDynamoDBCompleteness:
         )
         assert stats[vid1].pulls == 100
         assert stats[vid2].pulls == 100
+
+    @pytest.mark.regression
+    def test_complete_pulls_but_partial_dynamodb_successes_uses_postgres(self):
+        """Equal pulls are not enough: DynamoDB with 1 conversion per variant
+        against PostgreSQL's 30 and 10 would understate the conversion rate."""
+        scheduler, exp, vid1, vid2 = self._setup()
+        stats = self._stats(
+            scheduler,
+            exp,
+            (vid1, vid2),
+            dynamo=_fake_counter_provider({vid1: (100, 1), vid2: (100, 1)}),
+            pg_pulls={vid1: 100, vid2: 100},
+            pg_conv={vid1: 30, vid2: 10},
+        )
+        assert stats[vid1].pulls == 100
+        assert stats[vid1].successes == 30
+        assert stats[vid2].successes == 10
 
     @pytest.mark.regression
     def test_dynamodb_used_when_postgres_has_no_pulls(self):
