@@ -480,6 +480,47 @@
         "title": "AssignRoleRequest",
         "type": "object"
       },
+      "AssignmentColumns": {
+        "additionalProperties": false,
+        "properties": {
+          "experiment_key": {
+            "maxLength": 1024,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9_$]+$",
+            "title": "Experiment Key",
+            "type": "string"
+          },
+          "exposed_at": {
+            "maxLength": 1024,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9_$]+$",
+            "title": "Exposed At",
+            "type": "string"
+          },
+          "unit_id": {
+            "maxLength": 1024,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9_$]+$",
+            "title": "Unit Id",
+            "type": "string"
+          },
+          "variant": {
+            "maxLength": 1024,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9_$]+$",
+            "title": "Variant",
+            "type": "string"
+          }
+        },
+        "required": [
+          "unit_id",
+          "experiment_key",
+          "variant",
+          "exposed_at"
+        ],
+        "title": "AssignmentColumns",
+        "type": "object"
+      },
       "AssignmentRequest": {
         "description": "Model for requesting a variant assignment.",
         "example": {
@@ -526,6 +567,321 @@
           "user_id"
         ],
         "title": "AssignmentRequest",
+        "type": "object"
+      },
+      "AssignmentSourceCreate": {
+        "additionalProperties": false,
+        "description": "``POST /sources`` with ``kind: assignment``.",
+        "properties": {
+          "columns": {
+            "$ref": "#/components/schemas/AssignmentColumns"
+          },
+          "connection_id": {
+            "format": "uuid",
+            "title": "Connection Id",
+            "type": "string"
+          },
+          "filters": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/SourceFilterIn"
+            },
+            "maxItems": 5,
+            "title": "Filters",
+            "type": "array"
+          },
+          "kind": {
+            "const": "assignment",
+            "title": "Kind",
+            "type": "string"
+          },
+          "name": {
+            "maxLength": 200,
+            "minLength": 1,
+            "pattern": "^[^\\x00-\\x1f\\x7f\\u2028\\u2029]+$",
+            "title": "Name",
+            "type": "string"
+          },
+          "table": {
+            "maxLength": 2080,
+            "minLength": 3,
+            "pattern": "^[A-Za-z0-9_$-]+(\\.[A-Za-z0-9_$]+){1,2}$",
+            "title": "Table",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "table",
+          "columns",
+          "connection_id",
+          "kind"
+        ],
+        "title": "AssignmentSourceCreate",
+        "type": "object"
+      },
+      "AssignmentSourceUpdate": {
+        "additionalProperties": false,
+        "description": "``PUT /sources/{id}`` for an assignment source (the connection is fixed).",
+        "properties": {
+          "columns": {
+            "$ref": "#/components/schemas/AssignmentColumns"
+          },
+          "filters": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/SourceFilterIn"
+            },
+            "maxItems": 5,
+            "title": "Filters",
+            "type": "array"
+          },
+          "kind": {
+            "const": "assignment",
+            "title": "Kind",
+            "type": "string"
+          },
+          "name": {
+            "maxLength": 200,
+            "minLength": 1,
+            "pattern": "^[^\\x00-\\x1f\\x7f\\u2028\\u2029]+$",
+            "title": "Name",
+            "type": "string"
+          },
+          "table": {
+            "maxLength": 2080,
+            "minLength": 3,
+            "pattern": "^[A-Za-z0-9_$-]+(\\.[A-Za-z0-9_$]+){1,2}$",
+            "title": "Table",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "table",
+          "columns",
+          "kind"
+        ],
+        "title": "AssignmentSourceUpdate",
+        "type": "object"
+      },
+      "AthenaConnectionCreate": {
+        "additionalProperties": false,
+        "description": "An Amazon Athena connection.  It stores no secret.",
+        "properties": {
+          "database": {
+            "maxLength": 255,
+            "pattern": "^[a-z0-9_]{1,255}$",
+            "title": "Database",
+            "type": "string"
+          },
+          "max_bytes_per_query": {
+            "maximum": 1000000000000000,
+            "minimum": 10000000,
+            "title": "Max Bytes Per Query",
+            "type": "integer"
+          },
+          "max_runs_per_day": {
+            "default": 20,
+            "maximum": 10000,
+            "minimum": 1,
+            "title": "Max Runs Per Day",
+            "type": "integer"
+          },
+          "name": {
+            "maxLength": 200,
+            "minLength": 1,
+            "pattern": "^[^\\x00-\\x1f\\x7f\\u2028\\u2029]+$",
+            "title": "Name",
+            "type": "string"
+          },
+          "query_timeout_seconds": {
+            "default": 300,
+            "maximum": 86400,
+            "minimum": 10,
+            "title": "Query Timeout Seconds",
+            "type": "integer"
+          },
+          "region": {
+            "maxLength": 32,
+            "pattern": "^[a-z]{2}(-[a-z]+)+-[0-9]{1,2}$",
+            "title": "Region",
+            "type": "string"
+          },
+          "role_arn": {
+            "maxLength": 600,
+            "pattern": "^arn:aws:iam::[0-9]{12}:role/[A-Za-z0-9+=,.@_/-]{1,512}$",
+            "title": "Role Arn",
+            "type": "string"
+          },
+          "warehouse_type": {
+            "const": "athena",
+            "title": "Warehouse Type",
+            "type": "string"
+          },
+          "workgroup": {
+            "maxLength": 128,
+            "pattern": "^[A-Za-z0-9._-]{1,128}$",
+            "title": "Workgroup",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "warehouse_type",
+          "region",
+          "role_arn",
+          "workgroup",
+          "database",
+          "max_bytes_per_query"
+        ],
+        "title": "AthenaConnectionCreate",
+        "type": "object"
+      },
+      "AthenaConnectionTest": {
+        "additionalProperties": false,
+        "description": "``POST /connections/test`` for an Athena connection.",
+        "properties": {
+          "database": {
+            "maxLength": 255,
+            "pattern": "^[a-z0-9_]{1,255}$",
+            "title": "Database",
+            "type": "string"
+          },
+          "max_bytes_per_query": {
+            "maximum": 1000000000000000,
+            "minimum": 10000000,
+            "title": "Max Bytes Per Query",
+            "type": "integer"
+          },
+          "max_runs_per_day": {
+            "default": 20,
+            "maximum": 10000,
+            "minimum": 1,
+            "title": "Max Runs Per Day",
+            "type": "integer"
+          },
+          "name": {
+            "maxLength": 200,
+            "minLength": 1,
+            "pattern": "^[^\\x00-\\x1f\\x7f\\u2028\\u2029]+$",
+            "title": "Name",
+            "type": "string"
+          },
+          "query_timeout_seconds": {
+            "default": 300,
+            "maximum": 86400,
+            "minimum": 10,
+            "title": "Query Timeout Seconds",
+            "type": "integer"
+          },
+          "region": {
+            "maxLength": 32,
+            "pattern": "^[a-z]{2}(-[a-z]+)+-[0-9]{1,2}$",
+            "title": "Region",
+            "type": "string"
+          },
+          "role_arn": {
+            "maxLength": 600,
+            "pattern": "^arn:aws:iam::[0-9]{12}:role/[A-Za-z0-9+=,.@_/-]{1,512}$",
+            "title": "Role Arn",
+            "type": "string"
+          },
+          "warehouse_type": {
+            "const": "athena",
+            "title": "Warehouse Type",
+            "type": "string"
+          },
+          "workgroup": {
+            "maxLength": 128,
+            "pattern": "^[A-Za-z0-9._-]{1,128}$",
+            "title": "Workgroup",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "warehouse_type",
+          "region",
+          "role_arn",
+          "workgroup",
+          "database",
+          "max_bytes_per_query"
+        ],
+        "title": "AthenaConnectionTest",
+        "type": "object"
+      },
+      "AthenaConnectionUpdate": {
+        "additionalProperties": false,
+        "description": "``PUT /connections/{id}`` for an Athena connection.",
+        "properties": {
+          "database": {
+            "maxLength": 255,
+            "pattern": "^[a-z0-9_]{1,255}$",
+            "title": "Database",
+            "type": "string"
+          },
+          "max_bytes_per_query": {
+            "maximum": 1000000000000000,
+            "minimum": 10000000,
+            "title": "Max Bytes Per Query",
+            "type": "integer"
+          },
+          "max_runs_per_day": {
+            "default": 20,
+            "maximum": 10000,
+            "minimum": 1,
+            "title": "Max Runs Per Day",
+            "type": "integer"
+          },
+          "name": {
+            "maxLength": 200,
+            "minLength": 1,
+            "pattern": "^[^\\x00-\\x1f\\x7f\\u2028\\u2029]+$",
+            "title": "Name",
+            "type": "string"
+          },
+          "query_timeout_seconds": {
+            "default": 300,
+            "maximum": 86400,
+            "minimum": 10,
+            "title": "Query Timeout Seconds",
+            "type": "integer"
+          },
+          "region": {
+            "maxLength": 32,
+            "pattern": "^[a-z]{2}(-[a-z]+)+-[0-9]{1,2}$",
+            "title": "Region",
+            "type": "string"
+          },
+          "role_arn": {
+            "maxLength": 600,
+            "pattern": "^arn:aws:iam::[0-9]{12}:role/[A-Za-z0-9+=,.@_/-]{1,512}$",
+            "title": "Role Arn",
+            "type": "string"
+          },
+          "warehouse_type": {
+            "const": "athena",
+            "title": "Warehouse Type",
+            "type": "string"
+          },
+          "workgroup": {
+            "maxLength": 128,
+            "pattern": "^[A-Za-z0-9._-]{1,128}$",
+            "title": "Workgroup",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "warehouse_type",
+          "region",
+          "role_arn",
+          "workgroup",
+          "database",
+          "max_bytes_per_query"
+        ],
+        "title": "AthenaConnectionUpdate",
         "type": "object"
       },
       "AudiencePreviewResponse": {
@@ -1331,6 +1687,213 @@
           "expected_loss"
         ],
         "title": "BayesianVariantResult",
+        "type": "object"
+      },
+      "BigQueryConnectionCreate": {
+        "additionalProperties": false,
+        "description": "A BigQuery connection, with the service account's JSON key (write-only).",
+        "properties": {
+          "billing_project": {
+            "maxLength": 30,
+            "pattern": "^[a-z][a-z0-9-]{4,28}[a-z0-9]$",
+            "title": "Billing Project",
+            "type": "string"
+          },
+          "location": {
+            "maxLength": 64,
+            "pattern": "^[A-Za-z]+(-[a-z]+[0-9]*)*$",
+            "title": "Location",
+            "type": "string"
+          },
+          "max_bytes_per_query": {
+            "maximum": 1000000000000000,
+            "minimum": 10000000,
+            "title": "Max Bytes Per Query",
+            "type": "integer"
+          },
+          "max_runs_per_day": {
+            "default": 20,
+            "maximum": 10000,
+            "minimum": 1,
+            "title": "Max Runs Per Day",
+            "type": "integer"
+          },
+          "name": {
+            "maxLength": 200,
+            "minLength": 1,
+            "pattern": "^[^\\x00-\\x1f\\x7f\\u2028\\u2029]+$",
+            "title": "Name",
+            "type": "string"
+          },
+          "query_timeout_seconds": {
+            "default": 300,
+            "maximum": 86400,
+            "minimum": 10,
+            "title": "Query Timeout Seconds",
+            "type": "integer"
+          },
+          "service_account_json": {
+            "maxLength": 16384,
+            "minLength": 2,
+            "pattern": "^[\\t\\n\\r\\x20-\\x7e]+$",
+            "title": "Service Account Json",
+            "type": "string"
+          },
+          "warehouse_type": {
+            "const": "bigquery",
+            "title": "Warehouse Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "warehouse_type",
+          "billing_project",
+          "location",
+          "max_bytes_per_query",
+          "service_account_json"
+        ],
+        "title": "BigQueryConnectionCreate",
+        "type": "object"
+      },
+      "BigQueryConnectionTest": {
+        "additionalProperties": false,
+        "description": "``POST /connections/test``: a BigQuery connection checked before it is\nsaved.  The key is held in memory for the check and never stored.",
+        "properties": {
+          "billing_project": {
+            "maxLength": 30,
+            "pattern": "^[a-z][a-z0-9-]{4,28}[a-z0-9]$",
+            "title": "Billing Project",
+            "type": "string"
+          },
+          "location": {
+            "maxLength": 64,
+            "pattern": "^[A-Za-z]+(-[a-z]+[0-9]*)*$",
+            "title": "Location",
+            "type": "string"
+          },
+          "max_bytes_per_query": {
+            "maximum": 1000000000000000,
+            "minimum": 10000000,
+            "title": "Max Bytes Per Query",
+            "type": "integer"
+          },
+          "max_runs_per_day": {
+            "default": 20,
+            "maximum": 10000,
+            "minimum": 1,
+            "title": "Max Runs Per Day",
+            "type": "integer"
+          },
+          "name": {
+            "maxLength": 200,
+            "minLength": 1,
+            "pattern": "^[^\\x00-\\x1f\\x7f\\u2028\\u2029]+$",
+            "title": "Name",
+            "type": "string"
+          },
+          "query_timeout_seconds": {
+            "default": 300,
+            "maximum": 86400,
+            "minimum": 10,
+            "title": "Query Timeout Seconds",
+            "type": "integer"
+          },
+          "service_account_json": {
+            "maxLength": 16384,
+            "minLength": 2,
+            "pattern": "^[\\t\\n\\r\\x20-\\x7e]+$",
+            "title": "Service Account Json",
+            "type": "string"
+          },
+          "warehouse_type": {
+            "const": "bigquery",
+            "title": "Warehouse Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "warehouse_type",
+          "billing_project",
+          "location",
+          "max_bytes_per_query",
+          "service_account_json"
+        ],
+        "title": "BigQueryConnectionTest",
+        "type": "object"
+      },
+      "BigQueryConnectionUpdate": {
+        "additionalProperties": false,
+        "description": "``PUT /connections/{id}``; a new key replaces the stored one, and\nleaving ``service_account_json`` out keeps it.",
+        "properties": {
+          "billing_project": {
+            "maxLength": 30,
+            "pattern": "^[a-z][a-z0-9-]{4,28}[a-z0-9]$",
+            "title": "Billing Project",
+            "type": "string"
+          },
+          "location": {
+            "maxLength": 64,
+            "pattern": "^[A-Za-z]+(-[a-z]+[0-9]*)*$",
+            "title": "Location",
+            "type": "string"
+          },
+          "max_bytes_per_query": {
+            "maximum": 1000000000000000,
+            "minimum": 10000000,
+            "title": "Max Bytes Per Query",
+            "type": "integer"
+          },
+          "max_runs_per_day": {
+            "default": 20,
+            "maximum": 10000,
+            "minimum": 1,
+            "title": "Max Runs Per Day",
+            "type": "integer"
+          },
+          "name": {
+            "maxLength": 200,
+            "minLength": 1,
+            "pattern": "^[^\\x00-\\x1f\\x7f\\u2028\\u2029]+$",
+            "title": "Name",
+            "type": "string"
+          },
+          "query_timeout_seconds": {
+            "default": 300,
+            "maximum": 86400,
+            "minimum": 10,
+            "title": "Query Timeout Seconds",
+            "type": "integer"
+          },
+          "service_account_json": {
+            "anyOf": [
+              {
+                "maxLength": 16384,
+                "minLength": 2,
+                "pattern": "^[\\t\\n\\r\\x20-\\x7e]+$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Service Account Json"
+          },
+          "warehouse_type": {
+            "const": "bigquery",
+            "title": "Warehouse Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "warehouse_type",
+          "billing_project",
+          "location",
+          "max_bytes_per_query"
+        ],
+        "title": "BigQueryConnectionUpdate",
         "type": "object"
       },
       "Body_login_api_v1_auth_token_post": {
@@ -2211,6 +2774,396 @@
           "confirmed"
         ],
         "title": "ConfirmSignUpResponse",
+        "type": "object"
+      },
+      "ConnectionCreatedOut": {
+        "properties": {
+          "created_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
+          "credentials_status": {
+            "enum": [
+              "ok",
+              "unavailable",
+              "needs_new_credentials",
+              "pending_key"
+            ],
+            "title": "Credentials Status",
+            "type": "string"
+          },
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "external_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "External Id"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "max_bytes_per_query": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Bytes Per Query"
+          },
+          "max_runs_per_day": {
+            "title": "Max Runs Per Day",
+            "type": "integer"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "parameters": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Parameters",
+            "type": "object"
+          },
+          "pending_public_key_fingerprint": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pending Public Key Fingerprint"
+          },
+          "public_key": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PublicKeyOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "public_key_fingerprint": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Public Key Fingerprint"
+          },
+          "query_timeout_seconds": {
+            "title": "Query Timeout Seconds",
+            "type": "integer"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          },
+          "warehouse_type": {
+            "title": "Warehouse Type",
+            "type": "string"
+          },
+          "worst_case_bytes_per_day": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Worst Case Bytes Per Day"
+          },
+          "worst_case_seconds_per_day": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Worst Case Seconds Per Day"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "warehouse_type",
+          "parameters",
+          "credentials_status",
+          "query_timeout_seconds",
+          "max_runs_per_day",
+          "enabled"
+        ],
+        "title": "ConnectionCreatedOut",
+        "type": "object"
+      },
+      "ConnectionListOut": {
+        "properties": {
+          "connections": {
+            "items": {
+              "$ref": "#/components/schemas/ConnectionOut"
+            },
+            "title": "Connections",
+            "type": "array"
+          }
+        },
+        "required": [
+          "connections"
+        ],
+        "title": "ConnectionListOut",
+        "type": "object"
+      },
+      "ConnectionOut": {
+        "description": "A connection as every role that may list connections sees it.",
+        "properties": {
+          "created_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
+          "credentials_status": {
+            "enum": [
+              "ok",
+              "unavailable",
+              "needs_new_credentials",
+              "pending_key"
+            ],
+            "title": "Credentials Status",
+            "type": "string"
+          },
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "external_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "External Id"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "max_bytes_per_query": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Bytes Per Query"
+          },
+          "max_runs_per_day": {
+            "title": "Max Runs Per Day",
+            "type": "integer"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "parameters": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Parameters",
+            "type": "object"
+          },
+          "pending_public_key_fingerprint": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pending Public Key Fingerprint"
+          },
+          "public_key_fingerprint": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Public Key Fingerprint"
+          },
+          "query_timeout_seconds": {
+            "title": "Query Timeout Seconds",
+            "type": "integer"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          },
+          "warehouse_type": {
+            "title": "Warehouse Type",
+            "type": "string"
+          },
+          "worst_case_bytes_per_day": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Worst Case Bytes Per Day"
+          },
+          "worst_case_seconds_per_day": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Worst Case Seconds Per Day"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "warehouse_type",
+          "parameters",
+          "credentials_status",
+          "query_timeout_seconds",
+          "max_runs_per_day",
+          "enabled"
+        ],
+        "title": "ConnectionOut",
+        "type": "object"
+      },
+      "ConnectionTestOut": {
+        "properties": {
+          "ok": {
+            "title": "Ok",
+            "type": "boolean"
+          },
+          "promoted_pending_key": {
+            "default": false,
+            "title": "Promoted Pending Key",
+            "type": "boolean"
+          },
+          "warehouse_type": {
+            "title": "Warehouse Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "ok",
+          "warehouse_type"
+        ],
+        "title": "ConnectionTestOut",
+        "type": "object"
+      },
+      "ConnectorListOut": {
+        "properties": {
+          "connectors": {
+            "items": {
+              "$ref": "#/components/schemas/ConnectorOut"
+            },
+            "title": "Connectors",
+            "type": "array"
+          }
+        },
+        "required": [
+          "connectors"
+        ],
+        "title": "ConnectorListOut",
+        "type": "object"
+      },
+      "ConnectorOut": {
+        "properties": {
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "warehouse_type": {
+            "enum": [
+              "bigquery",
+              "snowflake",
+              "athena"
+            ],
+            "title": "Warehouse Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "warehouse_type",
+          "name",
+          "enabled"
+        ],
+        "title": "ConnectorOut",
         "type": "object"
       },
       "CorrectionMethod": {
@@ -7926,6 +8879,45 @@
         "title": "MetricBase",
         "type": "object"
       },
+      "MetricColumns": {
+        "additionalProperties": false,
+        "properties": {
+          "event_at": {
+            "maxLength": 1024,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9_$]+$",
+            "title": "Event At",
+            "type": "string"
+          },
+          "unit_id": {
+            "maxLength": 1024,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9_$]+$",
+            "title": "Unit Id",
+            "type": "string"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "maxLength": 1024,
+                "minLength": 1,
+                "pattern": "^[A-Za-z0-9_$]+$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value"
+          }
+        },
+        "required": [
+          "unit_id",
+          "event_at"
+        ],
+        "title": "MetricColumns",
+        "type": "object"
+      },
       "MetricResponse": {
         "description": "Model for metric response data.",
         "properties": {
@@ -8087,6 +9079,160 @@
           "has_significant_result"
         ],
         "title": "MetricResult",
+        "type": "object"
+      },
+      "MetricSourceCreate": {
+        "additionalProperties": false,
+        "description": "``POST /sources`` with ``kind: metric``.",
+        "properties": {
+          "cap_value": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0,
+                "maximum": 1000000000000000,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cap Value"
+          },
+          "columns": {
+            "$ref": "#/components/schemas/MetricColumns"
+          },
+          "connection_id": {
+            "format": "uuid",
+            "title": "Connection Id",
+            "type": "string"
+          },
+          "conversion_window_hours": {
+            "default": 168,
+            "maximum": 8760,
+            "minimum": 1,
+            "title": "Conversion Window Hours",
+            "type": "integer"
+          },
+          "filters": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/SourceFilterIn"
+            },
+            "maxItems": 5,
+            "title": "Filters",
+            "type": "array"
+          },
+          "kind": {
+            "const": "metric",
+            "title": "Kind",
+            "type": "string"
+          },
+          "metric_type": {
+            "enum": [
+              "proportion",
+              "mean"
+            ],
+            "title": "Metric Type",
+            "type": "string"
+          },
+          "name": {
+            "maxLength": 200,
+            "minLength": 1,
+            "pattern": "^[^\\x00-\\x1f\\x7f\\u2028\\u2029]+$",
+            "title": "Name",
+            "type": "string"
+          },
+          "table": {
+            "maxLength": 2080,
+            "minLength": 3,
+            "pattern": "^[A-Za-z0-9_$-]+(\\.[A-Za-z0-9_$]+){1,2}$",
+            "title": "Table",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "table",
+          "columns",
+          "metric_type",
+          "connection_id",
+          "kind"
+        ],
+        "title": "MetricSourceCreate",
+        "type": "object"
+      },
+      "MetricSourceUpdate": {
+        "additionalProperties": false,
+        "description": "``PUT /sources/{id}`` for a metric source (the connection is fixed).",
+        "properties": {
+          "cap_value": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0,
+                "maximum": 1000000000000000,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cap Value"
+          },
+          "columns": {
+            "$ref": "#/components/schemas/MetricColumns"
+          },
+          "conversion_window_hours": {
+            "default": 168,
+            "maximum": 8760,
+            "minimum": 1,
+            "title": "Conversion Window Hours",
+            "type": "integer"
+          },
+          "filters": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/SourceFilterIn"
+            },
+            "maxItems": 5,
+            "title": "Filters",
+            "type": "array"
+          },
+          "kind": {
+            "const": "metric",
+            "title": "Kind",
+            "type": "string"
+          },
+          "metric_type": {
+            "enum": [
+              "proportion",
+              "mean"
+            ],
+            "title": "Metric Type",
+            "type": "string"
+          },
+          "name": {
+            "maxLength": 200,
+            "minLength": 1,
+            "pattern": "^[^\\x00-\\x1f\\x7f\\u2028\\u2029]+$",
+            "title": "Name",
+            "type": "string"
+          },
+          "table": {
+            "maxLength": 2080,
+            "minLength": 3,
+            "pattern": "^[A-Za-z0-9_$-]+(\\.[A-Za-z0-9_$]+){1,2}$",
+            "title": "Table",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "table",
+          "columns",
+          "metric_type",
+          "kind"
+        ],
+        "title": "MetricSourceUpdate",
         "type": "object"
       },
       "MetricStatus": {
@@ -9521,6 +10667,175 @@
         "title": "PowerCurveResponse",
         "type": "object"
       },
+      "PreviewOut": {
+        "description": "Aggregates only: counts and the earliest and latest time.  No rows.",
+        "properties": {
+          "earliest": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Earliest"
+          },
+          "kind": {
+            "enum": [
+              "assignment",
+              "metric"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "latest": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Latest"
+          },
+          "null_unit_rows": {
+            "title": "Null Unit Rows",
+            "type": "integer"
+          },
+          "null_value_rows": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Null Value Rows"
+          },
+          "null_variant_rows": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Null Variant Rows"
+          },
+          "run_id": {
+            "format": "uuid",
+            "title": "Run Id",
+            "type": "string"
+          },
+          "total_rows": {
+            "title": "Total Rows",
+            "type": "integer"
+          },
+          "variants": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/PreviewVariantOut"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Variants"
+          },
+          "window_end": {
+            "format": "date-time",
+            "title": "Window End",
+            "type": "string"
+          },
+          "window_start": {
+            "format": "date-time",
+            "title": "Window Start",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "window_start",
+          "window_end",
+          "total_rows",
+          "null_unit_rows",
+          "run_id"
+        ],
+        "title": "PreviewOut",
+        "type": "object"
+      },
+      "PreviewRequest": {
+        "additionalProperties": false,
+        "description": "``POST /sources/{id}/preview``.  The window defaults to the last 7 days;\n``experiment_key`` narrows an assignment preview to one experiment.",
+        "properties": {
+          "experiment_key": {
+            "anyOf": [
+              {
+                "maxLength": 100,
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,99}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Experiment Key"
+          },
+          "window_end": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Window End"
+          },
+          "window_start": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Window Start"
+          }
+        },
+        "title": "PreviewRequest",
+        "type": "object"
+      },
+      "PreviewVariantOut": {
+        "properties": {
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "units": {
+            "title": "Units",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "label",
+          "units"
+        ],
+        "title": "PreviewVariantOut",
+        "type": "object"
+      },
       "PriorFamily": {
         "description": "Supported conjugate prior families.",
         "enum": [
@@ -9530,6 +10845,30 @@
         ],
         "title": "PriorFamily",
         "type": "string"
+      },
+      "PublicKeyOut": {
+        "description": "What the customer runs in Snowflake to register a generated key.",
+        "properties": {
+          "public_key": {
+            "title": "Public Key",
+            "type": "string"
+          },
+          "public_key_fingerprint": {
+            "title": "Public Key Fingerprint",
+            "type": "string"
+          },
+          "statement": {
+            "title": "Statement",
+            "type": "string"
+          }
+        },
+        "required": [
+          "public_key",
+          "public_key_fingerprint",
+          "statement"
+        ],
+        "title": "PublicKeyOut",
+        "type": "object"
       },
       "RecommendationAction": {
         "description": "Decision recommendation for an experiment after analysis.\n\nSHIP_VARIANT    - A treatment variant has won; ship it.\nKEEP_CONTROL    - No variant beat the control; keep the status quo.\nCONTINUE_TESTING - Results are directional but not yet conclusive.\nINCONCLUSIVE    - Results are mixed or otherwise uninterpretable.",
@@ -10495,6 +11834,331 @@
           }
         },
         "title": "RolloutStageUpdate",
+        "type": "object"
+      },
+      "RunAcceptedOut": {
+        "properties": {
+          "run_id": {
+            "format": "uuid",
+            "title": "Run Id",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "run_id",
+          "status"
+        ],
+        "title": "RunAcceptedOut",
+        "type": "object"
+      },
+      "RunCreate": {
+        "additionalProperties": false,
+        "description": "``POST /experiments/{experiment_id}/runs``.",
+        "properties": {
+          "assignment_source_id": {
+            "format": "uuid",
+            "title": "Assignment Source Id",
+            "type": "string"
+          },
+          "confidence_level": {
+            "default": 0.95,
+            "maximum": 0.99,
+            "minimum": 0.8,
+            "title": "Confidence Level",
+            "type": "number"
+          },
+          "connection_id": {
+            "format": "uuid",
+            "title": "Connection Id",
+            "type": "string"
+          },
+          "correction_method": {
+            "default": "none",
+            "enum": [
+              "none",
+              "bonferroni",
+              "benjamini_hochberg"
+            ],
+            "title": "Correction Method",
+            "type": "string"
+          },
+          "metric_source_ids": {
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "maxItems": 10,
+            "minItems": 1,
+            "title": "Metric Source Ids",
+            "type": "array"
+          },
+          "variant_map": {
+            "anyOf": [
+              {
+                "maxProperties": 50,
+                "patternProperties": {
+                  "^[^\\x00-\\x1f\\x7f\\u2028\\u2029]+$": {
+                    "format": "uuid",
+                    "type": "string"
+                  }
+                },
+                "propertyNames": {
+                  "maxLength": 64,
+                  "minLength": 1
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Variant Map"
+          },
+          "window_end": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Window End"
+          },
+          "window_start": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Window Start"
+          }
+        },
+        "required": [
+          "connection_id",
+          "assignment_source_id",
+          "metric_source_ids"
+        ],
+        "title": "RunCreate",
+        "type": "object"
+      },
+      "RunListOut": {
+        "properties": {
+          "runs": {
+            "items": {
+              "$ref": "#/components/schemas/RunOut"
+            },
+            "title": "Runs",
+            "type": "array"
+          }
+        },
+        "required": [
+          "runs"
+        ],
+        "title": "RunListOut",
+        "type": "object"
+      },
+      "RunOut": {
+        "properties": {
+          "connection_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Connection Id"
+          },
+          "connection_name": {
+            "title": "Connection Name",
+            "type": "string"
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
+          "error_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Code"
+          },
+          "error_message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Message"
+          },
+          "experiment_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Experiment Id"
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finished At"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "job_metadata": {
+            "anyOf": [
+              {
+                "items": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Job Metadata"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "request": {
+            "additionalProperties": true,
+            "title": "Request",
+            "type": "object"
+          },
+          "results": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Results"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          },
+          "statements": {
+            "anyOf": [
+              {
+                "items": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Statements"
+          },
+          "status": {
+            "enum": [
+              "queued",
+              "running",
+              "succeeded",
+              "failed"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "warehouse_type": {
+            "title": "Warehouse Type",
+            "type": "string"
+          },
+          "window_end": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Window End"
+          },
+          "window_start": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Window Start"
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "status",
+          "connection_name",
+          "warehouse_type",
+          "request"
+        ],
+        "title": "RunOut",
         "type": "object"
       },
       "RuntimeRequest": {
@@ -12338,6 +14002,379 @@
         "title": "SignUpResponse",
         "type": "object"
       },
+      "SnowflakeConnectionCreate": {
+        "additionalProperties": false,
+        "description": "A Snowflake connection.  The platform generates the key pair.",
+        "properties": {
+          "account": {
+            "maxLength": 300,
+            "pattern": "^[A-Za-z][A-Za-z0-9]*-[A-Za-z0-9_]{1,255}$",
+            "title": "Account",
+            "type": "string"
+          },
+          "max_runs_per_day": {
+            "default": 20,
+            "maximum": 10000,
+            "minimum": 1,
+            "title": "Max Runs Per Day",
+            "type": "integer"
+          },
+          "name": {
+            "maxLength": 200,
+            "minLength": 1,
+            "pattern": "^[^\\x00-\\x1f\\x7f\\u2028\\u2029]+$",
+            "title": "Name",
+            "type": "string"
+          },
+          "query_timeout_seconds": {
+            "default": 300,
+            "maximum": 86400,
+            "minimum": 10,
+            "title": "Query Timeout Seconds",
+            "type": "integer"
+          },
+          "role": {
+            "maxLength": 255,
+            "pattern": "^[A-Za-z_][A-Za-z0-9_$]{0,254}$",
+            "title": "Role",
+            "type": "string"
+          },
+          "user": {
+            "maxLength": 255,
+            "pattern": "^[A-Za-z_][A-Za-z0-9_$]{0,254}$",
+            "title": "User",
+            "type": "string"
+          },
+          "warehouse": {
+            "maxLength": 255,
+            "pattern": "^[A-Za-z_][A-Za-z0-9_$]{0,254}$",
+            "title": "Warehouse",
+            "type": "string"
+          },
+          "warehouse_type": {
+            "const": "snowflake",
+            "title": "Warehouse Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "warehouse_type",
+          "account",
+          "user",
+          "role",
+          "warehouse"
+        ],
+        "title": "SnowflakeConnectionCreate",
+        "type": "object"
+      },
+      "SnowflakeConnectionUpdate": {
+        "additionalProperties": false,
+        "description": "``PUT /connections/{id}``: every non-secret field, as on create.",
+        "properties": {
+          "account": {
+            "maxLength": 300,
+            "pattern": "^[A-Za-z][A-Za-z0-9]*-[A-Za-z0-9_]{1,255}$",
+            "title": "Account",
+            "type": "string"
+          },
+          "max_runs_per_day": {
+            "default": 20,
+            "maximum": 10000,
+            "minimum": 1,
+            "title": "Max Runs Per Day",
+            "type": "integer"
+          },
+          "name": {
+            "maxLength": 200,
+            "minLength": 1,
+            "pattern": "^[^\\x00-\\x1f\\x7f\\u2028\\u2029]+$",
+            "title": "Name",
+            "type": "string"
+          },
+          "query_timeout_seconds": {
+            "default": 300,
+            "maximum": 86400,
+            "minimum": 10,
+            "title": "Query Timeout Seconds",
+            "type": "integer"
+          },
+          "role": {
+            "maxLength": 255,
+            "pattern": "^[A-Za-z_][A-Za-z0-9_$]{0,254}$",
+            "title": "Role",
+            "type": "string"
+          },
+          "user": {
+            "maxLength": 255,
+            "pattern": "^[A-Za-z_][A-Za-z0-9_$]{0,254}$",
+            "title": "User",
+            "type": "string"
+          },
+          "warehouse": {
+            "maxLength": 255,
+            "pattern": "^[A-Za-z_][A-Za-z0-9_$]{0,254}$",
+            "title": "Warehouse",
+            "type": "string"
+          },
+          "warehouse_type": {
+            "const": "snowflake",
+            "title": "Warehouse Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "warehouse_type",
+          "account",
+          "user",
+          "role",
+          "warehouse"
+        ],
+        "title": "SnowflakeConnectionUpdate",
+        "type": "object"
+      },
+      "SourceColumnOut": {
+        "properties": {
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Type"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "SourceColumnOut",
+        "type": "object"
+      },
+      "SourceFilterIn": {
+        "additionalProperties": false,
+        "description": "One structured filter: ``{column, operator, value}``.",
+        "properties": {
+          "column": {
+            "maxLength": 1024,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9_$]+$",
+            "title": "Column",
+            "type": "string"
+          },
+          "operator": {
+            "enum": [
+              "eq",
+              "ne",
+              "in",
+              "not_in",
+              "is_null",
+              "is_not_null"
+            ],
+            "title": "Operator",
+            "type": "string"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "maximum": 9223372036854775808,
+                "minimum": -9223372036854775808,
+                "type": "integer"
+              },
+              {
+                "maxLength": 256,
+                "minLength": 1,
+                "pattern": "^[A-Za-z0-9 _.:@/+-]+$",
+                "type": "string"
+              },
+              {
+                "items": {
+                  "anyOf": [
+                    {
+                      "type": "boolean"
+                    },
+                    {
+                      "maximum": 9223372036854775808,
+                      "minimum": -9223372036854775808,
+                      "type": "integer"
+                    },
+                    {
+                      "maxLength": 256,
+                      "minLength": 1,
+                      "pattern": "^[A-Za-z0-9 _.:@/+-]+$",
+                      "type": "string"
+                    }
+                  ]
+                },
+                "maxItems": 50,
+                "minItems": 1,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value"
+          }
+        },
+        "required": [
+          "column",
+          "operator"
+        ],
+        "title": "SourceFilterIn",
+        "type": "object"
+      },
+      "SourceListOut": {
+        "properties": {
+          "sources": {
+            "items": {
+              "$ref": "#/components/schemas/SourceOut"
+            },
+            "title": "Sources",
+            "type": "array"
+          }
+        },
+        "required": [
+          "sources"
+        ],
+        "title": "SourceListOut",
+        "type": "object"
+      },
+      "SourceOut": {
+        "properties": {
+          "cap_value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cap Value"
+          },
+          "columns": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/SourceColumnOut"
+            },
+            "title": "Columns",
+            "type": "object"
+          },
+          "connection_id": {
+            "format": "uuid",
+            "title": "Connection Id",
+            "type": "string"
+          },
+          "conversion_window_hours": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Conversion Window Hours"
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
+          "filters": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Filters",
+            "type": "array"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "assignment",
+              "metric"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "metric_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Metric Type"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "table": {
+            "title": "Table",
+            "type": "string"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          },
+          "validated_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Validated At"
+          }
+        },
+        "required": [
+          "id",
+          "connection_id",
+          "kind",
+          "name",
+          "table",
+          "columns",
+          "filters"
+        ],
+        "title": "SourceOut",
+        "type": "object"
+      },
       "SplitUrlConfig": {
         "description": "Configuration for a split URL experiment.\n\nRequires at least 2 URL variants whose traffic_allocation values sum to 100.",
         "properties": {
@@ -13145,6 +15182,27 @@
           "email"
         ],
         "title": "UserUpdate",
+        "type": "object"
+      },
+      "ValidateOut": {
+        "description": "The table's columns as the warehouse's metadata describes them.",
+        "properties": {
+          "columns": {
+            "items": {
+              "$ref": "#/components/schemas/SourceColumnOut"
+            },
+            "title": "Columns",
+            "type": "array"
+          },
+          "source": {
+            "$ref": "#/components/schemas/SourceOut"
+          }
+        },
+        "required": [
+          "source",
+          "columns"
+        ],
+        "title": "ValidateOut",
         "type": "object"
       },
       "ValidationError": {
@@ -25849,6 +27907,7 @@
     },
     "/api/v1/openfeature/flags": {
       "get": {
+        "deprecated": true,
         "description": "Returns all feature flag definitions accessible to this API key. OpenFeature providers fetch this endpoint once on initialization to warm their local flag cache and perform client-side evaluation without a per-flag network round-trip.",
         "operationId": "get_openfeature_flags_api_v1_openfeature_flags_get",
         "responses": {
@@ -25875,8 +27934,7 @@
         "tags": [
           "OpenFeature",
           "OpenFeature"
-        ],
-        "deprecated": true
+        ]
       }
     },
     "/api/v1/power/curve": {
@@ -29765,6 +31823,937 @@
         ]
       }
     },
+    "/api/v1/warehouse/analysis/connections": {
+      "get": {
+        "operationId": "list_connections_api_v1_warehouse_analysis_connections_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConnectionListOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "List warehouse connections",
+        "tags": [
+          "Warehouse analysis"
+        ],
+        "x-stability": "beta"
+      },
+      "post": {
+        "operationId": "create_connection_api_v1_warehouse_analysis_connections_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/SnowflakeConnectionCreate"
+                  },
+                  {
+                    "$ref": "#/components/schemas/BigQueryConnectionCreate"
+                  },
+                  {
+                    "$ref": "#/components/schemas/AthenaConnectionCreate"
+                  }
+                ],
+                "title": "Body"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConnectionCreatedOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Create a warehouse connection",
+        "tags": [
+          "Warehouse analysis"
+        ],
+        "x-stability": "beta"
+      }
+    },
+    "/api/v1/warehouse/analysis/connections/test": {
+      "post": {
+        "description": "The configuration is held in memory for the test and not stored.\nSnowflake connections are tested after they are created, when their key\npair exists.",
+        "operationId": "test_unsaved_connection_api_v1_warehouse_analysis_connections_test_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/BigQueryConnectionTest"
+                  },
+                  {
+                    "$ref": "#/components/schemas/AthenaConnectionTest"
+                  }
+                ],
+                "title": "Body"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConnectionTestOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Test a warehouse connection before saving it",
+        "tags": [
+          "Warehouse analysis"
+        ],
+        "x-stability": "beta"
+      }
+    },
+    "/api/v1/warehouse/analysis/connections/{connection_id}": {
+      "delete": {
+        "description": "The row is deleted, not marked: its credentials go with it, its sources\nare deleted with it, and its runs keep their own copy of its name.",
+        "operationId": "delete_connection_api_v1_warehouse_analysis_connections__connection_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "connection_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Connection Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Delete a warehouse connection, its credentials and its sources",
+        "tags": [
+          "Warehouse analysis"
+        ],
+        "x-stability": "beta"
+      },
+      "get": {
+        "operationId": "get_connection_api_v1_warehouse_analysis_connections__connection_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "connection_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Connection Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConnectionOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Get a warehouse connection",
+        "tags": [
+          "Warehouse analysis"
+        ],
+        "x-stability": "beta"
+      },
+      "put": {
+        "operationId": "update_connection_api_v1_warehouse_analysis_connections__connection_id__put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "connection_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Connection Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/SnowflakeConnectionUpdate"
+                  },
+                  {
+                    "$ref": "#/components/schemas/BigQueryConnectionUpdate"
+                  },
+                  {
+                    "$ref": "#/components/schemas/AthenaConnectionUpdate"
+                  }
+                ],
+                "title": "Body"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConnectionOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Update a warehouse connection",
+        "tags": [
+          "Warehouse analysis"
+        ],
+        "x-stability": "beta"
+      }
+    },
+    "/api/v1/warehouse/analysis/connections/{connection_id}/regenerate-key": {
+      "post": {
+        "description": "The new key is pending: the current one keeps working until a test\nwith the new one passes.  The response carries the statement that\nregisters the new public key in the user's other key slot.",
+        "operationId": "regenerate_key_api_v1_warehouse_analysis_connections__connection_id__regenerate_key_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "connection_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Connection Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConnectionCreatedOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Generate a new Snowflake key pair for a connection",
+        "tags": [
+          "Warehouse analysis"
+        ],
+        "x-stability": "beta"
+      }
+    },
+    "/api/v1/warehouse/analysis/connections/{connection_id}/test": {
+      "post": {
+        "description": "Signs in and runs a statement that reads no table.  A pending Snowflake\nkey is tested in place of the current one and, if the test passes,\nbecomes the current one.  Tests are not counted by the daily limit.",
+        "operationId": "test_connection_api_v1_warehouse_analysis_connections__connection_id__test_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "connection_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Connection Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConnectionTestOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Test a saved warehouse connection",
+        "tags": [
+          "Warehouse analysis"
+        ],
+        "x-stability": "beta"
+      }
+    },
+    "/api/v1/warehouse/analysis/connectors": {
+      "get": {
+        "operationId": "list_connectors_api_v1_warehouse_analysis_connectors_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConnectorListOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "List the warehouse connectors and whether each is available",
+        "tags": [
+          "Warehouse analysis"
+        ],
+        "x-stability": "beta"
+      }
+    },
+    "/api/v1/warehouse/analysis/experiments/{experiment_id}/runs": {
+      "get": {
+        "operationId": "list_runs_api_v1_warehouse_analysis_experiments__experiment_id__runs_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "experiment_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Experiment Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunListOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "List an experiment's warehouse analyses, newest first",
+        "tags": [
+          "Warehouse analysis"
+        ],
+        "x-stability": "beta"
+      },
+      "post": {
+        "description": "Answers 202 with the run id; the run continues on the warehouse\nexecutor.  Poll ``GET /runs/{run_id}``.",
+        "operationId": "start_run_api_v1_warehouse_analysis_experiments__experiment_id__runs_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "experiment_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Experiment Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RunCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunAcceptedOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Start a warehouse analysis of an experiment",
+        "tags": [
+          "Warehouse analysis"
+        ],
+        "x-stability": "beta"
+      }
+    },
+    "/api/v1/warehouse/analysis/runs/{run_id}": {
+      "get": {
+        "operationId": "get_run_api_v1_warehouse_analysis_runs__run_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Run Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Get a warehouse analysis or preview, with its results and SQL",
+        "tags": [
+          "Warehouse analysis"
+        ],
+        "x-stability": "beta"
+      }
+    },
+    "/api/v1/warehouse/analysis/sources": {
+      "get": {
+        "operationId": "list_sources_api_v1_warehouse_analysis_sources_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SourceListOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "List warehouse sources",
+        "tags": [
+          "Warehouse analysis"
+        ],
+        "x-stability": "beta"
+      },
+      "post": {
+        "operationId": "create_source_api_v1_warehouse_analysis_sources_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/AssignmentSourceCreate"
+                  },
+                  {
+                    "$ref": "#/components/schemas/MetricSourceCreate"
+                  }
+                ],
+                "title": "Body"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SourceOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Create a warehouse source (a table or view and a column mapping)",
+        "tags": [
+          "Warehouse analysis"
+        ],
+        "x-stability": "beta"
+      }
+    },
+    "/api/v1/warehouse/analysis/sources/{source_id}": {
+      "delete": {
+        "operationId": "delete_source_api_v1_warehouse_analysis_sources__source_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "source_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Source Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Delete a warehouse source",
+        "tags": [
+          "Warehouse analysis"
+        ],
+        "x-stability": "beta"
+      },
+      "get": {
+        "operationId": "get_source_api_v1_warehouse_analysis_sources__source_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "source_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Source Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SourceOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Get a warehouse source",
+        "tags": [
+          "Warehouse analysis"
+        ],
+        "x-stability": "beta"
+      },
+      "put": {
+        "operationId": "update_source_api_v1_warehouse_analysis_sources__source_id__put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "source_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Source Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/AssignmentSourceUpdate"
+                  },
+                  {
+                    "$ref": "#/components/schemas/MetricSourceUpdate"
+                  }
+                ],
+                "title": "Body"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SourceOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Update a warehouse source",
+        "tags": [
+          "Warehouse analysis"
+        ],
+        "x-stability": "beta"
+      }
+    },
+    "/api/v1/warehouse/analysis/sources/{source_id}/preview": {
+      "post": {
+        "description": "One warehouse query, capped like a run's, that returns aggregates only.\nA preview counts against the connection's daily limit and, like a run,\ncannot start while another run or preview on the connection is in\nprogress.",
+        "operationId": "preview_source_api_v1_warehouse_analysis_sources__source_id__preview_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "source_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Source Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/PreviewRequest"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Body"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PreviewOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Preview a source: counts and time bounds, no rows",
+        "tags": [
+          "Warehouse analysis"
+        ],
+        "x-stability": "beta"
+      }
+    },
+    "/api/v1/warehouse/analysis/sources/{source_id}/validate": {
+      "post": {
+        "description": "Reads the table's column names and types; no query reads data.\nValidation is not counted by the daily limit.",
+        "operationId": "validate_source_api_v1_warehouse_analysis_sources__source_id__validate_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "source_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Source Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidateOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Check a source's table and columns against the warehouse's metadata",
+        "tags": [
+          "Warehouse analysis"
+        ],
+        "x-stability": "beta"
+      }
+    },
     "/api/v1/wizard/drafts": {
       "get": {
         "description": "Returns all in-progress wizard drafts belonging to the authenticated user.",
@@ -31138,6 +34127,10 @@
     {
       "description": "EP-057: Team Workspaces — group users into teams with workspace roles (OWNER/ADMIN/DEVELOPER/ANALYST/VIEWER) and create and accept invitation links; no email is sent. Workspaces do not limit access to experiments or feature flags, which is by platform role. Workspace API keys are not yet accepted by the SDK or tracking endpoints; use a platform API key.",
       "name": "Workspaces"
+    },
+    {
+      "description": "Beta. Frequentist analysis of an experiment on the customer's own exposure and metric tables in BigQuery or Snowflake: connections, sources (a table or view and a column mapping), previews and runs. Each connector is available only once it has been verified against a real account.",
+      "name": "Warehouse analysis"
     },
     {
       "description": "EP-050: HIPAA Compliance — PHI audit logging, Business Associate Agreement (BAA) management, PHI field encryption/decryption, data residency validation, and HIPAA readiness status reporting. All endpoints require ADMIN role.",

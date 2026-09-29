@@ -1498,11 +1498,12 @@ GET  /api/v1/holdout/check/{uid}  — Check if user is in holdout
 
 ---
 
-### Warehouse Analytics
+### Warehouse analysis (beta)
 
-The `/api/v1/warehouse` endpoints have been removed and answer 404.
-Warehouse analysis is being rebuilt (#312); see
-[Warehouse Analytics](warehouse-analytics.md).
+The full profile serves the warehouse analysis routes under
+`/api/v1/warehouse/analysis`; every other path under `/api/v1/warehouse`
+answers 404. No warehouse is available yet. See
+[Warehouse analysis](warehouse-analytics.md).
 
 ---
 

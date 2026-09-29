@@ -119,7 +119,7 @@ You can combine both: run a feature behind a flag during an experiment, then gra
 
 ### Can I use my own data warehouse?
 
-Not today. The warehouse endpoints have been removed, and warehouse analysis is being rebuilt (#312). See [Warehouse Analytics](../api/warehouse-analytics.md).
+Not yet. Warehouse analysis (beta, full profile) runs an experiment's analysis on your own tables, and each warehouse becomes available once its connector has been checked against a real account; none is available yet. See [Warehouse analysis](../api/warehouse-analytics.md).
 
 ---
 

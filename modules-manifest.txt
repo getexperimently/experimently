@@ -150,15 +150,16 @@ modules/backend/tests/unit/schemas/test_rbac_schemas.py
 modules/backend/tests/integration/api/test_rbac_api.py
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 6. Warehouse analytics  (Issue #26; being rebuilt, #312)
-# Core without it: yes. The endpoints and connectors were removed; what is
-# left is the storage for the rebuild -- the `warehouse_connections`,
-# `warehouse_sources` and `warehouse_analysis_runs` tables, which no route
-# reads yet -- the command that re-encrypts stored credentials under a new
-# key, and the per-connection daily run count.
-# The analysis query builder (#312): the identifier and literal gate, the
-# per-dialect statements, the result checks and the source request schemas.
-# Nothing imports them yet; its only runtime dependency, sqlglot, is pinned in
+# 6. Warehouse analytics  (Issue #26; rebuilt as warehouse analysis, #312)
+# Core without it: yes. Warehouse analysis (beta): the routes under
+# /api/v1/warehouse/analysis, the `warehouse_connections`,
+# `warehouse_sources` and `warehouse_analysis_runs` tables, the command that
+# re-encrypts stored credentials under a new key, and the per-connection
+# daily run count.
+# The analysis query builder: the identifier and literal gate, the
+# per-dialect statements, the result checks and the request schemas; the
+# runner, which admits, runs and records analyses and previews. The query
+# builder's only runtime dependency, sqlglot, is pinned in
 # modules/requirements.txt. Its tests run the statements on DuckDB, pinned in
 # modules/requirements-test.txt.
 # ─────────────────────────────────────────────────────────────────────────────
@@ -174,7 +175,17 @@ modules/backend/app/core/warehouse_identifiers.py
 modules/backend/app/services/warehouse_query_builder.py
 modules/backend/app/services/warehouse_sufficient_stats.py
 modules/backend/app/schemas/warehouse_sources.py
+modules/backend/app/schemas/warehouse_connections.py
+modules/backend/app/schemas/warehouse_runs.py
+modules/backend/app/schemas/responses_warehouse.py
+modules/backend/app/services/warehouse_clients.py
+modules/backend/app/services/warehouse_estimators.py
+modules/backend/app/services/warehouse_runner.py
+modules/backend/app/services/warehouse_source_service.py
+modules/backend/app/api/v1/endpoints/warehouse_analysis.py
 modules/backend/tests/unit/warehouse
+modules/backend/tests/integration/warehouse
+modules/backend/tests/smoke/test_warehouse_routes_contract.py
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 7. Third-party integrations — Jira / Salesforce / GitHub  (EP-034)
@@ -308,7 +319,7 @@ modules/frontend
 #
 # modules/backend/app/register.py is `modules.register(hooks)` (re-exported by
 # modules/__init__.py): it validates the modules' settings, registers the
-# nine model modules, installs the audit signer, mounts the seven routers
+# nine model modules, installs the audit signer, mounts the eight routers
 # behind authentication, registers the five capabilities and passes the ten
 # module names to hooks.register_modules(). modules/backend/app/settings.py
 # holds `ModulesSettings` -- the audit signing key, HIPAA, SSO, ETL and

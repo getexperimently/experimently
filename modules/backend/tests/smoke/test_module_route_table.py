@@ -1,20 +1,20 @@
 """The full application's route table for the warehouse and ETL prefixes.
 
-The warehouse endpoints and ``POST /api/v1/etl/query`` were removed; warehouse
-analysis is being rebuilt (#312).  This pins the result as exact sets rather
-than prefix rules:
+The earlier warehouse endpoints and ``POST /api/v1/etl/query`` were removed,
+and warehouse analysis was rebuilt under ``/api/v1/warehouse/analysis``
+(#312).  This pins both prefixes as exact sets rather than prefix rules:
 
-* no route at all under ``/api/v1/warehouse``;
+* ``/api/v1/warehouse`` serves exactly the warehouse analysis routes below,
+  and nothing else, in any letter case;
 * ``/api/v1/etl`` serves exactly the five method+path pairs below.
 
-A prefix deny-list would have to be loosened the day #312 adds its new
-routes; an exact set fails on any addition, and the change that adds a route
-amends the set on purpose.
+An exact set fails on any addition, and the change that adds a route amends
+the set on purpose.
 
-The positive control matters as much as the absence checks.  A modules
-registration that loaded but mounted nothing would make "no warehouse route"
-pass for the wrong reason, so the same route table must also carry an SSO
-route and ``POST /api/v1/etl/jobs/run``.
+The positive control matters as much as the exact sets.  A modules
+registration that loaded but mounted nothing would make the ETL check fail
+for the wrong reason, or an absence check pass for the wrong reason, so the
+same route table must also carry an SSO route and ``POST /api/v1/etl/jobs/run``.
 """
 
 from __future__ import annotations
@@ -38,7 +38,35 @@ EXPECTED_ETL_ROUTES = frozenset(
     }
 )
 
-#: Routes that must be present, so the absence checks cannot pass vacuously.
+_WA = "/api/v1/warehouse/analysis"
+
+#: Every (method, path) under the warehouse prefix: the warehouse analysis
+#: routes (#312, SPEC 7), all ``x-stability: beta``.
+EXPECTED_WAREHOUSE_ROUTES = frozenset(
+    {
+        ("GET", f"{_WA}/connectors"),
+        ("GET", f"{_WA}/connections"),
+        ("POST", f"{_WA}/connections"),
+        ("GET", f"{_WA}/connections/{{connection_id}}"),
+        ("PUT", f"{_WA}/connections/{{connection_id}}"),
+        ("DELETE", f"{_WA}/connections/{{connection_id}}"),
+        ("POST", f"{_WA}/connections/{{connection_id}}/test"),
+        ("POST", f"{_WA}/connections/{{connection_id}}/regenerate-key"),
+        ("POST", f"{_WA}/connections/test"),
+        ("GET", f"{_WA}/sources"),
+        ("POST", f"{_WA}/sources"),
+        ("GET", f"{_WA}/sources/{{source_id}}"),
+        ("PUT", f"{_WA}/sources/{{source_id}}"),
+        ("DELETE", f"{_WA}/sources/{{source_id}}"),
+        ("POST", f"{_WA}/sources/{{source_id}}/validate"),
+        ("POST", f"{_WA}/sources/{{source_id}}/preview"),
+        ("POST", f"{_WA}/experiments/{{experiment_id}}/runs"),
+        ("GET", f"{_WA}/experiments/{{experiment_id}}/runs"),
+        ("GET", f"{_WA}/runs/{{run_id}}"),
+    }
+)
+
+#: Routes that must be present, so the exact-set checks cannot pass vacuously.
 POSITIVE_CONTROL = frozenset(
     {
         ("GET", "/api/v1/auth/sso/saml/{config_id}/metadata"),
@@ -94,19 +122,20 @@ def test_the_positive_control_routes_are_mounted(route_table):
     )
 
 
-def warehouse_routes(table) -> list[tuple[str, str]]:
-    """Every route under the warehouse prefix, in any letter case.
+def warehouse_routes(table) -> set[tuple[str, str]]:
+    """Every route under the warehouse prefix, in any letter case, as served.
 
     Starlette matches paths case-sensitively, so ``/api/v1/Warehouse/x`` is a
     different route from ``/api/v1/warehouse/x`` -- and a case-sensitive
-    prefix check would let it through.  The comparison is on the lower-cased
-    path.
+    prefix check would let it through.  Selection is on the lower-cased path;
+    the comparison with the expected set is on the path as served, so a case
+    variant of an expected route is selected and then fails.
     """
-    return sorted(
+    return {
         (method, path)
         for method, path in table
         if path.lower().startswith(WAREHOUSE_PREFIX)
-    )
+    }
 
 
 def etl_routes(table) -> set[tuple[str, str]]:
@@ -123,10 +152,14 @@ def etl_routes(table) -> set[tuple[str, str]]:
     }
 
 
-def test_no_route_under_the_warehouse_prefix(route_table):
+def test_the_warehouse_routes_are_exactly_the_analysis_set(route_table):
     assert POSITIVE_CONTROL <= route_table, "positive control failed"
     found = warehouse_routes(route_table)
-    assert found == [], f"routes under {WAREHOUSE_PREFIX} (any case): {found}"
+    assert found == EXPECTED_WAREHOUSE_ROUTES, (
+        f"unexpected under {WAREHOUSE_PREFIX} (any case): "
+        f"{sorted(found - EXPECTED_WAREHOUSE_ROUTES)}; "
+        f"missing: {sorted(EXPECTED_WAREHOUSE_ROUTES - found)}"
+    )
 
 
 def test_the_etl_routes_are_exactly_the_five(route_table):
@@ -150,6 +183,10 @@ _PLANTED_WAREHOUSE = [
     ("GET", "/api/v1/warehouses"),
     ("GET", "/api/v1/Warehouse/x"),
     ("POST", "/api/v1/WAREHOUSE/clickhouse/query"),
+    ("POST", "/api/v1/warehouse/analysis/query"),
+    ("GET", "/api/v1/Warehouse/analysis/connectors"),
+    ("DELETE", "/api/v1/warehouse/analysis/runs/{run_id}"),
+    ("GET", "/api/v1/warehouse/analysis/connections/{connection_id}/credentials"),
 ]
 
 _PLANTED_ETL = [
@@ -161,20 +198,34 @@ _PLANTED_ETL = [
 ]
 
 
+def _expected_table() -> set[tuple[str, str]]:
+    return (
+        set(EXPECTED_ETL_ROUTES)
+        | set(EXPECTED_WAREHOUSE_ROUTES)
+        | set(POSITIVE_CONTROL)
+    )
+
+
 @pytest.mark.parametrize("planted", _PLANTED_WAREHOUSE)
 def test_the_warehouse_check_catches(planted):
-    table = set(EXPECTED_ETL_ROUTES) | set(POSITIVE_CONTROL) | {planted}
-    assert warehouse_routes(table) == [planted]
+    table = _expected_table() | {planted}
+    assert warehouse_routes(table) != EXPECTED_WAREHOUSE_ROUTES
+    assert planted in warehouse_routes(table)
+
+
+def test_the_warehouse_check_catches_a_missing_route():
+    table = _expected_table() - {("GET", f"{_WA}/runs/{{run_id}}")}
+    assert warehouse_routes(table) != EXPECTED_WAREHOUSE_ROUTES
 
 
 @pytest.mark.parametrize("planted", _PLANTED_ETL)
 def test_the_etl_check_catches(planted):
-    table = set(EXPECTED_ETL_ROUTES) | set(POSITIVE_CONTROL) | {planted}
+    table = _expected_table() | {planted}
     assert etl_routes(table) != EXPECTED_ETL_ROUTES
     assert planted in etl_routes(table)
 
 
 def test_the_checks_pass_on_the_expected_table():
-    table = set(EXPECTED_ETL_ROUTES) | set(POSITIVE_CONTROL)
-    assert warehouse_routes(table) == []
+    table = _expected_table()
+    assert warehouse_routes(table) == EXPECTED_WAREHOUSE_ROUTES
     assert etl_routes(table) == EXPECTED_ETL_ROUTES

@@ -3,7 +3,7 @@ The modules' registration entry point: ``modules.register(hooks)``.
 
 One ``register(hooks)`` that installs the optional modules into the core
 application through the seam in :mod:`backend.app.core.hooks`: the modules'
-settings, the nine model modules, the audit signer, the seven routers, the
+settings, the nine model modules, the audit signer, the eight routers, the
 OpenAPI tags, the five capabilities and the ten module names.
 ``backend/app/modules_loader.py`` calls it once per process, from whichever of
 ``modules.register`` and ``modules.backend.app.register`` it finds first
@@ -41,8 +41,7 @@ logger = logging.getLogger(__name__)
 
 #: The modules this registration provides -- every name in
 #: ``hooks.KNOWN_MODULES``, one per group of ``modules-manifest.txt``.
-#: ``warehouse`` provides only its models and tables while warehouse analysis
-#: is rebuilt (#312); it mounts no routes.
+#: ``warehouse`` provides the warehouse analysis routes (#312), all beta.
 PROVIDED_MODULES: tuple[str, ...] = (
     "workspaces",
     "hipaa",
@@ -106,6 +105,16 @@ MODULE_TAGS: list[dict[str, str]] = [
         ),
     },
     {
+        "name": "Warehouse analysis",
+        "description": (
+            "Beta. Frequentist analysis of an experiment on the customer's own "
+            "exposure and metric tables in BigQuery or Snowflake: connections, "
+            "sources (a table or view and a column mapping), previews and runs. "
+            "Each connector is available only once it has been verified against "
+            "a real account."
+        ),
+    },
+    {
         "name": "HIPAA",
         "description": (
             "EP-050: HIPAA Compliance — PHI audit logging, Business Associate Agreement (BAA) "
@@ -147,6 +156,7 @@ def mount_routers(router: Any) -> None:
     rbac = modules["rbac"]
     realtime_counters = modules["realtime_counters"]
     sso = modules["sso"]
+    warehouse_analysis = modules["warehouse_analysis"]
     workspaces = modules["workspaces"]
 
     # P2-A: RBAC Post-MVP Enhancements
@@ -170,8 +180,13 @@ def mount_routers(router: Any) -> None:
         tags=["ETL"],
         dependencies=_authenticated(),
     )
-    # Warehouse analysis has no routes while it is rebuilt (#312); the
-    # warehouse module keeps only its model and table.
+    # Warehouse analysis (#312), beta.
+    router.include_router(
+        warehouse_analysis.router,
+        prefix="/warehouse/analysis",
+        tags=["Warehouse analysis"],
+        dependencies=_authenticated(),
+    )
 
     # EP-034: Integration Config Management (Salesforce / Jira / GitHub)
     router.include_router(
@@ -230,6 +245,7 @@ ENDPOINT_MODULES: tuple[str, ...] = (
     "rbac",
     "realtime_counters",
     "sso",
+    "warehouse_analysis",
     "workspaces",
 )
 
@@ -254,7 +270,7 @@ def _import_endpoint_modules() -> None:
     loader clears the registries and the process starts cleanly on the core
     profile.  A failure at mount time leaves a registration that succeeded
     standing and costs the deployment its module routes.  Importing the
-    seven modules up front puts the likeliest failure -- an endpoint module
+    eight modules up front puts the likeliest failure -- an endpoint module
     that does not import -- on the side that rolls back.
     """
     _endpoint_modules()

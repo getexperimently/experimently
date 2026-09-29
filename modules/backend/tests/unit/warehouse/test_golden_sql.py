@@ -19,13 +19,17 @@ from sqlglot import exp
 
 from modules.backend.app.core.warehouse_identifiers import SourceFilter
 from modules.backend.app.services.warehouse_query_builder import (
+    ASSIGNMENT_PREVIEW_CTES,
     DIAGNOSTICS_CTES,
     METRIC_CTES,
+    METRIC_PREVIEW_CTES,
     SQL_DIALECTS,
     AnalysisWindow,
     AssignmentMapping,
     MetricMapping,
+    build_assignment_preview_query,
     build_diagnostics_query,
+    build_metric_preview_query,
     build_metric_query,
 )
 
@@ -87,7 +91,28 @@ TABLES = {
     },
 }
 
-KINDS = ("metric_mean", "metric_proportion", "diagnostics")
+KINDS = (
+    "metric_mean",
+    "metric_proportion",
+    "diagnostics",
+    "preview_assignment",
+    "preview_metric",
+)
+#: The CTE names each kind defines, and which of the two tables it reads.
+CTES = {
+    "metric_mean": METRIC_CTES,
+    "metric_proportion": METRIC_CTES,
+    "diagnostics": DIAGNOSTICS_CTES,
+    "preview_assignment": ASSIGNMENT_PREVIEW_CTES,
+    "preview_metric": METRIC_PREVIEW_CTES,
+}
+READS = {
+    "metric_mean": ("exposures", "orders"),
+    "metric_proportion": ("exposures", "orders"),
+    "diagnostics": ("exposures",),
+    "preview_assignment": ("exposures",),
+    "preview_metric": ("orders",),
+}
 CASES = [(dialect, kind) for dialect in sorted(SQL_DIALECTS) for kind in KINDS]
 
 
@@ -107,7 +132,9 @@ def build_case(dialect_name: str, kind: str):
     )
     if kind == "diagnostics":
         return build_diagnostics_query(dialect, assignment, KEY, WINDOW)
-    mean = kind == "metric_mean"
+    if kind == "preview_assignment":
+        return build_assignment_preview_query(dialect, assignment, WINDOW, KEY)
+    mean = kind in ("metric_mean", "preview_metric")
     metric = MetricMapping(
         table=t["orders"],
         unit_id=unit,
@@ -122,6 +149,8 @@ def build_case(dialect_name: str, kind: str):
             SourceFilter(amount, "is_not_null"),
         ),
     )
+    if kind == "preview_metric":
+        return build_metric_preview_query(dialect, metric, WINDOW)
     return build_metric_query(dialect, assignment, metric, KEY, WINDOW)
 
 
@@ -151,16 +180,13 @@ def test_golden_parses_as_one_select_with_no_unknown_function(
     root = statements[0]
     assert isinstance(root, exp.Select)
     assert [a.sql() for a in root.find_all(exp.Anonymous)] == []
-    ctes = METRIC_CTES if kind.startswith("metric") else DIAGNOSTICS_CTES
+    ctes = CTES[kind]
     read = {
         tuple(p for p in (t.catalog, t.db, t.name) if p)
         for t in root.find_all(exp.Table)
     }
     read = {parts for parts in read if not (len(parts) == 1 and parts[0] in ctes)}
-    expected = {TABLES[dialect]["exposures"]}
-    if kind.startswith("metric"):
-        expected.add(TABLES[dialect]["orders"])
-    assert read == expected
+    assert read == {TABLES[dialect][name] for name in READS[kind]}
 
 
 _TIMESTAMP_TEXT = re.compile(r"'(\d{4}-\d\d-\d\d \d\d:\d\d:\d\d(?:\.\d{6})?)([^']*)'")
@@ -182,7 +208,7 @@ def test_golden_literals_carry_utc_offset(dialect: str, kind: str) -> None:
     for sql in _golden_and_built(dialect, kind):
         literals = _TIMESTAMP_TEXT.findall(sql)
         # start and end on the exposures; start, end and the event cut on metrics.
-        assert len(literals) >= (2 if kind == "diagnostics" else 5), literals
+        assert len(literals) >= (5 if kind.startswith("metric") else 2), literals
         assert {suffix for _, suffix in literals} == {_OFFSET_SUFFIX[dialect]}
 
 
@@ -226,4 +252,46 @@ def test_unit_ids_are_cast_to_a_string_on_both_sides(dialect: str, kind: str) ->
     unit = TABLES[dialect]["columns"][0]
     cast = f"CAST({quote}{unit}{quote} AS {_STRING_TYPE[dialect]}) AS unit_id"
     for sql in _golden_and_built(dialect, kind):
-        assert sql.count(cast) == (1 if kind == "diagnostics" else 2), sql
+        assert sql.count(cast) == (2 if kind.startswith("metric") else 1), sql
+
+
+_EPOCH = {
+    "snowflake": "DATE_PART(EPOCH_SECOND, ",
+    "bigquery": "UNIX_SECONDS(",
+    "athena": "CAST(floor(to_unixtime(",
+}
+
+
+@pytest.mark.parametrize("dialect", sorted(SQL_DIALECTS))
+@pytest.mark.parametrize("kind", ["preview_assignment", "preview_metric"])
+def test_previews_return_aggregates_and_whole_epoch_seconds(
+    dialect: str, kind: str
+) -> None:
+    """A preview selects counts, MIN/MAX of the time as epoch seconds and, for
+    an assignment source, at most 51 labels -- never a column value itself."""
+    for sql in _golden_and_built(dialect, kind):
+        assert sql.count(_EPOCH[dialect]) == 2, sql
+        root = sqlglot.parse_one(sql, read=dialect)
+        outer = [e.alias_or_name for e in root.expressions]
+        if kind == "preview_metric":
+            expected = [
+                "total_rows",
+                "null_unit_rows",
+                "null_value_rows",
+                "earliest",
+                "latest",
+            ]
+        else:
+            expected = [
+                "total_rows",
+                "null_unit_rows",
+                "null_variant_rows",
+                "earliest",
+                "latest",
+                "variant",
+                "units",
+            ]
+            assert "LIMIT 51" in sql
+        if dialect == "snowflake":
+            expected.append("session_offset")
+        assert outer == expected

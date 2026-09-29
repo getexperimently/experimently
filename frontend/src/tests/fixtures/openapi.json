@@ -1273,6 +1273,106 @@
         "summary": "Calculate required sample size"
       }
     },
+    "/api/v1/warehouse/analysis/connections": {
+      "get": {
+        "operationId": "list_connections_api_v1_warehouse_analysis_connections_get",
+        "summary": "List warehouse connections"
+      },
+      "post": {
+        "operationId": "create_connection_api_v1_warehouse_analysis_connections_post",
+        "summary": "Create a warehouse connection"
+      }
+    },
+    "/api/v1/warehouse/analysis/connections/test": {
+      "post": {
+        "operationId": "test_unsaved_connection_api_v1_warehouse_analysis_connections_test_post",
+        "summary": "Test a warehouse connection before saving it"
+      }
+    },
+    "/api/v1/warehouse/analysis/connections/{connection_id}": {
+      "delete": {
+        "operationId": "delete_connection_api_v1_warehouse_analysis_connections__connection_id__delete",
+        "summary": "Delete a warehouse connection, its credentials and its sources"
+      },
+      "get": {
+        "operationId": "get_connection_api_v1_warehouse_analysis_connections__connection_id__get",
+        "summary": "Get a warehouse connection"
+      },
+      "put": {
+        "operationId": "update_connection_api_v1_warehouse_analysis_connections__connection_id__put",
+        "summary": "Update a warehouse connection"
+      }
+    },
+    "/api/v1/warehouse/analysis/connections/{connection_id}/regenerate-key": {
+      "post": {
+        "operationId": "regenerate_key_api_v1_warehouse_analysis_connections__connection_id__regenerate_key_post",
+        "summary": "Generate a new Snowflake key pair for a connection"
+      }
+    },
+    "/api/v1/warehouse/analysis/connections/{connection_id}/test": {
+      "post": {
+        "operationId": "test_connection_api_v1_warehouse_analysis_connections__connection_id__test_post",
+        "summary": "Test a saved warehouse connection"
+      }
+    },
+    "/api/v1/warehouse/analysis/connectors": {
+      "get": {
+        "operationId": "list_connectors_api_v1_warehouse_analysis_connectors_get",
+        "summary": "List the warehouse connectors and whether each is available"
+      }
+    },
+    "/api/v1/warehouse/analysis/experiments/{experiment_id}/runs": {
+      "get": {
+        "operationId": "list_runs_api_v1_warehouse_analysis_experiments__experiment_id__runs_get",
+        "summary": "List an experiment's warehouse analyses, newest first"
+      },
+      "post": {
+        "operationId": "start_run_api_v1_warehouse_analysis_experiments__experiment_id__runs_post",
+        "summary": "Start a warehouse analysis of an experiment"
+      }
+    },
+    "/api/v1/warehouse/analysis/runs/{run_id}": {
+      "get": {
+        "operationId": "get_run_api_v1_warehouse_analysis_runs__run_id__get",
+        "summary": "Get a warehouse analysis or preview, with its results and SQL"
+      }
+    },
+    "/api/v1/warehouse/analysis/sources": {
+      "get": {
+        "operationId": "list_sources_api_v1_warehouse_analysis_sources_get",
+        "summary": "List warehouse sources"
+      },
+      "post": {
+        "operationId": "create_source_api_v1_warehouse_analysis_sources_post",
+        "summary": "Create a warehouse source (a table or view and a column mapping)"
+      }
+    },
+    "/api/v1/warehouse/analysis/sources/{source_id}": {
+      "delete": {
+        "operationId": "delete_source_api_v1_warehouse_analysis_sources__source_id__delete",
+        "summary": "Delete a warehouse source"
+      },
+      "get": {
+        "operationId": "get_source_api_v1_warehouse_analysis_sources__source_id__get",
+        "summary": "Get a warehouse source"
+      },
+      "put": {
+        "operationId": "update_source_api_v1_warehouse_analysis_sources__source_id__put",
+        "summary": "Update a warehouse source"
+      }
+    },
+    "/api/v1/warehouse/analysis/sources/{source_id}/preview": {
+      "post": {
+        "operationId": "preview_source_api_v1_warehouse_analysis_sources__source_id__preview_post",
+        "summary": "Preview a source: counts and time bounds, no rows"
+      }
+    },
+    "/api/v1/warehouse/analysis/sources/{source_id}/validate": {
+      "post": {
+        "operationId": "validate_source_api_v1_warehouse_analysis_sources__source_id__validate_post",
+        "summary": "Check a source's table and columns against the warehouse's metadata"
+      }
+    },
     "/api/v1/wizard/drafts": {
       "get": {
         "operationId": "list_drafts_api_v1_wizard_drafts_get",
