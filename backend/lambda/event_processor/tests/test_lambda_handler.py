@@ -16,9 +16,53 @@ import base64
 import json
 import time
 from typing import Any, Dict
-from unittest.mock import Mock, patch
+from unittest.mock import MagicMock, Mock, patch
 
 import pytest
+
+# Every module-level client the handler's cold start sets. Each test starts
+# with all of them unset, so each one is a cold start against the fake boto3.
+_CLIENT_GLOBALS = (
+    ("handler", "s3_client"),
+    ("handler", "dynamodb_table"),
+    ("handler", "sqs_client"),
+    ("event_parser", "s3_client"),
+    ("s3_archiver", "s3_client"),
+    ("event_aggregator", "dynamodb_table"),
+    ("batch_processor", "sqs_client"),
+)
+
+
+@pytest.fixture(autouse=True)
+def fake_boto3(monkeypatch):
+    """The handler builds its S3, DynamoDB and SQS clients from a mock boto3.
+
+    These tests call ``handler()`` end to end, and its cold start used to build
+    real boto3 clients: archival sent ``PutObject`` to the real S3 endpoint
+    with dummy credentials, AWS refused it, the archiver retried and the
+    handler swallowed the error, so the tests passed while depending on the
+    network (#433). ``backend/tests/no_outbound_network.py`` now fails any
+    Lambda test that opens such a connection.
+    """
+    import importlib
+
+    import handler
+
+    # One fake client per service (``boto3.clients["s3"]``), answering the way
+    # the real one does when a call succeeds.
+    boto3 = MagicMock(name="boto3")
+    boto3.clients = {"s3": MagicMock(name="s3"), "sqs": MagicMock(name="sqs")}
+    boto3.clients["s3"].put_object.return_value = {
+        "ResponseMetadata": {"HTTPStatusCode": 200}
+    }
+    boto3.client.side_effect = lambda service, *args, **kwargs: boto3.clients[service]
+    table = boto3.resource.return_value.Table.return_value
+    table.update_item.return_value = {"Attributes": {}}
+    monkeypatch.setattr(handler, "boto3", boto3)
+    for module_name, attribute in _CLIENT_GLOBALS:
+        module = importlib.import_module(module_name)
+        monkeypatch.setattr(module, attribute, None, raising=False)
+    return boto3
 
 
 def create_kinesis_record(event_id: str, valid: bool = True) -> Dict[str, Any]:
@@ -53,7 +97,7 @@ def create_kinesis_record(event_id: str, valid: bool = True) -> Dict[str, Any]:
 class TestLambdaHandler:
     """Test suite for Lambda handler integration."""
 
-    def test_handler_processes_single_event_end_to_end(self):
+    def test_handler_processes_single_event_end_to_end(self, fake_boto3):
         """
         🔴 RED: Test complete end-to-end processing of a single event.
 
@@ -74,6 +118,10 @@ class TestLambdaHandler:
         assert response is not None
         assert "batchItemFailures" in response
         assert len(response["batchItemFailures"]) == 0  # No failures
+        # Archived through the (fake) S3 client, once, to the default bucket.
+        s3 = fake_boto3.clients["s3"]
+        assert s3.put_object.call_count == 1
+        assert s3.put_object.call_args.kwargs["Bucket"] == "event-archive"
 
     def test_handler_processes_batch_of_events(self):
         """
@@ -236,7 +284,7 @@ class TestLambdaHandler:
         assert "batchItemFailures" in response
         assert isinstance(response["batchItemFailures"], list)
 
-    def test_handler_initializes_aws_clients(self):
+    def test_handler_initializes_aws_clients(self, fake_boto3):
         """
         🔴 RED: Test that handler initializes AWS clients (S3, DynamoDB, SQS).
 
@@ -251,12 +299,12 @@ class TestLambdaHandler:
         from handler import handler
 
         # Act
-        with patch("handler.boto3") as mock_boto3:
-            mock_boto3.client.return_value = Mock()
-            response = handler(lambda_event, lambda_context)
+        handler(lambda_event, lambda_context)
 
-        # Assert - boto3 should be called to create clients
-        # We can't easily assert this without mocking, but the handler should initialize clients
+        # Assert - the cold start built the S3 and SQS clients and the DynamoDB table
+        created = sorted(c.args[0] for c in fake_boto3.client.call_args_list)
+        assert created == ["s3", "sqs"]
+        fake_boto3.resource.assert_called_once_with("dynamodb")
 
     def test_handler_logs_to_cloudwatch(self):
         """
@@ -322,7 +370,7 @@ class TestLambdaHandler:
         assert response is not None
         assert "error" in response or "batchItemFailures" in response
 
-    def test_handler_sets_environment_variables(self):
+    def test_handler_sets_environment_variables(self, fake_boto3, monkeypatch):
         """
         🔴 RED: Test that handler reads configuration from environment variables.
 
@@ -334,10 +382,8 @@ class TestLambdaHandler:
         lambda_event = {"Records": [create_kinesis_record("evt_1")]}
         lambda_context = Mock()
 
-        import os
-
-        os.environ["S3_BUCKET"] = "test-bucket"
-        os.environ["DLQ_URL"] = "https://sqs.us-east-1.amazonaws.com/123/dlq"
+        monkeypatch.setenv("S3_BUCKET", "test-bucket")
+        monkeypatch.setenv("DLQ_URL", "https://sqs.us-east-1.amazonaws.com/123/dlq")
 
         from handler import handler
 
@@ -346,6 +392,8 @@ class TestLambdaHandler:
 
         # Assert
         assert response is not None
+        s3 = fake_boto3.clients["s3"]
+        assert s3.put_object.call_args.kwargs["Bucket"] == "test-bucket"
 
     def test_handler_includes_request_id_in_logs(self):
         """
