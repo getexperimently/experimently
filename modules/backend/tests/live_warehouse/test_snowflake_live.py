@@ -101,7 +101,8 @@ def _adapter(config, key, recording, timeout: int) -> SnowflakeAdapter:
 def _verify_spend_cap(adapter: SnowflakeAdapter, config, recorder) -> None:
     """Refuse to go on unless the warehouse is under the named resource monitor.
 
-    ``SHOW WAREHOUSES`` reads metadata only; it does not resume the warehouse.
+    ``SHOW WAREHOUSES`` is a metadata command, so it is not expected to resume
+    the warehouse; the evidence records the state it reports.
     """
     name = config.warehouse  # passed the connection's fullmatch check
     _, rows, _ = adapter._execute(f"SHOW WAREHOUSES LIKE '{name}'", Deadline(60))

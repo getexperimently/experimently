@@ -7,9 +7,11 @@ by hand, never by CI::
 
     pytest -m warehouse_live modules/backend/tests/live_warehouse/
 
-Everything here that does not need a network is exercised by
 ``modules/backend/tests/unit/warehouse/test_live_check_harness.py``, which CI
-runs.
+runs, exercises what here needs no network -- configuration, caps, the
+evidence writer, the recording wrapper, the fixture data and the comparisons
+-- but not ``git_state`` or ``package_versions``, which only fill in the
+evidence.
 
 Credentials
 -----------
@@ -116,8 +118,9 @@ SF_REQUIRED = (
 # -- spend caps -------------------------------------------------------------------
 
 MIB = 1024 * 1024
-#: The per-query byte cap when none is given.  The two fixture tables are about
-#: 35 MB together.
+#: The per-query byte cap when none is given.  The two fixture CSVs are 22.2 MB
+#: and 23.5 MB (``write_fixture_csvs``); what BigQuery bills for reading the
+#: loaded tables is not measured here -- the check records it.
 BQ_DEFAULT_MAX_BYTES = 100 * MIB
 #: No per-query cap above this is accepted.
 BQ_HARD_MAX_BYTES = 1024 * MIB
@@ -125,7 +128,8 @@ BQ_HARD_MAX_BYTES = 1024 * MIB
 BQ_SESSION_BUDGET_BYTES = 2048 * MIB
 #: The cap the refusal checks run under (QA v1: 10 MB).
 BQ_TAMPER_MAX_BYTES = 10 * MIB
-#: A public table far larger than :data:`BQ_TAMPER_MAX_BYTES`, in the US.
+#: A US public table expected to read far more than :data:`BQ_TAMPER_MAX_BYTES`
+#: (not measured here: the check asserts it from the dry-run estimate first).
 BQ_LARGE_PUBLIC_TABLE = "bigquery-public-data.usa_names.usa_1910_current"
 BQ_LARGE_PUBLIC_SQL = f"SELECT COUNT(DISTINCT name) AS n FROM `{BQ_LARGE_PUBLIC_TABLE}`"
 
@@ -133,7 +137,9 @@ SF_DEFAULT_TIMEOUT_SECONDS = 60
 SF_HARD_MAX_TIMEOUT_SECONDS = 120
 #: The statement limit the time-limit check runs under (QA v1: 10 s).
 SF_TAMPER_TIMEOUT_SECONDS = 10
-SF_LONG_RUNNING_SQL = "SELECT COUNT(*) AS n FROM TABLE(GENERATOR(ROWCOUNT => 1e12))"
+SF_LONG_RUNNING_SQL = (
+    "SELECT COUNT(*) AS n FROM TABLE(GENERATOR(ROWCOUNT => 1000000000000))"
+)
 
 #: Fixed names of the fixture tables the founder loads (Snowflake folds them to
 #: upper case; the check resolves case through the table's own metadata).
