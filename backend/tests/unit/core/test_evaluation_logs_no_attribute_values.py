@@ -370,10 +370,12 @@ def test_an_exception_is_logged_by_type_only(logs, monkeypatch):
     assert logs.with_marker() == []
 
 
-def test_contains_all_on_a_string_still_raises(logs):
-    """Unchanged here: a string value with non-string items raises TypeError."""
-    with pytest.raises(TypeError):
-        apply_operator(OperatorType.CONTAINS_ALL, MARKER, [1])
+@pytest.mark.parametrize(
+    "operator", [OperatorType.CONTAINS_ALL, OperatorType.CONTAINS_ANY]
+)
+def test_contains_on_a_string_with_non_string_items_does_not_match(logs, operator):
+    """A string value with non-string items no longer raises (#270), and logs no value."""
+    assert apply_operator(operator, MARKER, [1]) is False
     assert logs.with_marker() == []
 
 
