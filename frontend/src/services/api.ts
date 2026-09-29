@@ -450,7 +450,11 @@ export async function apiFetch<T = unknown>(
       detail !== undefined
         ? messageForDetail(status, detail)
         : response.statusText || messageForDetail(status, undefined);
-    if (status >= 500 && requestId) message = `${message} (Request ID: ${requestId})`;
+    // A detail that already names this request's id (the API's own 500
+    // handler does) would otherwise show it twice (#401).
+    if (status >= 500 && requestId && !message.toLowerCase().includes(requestId.toLowerCase())) {
+      message = `${message} (Request ID: ${requestId})`;
+    }
   }
 
   throw new ApiError({ status, detail, message, requestId });

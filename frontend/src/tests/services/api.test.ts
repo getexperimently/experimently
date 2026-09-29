@@ -360,6 +360,43 @@ describe('server errors (#72)', () => {
     expect(err.detail).toBe('Module not available');
   });
 
+  describe('a 5xx JSON detail that already names the request id (#401)', () => {
+    function withRequestId(status: number, detail: string, requestId?: string): Response {
+      const headers: Record<string, string> = { 'content-type': 'application/json' };
+      if (requestId !== undefined) headers['x-request-id'] = requestId;
+      return jsonResponse(status, { detail }, {
+        headers: { get: (name: string) => headers[name.toLowerCase()] ?? null },
+      } as Partial<Response>);
+    }
+
+    it('a detail without the id still gets the suffix', async () => {
+      mockFetch.mockResolvedValueOnce(withRequestId(500, 'Database unavailable', 'abc-1'));
+      const err = await rejection(apiFetch('/x'));
+      expect(err.message).toBe('Database unavailable (Request ID: abc-1)');
+    });
+
+    it('a detail that already contains the id is not suffixed again', async () => {
+      const detail = 'Internal server error (request ID: ABC-1)';
+      mockFetch.mockResolvedValueOnce(withRequestId(500, detail, 'abc-1'));
+      const err = await rejection(apiFetch('/x'));
+      expect(err.message).toBe(detail);
+      expect(err.requestId).toBe('abc-1');
+    });
+
+    it('a detail naming a different id still gets the suffix', async () => {
+      mockFetch.mockResolvedValueOnce(withRequestId(500, 'Failed (request ID: xyz-9)', 'abc-1'));
+      const err = await rejection(apiFetch('/x'));
+      expect(err.message).toBe('Failed (request ID: xyz-9) (Request ID: abc-1)');
+    });
+
+    it('without a request id header the detail is unchanged', async () => {
+      mockFetch.mockResolvedValueOnce(withRequestId(500, 'Internal server error (request ID: abc-1)'));
+      const err = await rejection(apiFetch('/x'));
+      expect(err.message).toBe('Internal server error (request ID: abc-1)');
+      expect(err.requestId).toBeUndefined();
+    });
+  });
+
   it('a 4xx message is unchanged by a request id', async () => {
     mockFetch.mockResolvedValueOnce(
       jsonResponse(404, { detail: 'Not found' }, {
