@@ -1,0 +1,16 @@
+{
+  "_provenance": {
+    "source": "vendor documentation",
+    "vendor_docs_row": "3",
+    "url": "https://docs.snowflake.com/en/developer-guide/sql-api/reference",
+    "note": "GET /api/v2/statements/{handle} while the statement runs: 202 and a QueryStatus.",
+    "real_run_id": null
+  },
+  "status": 202,
+  "body": {
+    "code": "333334",
+    "message": "UPSTREAM-SENTINEL-sf-7a2c in progress",
+    "statementHandle": "019c06a4-0000-df4f-0000-00100006589e",
+    "statementStatusUrl": "/api/v2/statements/019c06a4-0000-df4f-0000-00100006589e"
+  }
+}

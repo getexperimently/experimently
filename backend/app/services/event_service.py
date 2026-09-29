@@ -136,7 +136,9 @@ class EventService:
             self.db.refresh(event)
             return event
         except Exception as e:
-            logger.error(f"Error tracking event: {e!s}")
+            # The type only: a database error's text repeats the row's
+            # parameters, the user id among them.
+            logger.error(f"Error tracking event: {type(e).__name__}")
             self.db.rollback()
             raise
 
@@ -213,7 +215,9 @@ class EventService:
                 self.db.refresh(event)
             return events
         except Exception as e:
-            logger.error(f"Error tracking events batch: {e!s}")
+            # The type only: a database error's text repeats the row's
+            # parameters, the user id among them.
+            logger.error(f"Error tracking events batch: {type(e).__name__}")
             self.db.rollback()
             raise
 

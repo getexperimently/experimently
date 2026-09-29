@@ -1,0 +1,16 @@
+{
+  "_provenance": {
+    "source": "vendor documentation",
+    "vendor_docs_row": "3",
+    "url": "https://docs.snowflake.com/en/developer-guide/sql-api/reference",
+    "note": "408: the statement ran past its time limit and was cancelled (the documented example body).",
+    "real_run_id": null
+  },
+  "status": 408,
+  "body": {
+    "code": "333334",
+    "message": "UPSTREAM-SENTINEL-sf-7a2c timeout",
+    "statementHandle": "019c06a4-0000-df4f-0000-00100006589e",
+    "statementStatusUrl": "/api/v2/statements/019c06a4-0000-df4f-0000-00100006589e"
+  }
+}

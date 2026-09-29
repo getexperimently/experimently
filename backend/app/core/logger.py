@@ -17,8 +17,9 @@ without callers having to pass a bound logger around.
 import contextvars
 import logging
 import os
+import re
 import sys
-from typing import Any
+from typing import Any, Optional
 
 import structlog
 
@@ -44,6 +45,25 @@ def bind_log_context(**kwargs: Any) -> None:
 def get_log_context() -> dict:
     """Return a copy of the current async-task log context."""
     return _log_context.get().copy()
+
+
+#: The shape a request id must have to be shown to a user in a response body.
+#: The same rule the SSO module applies to the ids it shows.
+REQUEST_ID_PATTERN = re.compile(r"[A-Za-z0-9._:-]{1,128}")
+
+
+def current_request_id() -> Optional[str]:
+    """This request's id (the one on its ``X-Request-ID``), if it is safe to show.
+
+    ``RequestIDMiddleware`` binds the id into the log context: the client's
+    ``X-Request-ID`` when it sent one, otherwise a fresh UUID4.  Returns None
+    when nothing is bound (no middleware), when the value is not a string, or
+    when it does not match ``REQUEST_ID_PATTERN`` in full.
+    """
+    value = _log_context.get().get("request_id")
+    if isinstance(value, str) and REQUEST_ID_PATTERN.fullmatch(value):
+        return value
+    return None
 
 
 # ---------------------------------------------------------------------------

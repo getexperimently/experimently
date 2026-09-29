@@ -21,9 +21,9 @@ level to INFO and replaces the root handlers, so DEBUG records would never be
 created and "nothing at DEBUG contains the marker" would hold vacuously.
 
 The marker is only ever an attribute value, never the ``user_id``: this
-change is about attribute values. ``user_id`` still appears in other log
-lines (the per-assignment INFO lines, the flag service's error line), which
-are tracked separately.
+change is about attribute values. That no evaluation or assignment line logs
+the ``user_id`` is pinned by
+``backend/tests/unit/services/test_assignment_evaluation_logs_no_user_id.py``.
 """
 
 from __future__ import annotations

@@ -26,12 +26,13 @@ This document describes the high-level technical architecture of the platform: h
        │               │               │
        ▼               ▼               ▼
   PostgreSQL        Redis           DynamoDB
-  (Aurora)      (ElastiCache)    (Real-time counters)
-                                       │
-                                       ▼
-                              Kinesis → Lambda → OpenSearch
-                                  (Analytics pipeline)
+  (Aurora)      (ElastiCache)    (real-time counters,
+                                  counters module)
 ```
+
+A full-profile deployment also creates a Kinesis stream, Firehose, an S3 data lake, an
+OpenSearch domain and Glue ETL jobs. The API does not write to them today; see
+[Analytics Pipeline](#analytics-pipeline).
 
 ---
 
@@ -101,31 +102,13 @@ Redis serves two purposes:
 
 ## Lambda Functions
 
-Three Lambda functions handle high-throughput, latency-sensitive operations:
-
-### Experiment Assignment Lambda
-
-Evaluates experiment targeting rules and assigns users to variants. Called directly by SDK clients for server-side assignment.
-
-- Input: `experiment_key`, `user_id`, `attributes`
-- Output: `variant_key`, assignment metadata
-- Uses consistent hash bucketing for deterministic results
-
-### Event Processor Lambda
-
-Processes incoming tracking events (impressions and conversions) at scale. Triggered by events arriving on the Kinesis stream.
-
-- Validates events against known experiment/metric configurations
-- Writes processed events to OpenSearch for analytics queries
-- Updates DynamoDB counters atomically
-
-### Feature Flag Evaluation Lambda
-
-Evaluates feature flag targeting rules and rollout percentages for a given user. Called by SDK clients for server-side flag evaluation.
-
-- Input: `flag_key`, `user_id`, `attributes`
-- Output: `enabled` (boolean), flag metadata
-- Results are cached at the Lambda layer using an in-memory LRU cache
+**No Lambda function serves requests or processes events.** SDKs call the API for assignment
+(`POST /api/v1/tracking/assign`) and flag evaluation (`GET /api/v1/feature-flags/evaluate/{key}`).
+The stacks deploy three functions: `DatabaseAccessLambda` (compute stack) and
+`AnalyticsLambda` (analytics stack, full profile) are placeholders whose inline code returns
+200 and does nothing, and `ETLTriggerLambda` (Glue ETL stack, full profile) starts the Glue
+jobs daily. The assignment, event-processor and flag-evaluation code under `backend/lambda/`
+is not deployed by any stack. See [AWS Integration](../integrations/aws.md#lambda-functions).
 
 ---
 
@@ -135,71 +118,64 @@ Impression and conversion counts are tracked in DynamoDB using atomic `ADD` oper
 
 ### Why DynamoDB for Counters
 
-Traditional relational databases struggle with high-frequency counter updates because each update requires a read-modify-write cycle. DynamoDB's atomic `ADD` operation performs the increment server-side, making it safe for concurrent writes from many Lambda instances.
+Traditional relational databases struggle with high-frequency counter updates because each update requires a read-modify-write cycle. DynamoDB's atomic `ADD` operation performs the increment server-side, making it safe for concurrent writes from many API tasks.
 
 ### Counter Schema
 
-```text
-partition_key: experiment_id
-sort_key:      variant_id#metric_key
-impressions:   (atomic counter)
-conversions:   (atomic counter)
-```
+The table is `experiment-counters-<env>`, keyed by `pk` and `sk`, with an
+`experiment-id-index` global secondary index
+(`modules/infrastructure/cdk/stacks/dynamodb_counters_stack.py`).
 
-The metrics collector scheduler reads from DynamoDB every 15 minutes and writes aggregated results to PostgreSQL for historical storage and statistical analysis.
+The bandit scheduler reads these counters first when it updates a bandit's weights, and falls
+back to PostgreSQL when they are unavailable (`backend/app/core/bandit_scheduler.py`).
 
 ---
 
 ## Analytics Pipeline
 
-Raw events flow through a pipeline for aggregation and search:
+Tracked events are stored in PostgreSQL: `POST /api/v1/tracking/track` and
+`/tracking/batch` write rows to the `events` table, and every analysis reads them from there.
+
+The full profile's analytics stack creates a pipeline beside that, which the API does not feed
+today:
 
 ```text
-Client App
-    |
-    v
-POST /api/v1/tracking/track
-    |
-    v
-Kinesis Data Stream
-    |
-    v
-Event Processor Lambda
-    |
-    +---> DynamoDB (atomic counters, real-time)
-    |
-    +---> OpenSearch (full event index, for ad-hoc queries)
+Kinesis Data Stream ──> Firehose ──> S3 data lake ──> Glue ETL (daily)
+        │
+        └──> AnalyticsLambda (placeholder: returns 200, processes nothing)
+
+OpenSearch domain: created; nothing writes to it
 ```
-
-**Kinesis** buffers events and decouples ingestion from processing. The platform can handle spikes without dropping events.
-
-**OpenSearch** provides the backing store for dimensional analysis, segment breakdowns, and ad-hoc event queries.
 
 ---
 
 ## Split URL Testing (Lambda@Edge)
 
-Split URL experiments use a different flow from standard A/B tests. Instead of modifying a component within a page, the entire URL path changes between variants. This is handled at the CDN layer:
+Split URL experiments send each variant's users to a different URL. The split-URL module ships
+a CloudFront construct (`modules/infrastructure/constructs/split_url_distribution.py`) with a
+Lambda@Edge `viewer-request` router. **No stack uses it**: `infrastructure/cdk/app.py` creates
+no CloudFront distribution, so a deployment has it only if you add it to a stack yourself.
+
+The router (`modules/lambda/split_url_router/handler.py`):
 
 ```text
-User Request
+Viewer request
     |
-    v
-CloudFront Distribution
+    +-- Read the experiment config from the X-Split-URL-Config request header
+    |     - Missing, invalid, or fewer than two variants: pass the request through
     |
-    v
-Lambda@Edge (viewer-request event)
+    +-- Read the assignment cookie
+    |     - Holds a known variant URL: pass through
+    |     - Absent or unknown: hash the client fingerprint (IP + User-Agent) to pick a variant
     |
-    +-- Read cookie exp_{experiment_key}
-    |     - Present: use stored variant
-    |     - Absent: consistent-hash bucket user_id → assign variant
+    +-- Return 302 to the variant URL
     |
-    +-- Return 302 redirect to variant URL
-    |
-    +-- Set-Cookie: exp_{key}=variant; Max-Age=31536000; Secure; SameSite=Lax
+    +-- Set-Cookie with Max-Age of cookie_ttl_days (default 30 days)
 ```
 
-The Lambda@Edge function is deployed to `us-east-1` (a requirement for Lambda@Edge) and runs globally on every CloudFront PoP. The `split_url_config` is fetched from the API at cold start and cached for 60 seconds.
+The construct does not set `X-Split-URL-Config`, so how the configuration reaches the router is
+left to you. Lambda@Edge functions must be deployed in `us-east-1`. See
+[Split URL testing](../api/split-url.md).
 
 ---
 
@@ -258,12 +234,12 @@ exists but `app.py` does not use it. See [AWS CDK Deployment](../self-hosting/cd
 | `experimentation-database-<env>` | Aurora PostgreSQL cluster, parameter group, KMS key, security group |
 | `experimentation-redis-<env>` | ElastiCache Redis replication group, subnet group, security group |
 | `experimentation-dynamodb-<env>` | Five DynamoDB tables (assignments, events, experiments, feature flags, overrides) |
-| `experimentation-compute-<env>` | ECS cluster, task security group, the database-access Lambda |
+| `experimentation-compute-<env>` | ECS cluster, task security group, a placeholder Lambda (`DatabaseAccessLambda`) |
 | `experimentation-fargate-<env>` | ALB, HTTPS + test listeners, blue/green target groups, the API's Fargate service, CodeDeploy application and deployment group, auto-scaling; the dashboard's ECS service and target group |
 | `experimentation-migrations-<env>` | One-off ECS task definition that runs the alembic upgrade |
 | `experimentation-monitoring-<env>` | CloudWatch dashboards, alarms, log groups, metric filters, SNS topic |
 | `experimentation-dynamodb-counters-<env>` | **Full profile only** — the real-time experiment-counters table |
-| `experimentation-analytics-<env>` | **Full profile only** — Kinesis stream, Firehose, S3 data lake, OpenSearch domain, consumer Lambda |
+| `experimentation-analytics-<env>` | **Full profile only** — Kinesis stream, Firehose, S3 data lake, OpenSearch domain, a placeholder consumer Lambda |
 | `experimentation-glue-etl-<env>` | **Full profile only** — Glue database and crawler, two ETL jobs, Athena results bucket, daily trigger |
 
 A core deployment builds the first nine; a full one builds all twelve. The

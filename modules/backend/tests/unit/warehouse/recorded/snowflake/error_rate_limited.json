@@ -1,0 +1,14 @@
+{
+  "_provenance": {
+    "source": "vendor documentation",
+    "vendor_docs_row": "3",
+    "url": "https://docs.snowflake.com/en/developer-guide/sql-api/reference",
+    "note": "429: the number of requests hit the rate limit. The body is not on this page; replace with a real recording at the flip.",
+    "real_run_id": null
+  },
+  "status": 429,
+  "body": {
+    "code": "000000",
+    "message": "UPSTREAM-SENTINEL-sf-7a2c too many requests"
+  }
+}

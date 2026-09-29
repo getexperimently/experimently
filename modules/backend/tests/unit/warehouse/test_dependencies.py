@@ -140,3 +140,41 @@ def test_the_bigquery_connector_signs_with_pyjwt_from_the_image_lock():
     assert "pyjwt" in _pins(ROOT / "backend" / "requirements" / "runtime.lock")
     imported = {m for m, _ in _imports(MODULES_APP / "warehouse" / "bigquery.py")}
     assert "jwt" in imported
+
+
+#: Snowflake's client libraries.  The Snowflake connector signs its own JWT
+#: with PyJWT and speaks the SQL API through the warehouse client, so none of
+#: these is needed, and each would bring its own HTTP stack.
+SNOWFLAKE_CLIENT_PACKAGES = (
+    "snowflake-connector-python",
+    "snowflake-sqlalchemy",
+    "snowflake-snowpark-python",
+)
+
+
+def test_no_snowflake_client_library_ships():
+    for shipped in (
+        ROOT / "modules" / "requirements.txt",
+        ROOT / "modules" / "requirements.lock",
+        ROOT / "backend" / "requirements" / "runtime.txt",
+        ROOT / "backend" / "requirements" / "runtime.lock",
+    ):
+        pins = _pins(shipped)
+        for package in SNOWFLAKE_CLIENT_PACKAGES:
+            assert package not in pins, (shipped, package)
+
+
+def test_no_application_module_imports_a_snowflake_client_library():
+    offenders = [
+        (str(path.relative_to(ROOT)), module)
+        for path in MODULES_APP.rglob("*.py")
+        for module, _ in _imports(path)
+        if module.split(".")[0] == "snowflake"
+    ]
+    assert offenders == []
+
+
+def test_the_snowflake_connector_signs_with_pyjwt_from_the_image_lock():
+    assert "pyjwt" in _pins(ROOT / "backend" / "requirements" / "runtime.lock")
+    imported = {m for m, _ in _imports(MODULES_APP / "warehouse" / "snowflake.py")}
+    assert "jwt" in imported

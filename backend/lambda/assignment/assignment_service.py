@@ -203,10 +203,9 @@ class AssignmentService:
 
         # Check global holdout
         if self.check_global_holdout(user_id, holdout_config):
-            logger.info(
+            logger.debug(
                 "User excluded by global holdout",
                 extra={
-                    "user_id": user_id,
                     "experiment_id": experiment_config.experiment_id,
                 },
             )
@@ -216,10 +215,9 @@ class AssignmentService:
         if self.check_mutual_exclusion(
             user_id, experiment_config.experiment_id, exclusion_config
         ):
-            logger.info(
+            logger.debug(
                 "User excluded by mutual exclusion",
                 extra={
-                    "user_id": user_id,
                     "experiment_id": experiment_config.experiment_id,
                 },
             )
@@ -230,10 +228,9 @@ class AssignmentService:
             if not self.evaluate_targeting_rules(
                 experiment_config.targeting_rules, context
             ):
-                logger.info(
+                logger.debug(
                     "User excluded by targeting rules",
                     extra={
-                        "user_id": user_id,
                         "experiment_id": experiment_config.experiment_id,
                     },
                 )
@@ -255,10 +252,9 @@ class AssignmentService:
         )
 
         if variant:
-            logger.info(
+            logger.debug(
                 "Assigned user to variant",
                 extra={
-                    "user_id": user_id,
                     "experiment_id": experiment_config.experiment_id,
                     "variant": variant,
                 },
@@ -493,10 +489,9 @@ class AssignmentService:
         )
 
         if success:
-            logger.info(
+            logger.debug(
                 "Stored assignment",
                 extra={
-                    "user_id": assignment.user_id,
                     "experiment_id": assignment.experiment_id,
                     "variant": assignment.variant,
                 },
@@ -541,10 +536,9 @@ class AssignmentService:
                 context=item.get("context"),
             )
 
-            logger.info(
+            logger.debug(
                 "Retrieved existing assignment",
                 extra={
-                    "user_id": user_id,
                     "experiment_id": experiment_id,
                     "variant": assignment.variant,
                 },
@@ -554,8 +548,8 @@ class AssignmentService:
 
         except Exception as e:
             logger.error(
-                f"Failed to get assignment: {e!s}",
-                extra={"user_id": user_id, "experiment_id": experiment_id},
+                f"Failed to get assignment: {type(e).__name__}",
+                extra={"experiment_id": experiment_id},
             )
             return None
 
@@ -670,10 +664,9 @@ class AssignmentService:
         )
 
         if variant:
-            logger.info(
+            logger.debug(
                 "MAB weighted assignment",
                 extra={
-                    "user_id": user_id,
                     "experiment_id": experiment.experiment_id,
                     "variant": variant,
                     "algorithm": bandit_weights.algorithm,
