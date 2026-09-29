@@ -14,6 +14,13 @@ pytestmark = [pytest.mark.integration, pytest.mark.modules]
 A, D, AN, V = "ADMIN", "DEVELOPER", "ANALYST", "VIEWER"
 ROLES = (A, D, AN, V)
 
+#: Fields of a response that only some of the roles allowed on the route are
+#: given; every other role gets the field as null.  One entry per field, with
+#: the roles that get it (founder decision D34: a run's SQL is returned to
+#: ANALYST and above).  test_run_sql_roles.py derives its expectations from
+#: this table.
+FIELD_ROLES = {"statements": ("ADMIN", "DEVELOPER", "ANALYST")}
+
 
 def _setup(wh):
     admin = wh.as_(A)

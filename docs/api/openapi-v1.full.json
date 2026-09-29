@@ -12109,6 +12109,7 @@
                 "type": "null"
               }
             ],
+            "description": "Each statement the run sent: its kind, dialect, SHA-256 and SQL. Returned only to the ADMIN, DEVELOPER and ANALYST roles (a superuser counts as ADMIN); for VIEWER, or a user with no role, it is null.",
             "title": "Statements"
           },
           "status": {
