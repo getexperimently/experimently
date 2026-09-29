@@ -61,8 +61,9 @@ The API uses two types of authentication:
     with `POST /api/v1/auth/login`; an administrator creates accounts and resets
     passwords.
 
+Step 1: Register a new user:
+
 ```bash
-# 1. Register a new user
 curl -X POST "http://localhost:8000/api/v1/auth/signup" \
   -H "Content-Type: application/json" \
   -d '{
@@ -72,29 +73,40 @@ curl -X POST "http://localhost:8000/api/v1/auth/signup" \
     "given_name": "John",
     "family_name": "Doe"
   }'
+```
 
-# 2. Confirm registration
+Step 2: Confirm registration:
+
+```bash
 curl -X POST "http://localhost:8000/api/v1/auth/confirm" \
   -H "Content-Type: application/json" \
   -d '{
     "username": "john.doe",
     "confirmation_code": "123456"
   }'
+```
 
-# 3. Login to get access token
+Step 3: Login to get access token:
+
+```bash
 curl -X POST "http://localhost:8000/api/v1/auth/token" \
   -H "Content-Type: application/x-www-form-urlencoded" \
   -d "username=john.doe&password=SecurePass123!"
 ```
 
 ### 2. Managing Experiments
+
+Step 1: List experiments:
+
 ```bash
-# 1. List experiments
 curl -X GET "http://localhost:8000/api/v1/experiments/" \
   -H "Authorization: Bearer your_access_token" \
   -H "Content-Type: application/json"
+```
 
-# 2. Create a new experiment
+Step 2: Create a new experiment:
+
+```bash
 curl -X POST "http://localhost:8000/api/v1/experiments/" \
   -H "Authorization: Bearer your_access_token" \
   -H "Content-Type: application/json" \
@@ -110,21 +122,29 @@ curl -X POST "http://localhost:8000/api/v1/experiments/" \
       "browsers": ["chrome", "firefox"]
     }
   }'
+```
 
-# 3. Get experiment results
+Step 3: Get experiment results:
+
+```bash
 curl -X GET "http://localhost:8000/api/v1/experiments/123/results" \
   -H "Authorization: Bearer your_access_token" \
   -H "Content-Type: application/json"
 ```
 
 ### 3. Feature Flag Management
+
+Step 1: List feature flags:
+
 ```bash
-# 1. List feature flags
 curl -X GET "http://localhost:8000/api/v1/feature-flags/" \
   -H "Authorization: Bearer your_access_token" \
   -H "Content-Type: application/json"
+```
 
-# 2. Create a feature flag
+Step 2: Create a feature flag:
+
+```bash
 curl -X POST "http://localhost:8000/api/v1/feature-flags/" \
   -H "Authorization: Bearer your_access_token" \
   -H "Content-Type: application/json" \
@@ -139,22 +159,30 @@ curl -X POST "http://localhost:8000/api/v1/feature-flags/" \
       "user_segments": ["premium"]
     }
   }'
+```
 
-# 3. Get feature flags for a user (client-side)
+Step 3: Get feature flags for a user (client-side):
+
+```bash
 curl -X GET "http://localhost:8000/api/v1/feature-flags/user/123" \
   -H "X-API-Key: your_api_key" \
   -H "Content-Type: application/json"
 ```
 
 ### 4. Tracking Events
+
+Step 1: Assign a user to an experiment (sticky; records an exposure event):
+
 ```bash
-# 1. Assign a user to an experiment (sticky; records an exposure event)
 curl -X POST "http://localhost:8000/api/v1/tracking/assign" \
   -H "X-API-Key: your_api_key" \
   -H "Content-Type: application/json" \
   -d '{"experiment_key": "hero_banner", "user_id": "123", "context": {"device": "mobile"}}'
+```
 
-# 2. Track a conversion for that experiment (variant is resolved from the assignment)
+Step 2: Track a conversion for that experiment (variant is resolved from the assignment):
+
+```bash
 curl -X POST "http://localhost:8000/api/v1/tracking/track" \
   -H "X-API-Key: your_api_key" \
   -H "Content-Type: application/json" \
@@ -165,20 +193,28 @@ curl -X POST "http://localhost:8000/api/v1/tracking/track" \
     "value": 99.99,
     "metadata": {"product_id": "ABC123", "payment_method": "credit_card"}
   }'
+```
 
-# 3. Get user assignments
+Step 3: Get user assignments:
+
+```bash
 curl -X GET "http://localhost:8000/api/v1/tracking/assignments/123" \
   -H "X-API-Key: your_api_key"
 ```
 
 ### 5. Admin Operations
+
+Step 1: List all users (superuser only):
+
 ```bash
-# 1. List all users (superuser only)
 curl -X GET "http://localhost:8000/api/v1/admin/users" \
   -H "Authorization: Bearer your_access_token" \
   -H "Content-Type: application/json"
+```
 
-# 2. Create a new user (superuser only)
+Step 2: Create a new user (superuser only):
+
+```bash
 curl -X POST "http://localhost:8000/api/v1/users/" \
   -H "Authorization: Bearer your_access_token" \
   -H "Content-Type: application/json" \
@@ -676,39 +712,57 @@ includes the error's details.
 ## Error Handling Examples
 
 ### 1. Authentication Errors
+
+Invalid credentials:
+
 ```bash
-# Invalid credentials
 curl -X POST "http://localhost:8000/api/v1/auth/token" \
   -H "Content-Type: application/x-www-form-urlencoded" \
   -d "username=wrong@example.com&password=wrong_password"
+```
 
-# Response (401 Unauthorized)
+Response (401 Unauthorized):
+
+```json
 {
   "detail": "Incorrect username or password"
 }
+```
 
-# Expired token
+Expired token:
+
+```bash
 curl -X GET "http://localhost:8000/api/v1/users/me" \
   -H "Authorization: Bearer expired_token"
+```
 
-# Response (401 Unauthorized)
+Response (401 Unauthorized):
+
+```json
 {
   "detail": "Token has expired"
 }
 ```
 
 ### 2. Validation Errors
+
+Invalid experiment creation:
+
 ```bash
-# Invalid experiment creation
 curl -X POST "http://localhost:8000/api/v1/experiments/" \
   -H "Authorization: Bearer your_access_token" \
   -H "Content-Type: application/json" \
   -d '{
-    "name": "",  # Empty name
-    "experiment_type": "INVALID_TYPE"  # Invalid type
+    "name": "",
+    "experiment_type": "INVALID_TYPE"
   }'
+```
 
-# Response (422 Unprocessable Entity)
+Both fields are invalid on purpose: `name` is empty and `experiment_type` is not a type.
+
+Response (422 Unprocessable Entity):
+
+```json
 {
   "detail": [
     {
@@ -726,12 +780,17 @@ curl -X POST "http://localhost:8000/api/v1/experiments/" \
 ```
 
 ### 3. Rate Limiting
+
+Too many requests:
+
 ```bash
-# Too many requests
 curl -X GET "http://localhost:8000/api/v1/experiments/" \
   -H "Authorization: Bearer your_access_token"
+```
 
-# Response (429 Too Many Requests)
+Response (429 Too Many Requests):
+
+```json
 {
   "detail": "Too many requests. Please try again in 60 seconds."
 }

@@ -208,11 +208,15 @@ active_experiments = dynamodb_access.get_experiments_by_status("active")
 
 To deploy the DynamoDB tables:
 
-```bash
-# Deploy only the DynamoDB stack
-cdk deploy experimentation-dynamodb-dev
+Deploy only the DynamoDB stack:
 
-# Or deploy all stacks
+```bash
+cdk deploy experimentation-dynamodb-dev
+```
+
+Or deploy all stacks:
+
+```bash
 cdk deploy --all
 ```
 

@@ -47,10 +47,14 @@ Ruff replaced black, isort and flake8. One tool, one config block
 in CI on a formatting difference:
 
 ```bash
-grep -A1 ruff-pre-commit .pre-commit-config.yaml | grep rev   # the hook
-grep '^ruff==' backend/requirements.txt                       # CI and the venv
-ruff --version                                                # what you have
+grep -A1 ruff-pre-commit .pre-commit-config.yaml | grep rev
+grep '^ruff==' backend/requirements.txt
+ruff --version
 ```
+
+- `grep -A1 ruff-pre-commit .pre-commit-config.yaml | grep rev`: the hook
+- `grep '^ruff==' backend/requirements.txt`: CI and the venv
+- `ruff --version`: what you have
 
 ## This is a subset of the gate, not the gate
 
@@ -61,9 +65,10 @@ Semgrep. Those live in `make lint` and in CI.
 So a clean `git commit` is not a green pull request. Before pushing:
 
 ```bash
-make lint     # ruff, import-linter, reuse, the lock checks, eslint, tsc,
-              # hadolint, actionlint — exactly what the `lint` job runs
+make lint
 ```
+
+- `make lint`: ruff, import-linter, reuse, the lock checks, eslint, tsc, hadolint, actionlint — exactly what the `lint` job runs
 
 `main` requires 20 checks to merge; `lint` is one of them. See
 [Development Guidelines](../development/guidelines.md) for the full list.

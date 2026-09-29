@@ -215,13 +215,17 @@ Streams the full audit log (or a filtered subset) as either JSON or CSV. Suitabl
 
 **Example Requests**
 
+JSON export — last 30 days:
+
 ```bash
-# JSON export — last 30 days
 curl -X GET "https://your-platform.example.com/api/v1/compliance/export?format=json&start_date=2026-02-01T00:00:00Z" \
   -H "Authorization: Bearer your_admin_token" \
   --output audit_export.json
+```
 
-# CSV export — all DELETE events
+CSV export — all DELETE events:
+
+```bash
 curl -X GET "https://your-platform.example.com/api/v1/compliance/export?format=csv&action=DELETE" \
   -H "Authorization: Bearer your_admin_token" \
   --output deletes.csv

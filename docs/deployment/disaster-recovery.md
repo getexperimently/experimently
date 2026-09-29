@@ -73,8 +73,9 @@ No action is needed. ECS automatically:
 
 ### Verification
 
+Verify replacement task is running:
+
 ```bash
-# Verify replacement task is running
 aws ecs describe-services \
   --cluster "experimentation-$ENV" \
   --services "experimentation-backend-$ENV" \
@@ -96,14 +97,18 @@ running-task count either. Use an uptime check from outside AWS on `/health` to 
 
 ### Immediate Response
 
+Step 1: Check why tasks are failing:
+
 ```bash
-# Step 1: Check why tasks are failing
 aws ecs describe-services \
   --cluster "experimentation-$ENV" \
   --services "experimentation-backend-$ENV" \
   --query 'services[0].{Status:status,Running:runningCount,Events:events[:10]}'
+```
 
-# Step 2: Check stopped task reasons
+Step 2: Check stopped task reasons:
+
+```bash
 STOPPED_TASKS=$(aws ecs list-tasks \
   --cluster "experimentation-$ENV" \
   --desired-status STOPPED \
@@ -114,8 +119,11 @@ aws ecs describe-tasks \
   --cluster "experimentation-$ENV" \
   --tasks $STOPPED_TASKS \
   --query 'tasks[*].{StopReason:stoppedReason,ContainerReason:containers[0].reason,ExitCode:containers[0].exitCode}'
+```
 
-# Step 3: Check recent application logs for the crash reason
+Step 3: Check recent application logs for the crash reason:
+
+```bash
 aws logs filter-log-events \
   --log-group-name "/ecs/experimentation-backend-$ENV" \
   --filter-pattern ERROR \
@@ -170,13 +178,17 @@ to the old writer is replaced the next time it is used.
 
 ### Verify Failover Completed
 
+Check cluster status:
+
 ```bash
-# Check cluster status
 aws rds describe-db-clusters \
   --db-cluster-identifier "$CLUSTER" \
   --query 'DBClusters[0].{Status:Status,Endpoint:Endpoint,ReaderEndpoint:ReaderEndpoint,Members:DBClusterMembers[*].{Role:IsClusterWriter,ID:DBInstanceIdentifier,Status:DBInstanceStatus}}'
+```
 
-# Watch until status is "available" and a new writer is identified
+Watch until status is "available" and a new writer is identified:
+
+```bash
 watch -n 10 "aws rds describe-db-clusters \
   --db-cluster-identifier $CLUSTER \
   --query 'DBClusters[0].{Status:Status,Writer:DBClusterMembers[?IsClusterWriter].DBInstanceIdentifier|[0]}'"
@@ -201,13 +213,17 @@ newest manual snapshot (`pre-deploy-...` or `pre-migration-...`) is the recovery
 
 ### Immediate Response
 
+Step 1: Confirm cluster is down:
+
 ```bash
-# Step 1: Confirm cluster is down
 aws rds describe-db-clusters \
   --db-cluster-identifier "$CLUSTER" \
   --query 'DBClusters[0].{Status:Status,LatestRestorableTime:LatestRestorableTime}'
+```
 
-# Step 2: List the most recent snapshots, automated and manual
+Step 2: List the most recent snapshots, automated and manual:
+
+```bash
 aws rds describe-db-cluster-snapshots \
   --db-cluster-identifier "$CLUSTER" \
   --query 'sort_by(DBClusterSnapshots, &SnapshotCreateTime)[-5:].{ID:DBClusterSnapshotIdentifier,Time:SnapshotCreateTime,Type:SnapshotType,Status:Status}'
@@ -228,9 +244,9 @@ AURORA_SECURITY_GROUP=$(aws rds describe-db-clusters --db-cluster-identifier "$C
 
 Then restore:
 
+Restore the cluster to just before the failure. Replace YYYY-MM-DDTHH:MM:SSZ with the timestamp just before the failure:
+
 ```bash
-# Restore the cluster to just before the failure
-# Replace YYYY-MM-DDTHH:MM:SSZ with the timestamp just before the failure
 aws rds restore-db-cluster-to-point-in-time \
   --source-db-cluster-identifier "$CLUSTER" \
   --db-cluster-identifier "$CLUSTER-restored" \
@@ -240,8 +256,11 @@ aws rds restore-db-cluster-to-point-in-time \
 
 aws rds wait db-cluster-available \
   --db-cluster-identifier "$CLUSTER-restored"
+```
 
-# Add a writer instance (prod's instances are db.r5.large)
+Add a writer instance (prod's instances are db.r5.large):
+
+```bash
 aws rds create-db-instance \
   --db-instance-identifier "$CLUSTER-restored-1" \
   --db-cluster-identifier "$CLUSTER-restored" \
@@ -294,8 +313,9 @@ The API is designed to keep serving without Redis. Two parts of that are pinned 
 
 ### Immediate Response
 
+Step 1: Check ElastiCache replication group status:
+
 ```bash
-# Step 1: Check ElastiCache replication group status
 aws elasticache describe-replication-groups \
   --replication-group-id "experimentation-redis-$ENV-redis" \
   --query 'ReplicationGroups[0].{Status:Status,MemberClusters:MemberClusters,AutomaticFailover:AutomaticFailover}'
@@ -344,25 +364,35 @@ A second region needs all of the following, and the CDK creates none of them:
 `GLOBAL_CLUSTER_ID` and `SECONDARY_CLUSTER_ARN` are the Aurora Global Database you created,
 if you created one.
 
+Step 1: Confirm it is a regional outage, not an application issue:
+
 ```bash
-# Step 1: Confirm it is a regional outage, not an application issue
 aws health describe-events \
   --filter eventTypeCategories=issue \
   --region us-east-1
+```
 
-# Step 2: Promote Aurora secondary cluster to primary (only if you configured an Aurora Global Database)
+Step 2: Promote Aurora secondary cluster to primary (only if you configured an Aurora Global Database):
+
+```bash
 aws rds failover-global-cluster \
   --global-cluster-identifier "$GLOBAL_CLUSTER_ID" \
   --target-db-cluster-identifier "$SECONDARY_CLUSTER_ARN"
+```
 
-# Step 3: Deploy CDK stacks in us-east-1
+Step 3: Deploy CDK stacks in us-east-1:
+
+```bash
 cd infrastructure/cdk
 export ENVIRONMENT=prod CDK_DEFAULT_REGION=us-east-1 AWS_REGION=us-east-1
 export CERTIFICATE_ARN="$US_EAST_1_CERTIFICATE_ARN" PUBLIC_BASE_URL="https://app.$DOMAIN"
 export ALARM_EMAIL=ops@your-domain.com
 cdk deploy --all
+```
 
-# Step 4: Update DNS to point to us-east-1 ALB
+Step 4: Update DNS to point to us-east-1 ALB:
+
+```bash
 aws route53 change-resource-record-sets \
   --hosted-zone-id <hosted-zone-id> \
   --change-batch '{
@@ -376,8 +406,11 @@ aws route53 change-resource-record-sets \
       }
     }]
   }'
+```
 
-# Step 5: Verify services are running in us-east-1
+Step 5: Verify services are running in us-east-1:
+
+```bash
 curl -f https://api.experimentation.example.com/health
 ```
 
@@ -411,17 +444,27 @@ See [Responding to an incident on your deployment](../security/incident-response
 
 Key immediate actions:
 
+Disable suspected compromised account:
+
 ```bash
-# Disable suspected compromised account
 UPDATE experimentation.users SET is_active = false WHERE email = '<suspected>';
+```
 
-# Revoke API keys
+Revoke API keys:
+
+```bash
 UPDATE experimentation.api_keys SET is_active = false WHERE user_id = '<user-uuid>';
+```
 
-# If AWS credentials are compromised, deactivate immediately
+If AWS credentials are compromised, deactivate immediately:
+
+```bash
 aws iam update-access-key --access-key-id <key-id> --status Inactive
+```
 
-# Take forensic snapshot before any remediation
+Take forensic snapshot before any remediation:
+
+```bash
 aws rds create-db-cluster-snapshot \
   --db-cluster-identifier "$CLUSTER" \
   --db-cluster-snapshot-identifier incident-$(date +%Y%m%d)-pre-remediation
@@ -441,8 +484,9 @@ The API service auto-scales, with a floor equal to its task count (3 in prod). S
 the floor to 0 and suspends scaling before stopping the tasks, so that scaling does not start
 them again. Step 5 puts both back.
 
+Step 1: STOP the application immediately to prevent further writes to corrupted state:
+
 ```bash
-# Step 1: STOP the application immediately to prevent further writes to corrupted state
 aws application-autoscaling register-scalable-target \
   --service-namespace ecs \
   --scalable-dimension ecs:service:DesiredCount \
@@ -454,25 +498,33 @@ aws ecs update-service \
   --cluster "experimentation-$ENV" \
   --service "experimentation-backend-$ENV" \
   --desired-count 0
+```
 
-# Step 2: Confirm the extent of data loss
-# Connect to Aurora and check key tables
+Step 2: Confirm the extent of data loss. Connect to Aurora and check key tables:
+
+```sql
 SELECT table_name, COUNT(*)
 FROM information_schema.tables t
 JOIN experimentation.experiments e ON true
 GROUP BY table_name;
+```
 
-# Step 3: Use PITR to restore to just before the data loss event
-# (See Scenario 4 for full PITR procedure)
+Step 3: Use PITR to restore to just before the data loss event (see Scenario 4 for the full
+PITR procedure):
+
+```bash
 aws rds restore-db-cluster-to-point-in-time \
   --source-db-cluster-identifier "$CLUSTER" \
   --db-cluster-identifier "$CLUSTER-pre-loss" \
   --restore-to-time <timestamp-before-loss>
+```
 
-# Step 4: Validate restored data
-# Connect to restored cluster and verify row counts match expectations
+Step 4: Validate the restored data. Connect to the restored cluster and verify that the row
+counts match expectations.
 
-# Step 5: Point the application at the restored cluster (Scenario 4), then scale back up
+Step 5: Point the application at the restored cluster (Scenario 4), then scale back up:
+
+```bash
 aws ecs update-service \
   --cluster "experimentation-$ENV" \
   --service "experimentation-backend-$ENV" \
@@ -501,24 +553,30 @@ Escalation: Data loss incidents require immediate escalation to Engineering Lead
 
 ### Monthly DB Restore Test Procedure
 
+Step 1: Find latest automated snapshot:
+
 ```bash
-# 1. Find latest automated snapshot
 aws rds describe-db-cluster-snapshots \
   --db-cluster-identifier "$CLUSTER" \
   --snapshot-type automated \
   --query 'sort_by(DBClusterSnapshots, &SnapshotCreateTime)[-1].DBClusterSnapshotIdentifier'
+```
 
-# 2. Restore to a test cluster in TEST_SUBNET_GROUP, then add an instance (Scenario 4)
+Step 2: Restore to a test cluster in TEST_SUBNET_GROUP, then add an instance (Scenario 4):
+
+```bash
 aws rds restore-db-cluster-from-snapshot \
   --db-cluster-identifier experimentation-staging-dr-test \
   --snapshot-identifier <snapshot-id> \
   --engine aurora-postgresql \
   --db-subnet-group-name "$TEST_SUBNET_GROUP"
+```
 
-# 3. Connect to restored cluster and verify
-# Expected: all tables present, row counts match production within expected delta
+Step 3: Connect to restored cluster and verify. Expected: all tables present, row counts match production within expected delta.
 
-# 4. Clean up
+Step 4: Clean up:
+
+```bash
 aws rds delete-db-cluster \
   --db-cluster-identifier experimentation-staging-dr-test \
   --skip-final-snapshot

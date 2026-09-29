@@ -26,9 +26,12 @@ version of this page listed 43 pins as the "contents" of `base.txt`, starting
 To see what is pinned:
 
 ```bash
-grep -c '==' backend/requirements.txt      # how many
-grep '^fastapi' backend/requirements.txt   # a specific one
+grep -c '==' backend/requirements.txt
+grep '^fastapi' backend/requirements.txt
 ```
+
+- `grep -c '==' backend/requirements.txt`: how many
+- `grep '^fastapi' backend/requirements.txt`: a specific one
 
 Note that `requirements/prod.txt` is **not** what the container installs — the
 image installs `backend/requirements.txt`. The prod profile is for running the
@@ -61,9 +64,11 @@ There is no setup script. It is three commands, from the repository root:
 
 ```bash
 python3.11 -m venv venv
-source venv/bin/activate          # Windows: venv\Scripts\activate
+source venv/bin/activate
 pip install -r backend/requirements.txt
 ```
+
+- `source venv/bin/activate`: on Windows, `venv\Scripts\activate`
 
 `backend/requirements.txt` is the single source of truth for pins, and it is
 what every CI job and the developer venv install. The profile files above are
@@ -74,10 +79,14 @@ extras.
 ### Selecting a profile
 
 ```bash
-pip install -r requirements/dev.txt    # base + ipython, debugpy
-pip install -r requirements/test.txt   # base (test deps are pinned in base)
-pip install -r requirements/prod.txt   # base + gunicorn
+pip install -r requirements/dev.txt
+pip install -r requirements/test.txt
+pip install -r requirements/prod.txt
 ```
+
+- `pip install -r requirements/dev.txt`: base + ipython, debugpy
+- `pip install -r requirements/test.txt`: base (test deps are pinned in base)
+- `pip install -r requirements/prod.txt`: base + gunicorn
 
 ### Development Mode Installation
 

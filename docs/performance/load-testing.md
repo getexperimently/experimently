@@ -61,15 +61,21 @@ backend/tests/performance/
 
 ### Prerequisites
 
+Activate the virtual environment:
+
 ```bash
-# Activate the virtual environment
 source venv/bin/activate
+```
 
-# Ensure dependencies are installed (includes locust==2.17.0)
+Ensure dependencies are installed (includes locust==2.17.0):
+
+```bash
 pip install -r backend/requirements.txt
+```
 
-# Start the backend API server (in a separate terminal)
-# from the repository root
+Start the backend API server (in a separate terminal) from the repository root:
+
+```bash
 ENVIRONMENT=development uvicorn backend.app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
@@ -77,16 +83,25 @@ ENVIRONMENT=development uvicorn backend.app.main:app --reload --host 0.0.0.0 --p
 
 ```bash
 cd "$(git rev-parse --show-toplevel)"
+```
 
-# Baseline test
+Baseline test:
+
+```bash
 locust -f backend/tests/performance/locustfiles/api_load_test.py \
        --host http://localhost:8000
+```
 
-# Spike test
+Spike test:
+
+```bash
 locust -f backend/tests/performance/locustfiles/spike_test.py \
        --host http://localhost:8000
+```
 
-# Endurance test
+Endurance test:
+
+```bash
 locust -f backend/tests/performance/locustfiles/endurance_test.py \
        --host http://localhost:8000
 ```
@@ -98,8 +113,11 @@ and spawn rate, and click **Start swarming**.
 
 ```bash
 cd "$(git rev-parse --show-toplevel)"
+```
 
-# Baseline — 50 users, 60 seconds
+Baseline — 50 users, 60 seconds:
+
+```bash
 locust -f backend/tests/performance/locustfiles/api_load_test.py \
        --headless \
        --users 50 \
@@ -107,12 +125,10 @@ locust -f backend/tests/performance/locustfiles/api_load_test.py \
        --run-time 60s \
        --host http://localhost:8000 \
        --csv /tmp/locust_baseline
-
-# Results are written to:
-#   /tmp/locust_baseline_stats.csv
-#   /tmp/locust_baseline_stats_history.csv
-#   /tmp/locust_baseline_failures.csv
 ```
+
+Results are written to `/tmp/locust_baseline_stats.csv`, `/tmp/locust_baseline_stats_history.csv`
+and `/tmp/locust_baseline_failures.csv`.
 
 ### Option C: CI runner (validates SLAs automatically)
 
@@ -125,10 +141,9 @@ python backend/tests/performance/run_load_tests.py \
     --users 50 \
     --spawn-rate 10 \
     --duration 60s
-
-# Exit code 0 = all SLAs met
-# Exit code 1 = SLA violation(s) detected
 ```
+
+It exits 0 when every SLA is met and 1 when any is violated.
 
 The runner can also start a local server automatically:
 
@@ -289,14 +304,23 @@ To update an existing target (e.g., after a performance improvement):
 ```bash
 source venv/bin/activate
 export APP_ENV=test TESTING=true
+```
 
-# Test the SLA spec definitions
+Test the SLA spec definitions:
+
+```bash
 python -m pytest backend/tests/performance/test_specs.py -v
+```
 
-# Test the validators (percentile calculations, SLA checks, CSV parsing, reporting)
+Test the validators (percentile calculations, SLA checks, CSV parsing, reporting):
+
+```bash
 python -m pytest backend/tests/performance/test_validators.py -v
+```
 
-# Run both together
+Run both together:
+
+```bash
 python -m pytest backend/tests/performance/test_specs.py \
                  backend/tests/performance/test_validators.py -v
 ```

@@ -76,6 +76,9 @@ Verified against a live backend: **yes (2026-09-11)**.
 
 ```bash
 npm install
-npm test          # 51 Jest tests (fetch mocked; builds ../js first)
-npm run build     # tsc → dist/ (CommonJS + .d.ts)
+npm test
+npm run build
 ```
+
+- `npm test`: 51 Jest tests (fetch mocked; builds ../js first)
+- `npm run build`: tsc → dist/ (CommonJS + .d.ts)

@@ -152,9 +152,16 @@ Runs the four contract steps (sticky assignment, flag evaluation, keyed track, k
 plus a 2-event batch) against a live backend and prints one JSON line:
 
 ```bash
-cd sdk/elixir && mix deps.get            # once
+cd sdk/elixir && mix deps.get
 EXPERIMENTLY_API_KEY=<key> mix run examples/contract_smoke.exs
-# {"sdk":"elixir","assign":{"variant_name":"control","is_control":true,"sticky":true},"flag":{"enabled":true},"track":{"ok":true},"fanout":{"ok":true}}
+```
+
+- `cd sdk/elixir && mix deps.get`: once
+
+It prints:
+
+```text
+{"sdk":"elixir","assign":{"variant_name":"control","is_control":true,"sticky":true},"flag":{"enabled":true},"track":{"ok":true},"fanout":{"ok":true}}
 ```
 
 Env: `EXPERIMENTLY_API_URL` (default `http://localhost:8000`), `EXPERIMENTLY_API_KEY` (required),
@@ -170,8 +177,10 @@ development machine)**.
 ```bash
 cd sdk/elixir
 mix deps.get
-mix test          # ExUnit, HTTP mocked through HttpBehaviour modules
+mix test
 ```
+
+- `mix test`: ExUnit, HTTP mocked through HttpBehaviour modules
 
 The ExUnit suite (client, facade, cache, HTTP helpers, hash parity) was rewritten for the
 public-API contract but **not executed here** — no `mix` on the development machine.

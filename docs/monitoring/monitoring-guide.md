@@ -189,8 +189,9 @@ ensures every request has a unique `X-Request-ID` header.
 
 ```bash
 curl -H "X-Request-ID: my-trace-id-123" https://api.example.com/api/v1/health
-# Response will include: X-Request-ID: my-trace-id-123
 ```
+
+The response carries the same header back: `X-Request-ID: my-trace-id-123`.
 
 ---
 
@@ -373,8 +374,11 @@ APP_ENV=staging uvicorn backend.app.main:app --reload
 ```bash
 source venv/bin/activate
 export APP_ENV=test TESTING=true
+```
 
-# All monitoring / logging tests
+All monitoring / logging tests:
+
+```bash
 python -m pytest \
   backend/tests/unit/core/test_metrics.py \
   backend/tests/unit/core/test_logger.py \

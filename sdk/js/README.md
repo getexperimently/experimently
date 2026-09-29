@@ -95,6 +95,9 @@ Verified against a live backend: **yes (2026-09-11)**.
 
 ```bash
 npm install
-npm test          # 171 Jest tests (fetch mocked; the local evaluator runs against tests/sdk-contract/ruleset-vectors.json)
-npm run build     # tsc → dist/ (CommonJS + .d.ts)
+npm test
+npm run build
 ```
+
+- `npm test`: 171 Jest tests (fetch mocked; the local evaluator runs against tests/sdk-contract/ruleset-vectors.json)
+- `npm run build`: tsc → dist/ (CommonJS + .d.ts)

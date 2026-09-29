@@ -55,8 +55,9 @@ before any `cdk deploy`. `PUBLIC_BASE_URL=https://app.<domain>`.
 ```bash
 aws acm describe-certificate --certificate-arn "$CERTIFICATE_ARN" \
   --region us-west-2 --query Certificate.Status
-# "ISSUED" -- stop here if not
 ```
+
+It must print `"ISSUED"`. If it prints anything else, stop here.
 
 After the Fargate stack exists, point `app.<domain>` at the load balancer
 (output `ALBDnsName` of `experimentation-fargate-<env>`). Nothing in the CDK

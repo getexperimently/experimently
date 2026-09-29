@@ -12,8 +12,10 @@ Full reference: [`docs/sdk/go.md`](../../docs/sdk/go.md).
 ## Installation
 
 ```bash
-go get github.com/getexperimently/experimently/sdk/go   # Go 1.21+
+go get github.com/getexperimently/experimently/sdk/go
 ```
+
+- `go get github.com/getexperimently/experimently/sdk/go`: Go 1.21+
 
 ```go
 import exp "github.com/getexperimently/experimently/sdk/go"
@@ -133,7 +135,12 @@ Every request carries `X-API-Key`, `Content-Type: application/json` and `Accept:
 
 ```bash
 cd sdk/go && go run ./examples/contract_smoke
-# {"sdk":"go","assign":{"variant_name":"control","is_control":true,"sticky":true},"flag":{"enabled":true},"track":{"ok":true},"fanout":{"ok":true}}
+```
+
+It prints:
+
+```text
+{"sdk":"go","assign":{"variant_name":"control","is_control":true,"sticky":true},"flag":{"enabled":true},"track":{"ok":true},"fanout":{"ok":true}}
 ```
 
 Env: `EXPERIMENTLY_API_URL` (default `http://localhost:8000`), `EXPERIMENTLY_API_KEY` (required),
@@ -147,7 +154,9 @@ Verified against a live backend: yes (2026-09-11)
 ## Tests
 
 ```bash
-cd sdk/go && go vet ./... && go test -race ./...   # 51 tests, HTTP mocked with httptest
+cd sdk/go && go vet ./... && go test -race ./...
 ```
+
+- `cd sdk/go && go vet ./... && go test -race ./...`: 51 tests, HTTP mocked with httptest
 
 A longer walkthrough lives in `examples/main.go` (`go run ./examples`).

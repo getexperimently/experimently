@@ -70,8 +70,13 @@ comes from
 
 ```bash
 gh api repos/<owner>/<repo>/actions/oidc/customization/sub
-# {"use_default":true,"use_immutable_subject":true,
-#  "sub_claim_prefix":"repo:getexperimently@328439352/experimently@1367480368"}
+```
+
+It prints:
+
+```text
+{"use_default":true,"use_immutable_subject":true,
+ "sub_claim_prefix":"repo:getexperimently@328439352/experimently@1367480368"}
 ```
 
 and a fork or a copy of this repository has a different one: read yours with

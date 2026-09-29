@@ -132,7 +132,12 @@ It is exported as a utility only — nothing in the SDK uses it to decide a vari
 ```bash
 cd sdk/flutter && flutter pub get
 EXPERIMENTLY_API_KEY=<key> dart run example/contract_smoke.dart
-# {"sdk":"flutter","assign":{"variant_name":"control","is_control":true,"sticky":true},"flag":{"enabled":true},"track":{"ok":true},"fanout":{"ok":true}}
+```
+
+It prints:
+
+```text
+{"sdk":"flutter","assign":{"variant_name":"control","is_control":true,"sticky":true},"flag":{"enabled":true},"track":{"ok":true},"fanout":{"ok":true}}
 ```
 
 Env: `EXPERIMENTLY_API_URL` (default `http://localhost:8000`), `EXPERIMENTLY_API_KEY` (required),
@@ -151,8 +156,10 @@ on a machine with the Flutter SDK.
 ```bash
 cd sdk/flutter
 flutter pub get
-flutter test          # 70 tests: client (HTTP faked with package:http MockClient), hash vectors, SharedPreferences store
+flutter test
 ```
+
+- `flutter test`: 70 tests: client (HTTP faked with package:http MockClient), hash vectors, SharedPreferences store
 
 The test suite and the contract smoke were reviewed line by line for the server-side rewire but
 **not executed** on the development machine (no `dart`/`flutter` installed); run them on a machine

@@ -23,18 +23,25 @@ absolute `-c` path — the config resolves both branches from any directory.
 
 To apply all pending migrations to the latest schema version:
 
-```bash
-# Always activate your virtualenv first
-source venv/bin/activate
+Always activate your virtualenv first:
 
-# Set required environment variables
+```bash
+source venv/bin/activate
+```
+
+Set required environment variables:
+
+```bash
 export POSTGRES_DB=experimentation
 export POSTGRES_SCHEMA=experimentation
 export POSTGRES_SERVER=localhost
 export POSTGRES_USER=postgres
 export POSTGRES_PASSWORD=your-password
+```
 
-# Run migrations
+Run migrations:
+
+```bash
 python -m alembic -c backend/app/db/alembic.ini upgrade heads
 ```
 
@@ -105,9 +112,9 @@ This is the revision ID of the last migration that was applied to the database.
 
 When you add or modify SQLAlchemy models, generate a migration script:
 
+Which head does this revision extend? (A core checkout has only one and can leave --head out entirely.)
+
 ```bash
-# Which head does this revision extend?  (A core checkout has only one and can
-# leave --head out entirely.)
 python -m alembic -c backend/app/db/alembic.ini heads
 
 python -m alembic -c backend/app/db/alembic.ini revision --autogenerate \
@@ -151,11 +158,15 @@ python -m alembic -c backend/app/db/alembic.ini upgrade ab1234567890
 
 You can also use relative steps:
 
-```bash
-# Apply the next one migration
-python -m alembic -c backend/app/db/alembic.ini upgrade +1
+Apply the next one migration:
 
-# Apply the next three migrations
+```bash
+python -m alembic -c backend/app/db/alembic.ini upgrade +1
+```
+
+Apply the next three migrations:
+
+```bash
 python -m alembic -c backend/app/db/alembic.ini upgrade +3
 ```
 
@@ -171,12 +182,16 @@ The modules branch has two revisions: `modules_0001_rbac` and, after it,
 `modules_0002_warehouse_analysis`. `modules@-1` unapplies the newest one only;
 `modules@-2` unapplies both, newest first.
 
+The modules branch, one revision back (modules_0002_warehouse_analysis):
+
 ```bash
-# the modules branch, one revision back (modules_0002_warehouse_analysis)
 python -m alembic -c backend/app/db/alembic.ini downgrade modules@-1
 python -m alembic -c backend/app/db/alembic.ini downgrade modules@-2
+```
 
-# one step back on the core chain
+One step back on the core chain:
+
+```bash
 python -m alembic -c backend/app/db/alembic.ini downgrade <core revision id>
 ```
 
@@ -233,11 +248,15 @@ The `stamp` command marks a migration as applied without actually running its SQ
 - You are setting up Alembic on an existing database
 - You need to skip a problematic migration after fixing it manually
 
-```bash
-# Mark current database state as "head"
-python -m alembic -c backend/app/db/alembic.ini stamp heads
+Mark current database state as "head":
 
-# Mark as a specific revision
+```bash
+python -m alembic -c backend/app/db/alembic.ini stamp heads
+```
+
+Mark as a specific revision:
+
+```bash
 python -m alembic -c backend/app/db/alembic.ini stamp ab1234567890
 ```
 
@@ -327,8 +346,9 @@ On macOS, always use `localhost` (not `127.0.0.1`) for the database host when co
 
 In production (ECS Fargate), migrations are run as a one-off ECS task before the new application version is deployed:
 
+Run as a one-off ECS task:
+
 ```bash
-# Run as a one-off ECS task
 aws ecs run-task \
   --cluster experimentation-<env> \
   --task-definition experimentation-migrate-<env> \

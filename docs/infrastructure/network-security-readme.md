@@ -56,14 +56,21 @@ This Terraform configuration sets up a robust network infrastructure with compre
 
 ## Deployment Instructions
 
+Initialize Terraform:
+
 ```bash
-# Initialize Terraform
 terraform init
+```
 
-# Review planned changes
+Review planned changes:
+
+```bash
 terraform plan
+```
 
-# Apply configuration
+Apply configuration:
+
+```bash
 terraform apply
 ```
 

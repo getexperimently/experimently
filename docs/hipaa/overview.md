@@ -90,17 +90,27 @@ All endpoints at `/api/v1/hipaa` require ADMIN role (except `/encrypt` which als
 
 Add these settings to your environment or AWS Secrets Manager:
 
+Required for PHI encryption:
+
 ```bash
-# Required for PHI encryption
 PHI_ENCRYPTION_KEY=<generate with PHIEncryption.generate_key()>
+```
 
-# Enable HIPAA mode
+Enable HIPAA mode:
+
+```bash
 HIPAA_ENABLED=true
+```
 
-# Restrict to HIPAA-compliant AWS regions
+Restrict to HIPAA-compliant AWS regions:
+
+```bash
 HIPAA_ALLOWED_REGIONS=["us-east-1","us-west-2"]
+```
 
-# Audit log retention (HIPAA requires 6 years)
+Audit log retention (HIPAA requires 6 years):
+
+```bash
 HIPAA_AUDIT_LOG_RETENTION_YEARS=6
 ```
 

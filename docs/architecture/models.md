@@ -292,9 +292,12 @@ To apply migrations to your database:
 
 3. **Downgrade to a previous version**:
    ```bash
-   alembic downgrade -1         # Downgrade by one revision
-   alembic downgrade <revision> # Downgrade to specific revision
+   alembic downgrade -1
+   alembic downgrade <revision>
    ```
+
+   - `alembic downgrade -1`: Downgrade by one revision
+   - `alembic downgrade <revision>`: Downgrade to specific revision
 
 4. **Check current migration status**:
    ```bash

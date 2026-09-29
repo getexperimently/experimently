@@ -38,10 +38,12 @@ This document outlines the development standards, workflows, and best practices 
     ```bash
     cd backend
     python -m venv venv
-    source venv/bin/activate  # On Windows: venv\Scripts\activate
+    source venv/bin/activate
     pip install -r requirements.txt
     pre-commit install
     ```
+
+    - `source venv/bin/activate`: on Windows, `venv\Scripts\activate`
 
 3. Set up the frontend:
 
@@ -52,15 +54,17 @@ This document outlines the development standards, workflows, and best practices 
 
 4. Start the local development environment:
 
+    From the project root:
+
     ```bash
-    # From the project root
     docker-compose up -d
     ```
 
 5. Run the backend server:
 
+    From the repository root:
+
     ```bash
-    # from the repository root
     export ENVIRONMENT=development
     python -m backend.app.db.bootstrap
     uvicorn backend.app.main:app --reload

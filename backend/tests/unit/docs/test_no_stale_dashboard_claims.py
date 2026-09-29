@@ -1,6 +1,6 @@
 """The docs no longer say the dashboard is undeployed, or that prod reuses staging's image.
 
-Two families of sentence were true once and are false on main:
+Three families of sentence were true once and are false on main:
 
 * **"The dashboard is not yet deployed by the CDK."** False since #145: the
   Fargate stack creates the dashboard's own ECS service
@@ -8,8 +8,10 @@ Two families of sentence were true once and are false on main:
   `experimentation-platform/web:bootstrap`, and the HTTPS listener sends
   `/api/*`, `/health`, `/health/*` and `/metrics` to the API and everything
   else to the dashboard (`API_PATH_RULES` in `fargate_service_stack.py`).
-  What is still missing is the Deploy workflow rolling each release onto it
-  (#69); the pages say that, and this test does not forbid it.
+* **"The Deploy workflow does not roll releases onto the dashboard."** False
+  since #145 too (#394): `deploy.yml` registers the dashboard's task
+  definition with the release image, rolls the dashboard service and
+  smoke-tests it through the public URL.
 * **"Staging and prod run the same bytes."** False when they are separate
   AWS accounts, each with its own ECR (#167): prod builds the release itself
   from the tag. An image is reused only by a repeat deploy into the same
@@ -60,6 +62,14 @@ STALE_DASHBOARD: Tuple[Tuple[str, str], ...] = (
     ),
     (r"no dashboard for an app\.? subdomain", "the ALB serves the dashboard"),
     (r"app dashboard: not provided", "the ALB serves the dashboard"),
+    (
+        r"deploy workflow does not (yet )?roll",
+        "deploy.yml rolls the dashboard onto each release (#394)",
+    ),
+    (
+        r"per-release (dashboard )?rollout is 69",
+        "deploy.yml rolls the dashboard onto each release (#394)",
+    ),
 )
 
 STALE_SAME_BYTES: Tuple[Tuple[str, str], ...] = (
@@ -114,8 +124,8 @@ def test_no_page_says_the_dashboard_is_not_deployed():
     hits = [hit for path in _doc_files() for hit in _hits(path, STALE_DASHBOARD)]
     assert not hits, (
         "these say the CDK does not deploy the dashboard; it has run the dashboard "
-        "as its own ECS service since #145 (on web:bootstrap; per-release rollout "
-        "is #69):\n" + "\n".join(hits)
+        "as its own ECS service since #145, and deploy.yml rolls it onto each "
+        "release (#394):\n" + "\n".join(hits)
     )
 
 
@@ -140,6 +150,15 @@ def test_no_page_or_deploy_comment_says_prod_reuses_stagings_image():
             STALE_DASHBOARD,
         ),
         ("the Fargate stack runs the API\n  container alone", STALE_DASHBOARD),
+        (
+            "you push first; the Deploy workflow does not yet roll releases onto it (#69).",
+            STALE_DASHBOARD,
+        ),
+        (
+            "The Deploy workflow does not yet roll each release onto the\ndashboard; that is #69.",
+            STALE_DASHBOARD,
+        ),
+        ("(started on `web:bootstrap`; per-release rollout is #69)", STALE_DASHBOARD),
         ("reused, not rebuilt, when another\nenvironment deploys", STALE_SAME_BYTES),
         (
             "# rebuilt, so staging and prod run the same\n      # bytes.",

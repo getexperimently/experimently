@@ -12,9 +12,12 @@ the first line below fails today. Install both from the root of a clone of this 
 the second line (`openfeature-sdk` itself is on PyPI and is installed as a dependency).
 
 ```bash
-pip install openfeature-sdk experimently experimently-openfeature            # once published
-pip install -e sdk/python -e sdk/openfeature-python                          # from this repository
+pip install openfeature-sdk experimently experimently-openfeature
+pip install -e sdk/python -e sdk/openfeature-python
 ```
+
+- `pip install openfeature-sdk experimently experimently-openfeature`: once published
+- `pip install -e sdk/python -e sdk/openfeature-python`: from this repository
 
 Requires Python 3.9+ and `openfeature-sdk >= 0.9.0` (the version that added the tracking API).
 The only other dependency is [`experimently`](../python), which itself has none.
@@ -85,7 +88,12 @@ Every request carries `X-API-Key: <key>`, `Content-Type: application/json`, `Acc
 
 ```bash
 EXPERIMENTLY_API_KEY=<key> python sdk/openfeature-python/examples/contract_smoke.py
-# {"sdk":"openfeature-python","assign":{"variant_name":"control","is_control":true,"sticky":true},"flag":{"enabled":true},"track":{"ok":true},"fanout":{"ok":true}}
+```
+
+It prints:
+
+```text
+{"sdk":"openfeature-python","assign":{"variant_name":"control","is_control":true,"sticky":true},"flag":{"enabled":true},"track":{"ok":true},"fanout":{"ok":true}}
 ```
 
 Env: `EXPERIMENTLY_API_URL` (default `http://localhost:8000`), `EXPERIMENTLY_API_KEY` (required),

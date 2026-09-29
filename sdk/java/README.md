@@ -171,7 +171,12 @@ Every request carries `X-API-Key`, `Content-Type: application/json` and `Accept:
 
 ```bash
 bash sdk/java/examples/contract_smoke.sh
-# {"sdk":"java","assign":{"variant_name":"control","is_control":true,"sticky":true},"flag":{"enabled":true},"track":{"ok":true},"fanout":{"ok":true}}
+```
+
+It prints:
+
+```text
+{"sdk":"java","assign":{"variant_name":"control","is_control":true,"sticky":true},"flag":{"enabled":true},"track":{"ok":true},"fanout":{"ok":true}}
 ```
 
 The script runs `./mvnw -q -B -pl core -am package -DskipTests` when `core/target` is stale (Maven output
@@ -187,8 +192,10 @@ Verified against a live backend: yes (2026-09-11)
 ## Tests
 
 ```bash
-cd sdk/java && ./mvnw clean test   # core: 77 tests (MockWebServer); spring-boot-starter: 35 tests
+cd sdk/java && ./mvnw clean test
 ```
+
+- `cd sdk/java && ./mvnw clean test`: core: 77 tests (MockWebServer); spring-boot-starter: 35 tests
 
 `./mvnw` pins Maven 3.9.9 and verifies the download against a SHA-256 in
 `.mvn/wrapper/maven-wrapper.properties` (no `maven-wrapper.jar` is committed —

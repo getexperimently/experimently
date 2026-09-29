@@ -51,8 +51,9 @@ The ECS task reads configuration from AWS Secrets Manager at startup. Set the fo
 
 ### Connection Configuration
 
+The API connects with the `POSTGRES_*` variables, not a `DATABASE_URL`:
+
 ```bash
-# The API connects with the POSTGRES_* variables, not a DATABASE_URL
 POSTGRES_SERVER=aurora-cluster.cluster-xxxx.region.rds.amazonaws.com
 POSTGRES_PORT=5432
 POSTGRES_USER=username
@@ -211,16 +212,23 @@ All infrastructure is defined in `infrastructure/cdk` using AWS CDK v2, in Pytho
 
 ### Deploy
 
+One-time bootstrap (per account/region):
+
 ```bash
-# One-time bootstrap (per account/region)
 cd infrastructure
 cdk bootstrap aws://YOUR_ACCOUNT_ID/YOUR_REGION
+```
 
-# Deploy all stacks
+Deploy all stacks:
+
+```bash
 export ALARM_EMAIL=ops@your-domain.com
 cdk deploy --all
+```
 
-# Deploy a specific stack (a stack id from `cdk list`)
+Deploy a specific stack (a stack id from `cdk list`):
+
+```bash
 cdk deploy experimentation-fargate-prod
 ```
 

@@ -181,7 +181,12 @@ ceiling (default 6000).
 
 ```bash
 cd sdk/go && go run ./examples/contract_smoke
-# {"sdk":"go","assign":{"variant_name":"control","is_control":true,"sticky":true},"flag":{"enabled":true},"track":{"ok":true},"fanout":{"ok":true}}
+```
+
+It prints:
+
+```text
+{"sdk":"go","assign":{"variant_name":"control","is_control":true,"sticky":true},"flag":{"enabled":true},"track":{"ok":true},"fanout":{"ok":true}}
 ```
 
 Env: `EXPERIMENTLY_API_URL` (default `http://localhost:8000`), `EXPERIMENTLY_API_KEY` (required),
@@ -200,6 +205,9 @@ Verified against a live backend: yes (2026-09-11)
 
 ```bash
 cd sdk/go
-go vet ./... && go test -race ./...   # 51 tests, HTTP mocked with net/http/httptest
-go run ./examples                     # examples/main.go walkthrough against a running backend
+go vet ./... && go test -race ./...
+go run ./examples
 ```
+
+- `go vet ./... && go test -race ./...`: 51 tests, HTTP mocked with net/http/httptest
+- `go run ./examples`: examples/main.go walkthrough against a running backend

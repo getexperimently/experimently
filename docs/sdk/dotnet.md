@@ -336,7 +336,12 @@ plus a 2-event batch) against a live backend and prints one JSON line:
 
 ```bash
 EXPERIMENTLY_API_KEY=<key> dotnet run --project sdk/dotnet/examples/ContractSmoke
-# {"sdk":"dotnet","assign":{"variant_name":"control","is_control":true,"sticky":true},"flag":{"enabled":true},"track":{"ok":true},"fanout":{"ok":true}}
+```
+
+It prints:
+
+```text
+{"sdk":"dotnet","assign":{"variant_name":"control","is_control":true,"sticky":true},"flag":{"enabled":true},"track":{"ok":true},"fanout":{"ok":true}}
 ```
 
 Env: `EXPERIMENTLY_API_URL` (default `http://localhost:8000`), `EXPERIMENTLY_API_KEY` (required),
@@ -357,7 +362,10 @@ on a machine with the .NET 6+ SDK.
 
 ```bash
 cd sdk/dotnet
-dotnet build                      # netstandard2.1 + net6.0
-dotnet test                       # xUnit, 89 tests by inspection (HTTP faked, no network)
+dotnet build
+dotnet test
 dotnet run --project examples/BasicUsage
 ```
+
+- `dotnet build`: netstandard2.1 + net6.0
+- `dotnet test`: xUnit, 89 tests by inspection (HTTP faked, no network)

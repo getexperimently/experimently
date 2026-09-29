@@ -137,9 +137,12 @@ goes through `org.json` (which `android.jar` only stubs, so the real implementat
 for unit tests either way). So the same sources compile and test on a plain JVM:
 
 ```bash
-cd sdk/android/jvm && ./mvnw clean test   # JUnit 5 + MockWebServer, 78 tests — no Android SDK, no emulator
-cd sdk/android && gradle :sdk:testDebugUnitTest   # the same tests through the AAR build (Gradle 8 + Android SDK)
+cd sdk/android/jvm && ./mvnw clean test
+cd sdk/android && gradle :sdk:testDebugUnitTest
 ```
+
+- `cd sdk/android/jvm && ./mvnw clean test`: JUnit 5 + MockWebServer, 78 tests — no Android SDK, no emulator
+- `cd sdk/android && gradle :sdk:testDebugUnitTest`: the same tests through the AAR build (Gradle 8 + Android SDK)
 
 Both run in `.github/workflows/sdk-unit-tests.yml` (nightly, and on any PR touching `sdk/android/**`).
 
@@ -147,7 +150,12 @@ Both run in `.github/workflows/sdk-unit-tests.yml` (nightly, and on any PR touch
 
 ```bash
 bash sdk/android/examples/contract_smoke.sh
-# {"sdk":"android","assign":{"variant_name":"treatment","is_control":false,"sticky":true},"flag":{"enabled":true},"track":{"ok":true},"fanout":{"ok":true}}
+```
+
+It prints:
+
+```text
+{"sdk":"android","assign":{"variant_name":"treatment","is_control":false,"sticky":true},"flag":{"enabled":true},"track":{"ok":true},"fanout":{"ok":true}}
 ```
 
 Runs `com.getexperimently.android.examples.ContractSmoke` from the JVM build above

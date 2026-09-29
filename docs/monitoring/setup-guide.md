@@ -31,13 +31,17 @@ python-json-logger==2.0.7
 
 Set up the required log groups in CloudWatch:
 
+Create log groups:
+
 ```bash
-# Create log groups
 aws logs create-log-group --log-group-name /experimentation-platform/api --profile experimentation-platform --region us-west-2
 aws logs create-log-group --log-group-name /experimentation-platform/services --profile experimentation-platform --region us-west-2
 aws logs create-log-group --log-group-name /experimentation-platform/errors --profile experimentation-platform --region us-west-2
+```
 
-# Set retention policies (optional but recommended)
+Set retention policies (optional but recommended):
+
+```bash
 aws logs put-retention-policy --log-group-name /experimentation-platform/api --retention-in-days 30 --profile experimentation-platform --region us-west-2
 aws logs put-retention-policy --log-group-name /experimentation-platform/services --retention-in-days 30 --profile experimentation-platform --region us-west-2
 aws logs put-retention-policy --log-group-name /experimentation-platform/errors --retention-in-days 30 --profile experimentation-platform --region us-west-2
@@ -63,14 +67,23 @@ This script deploys two dashboards:
 
 Configure the monitoring system with these environment variables:
 
-```bash
-# AWS Configuration
-export AWS_REGION=us-west-2  # Set your preferred region
-export AWS_PROFILE=experimentation-platform  # Set your AWS profile
+AWS Configuration:
 
-# Monitoring Options
-export COLLECT_REQUEST_BODY=false  # Set to true to include request bodies in error logs
+```bash
+export AWS_REGION=us-west-2
+export AWS_PROFILE=experimentation-platform
 ```
+
+- `export AWS_REGION=us-west-2`: Set your preferred region
+- `export AWS_PROFILE=experimentation-platform`: Set your AWS profile
+
+Monitoring Options:
+
+```bash
+export COLLECT_REQUEST_BODY=false
+```
+
+- `export COLLECT_REQUEST_BODY=false`: Set to true to include request bodies in error logs
 
 For production deployments, set these variables in your deployment environment (e.g., ECS Task Definitions, Lambda environment variables).
 

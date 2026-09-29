@@ -32,8 +32,11 @@ aws logs create-log-group --log-group-name /experimentation-platform/api
 aws logs create-log-group --log-group-name /experimentation-platform/services
 aws logs create-log-group --log-group-name /experimentation-platform/errors
 aws logs create-log-group --log-group-name /experimentation-platform/lambda
+```
 
-# Set retention to 90 days for cost control
+Set retention to 90 days for cost control:
+
+```bash
 aws logs put-retention-policy \
   --log-group-name /experimentation-platform/api \
   --retention-in-days 90
@@ -140,8 +143,9 @@ fields @timestamp, level, action, @message
 
 Set up alarms to notify you when key thresholds are breached. Requires an SNS topic for notifications:
 
+Create SNS topic:
+
 ```bash
-# Create SNS topic
 aws sns create-topic --name experimentation-alerts
 aws sns subscribe --topic-arn arn:aws:sns:us-east-1:123456789:experimentation-alerts \
   --protocol email --notification-endpoint oncall@yourcompany.com
@@ -149,8 +153,9 @@ aws sns subscribe --topic-arn arn:aws:sns:us-east-1:123456789:experimentation-al
 
 ### Recommended Alarms
 
+p99 API latency > 1 second:
+
 ```bash
-# p99 API latency > 1 second
 aws cloudwatch put-metric-alarm \
   --alarm-name "ExperimentationAPI-HighLatency" \
   --metric-name "http_request_duration_seconds" \
@@ -161,8 +166,11 @@ aws cloudwatch put-metric-alarm \
   --evaluation-periods 3 \
   --period 60 \
   --alarm-actions arn:aws:sns:us-east-1:123456789:experimentation-alerts
+```
 
-# Error rate > 1%
+Error rate > 1%:
+
+```bash
 aws cloudwatch put-metric-alarm \
   --alarm-name "ExperimentationAPI-HighErrorRate" \
   --metric-name "http_request_5xx_total" \
@@ -173,8 +181,11 @@ aws cloudwatch put-metric-alarm \
   --evaluation-periods 2 \
   --period 60 \
   --alarm-actions arn:aws:sns:us-east-1:123456789:experimentation-alerts
+```
 
-# Lambda DLQ messages > 0 (indicates failed events not being processed)
+Lambda DLQ messages > 0 (indicates failed events not being processed):
+
+```bash
 aws cloudwatch put-metric-alarm \
   --alarm-name "EventProcessorDLQ-Messages" \
   --metric-name "ApproximateNumberOfMessagesVisible" \

@@ -32,16 +32,27 @@ The platform uses a multi-layer testing strategy:
 
 ### Backend Setup
 
+Step 1: Activate virtualenv (ALWAYS do this first):
+
 ```bash
-# 1. Activate virtualenv (ALWAYS do this first)
 source venv/bin/activate
+```
 
-# 2. Start PostgreSQL
+Step 2: Start PostgreSQL:
+
+```bash
 docker ps | grep postgres
-# If not running:
-docker-compose up -d db
+```
 
-# 3. Set test environment variables
+If not running:
+
+```bash
+docker-compose up -d db
+```
+
+Step 3: Set test environment variables:
+
+```bash
 export APP_ENV=test
 export TESTING=true
 export POSTGRES_DB=experimentation
@@ -69,17 +80,27 @@ python -m pytest backend/tests/ -v
 
 ### By Layer
 
+Unit tests only (fast, no DB required):
+
 ```bash
-# Unit tests only (fast, no DB required)
 python -m pytest backend/tests/unit/ -v
+```
 
-# Integration tests (requires PostgreSQL)
+Integration tests (requires PostgreSQL):
+
+```bash
 python -m pytest backend/tests/integration/ -v
+```
 
-# E2E tests (requires full stack)
+E2E tests (requires full stack):
+
+```bash
 python -m pytest backend/tests/e2e/ -v
+```
 
-# Contract tests
+Contract tests:
+
+```bash
 python -m pytest backend/tests/contract/ -v
 ```
 
@@ -87,33 +108,52 @@ python -m pytest backend/tests/contract/ -v
 
 Due to transaction isolation, run DB-heavy and API test suites in separate invocations:
 
+✅ CORRECT — separate invocations:
+
 ```bash
-# ✅ CORRECT — separate invocations
 python -m pytest backend/tests/integration/database/ -v
 python -m pytest backend/tests/integration/api/test_experiments_api.py -v
-
-# ❌ WRONG — can corrupt connection pool
-python -m pytest backend/tests/integration/ -v  # may cause SA warnings
 ```
+
+❌ WRONG — can corrupt connection pool:
+
+```bash
+python -m pytest backend/tests/integration/ -v
+```
+
+- `python -m pytest backend/tests/integration/ -v`: may cause SA warnings
 
 ### Specific Tests
 
+Single file:
+
 ```bash
-# Single file
 python -m pytest backend/tests/unit/services/test_experiment_service.py -v
+```
 
-# Specific test function
+Specific test function:
+
+```bash
 python -m pytest backend/tests/unit/core/test_rules_engine.py::test_evaluate_equals -xvs
+```
 
-# By marker
+By marker:
+
+```bash
 python -m pytest -m "unit" -v
 python -m pytest -m "integration" -v
 python -m pytest -m "requires_db" -v
+```
 
-# Skip slow tests
+Skip slow tests:
+
+```bash
 python -m pytest -m "not slow" -v
+```
 
-# Keyword match
+Keyword match:
+
+```bash
 python -m pytest -k "experiment" -v
 ```
 
@@ -121,10 +161,14 @@ python -m pytest -k "experiment" -v
 
 ```bash
 cd frontend
-npm test                    # Run all tests
-npm test -- --watchAll=false  # Single run (CI mode)
-npm test -- --coverage      # With coverage report
+npm test
+npm test -- --watchAll=false
+npm test -- --coverage
 ```
+
+- `npm test`: Run all tests
+- `npm test -- --watchAll=false`: Single run (CI mode)
+- `npm test -- --coverage`: With coverage report
 
 ---
 
@@ -482,14 +526,21 @@ beforeEach(() => {
 
 ### Verbose Output
 
+Maximum verbosity with full traceback:
+
 ```bash
-# Maximum verbosity with full traceback
 python -m pytest backend/tests/unit/my_test.py -xvs
+```
 
-# Stop on first failure
+Stop on first failure:
+
+```bash
 python -m pytest backend/tests/ -x
+```
 
-# Show local variables on failure
+Show local variables on failure:
+
+```bash
 python -m pytest backend/tests/ --tb=long -l
 ```
 
@@ -550,14 +601,21 @@ steps:
 
 ## Coverage
 
+Generate coverage report:
+
 ```bash
-# Generate coverage report
 python -m pytest backend/tests/ --cov=backend/app --cov-report=html
+```
 
-# View in browser
+View in browser:
+
+```bash
 open htmlcov/index.html
+```
 
-# Minimum threshold check
+Minimum threshold check:
+
+```bash
 python -m pytest --cov=backend/app --cov-fail-under=80
 ```
 

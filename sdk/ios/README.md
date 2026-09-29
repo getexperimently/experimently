@@ -138,7 +138,12 @@ Every request carries `X-API-Key`, `Content-Type: application/json` and `Accept:
 
 ```bash
 cd sdk/ios && swift run contract-smoke
-# {"sdk":"ios","assign":{"variant_name":"control","is_control":true,"sticky":true},"flag":{"enabled":true},"track":{"ok":true},"fanout":{"ok":true}}
+```
+
+It prints:
+
+```text
+{"sdk":"ios","assign":{"variant_name":"control","is_control":true,"sticky":true},"flag":{"enabled":true},"track":{"ok":true},"fanout":{"ok":true}}
 ```
 
 Build output goes to stderr (the repo runner passes `-q`). Env: `EXPERIMENTLY_API_URL` (default
@@ -152,7 +157,9 @@ Verified against a live backend: yes (2026-09-11)
 ## Tests
 
 ```bash
-cd sdk/ios && swift test   # 71 XCTests; URLSession is intercepted with a URLProtocol mock
+cd sdk/ios && swift test
 ```
+
+- `cd sdk/ios && swift test`: 71 XCTests; URLSession is intercepted with a URLProtocol mock
 
 `Examples/SwiftUIExample/ExampleApp.swift` shows the same calls from a SwiftUI view.

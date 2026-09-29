@@ -84,7 +84,7 @@ The architecture is designed to provide high-performance experiment evaluation, 
 
 ### 2. Application Layer
 
--   **Next.js dashboard**: Web UI for experiment management, feature flag configuration, and dashboards. It runs as the nginx image built from `frontend/Dockerfile`: in AWS as its own ECS service behind the load balancer (started on `web:bootstrap`; per-release rollout is #69), and in Docker Compose
+-   **Next.js dashboard**: Web UI for experiment management, feature flag configuration, and dashboards. It runs as the nginx image built from `frontend/Dockerfile`: in AWS as its own ECS service behind the load balancer (started on `web:bootstrap`, then rolled onto each release by the Deploy workflow), and in Docker Compose
 -   **Core Backend Services (ECS/Fargate)**:
     -   Experiment Management Service
     -   Feature Flag Service

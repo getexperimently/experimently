@@ -183,11 +183,15 @@ The Redis stack is integrated with the application through:
 
 ## Deployment Instructions
 
-```bash
-# Deploy the Redis stack
-cdk deploy experimentation-redis-dev
+Deploy the Redis stack:
 
-# Deploy all stacks
+```bash
+cdk deploy experimentation-redis-dev
+```
+
+Deploy all stacks:
+
+```bash
 cdk deploy --all
 ```
 
