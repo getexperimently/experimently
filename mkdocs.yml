@@ -111,6 +111,7 @@ nav:
   - .NET SDK: sdk/dotnet.md
   - Elixir SDK: sdk/elixir.md
   - SDK contract & status: sdk-guide.md
+  - Local evaluation (server-side, beta): sdk/local-evaluation.md
 - API Reference:
   - Authentication: api/auth.md
   - Experiments: api/endpoints.md

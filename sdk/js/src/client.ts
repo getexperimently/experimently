@@ -1,5 +1,13 @@
 import { UserKeyCache } from './cache';
 import { ExperimentationError, asExperimentationError } from './errors';
+import { DEFER } from './evaluator';
+import {
+  DEFAULT_REFRESH_INTERVAL_MS,
+  LocalEvaluation,
+  LocalEvaluationStatus,
+  MIN_REFRESH_INTERVAL_MS,
+  ReadyResult,
+} from './local';
 import type {
   Assignment,
   AssignmentRecord,
@@ -27,8 +35,20 @@ const BATCH_LIMIT = 100;
 interface RequestInitLite {
   method?: 'GET' | 'POST';
   body?: unknown;
+  /** Extra request headers (the ruleset poll sends `If-None-Match`). */
+  headers?: Record<string, string>;
   /** Internal: set on the single retry after a 429. */
   retried?: boolean;
+}
+
+/** Thrown at construction when `evaluation: 'local'` is used in a browser. */
+export const BROWSER_LOCAL_EVALUATION_MESSAGE =
+  "evaluation: 'local' downloads every flag's targeting rules, including the values in them, and " +
+  "is for server-side code. In a browser, leave evaluation at its default ('server').";
+
+function inBrowser(): boolean {
+  const scope = globalThis as { window?: { document?: unknown } };
+  return typeof scope.window !== 'undefined' && scope.window !== null && typeof scope.window.document !== 'undefined';
 }
 
 function encode(value: string): string {
@@ -62,8 +82,12 @@ function toIso(timestamp: Date | string): string {
 /**
  * Client for the Experimently public API.
  *
- * - Flag evaluation and experiment assignment are decided by the server; no
- *   local bucketing happens here. `consistentHash` is exported as a utility only.
+ * - By default (`evaluation: 'server'`) flag evaluation and experiment assignment
+ *   are decided by the server. With `evaluation: 'local'` (server-side code only)
+ *   flags are answered in-process from the server's ruleset whenever the answer is
+ *   provably the server's, and by the server otherwise; experiments always stay on
+ *   the server. `consistentHash` is exported as a utility only; it is not the flag
+ *   bucketing function.
  * - Successful evaluations/assignments are cached per user + key for
  *   `cacheTtlMs`; failures are never cached. Concurrent calls for the same
  *   user + key share one in-flight request.
@@ -83,6 +107,8 @@ export class ExperimentationClient {
   private readonly assignments: UserKeyCache<Assignment>;
   /** Requests currently in flight, so concurrent callers share one fetch. */
   private readonly inflight = new Map<string, Promise<unknown>>();
+  /** The local-evaluation runtime; `null` in server mode. */
+  private readonly local: LocalEvaluation | null = null;
 
   constructor(config: ClientConfig) {
     if (!config || !config.apiKey) throw new Error('apiKey is required');
@@ -96,6 +122,66 @@ export class ExperimentationClient {
     const ttl = config.cacheTtlMs ?? DEFAULT_CACHE_TTL_MS;
     this.flags = new UserKeyCache<FlagEvaluation>(ttl);
     this.assignments = new UserKeyCache<Assignment>(ttl);
+
+    const evaluation = config.evaluation ?? 'server';
+    if (evaluation !== 'server' && evaluation !== 'local') {
+      throw new Error("evaluation must be 'server' or 'local'");
+    }
+    if (evaluation === 'local') {
+      if (inBrowser()) throw new Error(BROWSER_LOCAL_EVALUATION_MESSAGE);
+      const interval = config.refreshIntervalMs ?? DEFAULT_REFRESH_INTERVAL_MS;
+      if (typeof interval !== 'number' || !Number.isFinite(interval)) {
+        throw new Error('refreshIntervalMs must be a number of milliseconds');
+      }
+      const maxStale = config.maxStaleMs;
+      if (maxStale !== undefined && (typeof maxStale !== 'number' || !(maxStale > 0))) {
+        throw new Error('maxStaleMs must be a positive number of milliseconds');
+      }
+      this.local = new LocalEvaluation(
+        {
+          request: (path, init) => this.request(path, init),
+          httpError: (response, path, method) => this.httpError(response, path, method),
+          report: (error, operation) => this.report(error, operation),
+        },
+        { refreshIntervalMs: Math.max(interval, MIN_REFRESH_INTERVAL_MS), maxStaleMs: maxStale }
+      );
+      this.local.start();
+    }
+  }
+
+  // ─── Local evaluation ──────────────────────────────────────────────────────
+
+  /**
+   * Resolves once flags can be answered locally, or the first ruleset fetch failed, or
+   * `timeoutMs` passed. Never rejects. In server mode it resolves `{ ok: true }` at once.
+   * Evaluation calls never wait for it: until a ruleset is loaded they are made on the server.
+   */
+  async ready(options: { timeoutMs?: number } = {}): Promise<ReadyResult> {
+    if (!this.local) return { ok: true, rulesetVersion: null };
+    return this.local.ready(options.timeoutMs);
+  }
+
+  /** Where flags are being evaluated, and the state of the ruleset. */
+  status(): LocalEvaluationStatus {
+    if (!this.local) {
+      return {
+        evaluation: 'server',
+        ready: true,
+        rulesetVersion: null,
+        lastRefreshAt: null,
+        lastError: null,
+        serverEvaluatedFlags: [],
+      };
+    }
+    return this.local.status();
+  }
+
+  /**
+   * Stop refreshing the ruleset and send the evaluation counts not yet sent. After `close()`,
+   * flags are evaluated by the server. Never rejects. A no-op in server mode.
+   */
+  async close(): Promise<void> {
+    if (this.local) await this.local.close();
   }
 
   // ─── Experiments ───────────────────────────────────────────────────────────
@@ -174,10 +260,30 @@ export class ExperimentationClient {
    * `user.attributes` (when non-empty) is sent as `context` so the flag's targeting
    * rules can evaluate against it. The cache key is user + flag only — attributes are
    * assumed stable per user; call `clearCache()` after changing them.
-   * Throws `ExperimentationError` (404 when the flag is not ACTIVE).
+   * Throws `ExperimentationError` (404 for a flag key the server does not know; an
+   * inactive flag is `{ enabled: false, reason: 'inactive' }`).
+   *
+   * With `evaluation: 'local'`, a flag the ruleset can answer is answered in-process from the
+   * attributes passed (no request, no cache read) with `source: 'local'`; anything else is
+   * evaluated by the server as above, with `source: 'server'`.
    */
   async evaluateFlag(flagKey: string, user: UserContext): Promise<FlagEvaluation> {
     const { userId, attributes } = requireUser(user);
+    if (this.local) {
+      const answer = this.local.answer(flagKey, userId, attributes);
+      if (answer !== DEFER) {
+        const evaluation: FlagEvaluation = {
+          key: flagKey,
+          enabled: answer.enabled,
+          config: null,
+          reason: answer.reason,
+          source: 'local',
+        };
+        // Recorded for the key-less track() fan-out, exactly as a server answer is.
+        this.flags.set(userId, flagKey, evaluation);
+        return evaluation;
+      }
+    }
     const cached = this.flags.get(userId, flagKey);
     if (cached) return cached;
 
@@ -191,6 +297,7 @@ export class ExperimentationClient {
         config: data?.config === undefined ? null : data.config,
       };
       if (typeof data?.reason === 'string') evaluation.reason = data.reason;
+      if (this.local) evaluation.source = 'server';
       this.flags.set(userId, flagKey, evaluation);
       return evaluation;
     });
@@ -210,8 +317,15 @@ export class ExperimentationClient {
    * `GET /api/v1/feature-flags/user/{user_id}[?context=<url-encoded JSON>]` → `{flagKey: enabled}`.
    * `attributes` (when non-empty) is sent as `context` for targeting rules.
    * Not cached and not part of the tracking fan-out (it carries no `config`).
+   *
+   * With `evaluation: 'local'` the answer is computed in-process when every active flag can be
+   * answered locally for these attributes; otherwise the whole call goes to the server.
    */
   async getAllFlags(userId: string, attributes?: Record<string, unknown>): Promise<Record<string, boolean>> {
+    if (this.local) {
+      const flags = this.local.answerAll(userId, attributes);
+      if (flags !== DEFER) return flags;
+    }
     const context = contextQuery(attributes);
     const data = await this.requestJson<Record<string, unknown>>(
       `/api/v1/feature-flags/user/${encode(userId)}${context ? `?${context.slice(1)}` : ''}`
@@ -365,6 +479,7 @@ export class ExperimentationClient {
       response = await fetchImpl(`${this.apiUrl}${path}`, {
         method,
         headers: {
+          ...(init.headers ?? {}),
           'X-API-Key': this.apiKey,
           'Content-Type': 'application/json',
           Accept: 'application/json',

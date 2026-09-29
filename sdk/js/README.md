@@ -3,8 +3,11 @@
 JavaScript/TypeScript client for the Experimently public API. Node >= 18 and browsers,
 zero runtime dependencies (global `fetch`), CommonJS build with type declarations.
 
-Flag evaluation and experiment assignment are **decided by the server**; results are cached per
-user + key in memory. Nothing is bucketed locally.
+Flag evaluation and experiment assignment are **decided by the server** by default; results are
+cached per user + key in memory. Server-side code can opt in to **local evaluation**
+(`evaluation: 'local'`, beta): flags are answered in-process from the server's ruleset, with the
+server's answers, and anything that cannot be answered exactly goes to the server. See
+[`docs/sdk/local-evaluation.md`](../../docs/sdk/local-evaluation.md).
 
 Full documentation: [`docs/sdk/javascript.md`](../../docs/sdk/javascript.md).
 
@@ -38,10 +41,12 @@ await client.track('user-123', 'page_view'); // no key → fans out to every cac
 | `trackBatch(events)` | `Promise<{ successCount, failureCount, errors }>` (chunked at 100) | never rejects |
 | `fetchAssignments(userId, { activeOnly? })` | `Promise<AssignmentRecord[]>` from the server | rejects |
 | `getAssignments(userId)`, `getEvaluatedFlags(userId)`, `clearCache()` | in-memory cache access | — |
-| `consistentHash(userId, flagKey)`, `md5Hex(s)`, `md5Bytes(s)` | compatibility hash utilities (unused for bucketing) | — |
+| `ready({ timeoutMs? })`, `status()`, `close()` | local mode: readiness, ruleset state, shutdown (sends evaluation counts) | never reject |
+| `consistentHash(userId, flagKey)`, `md5Hex(s)`, `md5Bytes(s)` | compatibility hash utilities (not the flag bucketing function) | — |
 
 Config: `apiUrl`, `apiKey` (required); `timeoutMs` (5000), `cacheTtlMs` (300000),
-`defaultVariant` (`'control'`), `fetch`, `onError(err, 'track' | 'trackBatch')`.
+`defaultVariant` (`'control'`), `fetch`, `onError(err, 'track' | 'trackBatch' | 'refresh' | 'flush')`,
+`evaluation` (`'server'` or `'local'`), `refreshIntervalMs` (30000, minimum 5000), `maxStaleMs`.
 Failures are never cached; concurrent calls for the same user + key share one request; a 429 is
 retried once after `Retry-After`.
 
@@ -90,6 +95,6 @@ Verified against a live backend: **yes (2026-09-11)**.
 
 ```bash
 npm install
-npm test          # 105 Jest tests (fetch mocked)
+npm test          # 171 Jest tests (fetch mocked; the local evaluator runs against tests/sdk-contract/ruleset-vectors.json)
 npm run build     # tsc → dist/ (CommonJS + .d.ts)
 ```

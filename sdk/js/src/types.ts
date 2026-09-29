@@ -1,7 +1,14 @@
 import type { ExperimentationError } from './errors';
 
-/** Operations whose failures are swallowed and reported through `onError`. */
-export type SwallowedOperation = 'track' | 'trackBatch';
+/**
+ * Operations whose failures are swallowed and reported through `onError`:
+ * `'refresh'` (a ruleset fetch) and `'flush'` (sending evaluation counts) occur only with
+ * `evaluation: 'local'`.
+ */
+export type SwallowedOperation = 'track' | 'trackBatch' | 'refresh' | 'flush';
+
+/** Where flags are evaluated: by the server (the default) or in-process from its ruleset. */
+export type EvaluationMode = 'server' | 'local';
 
 export interface ClientConfig {
   /** Backend origin, e.g. `https://api.example.com`. The SDK appends `/api/v1/...`. */
@@ -17,10 +24,27 @@ export interface ClientConfig {
   /** Custom `fetch` implementation. Defaults to the global `fetch` (Node >= 18, browsers). */
   fetch?: typeof fetch;
   /**
-   * Called with the error whenever `track` / `trackBatch` swallow a failure.
-   * Those methods never reject; this is the only way to observe their failures.
+   * Called with the error whenever `track` / `trackBatch` swallow a failure, and in local mode
+   * when a ruleset refresh (`'refresh'`) or an evaluation-count report (`'flush'`) fails.
+   * Those operations never reject; this is the only way to observe their failures.
    */
   onError?: (error: ExperimentationError, operation: SwallowedOperation) => void;
+  /**
+   * `'server'` (default): every flag is evaluated by the server. `'local'`: flags are evaluated
+   * in-process from `GET /api/v1/sdk/ruleset` (beta) whenever the answer is provably the
+   * server's, and by the server otherwise. Server-side code only: the ruleset holds every flag's
+   * targeting rules, the key needs the `sdk:ruleset` scope, and the constructor throws in a
+   * browser. Experiments are always assigned by the server.
+   */
+  evaluation?: EvaluationMode;
+  /** Local mode: how often the ruleset is refreshed (default 30 000 ms, minimum 5 000 ms, ±10% jitter). */
+  refreshIntervalMs?: number;
+  /**
+   * Local mode: stop answering locally when the ruleset has not been refreshed successfully for
+   * this long, and evaluate on the server instead. Default: no limit (a stale ruleset keeps
+   * being served while the API is unreachable).
+   */
+  maxStaleMs?: number;
 }
 
 export interface UserContext {
@@ -65,9 +89,15 @@ export interface FlagEvaluation {
   config: unknown | null;
   /**
    * Why the server decided as it did — `'targeting_rule'`, `'rollout'`, `'inactive'` or
-   * `'error'`. `undefined` when the server did not send one.
+   * `'error'`. `undefined` when the server did not send one. A local answer carries the
+   * reason the server would have given.
    */
   reason?: string;
+  /**
+   * Set only with `evaluation: 'local'`: `'local'` when answered in-process from the ruleset,
+   * `'server'` when the server evaluated it.
+   */
+  source?: 'server' | 'local';
 }
 
 export interface TrackOptions {

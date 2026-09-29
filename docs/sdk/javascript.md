@@ -1,12 +1,15 @@
 # JavaScript SDK
 
-`@getexperimently/js-sdk` (v1.0) is the JavaScript/TypeScript client for the
+`@getexperimently/js-sdk` (v1.1) is the JavaScript/TypeScript client for the
 Experimently public API: experiment assignment, feature flag evaluation and event
 tracking for Node >= 18 and browsers. Zero runtime dependencies — it uses the global `fetch`.
 
-Flag evaluation and experiment assignment are decided **by the server**: every call goes to the
-public API with your `X-API-Key`, the server buckets the user (sticky per user + experiment), and
-the SDK caches the answer per user + key. Nothing is bucketed locally.
+By default, flag evaluation and experiment assignment are decided **by the server**: every call
+goes to the public API with your `X-API-Key`, the server buckets the user (sticky per user +
+experiment), and the SDK caches the answer per user + key. In server-side code you can opt in to
+[local evaluation](#local-evaluation-server-side-beta) (`evaluation: 'local'`): flags are then
+answered in-process from the server's ruleset, with the server's answers, and experiments stay on
+the server.
 
 Source: `sdk/js`. For React apps use the [React SDK](react.md); for edge runtimes the
 [Edge SDK](edge.md); for the vendor-neutral API the [OpenFeature provider](openfeature.md), which
@@ -25,7 +28,7 @@ npm install @getexperimently/js-sdk
 ```
 
 Build it from a clone of this repository instead. `npm pack` writes
-`getexperimently-js-sdk-1.0.0.tgz`:
+`getexperimently-js-sdk-1.1.0.tgz`:
 
 ```bash
 git clone https://github.com/getexperimently/experimently.git
@@ -86,7 +89,8 @@ const client = new ExperimentationClient({
   cacheTtlMs: 300_000,               // Successful evaluations/assignments reused per user + key (default 5 min)
   defaultVariant: 'control',         // Returned by getVariant when assignment fails (default 'control')
   fetch: customFetch,                // Optional custom fetch (tests, polyfills); defaults to globalThis.fetch
-  onError: (err, operation) => {},   // Optional; called when track / trackBatch swallow a failure
+  onError: (err, operation) => {},   // Optional; called when track / trackBatch (or, in local mode, refresh / flush) swallow a failure
+  evaluation: 'server',              // 'server' (default) or 'local' (server-side only; see Local evaluation)
 });
 ```
 
@@ -98,10 +102,14 @@ const client = new ExperimentationClient({
 | `cacheTtlMs` | `number` | `300000` | TTL of successful evaluations/assignments, per user + key |
 | `defaultVariant` | `string` | `'control'` | Variant name `getVariant` returns on failure |
 | `fetch` | `typeof fetch` | global `fetch` | Custom fetch implementation |
-| `onError` | `(error: ExperimentationError, op: 'track' \| 'trackBatch') => void` | — | Only way to observe swallowed tracking failures; a throwing handler is itself swallowed |
+| `onError` | `(error: ExperimentationError, op: 'track' \| 'trackBatch' \| 'refresh' \| 'flush') => void` | — | Only way to observe swallowed failures; a throwing handler is itself swallowed. `'refresh'` and `'flush'` occur only in local mode |
+| `evaluation` | `'server' \| 'local'` | `'server'` | `'local'`: answer flags in-process from `GET /api/v1/sdk/ruleset`; needs a key with the `sdk:ruleset` scope; throws in a browser |
+| `refreshIntervalMs` | `number` | `30000` | Local mode: ruleset refresh interval (minimum 5000, ±10% jitter) |
+| `maxStaleMs` | `number` | none | Local mode: evaluate on the server once the ruleset has not been refreshed for this long |
 
 The constructor throws a plain `Error` (`apiKey is required` / `apiUrl is required`) when either
-required field is missing.
+required field is missing, when `evaluation` is not `'server'` or `'local'`, and when
+`evaluation: 'local'` is used in a browser.
 
 ### `UserContext`
 
@@ -147,6 +155,9 @@ turn that into their safe default.
 | `getAssignments` | `(userId) => Assignment[]` | Cached, unexpired assignments in assignment order (no network) | — |
 | `getEvaluatedFlags` | `(userId) => string[]` | Keys of cached, successfully evaluated flags (no network) | — |
 | `clearCache` | `() => void` | Drops both caches | — |
+| `ready` | `({ timeoutMs? }?) => Promise<ReadyResult>` | `{ ok: true, rulesetVersion }` or `{ ok: false, error }`; `{ ok: true, rulesetVersion: null }` at once in server mode | Never rejects |
+| `status` | `() => LocalEvaluationStatus` | `{ evaluation, ready, rulesetVersion, lastRefreshAt, lastError, serverEvaluatedFlags }` | — |
+| `close` | `() => Promise<void>` | Local mode: stops the ruleset refresh and sends the remaining evaluation counts; later calls are evaluated by the server. A no-op in server mode | Never rejects |
 
 ### Enrolment: `assigned` and `reason`
 
@@ -223,6 +234,8 @@ Every request carries `X-API-Key`, `Content-Type: application/json` and `Accept:
 | `track` with a key | `POST /api/v1/tracking/track` | `{"event_type","event_name","user_id","experiment_key"?,"feature_flag_key"?,"value"?,"metadata"?,"timestamp"?}` | stored event (ignored) |
 | `track` without a key, `trackBatch` | `POST /api/v1/tracking/batch` | `{"events":[<track body>...]}` (max 100) | `{"success_count","failure_count","errors"}` |
 | `fetchAssignments` | `GET /api/v1/tracking/assignments/{user_id}?active_only=true` | — | list of assignment rows |
+| local mode: ruleset refresh | `GET /api/v1/sdk/ruleset` (beta) | `If-None-Match: "<version>"` | the ruleset, `ETag`; `304` when unchanged |
+| local mode: evaluation counts | `POST /api/v1/tracking/evaluations` (beta) | `{"evaluations":[{"flag_key","count","enabled_count","window_start","window_end"}]}` | `{"accepted","errors"}` |
 
 Errors: 401 bad key; 404 experiment/flag not ACTIVE or unknown; 422 track without any key; 429
 rate limited (`Retry-After` header, retried once).
@@ -251,6 +264,7 @@ interface FlagEvaluation {
   enabled: boolean;
   config: unknown | null;
   reason?: string;     // 'targeting_rule' | 'rollout' | 'inactive' | 'error'; undefined when the server does not send it
+  source?: 'server' | 'local'; // local mode only: answered in-process, or by the server
 }
 
 interface BatchResult {
@@ -275,7 +289,38 @@ MD5("{userId}:{flagKey}") → first 4 bytes as little-endian uint32 → ÷ 2^32 
 consistentHash('user-123', 'my-flag') ≈ 0.6927449859
 ```
 
-**Nothing in the SDK calls them to pick a variant** — the server decides.
+**Nothing in the SDK calls them to pick a variant or decide a flag.** `consistentHash` is not the
+function the server buckets flag rollouts with: that is `md5-mod100-v1`, the whole MD5 digest of
+`"{userId}:{flagKey}"` read as a big-endian integer, mod 100, which local evaluation reproduces
+internally (`consistentHash('user-123', 'my-flag')` is bucket 69; the server puts that user in
+bucket 79).
+
+---
+
+## Local evaluation (server-side, beta)
+
+With `evaluation: 'local'` the client downloads the flag ruleset (`GET /api/v1/sdk/ruleset`),
+refreshes it every `refreshIntervalMs` (30 s by default, 5 s minimum), and answers `evaluateFlag`,
+`isFeatureEnabled` and `getAllFlags` in-process whenever it can give exactly the server's answer;
+otherwise it makes the usual request. Experiments are always assigned by the server. It needs an
+Experimently server at 0.11.0 or later and a key with the `sdk:ruleset` scope, and it is for
+server-side code only: the constructor throws in a browser.
+
+```typescript
+const client = new ExperimentationClient({
+  apiUrl: process.env.EXPERIMENTLY_API_URL!,
+  apiKey: process.env.EXPERIMENTLY_SERVER_KEY!, // sdk:ruleset scope
+  evaluation: 'local',
+});
+await client.ready({ timeoutMs: 5_000 });        // optional; never rejects
+const { enabled, reason, source } = await client.evaluateFlag('new_search', user); // source: 'local' | 'server'
+await client.close();                            // on shutdown: sends the evaluation counts
+```
+
+A change made in the dashboard reaches the process at its next successful refresh. While the API
+is unreachable the last ruleset keeps being served (set `maxStaleMs` to bound that); a 401 or 403
+on refresh discards it. What is answered locally, the refresh failure table, safety monitoring and
+troubleshooting: [Local evaluation](local-evaluation.md).
 
 ---
 
@@ -316,7 +361,11 @@ Env: `EXPERIMENTLY_API_URL` (default `http://localhost:8000`), `EXPERIMENTLY_API
 (fan-out) and sends a 2-event `trackBatch`. `npm run smoke` is a shortcut.
 
 With a seeded backend (`python backend/scripts/seed_sdk_contract.py`):
-`python tests/sdk-contract/live/run_live_contract.py --sdk js --strict`.
+`python tests/sdk-contract/live/run_live_contract.py --sdk js --strict`. That also runs
+`examples/local_eval_smoke.mjs` with the seed's `sdk:ruleset` key (the `js (local)` row): 40
+evaluations answered locally, the counts sent on `close()`, then two client errors, and the runner
+checks in the database that no evaluate call was made and that the safety monitor's denominator
+grew by exactly 40.
 
 ---
 
