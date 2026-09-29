@@ -197,14 +197,13 @@ describe.each<View>(['guided', 'advanced'])('%s: a create that fails', (view) =>
   it('with 409 says the key is taken in the page’s words, never the API’s, and offers Edit details', async () => {
     // Whatever the 409 body says, the page does not show it: this one is
     // deliberately text the page must never print.
-    createReplies = [{ status: 409, body: { detail: 'RAW-409-DETAIL [SQL: INSERT INTO experiments]' } }];
+    createReplies = [{ status: 409, body: { detail: 'RAW-409-DETAIL: text the page must not print' } }];
     await fillAndCreate(view);
 
     const error = await screen.findByTestId('form-error');
     expect(error).toHaveTextContent('An experiment with the key “checkout_v2” already exists.');
     expect(error).toHaveTextContent('Choose a different key');
-    expect(error).not.toHaveTextContent('RAW-409-DETAIL');
-    expect(document.body).not.toHaveTextContent('[SQL:');
+    expect(document.body).not.toHaveTextContent('RAW-409-DETAIL');
     expectAnswersKept(view);
 
     fireEvent.click(screen.getByTestId('form-error-edit-details'));

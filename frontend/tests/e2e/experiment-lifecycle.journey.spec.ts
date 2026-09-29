@@ -196,10 +196,11 @@ test.describe("Journey: experiment lifecycle", () => {
 
     // Taken key: the API answers 409; the page says so in its own words.
     await experiments.createStepButton.click();
-    await expect(experiments.formError).toContainText(
-      `An experiment with the key “${EXPERIMENT_KEY}” already exists.`,
+    // Exactly the page's sentence and its button: nothing of the API's body.
+    await expect(experiments.formError).toHaveText(
+      `An experiment with the key “${EXPERIMENT_KEY}” already exists. ` +
+        "Choose a different key on the Details step. Edit details",
     );
-    await expect(experiments.formError).not.toContainText(/SQL|psycopg2/);
     await expect(adminPage).toHaveURL(/\/experiments\/new\?step=review$/);
     await expect(adminPage.getByTestId("review-name")).toContainText(name);
 
