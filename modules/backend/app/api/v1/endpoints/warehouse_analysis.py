@@ -4,7 +4,7 @@ Mounted at ``/api/v1/warehouse/analysis`` behind authentication.  Every route
 is ``x-stability: beta``.  The exact set of routes is pinned by
 ``modules/backend/tests/smoke/test_module_route_table.py``.
 
-Who may do what (founder decisions D11 and D25):
+Who may do what (founder decisions D11, D25 and D34):
 
 =====================================================  =====  =========  =======  ======
 Action                                                  ADMIN  DEVELOPER  ANALYST  VIEWER
@@ -17,10 +17,13 @@ Create, edit, delete, validate, preview assignment src  yes    yes        no    
 Create, edit, validate, preview metric sources          yes    yes        yes      no
 Delete a metric source                                  yes    yes        no       no
 Start a run                                             yes    yes        no       no
-Read runs, results and the SQL sent                     yes    yes        yes      yes
+Read runs and results                                   yes    yes        yes      yes
+Read the SQL a run sent (``statements``; D34)           yes    yes        yes      no
 =====================================================  =====  =========  =======  ======
 
 A superuser counts as ADMIN.  A refusal names the role needed and the caller's.
+A VIEWER, or a user with no role, reading a run gets ``statements: null``: the
+kind, dialect, SHA-256 and SQL of every statement are all withheld.
 
 Errors are ``{"detail": {"code": ..., "message": ...}}`` with a code from a
 fixed set.  A request that fails validation is answered with the location and
@@ -400,7 +403,14 @@ def source_out(source: WarehouseSource) -> Dict[str, Any]:
     }
 
 
-def run_out(run: WarehouseAnalysisRun) -> Dict[str, Any]:
+def run_out(run: WarehouseAnalysisRun, *, include_sql: bool) -> Dict[str, Any]:
+    """A run as the API returns it.
+
+    ``include_sql`` has no default on purpose: every caller decides, from the
+    caller's role, whether ``statements`` is returned (D34).  When it is false
+    the whole list is withheld -- not only the SQL text, but each statement's
+    kind, dialect and SHA-256 too.
+    """
     request = {k: v for k, v in (run.request or {}).items() if k != "total_seconds"}
     return {
         "id": run.id,
@@ -415,7 +425,7 @@ def run_out(run: WarehouseAnalysisRun) -> Dict[str, Any]:
         "window_end": _utc(run.window_end),
         "error_code": run.error_code,
         "error_message": runner.run_message(run.error_code),
-        "statements": run.statements,
+        "statements": run.statements if include_sql else None,
         # A failed or unfinished run never reports numbers.
         "results": run.results if run.status == "succeeded" else None,
         "job_metadata": run.job_metadata,
@@ -1575,7 +1585,8 @@ def list_runs(
         .order_by(WarehouseAnalysisRun.created_at.desc())
         .limit(RUN_LIST_LIMIT)
     ).scalars()
-    return {"runs": [run_out(r) for r in rows]}
+    include_sql = role_of(current_user) in READERS
+    return {"runs": [run_out(r, include_sql=include_sql) for r in rows]}
 
 
 @router.get(
@@ -1593,4 +1604,4 @@ def get_run(
     run = db.get(WarehouseAnalysisRun, run_id)
     if run is None:
         raise _not_found("Warehouse run")
-    return run_out(run)
+    return run_out(run, include_sql=role_of(current_user) in READERS)
