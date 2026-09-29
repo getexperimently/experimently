@@ -18,6 +18,20 @@ _dynamodb = None
 _kinesis = None
 
 
+def error_name(exc: BaseException) -> str:
+    """The exception's type, plus the AWS error code for a botocore ClientError.
+
+    Never the message: a DynamoDB or Kinesis error can repeat the key or the
+    partition key it was given, and those are user ids.
+    """
+    response = getattr(exc, "response", None)
+    error = (response.get("Error") or {}) if isinstance(response, dict) else {}
+    code = error.get("Code") if isinstance(error, dict) else None
+    if code:
+        return f"{type(exc).__name__}({code})"
+    return type(exc).__name__
+
+
 class JsonFormatter(logging.Formatter):
     """JSON formatter for structured logging in CloudWatch."""
 
@@ -221,7 +235,8 @@ def put_dynamodb_item(
     except Exception as e:
         logger = get_logger(__name__)
         logger.error(
-            f"Failed to put item in DynamoDB: {e!s}", extra={"table": table_name}
+            f"Failed to put item in DynamoDB: {error_name(e)}",
+            extra={"table": table_name},
         )
         return False
 
@@ -246,7 +261,8 @@ def get_dynamodb_item(table_name: str, key: Dict[str, Any]) -> Optional[Dict[str
     except Exception as e:
         logger = get_logger(__name__)
         logger.error(
-            f"Failed to get item from DynamoDB: {e!s}", extra={"table": table_name}
+            f"Failed to get item from DynamoDB: {error_name(e)}",
+            extra={"table": table_name},
         )
         return None
 
@@ -277,7 +293,8 @@ def put_kinesis_record(
     except Exception as e:
         logger = get_logger(__name__)
         logger.error(
-            f"Failed to put record in Kinesis: {e!s}", extra={"stream": stream_name}
+            f"Failed to put record in Kinesis: {error_name(e)}",
+            extra={"stream": stream_name},
         )
         return False
 
@@ -333,7 +350,7 @@ def batch_put_kinesis_records(
 
         except Exception as e:
             logger.error(
-                f"Failed to batch put records in Kinesis: {e!s}",
+                f"Failed to batch put records in Kinesis: {error_name(e)}",
                 extra={"stream": stream_name},
             )
             failed += len(batch)

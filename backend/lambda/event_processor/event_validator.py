@@ -44,7 +44,8 @@ def validate_event(event_dict: Dict[str, Any]) -> EventData:
         return validated_event
     except ValidationError as e:
         logger.error(
-            f"Event validation failed for event_id={event_dict.get('event_id', 'unknown')}: {e}"
+            f"Event validation failed for event_id={event_dict.get('event_id', 'unknown')}: "
+            f"{e.error_count()} error(s)"
         )
         raise
 
@@ -109,7 +110,7 @@ def validate_events_batch(
                 "event_data": event_dict,
             }
 
-            logger.error(f"Validation failed for event {event_id}: {e}")
+            logger.error(f"Validation failed for event {event_id}: {type(e).__name__}")
 
             if skip_invalid:
                 validation_errors.append(error_dict)
@@ -125,7 +126,9 @@ def validate_events_batch(
                 "event_data": event_dict,
             }
 
-            logger.error(f"Unexpected error validating event {event_id}: {e}")
+            logger.error(
+                f"Unexpected error validating event {event_id}: {type(e).__name__}"
+            )
 
             if skip_invalid:
                 validation_errors.append(error_dict)
