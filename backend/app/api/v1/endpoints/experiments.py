@@ -808,7 +808,8 @@ async def delete_experiment(
     Delete an experiment.
 
     This endpoint allows users to delete an existing experiment.
-    The user must have access to the experiment (be the owner or have permission).
+    The caller's role must hold READ and DELETE on experiments; who created
+    the experiment is not considered.
 
     Deleting an experiment has the following effects:
     - The experiment and all its related data (variants, metrics) are permanently removed
@@ -839,23 +840,10 @@ async def delete_experiment(
             detail="experiment_key does not match experiment_id",
         )
 
-    # Check permission to delete experiment
-    if not current_user.is_superuser:
-        # User must be the owner
-        if str(experiment.owner_id) != str(current_user.id):
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="You must be the owner to delete this experiment",
-            )
-
-        # Check if user has permission to delete experiments
-        if not check_permission(current_user, ResourceType.EXPERIMENT, Action.DELETE):
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail=get_permission_error_message(
-                    ResourceType.EXPERIMENT, Action.DELETE
-                ),
-            )
+    # READ and DELETE on experiments; who created it is not considered
+    experiment = deps.get_experiment_change_access(
+        experiment, current_user, Action.DELETE
+    )
 
     # Additional check for experiment status for non-draft experiments
     if experiment.status != ExperimentStatus.DRAFT:
@@ -868,6 +856,7 @@ async def delete_experiment(
     deleted_exp_snapshot = {
         "name": experiment.name,
         "status": str(experiment.status),
+        "owner_id": str(experiment.owner_id) if experiment.owner_id else None,
     }
     deleted_exp_id = str(experiment.id)
 
@@ -886,6 +875,9 @@ async def delete_experiment(
             actor_id=str(current_user.id) if current_user else None,
             old_value=deleted_exp_snapshot,
         )
+        # log() only flushes, and the delete above has already committed, so
+        # without this the record is rolled back when the session closes.
+        db.commit()
     except Exception as _audit_err:
         logger.warning(
             f"Compliance audit logging failed for experiment delete: {_audit_err}"
@@ -1086,7 +1078,8 @@ async def update_experiment_schedule(
 
     Raises:
         HTTPException 400: If scheduling parameters are invalid
-        HTTPException 403: If user doesn't have permission to update this experiment
+        HTTPException 403: If the caller's role does not hold READ and UPDATE
+            on experiments
         HTTPException 404: If experiment not found
     """
     try:
@@ -1097,20 +1090,8 @@ async def update_experiment_schedule(
                 status_code=status.HTTP_404_NOT_FOUND, detail="Experiment not found"
             )
 
-        # Use explicit permission checks for update operation
-        # Step 1: Check if user has UPDATE permission
-        if not check_permission(current_user, ResourceType.EXPERIMENT, Action.UPDATE):
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="You don't have permission to update experiments",
-            )
-
-        # Step 2: Check ownership for non-superusers
-        if not current_user.is_superuser and experiment.owner_id != current_user.id:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="You don't have permission to update this experiment",
-            )
+        # READ and UPDATE on experiments; who created it is not considered
+        experiment = deps.get_experiment_change_access(experiment, current_user)
 
         # Create experiment service
         experiment_service = ExperimentService(db)

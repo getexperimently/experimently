@@ -39,6 +39,10 @@ from backend.app.api.v1.endpoints.auth import create_local_access_token
 from backend.app.core.config import settings
 from backend.app.core.permissions import ROLE_PERMISSIONS, Action, ResourceType
 from backend.app.main import app
+from backend.app.models.compliance_audit_event import (
+    AuditAction,
+    ComplianceAuditEvent,
+)
 from backend.app.models.experiment import Experiment, ExperimentStatus
 from backend.app.models.user import User, UserRole
 
@@ -97,6 +101,10 @@ ROUTES = {
     "clone": ("POST", "/clone", None, ExperimentStatus.ACTIVE),
     "schedule": ("PUT", "/schedule", _schedule_body, ExperimentStatus.DRAFT),
     "delete": ("DELETE", "?experiment_key={id}", None, ExperimentStatus.DRAFT),
+    # Who may act is decided before the status rule, and the status rule still
+    # holds for everyone the role check admits.
+    "delete_active": ("DELETE", "?experiment_key={id}", None, ExperimentStatus.ACTIVE),
+    "schedule_active": ("PUT", "/schedule", _schedule_body, ExperimentStatus.ACTIVE),
 }
 
 
@@ -120,8 +128,6 @@ def _row(ok, *, admin_other=None, developer_other=None, analyst_viewer=403):
 
 READ_ROW = _row(200, analyst_viewer=200)
 CHANGE_ROW = _row(200)
-# Schedule and delete also require the experiment's owner (a superuser excepted).
-OWNER_ROW = {"admin_other": 403, "developer_other": 403}
 
 EXPECTED = {
     "detail": READ_ROW,
@@ -135,8 +141,29 @@ EXPECTED = {
     "archive": CHANGE_ROW,
     "metadata": CHANGE_ROW,
     "clone": _row(201),
-    "schedule": _row(200, **OWNER_ROW),
-    "delete": _row(204, **OWNER_ROW),
+    "schedule": CHANGE_ROW,
+    "delete": _row(204),
+    # 403 for every signed-in caller, so the detail tells the two refusals apart.
+    "delete_active": _row(403),
+    "schedule_active": _row(400),
+}
+
+NOT_DRAFT = "Cannot delete experiments that are not in DRAFT status"
+CANNOT_DELETE = "You don't have permission to delete experiments"
+CANNOT_VIEW = "You don't have permission to view experiments"
+
+#: delete_active: the refusal each signed-in caller gets.
+DELETE_ACTIVE_DETAIL = {
+    "superuser": NOT_DRAFT,
+    "admin_own": NOT_DRAFT,
+    "admin_other": NOT_DRAFT,
+    "developer_own": NOT_DRAFT,
+    "developer_other": NOT_DRAFT,
+    "analyst_own": CANNOT_DELETE,
+    "analyst_other": CANNOT_DELETE,
+    "viewer_own": CANNOT_DELETE,
+    "viewer_other": CANNOT_DELETE,
+    "analyst_own_without_read": CANNOT_VIEW,
 }
 
 READ_ROUTES = ["results", "daily_results", "segmented_results"]
@@ -336,12 +363,13 @@ def _without_read(monkeypatch, column):
 
 
 def test_the_matrix_is_the_size_it_says():
-    """13 routes by 11 callers, and 3 by 11 with the cache on."""
-    assert len(ROUTES) == len(EXPECTED) == 13
+    """15 routes by 11 callers, and 3 by 11 with the cache on."""
+    assert len(ROUTES) == len(EXPECTED) == 15
     assert all(list(cells) == COLUMNS for cells in EXPECTED.values())
     assert len(COLUMNS) == 11
-    assert len(CELLS) == 143
+    assert len(CELLS) == 165
     assert len(CACHED_CELLS) == 33
+    assert set(DELETE_ACTIVE_DETAIL) == set(CALLERS)
 
 
 @pytest.mark.parametrize(("row", "column"), CELLS, ids=[f"{r}-{c}" for r, c in CELLS])
@@ -356,6 +384,63 @@ def test_status_by_route_and_caller(
     response = _request(client, row, experiment_id, headers)
 
     assert response.status_code == EXPECTED[row][column], response.text
+    if row == "delete_active" and column in DELETE_ACTIVE_DETAIL:
+        assert response.json()["detail"] == DELETE_ACTIVE_DETAIL[column]
+    _assert_effect(db_session, row, experiment_id, response, caller, owner)
+
+
+def _assert_effect(db_session, row, experiment_id, response, caller, owner):
+    """A success status is not enough: the change must have happened."""
+    db_session.expire_all()
+    stored = db_session.get(Experiment, uuid.UUID(experiment_id))
+    if row == "schedule" and response.status_code == 200:
+        assert stored.start_date is not None, "schedule answered 200, saved no date"
+    elif row == "delete" and response.status_code == 204:
+        assert stored is None, "delete answered 204 but the experiment is still there"
+        audit = _delete_audit(db_session, experiment_id)
+        assert audit is not None, "no audit record of the delete"
+        assert audit.actor_id == caller.id
+        assert audit.old_value["owner_id"] == str(owner.id)
+    elif row in ("schedule", "schedule_active", "delete", "delete_active"):
+        # A refusal changes nothing.
+        assert stored is not None
+        assert stored.start_date is None
+
+
+def _delete_audit(db_session, experiment_id):
+    return (
+        db_session.query(ComplianceAuditEvent)
+        .filter(
+            ComplianceAuditEvent.resource_type == "experiment",
+            ComplianceAuditEvent.resource_id == experiment_id,
+            ComplianceAuditEvent.action == AuditAction.DELETE,
+        )
+        .one_or_none()
+    )
+
+
+#: A DEVELOPER whose role keeps UPDATE but has had DELETE taken out. Every
+#: shipped role that holds UPDATE also holds DELETE, so without this a delete
+#: route that checked UPDATE instead of DELETE would pass every cell above.
+WITHOUT_DELETE = {"delete": 403, "schedule": 200}
+
+
+@pytest.mark.parametrize("row", list(WITHOUT_DELETE))
+def test_developer_other_without_delete(client, db_session, people, monkeypatch, row):
+    caller, owner = people["developer_other"], people["creator"]
+    experiment_id = _experiment(client, db_session, people, owner, ROUTES[row][3])
+    monkeypatch.setitem(
+        ROLE_PERMISSIONS[UserRole.DEVELOPER],
+        ResourceType.EXPERIMENT,
+        [Action.CREATE, Action.READ, Action.UPDATE, Action.LIST],
+    )
+
+    response = _request(client, row, experiment_id, _auth(caller))
+
+    assert response.status_code == WITHOUT_DELETE[row], response.text
+    if row == "delete":
+        assert response.json()["detail"] == CANNOT_DELETE
+    _assert_effect(db_session, row, experiment_id, response, caller, owner)
 
 
 @pytest.mark.parametrize(

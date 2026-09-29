@@ -1,7 +1,7 @@
 from typing import Any, Dict, Generator, Optional, Union
 from uuid import UUID
 
-from fastapi import Depends, HTTPException, Query, Request, status
+from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import (
     APIKeyHeader,
 )
@@ -437,9 +437,8 @@ def get_experiment_change_access(
     ``action`` on experiments. Who created the experiment is not considered,
     so a role without ``action`` is refused on an experiment it created too.
 
-    Used by update, start, pause, complete, archive and metadata. Schedule
-    and delete keep their own checks in the endpoint, which also require the
-    caller to be the experiment's owner.
+    Used by update, schedule, start, pause, complete, archive and metadata,
+    and by delete with ``Action.DELETE``.
 
     Args:
         experiment: The experiment being changed
@@ -790,87 +789,4 @@ def can_create_experiment(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=get_permission_error_message(ResourceType.EXPERIMENT, Action.CREATE),
         )
-    return True
-
-
-# Create a dedicated function for getting experiments for deletion
-def get_experiment_for_deletion(
-    experiment_key: str = Query(
-        ..., description="Key or ID of the experiment to delete"
-    ),
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user),
-    cache_control: Dict[str, Any] = Depends(get_cache_control),
-) -> Experiment:
-    """
-    Get experiment by key or ID specifically for deletion purposes.
-    This function accepts DRAFT experiments and raises exceptions for other statuses.
-
-    Args:
-        experiment_key: The key or ID of the experiment
-        db: Database session
-        current_user: Current active user
-        cache_control: Cache control configuration
-
-    Returns:
-        Experiment: The experiment if it exists and is in DRAFT status
-
-    Raises:
-        HTTPException 404: If experiment not found
-        HTTPException 400: If experiment not in DRAFT status
-    """
-    # Try to get experiment by ID first
-    try:
-        experiment_id = UUID(experiment_key)
-        experiment = db.query(Experiment).filter(Experiment.id == experiment_id).first()
-    except (ValueError, TypeError):
-        # If not valid UUID, try by key
-        experiment = (
-            db.query(Experiment).filter(Experiment.key == experiment_key).first()
-        )
-
-    if not experiment:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Experiment not found"
-        )
-
-    # Check if experiment is in DRAFT status
-    if experiment.status != ExperimentStatus.DRAFT:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Experiment not in DRAFT status",
-        )
-
-    return experiment
-
-
-async def can_delete_draft_experiment(
-    current_user: User = Depends(get_current_active_user),
-    experiment: Experiment = Depends(get_experiment_for_deletion),
-) -> bool:
-    """
-    Check if user can delete a draft experiment.
-    User must be either the owner of the experiment or a superuser.
-
-    Args:
-        current_user: Current active user
-        experiment: Experiment to check
-
-    Returns:
-        bool: True if user can delete the experiment
-
-    Raises:
-        HTTPException 403: If user doesn't have permission to delete this experiment
-    """
-    # Superusers can always delete
-    if current_user.is_superuser:
-        return True
-
-    # Non-superusers can only delete if they own the experiment
-    if experiment.owner_id != current_user.id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Not enough permissions to delete this experiment",
-        )
-
     return True

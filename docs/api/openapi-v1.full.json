@@ -21128,7 +21128,7 @@
     },
     "/api/v1/experiments/{experiment_id}": {
       "delete": {
-        "description": "Delete an experiment.\n\nThis endpoint allows users to delete an existing experiment.\nThe user must have access to the experiment (be the owner or have permission).\n\nDeleting an experiment has the following effects:\n- The experiment and all its related data (variants, metrics) are permanently removed\n- Any cached data related to the experiment is invalidated\n\n**Note**: This operation cannot be undone. For active experiments, consider\nusing the archive operation instead.\n\nReturns:\n    None: No content, experiment was successfully deleted\n\nRaises:\n    HTTPException 400: If experiment is not in DRAFT status\n    HTTPException 403: If the user doesn't have permission to delete this experiment\n    HTTPException 404: If the experiment doesn't exist",
+        "description": "Delete an experiment.\n\nThis endpoint allows users to delete an existing experiment.\nThe caller's role must hold READ and DELETE on experiments; who created\nthe experiment is not considered.\n\nDeleting an experiment has the following effects:\n- The experiment and all its related data (variants, metrics) are permanently removed\n- Any cached data related to the experiment is invalidated\n\n**Note**: This operation cannot be undone. For active experiments, consider\nusing the archive operation instead.\n\nReturns:\n    None: No content, experiment was successfully deleted\n\nRaises:\n    HTTPException 400: If experiment is not in DRAFT status\n    HTTPException 403: If the user doesn't have permission to delete this experiment\n    HTTPException 404: If the experiment doesn't exist",
         "operationId": "delete_experiment_api_v1_experiments__experiment_id__delete",
         "parameters": [
           {
@@ -22204,7 +22204,7 @@
     },
     "/api/v1/experiments/{experiment_id}/schedule": {
       "put": {
-        "description": "Update experiment scheduling configuration.\n\nThis endpoint allows scheduling experiments for future activation and automatic completion.\n\n- **start_date**: When the experiment should automatically activate\n- **end_date**: When the experiment should automatically complete\n- **time_zone**: Time zone for interpreting the dates (default: UTC)\n\nBoth dates must be in the future, and end_date must be after start_date.\n\nReturns:\n    ExperimentResponse: The updated experiment with scheduling information\n\nRaises:\n    HTTPException 400: If scheduling parameters are invalid\n    HTTPException 403: If user doesn't have permission to update this experiment\n    HTTPException 404: If experiment not found",
+        "description": "Update experiment scheduling configuration.\n\nThis endpoint allows scheduling experiments for future activation and automatic completion.\n\n- **start_date**: When the experiment should automatically activate\n- **end_date**: When the experiment should automatically complete\n- **time_zone**: Time zone for interpreting the dates (default: UTC)\n\nBoth dates must be in the future, and end_date must be after start_date.\n\nReturns:\n    ExperimentResponse: The updated experiment with scheduling information\n\nRaises:\n    HTTPException 400: If scheduling parameters are invalid\n    HTTPException 403: If the caller's role does not hold READ and UPDATE\n        on experiments\n    HTTPException 404: If experiment not found",
         "operationId": "update_experiment_schedule_api_v1_experiments__experiment_id__schedule_put",
         "parameters": [
           {

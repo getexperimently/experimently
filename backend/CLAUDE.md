@@ -118,10 +118,10 @@ owns the experiment:
   READ on experiments. The detail, results, daily-results and
   segmented-results routes call it before any cache read.
 - `get_experiment_change_access(experiment, user, action=Action.UPDATE)`: a
-  superuser, or a role with READ and `action`. Update, start, pause, complete,
-  archive and metadata call it; clone calls the read check and then checks
-  CREATE. Schedule and delete keep their own inline checks, which also require
-  the owner.
+  superuser, or a role with READ and `action`. Update, schedule, start, pause,
+  complete, archive and metadata call it; delete calls it with `Action.DELETE`
+  (then refuses anything not in DRAFT); clone calls the read check and then
+  checks CREATE.
 
 ```python
 @router.post("/experiments/{experiment_id}/start")

@@ -67,14 +67,15 @@ none, including one they own.
 - Reading an experiment (`GET /{experiment_id}`) and its results (`/results`,
   `/daily-results`, `/segmented-results/{segment_by}`) needs the role's READ on
   experiments. Who owns the experiment is not considered.
-- Changing one -- `PUT /{experiment_id}`, `start`, `pause`, `complete`, `archive` and
-  `metadata` -- needs the role's UPDATE on experiments. Who owns the experiment is not
-  considered, so ANALYST and VIEWER change no experiment, including one they own.
+- Changing one -- `PUT /{experiment_id}`, `schedule`, `start`, `pause`, `complete`,
+  `archive` and `metadata` -- needs the role's READ and UPDATE on experiments. Who owns
+  the experiment is not considered, so ANALYST and VIEWER change no experiment, including
+  one they own.
+- Deleting one (`DELETE /{experiment_id}`) needs the role's READ and DELETE on
+  experiments, and the experiment must be in DRAFT. Who owns the experiment is not
+  considered: ADMIN and DEVELOPER may delete any DRAFT experiment.
 - A clone (`POST /{experiment_id}/clone`) needs READ on the source and the role's CREATE
   on experiments.
-- Scheduling (`PUT /{experiment_id}/schedule`) and deleting (`DELETE /{experiment_id}`)
-  need the role's UPDATE or DELETE **and** being the experiment's owner; a superuser is
-  the exception.
 
 A superuser passes every one of these checks.
 
@@ -96,14 +97,16 @@ else:
 
 ### Checking Ownership
 
-To check if a user owns a specific resource:
+`check_ownership` says whether a user is a resource's recorded owner. It is not
+how access to experiments or feature flags is decided -- both are decided by
+role -- so do not use it to gate a change to either:
 
 ```python
 from backend.app.core.permissions import check_ownership
 
-# Check if user owns an experiment
-if check_ownership(current_user, experiment):
-    # Allow special operations for owners
+# True when report.owner_id is the user's id
+if check_ownership(current_user, report):
+    ...
 ```
 
 ### Getting Error Messages
