@@ -9,7 +9,13 @@ jest.mock('@/services/api', () => ({
   apiFetch: jest.fn(),
 }));
 
-const mockRouter = makeRouter({ pathname: '/experiments/new', asPath: '/experiments/new' });
+// The single-page form is the page's `?advanced` view; guided setup, the
+// default view, has its own tests (experiment-new-guided.test.tsx).
+const mockRouter = makeRouter({
+  pathname: '/experiments/new',
+  asPath: '/experiments/new?advanced',
+  query: { advanced: '' },
+});
 jest.mock('next/router', () => ({ useRouter: () => mockRouter }));
 
 jest.mock('next/head', () => {

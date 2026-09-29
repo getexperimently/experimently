@@ -1,0 +1,504 @@
+import React, { useEffect, useRef, useState } from 'react';
+import Link from 'next/link';
+import { useRouter } from 'next/router';
+import { TargetingRuleBuilder } from '@/components/targeting';
+import { PageTitle } from '@/components/PageTitle';
+import { docsUrl } from '@/services/docs';
+import { EXPERIMENT_TYPE_LABELS, METRIC_TYPE_LABELS } from '@/types/experiments';
+import {
+  buildCreatePayload,
+  ExperimentFormAction,
+  ExperimentFormState,
+  FORM_EXPERIMENT_TYPES,
+  FORM_STEPS,
+  FormStep,
+  maxReachableStep,
+  validateForm,
+  validateStep,
+} from './formState';
+import { BasicInfoFields } from './BasicInfoFields';
+import { VariantsEditor } from './VariantsEditor';
+import { MetricsEditor } from './MetricsEditor';
+import { EstimatePanelState, INITIAL_ESTIMATE_PANEL, SampleSizeEstimate } from './SampleSizeEstimate';
+
+export const NEW_EXPERIMENT_PATH = '/experiments/new';
+
+export const STEP_LABELS: Record<FormStep, string> = {
+  type: 'Type',
+  details: 'Details',
+  variants: 'Variants',
+  estimate: 'Estimate',
+  review: 'Review',
+};
+
+export const STEP_HEADINGS: Record<FormStep, string> = {
+  type: 'What kind of experiment?',
+  details: 'Name it and choose what to measure',
+  variants: 'Set up the versions users will see',
+  estimate: 'How many users will you need?',
+  review: 'Check and create',
+};
+
+export const FRESH_LOAD_NOTICE =
+  'Start from the first step. Answers are kept only in this tab, so reloading or opening a link starts over.';
+
+const TYPE_DESCRIPTIONS: Record<string, string> = {
+  a_b: 'Compare a control with one or more alternatives.',
+  mv: 'Compare several combinations of changes at once.',
+};
+
+/** Input types where Enter means "Next" on the first three steps. */
+const ENTER_ADVANCES = new Set(['text', 'number', 'email', 'search', 'url', 'tel']);
+
+/** The step a `?step=` value names: its index, 0 when absent, -1 when unknown. */
+function parseStep(raw: string | string[] | undefined): number {
+  if (raw === undefined) return 0;
+  return FORM_STEPS.indexOf((Array.isArray(raw) ? raw[0] : raw) as FormStep);
+}
+
+interface WizardProps {
+  state: ExperimentFormState;
+  dispatch: React.Dispatch<ExperimentFormAction>;
+  error: string | null;
+  isSubmitting: boolean;
+  onCreate: () => void;
+  /** True when this is the first view the page showed after loading. */
+  freshLoad: boolean;
+}
+
+const primaryButton =
+  'px-6 py-2 rounded-lg bg-blue-600 text-white text-sm font-medium hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-600 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed transition-colors';
+const secondaryButton =
+  'px-4 py-2 rounded-lg border border-slate-500 text-sm font-medium text-slate-700 hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-600 transition-colors';
+const editButton =
+  'text-sm font-medium text-blue-700 hover:text-blue-900 underline focus:outline-none focus:ring-2 focus:ring-blue-600 rounded';
+
+/**
+ * Guided setup: the new-experiment form asked one part at a time.
+ *
+ * The same state, validators and create request as the single-page form; only
+ * the layout differs. The step lives in `?step=` so the browser's Back and
+ * Forward move between steps. There is no `<form>` here and every button is
+ * `type="button"`, so nothing is ever submitted by a key press: Enter in a
+ * text or number field on the first three steps presses Next, and does
+ * nothing on Estimate and Review.
+ */
+export function Wizard({ state, dispatch, error, isSubmitting, onCreate, freshLoad }: WizardProps) {
+  const router = useRouter();
+  const rawStep = router.query.step;
+  const requested = parseStep(rawStep);
+  const maxReachable = maxReachableStep(state);
+
+  // A step this view has asked the router for and not yet seen in the URL.
+  const [pinned, setPinned] = useState<number | null>(null);
+  const pinnedRef = useRef<number | null>(null);
+  const [showFreshNotice, setShowFreshNotice] = useState(false);
+  const [stepError, setStepError] = useState<string | null>(null);
+  const [visitedMax, setVisitedMax] = useState(0);
+  const [estimate, setEstimate] = useState<EstimatePanelState>(INITIAL_ESTIMATE_PANEL);
+  const headingRef = useRef<HTMLHeadingElement>(null);
+  const firstRunRef = useRef(true);
+  const shownRef = useRef<number | null>(null);
+
+  const current = pinned ?? (requested < 0 ? 0 : Math.min(requested, maxReachable));
+  const step = FORM_STEPS[current];
+
+  const moveTo = (index: number, how: 'push' | 'replace') => {
+    pinnedRef.current = index;
+    setPinned(index);
+    const navigate = how === 'push' ? router.push : router.replace;
+    navigate({ pathname: NEW_EXPERIMENT_PATH, query: { step: FORM_STEPS[index] } }, undefined, {
+      shallow: true,
+    }).catch(() => {
+      // A cancelled route change leaves the URL where it was; the step shown
+      // follows the URL again from its next change.
+    });
+  };
+
+  // Keep the step in the URL honest. On the page's first load the answers are
+  // empty, so any later step sends you to the first with a notice; after that,
+  // Back, Forward or an edited URL can only reach a step whose earlier steps
+  // are complete.
+  useEffect(() => {
+    if (firstRunRef.current) {
+      firstRunRef.current = false;
+      if (freshLoad && rawStep !== undefined && rawStep !== 'type') {
+        setShowFreshNotice(true);
+        moveTo(0, 'replace');
+        return;
+      }
+    }
+    if (pinnedRef.current !== null) {
+      if (requested === pinnedRef.current) {
+        pinnedRef.current = null;
+        setPinned(null);
+      }
+      return;
+    }
+    if (requested < 0 || requested > maxReachable) {
+      moveTo(requested < 0 ? 0 : maxReachable, 'replace');
+    }
+    // Runs when the URL's step changes; the answers are read as they stand.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rawStep]);
+
+  // Focus the step's heading on every step change after the first.
+  useEffect(() => {
+    setVisitedMax((v) => Math.max(v, current));
+    if (shownRef.current !== null && shownRef.current !== current) {
+      headingRef.current?.focus();
+      setStepError(null);
+    }
+    shownRef.current = current;
+  }, [current]);
+
+  const next = () => {
+    const problem = validateStep(step, state);
+    if (problem) {
+      setStepError(problem);
+      return;
+    }
+    setStepError(null);
+    setShowFreshNotice(false);
+    moveTo(current + 1, 'push');
+  };
+
+  const back = () => {
+    setStepError(null);
+    moveTo(current - 1, 'push');
+  };
+
+  const goTo = (index: number) => {
+    if (index === current || index > maxReachable) return;
+    moveTo(index, 'push');
+  };
+
+  const onKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    if (e.key !== 'Enter' || e.defaultPrevented) return;
+    // An IME confirming a composition also sends Enter.
+    if (e.nativeEvent.isComposing || e.keyCode === 229) return;
+    if (step === 'estimate' || step === 'review') return;
+    const target = e.target;
+    if (!(target instanceof HTMLInputElement) || !ENTER_ADVANCES.has(target.type)) return;
+    e.preventDefault();
+    next();
+  };
+
+  const payload = step === 'review' ? buildCreatePayload(state) : null;
+
+  return (
+    <div data-testid="guided-setup">
+      <PageTitle title={`New Experiment – Step ${current + 1} of 5: ${STEP_LABELS[step]}`} />
+
+      <nav aria-label="Guided setup steps" className="mb-6">
+        <p className="text-sm text-slate-600 mb-2" data-testid="wizard-step-count">
+          Step {current + 1} of {FORM_STEPS.length}
+        </p>
+        <ol className="flex flex-wrap gap-2" data-testid="wizard-stepper">
+          {FORM_STEPS.map((s, index) => {
+            const isCurrent = index === current;
+            const reachable = index <= maxReachable;
+            // Each step's own check, independently: a problem on one step never
+            // marks another. Review is the whole form.
+            const problem =
+              !isCurrent && index <= visitedMax
+                ? s === 'review'
+                  ? validateForm(state.name, state.variants, state.metrics)
+                  : validateStep(s, state)
+                : null;
+            const status = isCurrent
+              ? 'current step'
+              : problem
+                ? 'needs attention'
+                : index <= visitedMax
+                  ? 'completed'
+                  : 'not started';
+            const label = (
+              <>
+                <span aria-hidden="true">{index + 1}</span> {STEP_LABELS[s]}
+                {problem && (
+                  <span aria-hidden="true" className="ml-1 text-red-700" data-testid={`wizard-step-problem-${s}`}>
+                    !
+                  </span>
+                )}
+                <span className="sr-only"> ({status})</span>
+              </>
+            );
+            const base = 'inline-flex items-center gap-1 rounded-full px-3 py-1 text-sm min-h-[24px]';
+            return (
+              <li key={s} aria-current={isCurrent ? 'step' : undefined} data-testid={`wizard-step-${s}`}>
+                {isCurrent || !reachable ? (
+                  <span
+                    className={`${base} ${
+                      isCurrent ? 'bg-blue-600 text-white font-semibold' : 'border border-slate-300 text-slate-600'
+                    }`}
+                    aria-disabled={!isCurrent ? true : undefined}
+                  >
+                    {label}
+                  </span>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => goTo(index)}
+                    className={`${base} border border-slate-500 text-slate-800 hover:bg-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-600`}
+                  >
+                    {label}
+                  </button>
+                )}
+              </li>
+            );
+          })}
+        </ol>
+      </nav>
+
+      {showFreshNotice && step === 'type' && (
+        <div
+          role="status"
+          className="mb-4 rounded-lg border border-blue-200 bg-blue-50 p-3 text-sm text-blue-900"
+          data-testid="wizard-fresh-notice"
+        >
+          {FRESH_LOAD_NOTICE}
+        </div>
+      )}
+
+      <div onKeyDown={onKeyDown} className="space-y-6" data-testid={`wizard-panel-${step}`}>
+        <section
+          aria-labelledby="wizard-step-heading"
+          className="bg-white rounded-lg border border-slate-200 p-6 space-y-4"
+        >
+          <h2
+            id="wizard-step-heading"
+            ref={headingRef}
+            tabIndex={-1}
+            className="text-lg font-semibold text-slate-900 focus:outline-none"
+            data-testid="wizard-step-heading"
+          >
+            {STEP_HEADINGS[step]}
+          </h2>
+
+          {step === 'type' && (
+            <fieldset>
+              <legend className="text-sm text-slate-700 mb-3">Choose the experiment type.</legend>
+              <div className="grid gap-3 sm:grid-cols-2">
+                {FORM_EXPERIMENT_TYPES.map((t) => (
+                  <label
+                    key={t}
+                    className={`flex gap-3 items-start rounded-lg border p-4 cursor-pointer ${
+                      state.type === t ? 'border-blue-600 bg-blue-50' : 'border-slate-500'
+                    }`}
+                  >
+                    <input
+                      type="radio"
+                      name="wizard_experiment_type"
+                      value={t}
+                      checked={state.type === t}
+                      onChange={() => dispatch({ type: 'setType', experimentType: t })}
+                      className="mt-1"
+                      data-testid={`wizard-type-${t}`}
+                    />
+                    <span>
+                      <span className="block text-sm font-semibold text-slate-900">
+                        {EXPERIMENT_TYPE_LABELS[t]}
+                      </span>
+                      <span className="block text-sm text-slate-600">{TYPE_DESCRIPTIONS[t]}</span>
+                    </span>
+                  </label>
+                ))}
+              </div>
+              <p className="text-sm text-slate-600 mt-3" data-testid="wizard-type-note">
+                <a href={docsUrl('api/split-url')} className="text-blue-700 underline hover:text-blue-900">
+                  Split URL
+                </a>{' '}
+                and{' '}
+                <a
+                  href={docsUrl('api/multi-armed-bandit')}
+                  className="text-blue-700 underline hover:text-blue-900"
+                >
+                  bandit
+                </a>{' '}
+                experiments need settings this flow does not ask for. Create them through the API or an
+                SDK.
+              </p>
+            </fieldset>
+          )}
+
+          {step === 'details' && (
+            <>
+              <BasicInfoFields state={state} dispatch={dispatch} />
+              <div className="pt-2 space-y-4" data-testid="metrics-section">
+                <p className="text-sm text-slate-600">
+                  Mark one metric as the primary metric; that is the one you decide on. Any other metrics
+                  are tracked alongside it.
+                </p>
+                <MetricsEditor metrics={state.metrics} dispatch={dispatch} />
+              </div>
+            </>
+          )}
+
+          {step === 'variants' && (
+            <>
+              <VariantsEditor variants={state.variants} dispatch={dispatch} />
+              <div className="pt-2">
+                <TargetingRuleBuilder
+                  value={state.rules}
+                  onChange={(rules) => dispatch({ type: 'setRules', rules })}
+                />
+              </div>
+            </>
+          )}
+
+          {step === 'estimate' && (
+            <SampleSizeEstimate
+              value={estimate}
+              onChange={setEstimate}
+              allocations={state.variants.map((v) => Number(v.traffic_allocation) || 0)}
+            />
+          )}
+
+          {step === 'review' && payload && (
+            <dl className="divide-y divide-slate-200 text-sm" data-testid="wizard-review">
+              <ReviewRow title="Type" onEdit={() => goTo(0)} editLabel="Edit type">
+                <span data-testid="review-type">{EXPERIMENT_TYPE_LABELS[payload.experiment_type]}</span>
+              </ReviewRow>
+              <ReviewRow title="Details" onEdit={() => goTo(1)} editLabel="Edit details">
+                <p data-testid="review-name">
+                  <span className="font-medium">Name:</span> {payload.name}
+                </p>
+                <p data-testid="review-key">
+                  <span className="font-medium">Key:</span>{' '}
+                  <code className="font-mono">{payload.key ?? '(none)'}</code>
+                </p>
+                {payload.description && (
+                  <p data-testid="review-description">
+                    <span className="font-medium">Description:</span> {payload.description}
+                  </p>
+                )}
+                {payload.hypothesis && (
+                  <p data-testid="review-hypothesis">
+                    <span className="font-medium">Hypothesis:</span> {payload.hypothesis}
+                  </p>
+                )}
+                <ul className="mt-1 list-disc pl-5" data-testid="review-metrics">
+                  {payload.metrics.map((m, i) => (
+                    <li key={i}>
+                      {m.name} (<code className="font-mono">{m.event_name}</code>,{' '}
+                      {METRIC_TYPE_LABELS[m.metric_type]}){m.is_primary ? ' — primary metric' : ''}
+                    </li>
+                  ))}
+                </ul>
+              </ReviewRow>
+              <ReviewRow title="Variants" onEdit={() => goTo(2)} editLabel="Edit variants">
+                <ul className="list-disc pl-5" data-testid="review-variants">
+                  {payload.variants.map((v, i) => (
+                    <li key={i}>
+                      {v.name}: {v.traffic_allocation}%{v.is_control ? ' (control)' : ''}
+                    </li>
+                  ))}
+                </ul>
+                <p className="mt-1" data-testid="review-targeting">
+                  {payload.targeting_rules
+                    ? `Targeting: ${state.rules.groups.length} rule ${
+                        state.rules.groups.length === 1 ? 'group' : 'groups'
+                      }`
+                    : 'Targeting: everyone'}
+                </p>
+              </ReviewRow>
+              <ReviewRow title="Estimate" onEdit={() => goTo(3)} editLabel="Edit estimate">
+                <p data-testid="review-estimate">
+                  {estimate.result
+                    ? `${estimate.result.estimate.samples_per_variant.toLocaleString(
+                        'en-US',
+                      )} users per variant (advisory; not saved)`
+                    : 'Not calculated (optional; not saved)'}
+                </p>
+              </ReviewRow>
+            </dl>
+          )}
+
+          <div role="alert" id="wizard-step-error" data-testid="step-error">
+            {stepError && (
+              <p className="rounded-lg bg-red-50 border border-red-200 p-3 text-sm text-red-700">{stepError}</p>
+            )}
+          </div>
+
+          {step === 'review' && error && (
+            <div
+              role="alert"
+              className="rounded-lg bg-red-50 border border-red-200 p-3 text-sm text-red-700"
+              data-testid="form-error"
+            >
+              {error}
+            </div>
+          )}
+        </section>
+
+        <div className="flex flex-wrap gap-3 justify-between items-center">
+          <Link
+            href="/experiments"
+            className="px-4 py-2 rounded-lg text-sm font-medium text-slate-700 underline hover:text-slate-900"
+            data-testid="wizard-cancel"
+          >
+            Cancel
+          </Link>
+          <div className="flex gap-3">
+            {current > 0 && (
+              <button type="button" onClick={back} className={secondaryButton} data-testid="wizard-back">
+                Back
+              </button>
+            )}
+            {step === 'review' ? (
+              <button
+                type="button"
+                onClick={onCreate}
+                disabled={isSubmitting}
+                className={primaryButton}
+                data-testid="wizard-create"
+              >
+                {isSubmitting ? 'Creating…' : 'Create Experiment'}
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={next}
+                aria-describedby={stepError ? 'wizard-step-error' : undefined}
+                className={primaryButton}
+                data-testid="wizard-next"
+              >
+                Next
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ReviewRow({
+  title,
+  onEdit,
+  editLabel,
+  children,
+}: {
+  title: string;
+  onEdit: () => void;
+  editLabel: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="py-3">
+      <dt className="font-semibold text-slate-900">{title}</dt>
+      <dd className="mt-1 flex gap-4 justify-between items-start text-slate-700">
+        <div className="flex-1">{children}</div>
+        <button
+          type="button"
+          onClick={onEdit}
+          className={editButton}
+          data-testid={`review-edit-${title.toLowerCase()}`}
+        >
+          {editLabel}
+        </button>
+      </dd>
+    </div>
+  );
+}
