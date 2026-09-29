@@ -90,10 +90,7 @@ class TestFeatureFlagToggleEndpoints:
         # Override dependencies
         app.dependency_overrides[deps.get_current_active_user] = lambda: mock_user
         app.dependency_overrides[deps.get_db] = lambda: mock_db
-        app.dependency_overrides[deps.get_cache_control] = lambda: {
-            "enabled": False,
-            "redis": None,
-        }
+        app.dependency_overrides[deps.get_cache_control] = lambda: deps.CacheControl()
 
         # Mock audit service
         with patch(
@@ -147,10 +144,7 @@ class TestFeatureFlagToggleEndpoints:
         # Override dependencies
         app.dependency_overrides[deps.get_current_active_user] = lambda: mock_user
         app.dependency_overrides[deps.get_db] = lambda: mock_db
-        app.dependency_overrides[deps.get_cache_control] = lambda: {
-            "enabled": False,
-            "redis": None,
-        }
+        app.dependency_overrides[deps.get_cache_control] = lambda: deps.CacheControl()
 
         # Mock audit service
         with patch(
@@ -195,10 +189,7 @@ class TestFeatureFlagToggleEndpoints:
         # Override dependencies
         app.dependency_overrides[deps.get_current_active_user] = lambda: mock_user
         app.dependency_overrides[deps.get_db] = lambda: mock_db
-        app.dependency_overrides[deps.get_cache_control] = lambda: {
-            "enabled": False,
-            "redis": None,
-        }
+        app.dependency_overrides[deps.get_cache_control] = lambda: deps.CacheControl()
 
         # Mock audit service
         with patch(
@@ -241,10 +232,7 @@ class TestFeatureFlagToggleEndpoints:
         # Override dependencies
         app.dependency_overrides[deps.get_current_active_user] = lambda: mock_user
         app.dependency_overrides[deps.get_db] = lambda: mock_db
-        app.dependency_overrides[deps.get_cache_control] = lambda: {
-            "enabled": False,
-            "redis": None,
-        }
+        app.dependency_overrides[deps.get_cache_control] = lambda: deps.CacheControl()
 
         # Mock audit service
         with patch(
@@ -276,10 +264,7 @@ class TestFeatureFlagToggleEndpoints:
         # Override dependencies
         app.dependency_overrides[deps.get_current_active_user] = lambda: mock_user
         app.dependency_overrides[deps.get_db] = lambda: mock_db
-        app.dependency_overrides[deps.get_cache_control] = lambda: {
-            "enabled": False,
-            "redis": None,
-        }
+        app.dependency_overrides[deps.get_cache_control] = lambda: deps.CacheControl()
 
         client = TestClient(app)
         non_existent_id = uuid4()
@@ -313,10 +298,7 @@ class TestFeatureFlagToggleEndpoints:
         # Override dependencies
         app.dependency_overrides[deps.get_current_active_user] = lambda: mock_user
         app.dependency_overrides[deps.get_db] = lambda: mock_db
-        app.dependency_overrides[deps.get_cache_control] = lambda: {
-            "enabled": False,
-            "redis": None,
-        }
+        app.dependency_overrides[deps.get_cache_control] = lambda: deps.CacheControl()
 
         client = TestClient(app)
         response = client.post(
@@ -350,10 +332,7 @@ class TestFeatureFlagToggleEndpoints:
         # Override dependencies
         app.dependency_overrides[deps.get_current_active_user] = lambda: mock_superuser
         app.dependency_overrides[deps.get_db] = lambda: mock_db
-        app.dependency_overrides[deps.get_cache_control] = lambda: {
-            "enabled": False,
-            "redis": None,
-        }
+        app.dependency_overrides[deps.get_cache_control] = lambda: deps.CacheControl()
 
         # Mock audit service
         with patch(
@@ -375,7 +354,17 @@ class TestFeatureFlagToggleEndpoints:
         # Setup mocks
         mock_user = self.setup_test_user()
         mock_db = Mock(spec=Session)
+        # The dependency hands out redis.asyncio: its calls are awaited, and a
+        # synchronous Mock here hid the missing awaits (#100).
         mock_redis = Mock()
+        mock_redis.delete = AsyncMock()
+        list_key = f"feature_flags:{uuid4()}:0:100:None:None"
+
+        async def scan_iter(match):
+            assert match == "feature_flags:*"
+            yield list_key
+
+        mock_redis.scan_iter = Mock(side_effect=scan_iter)
 
         # Setup feature flag
         feature_flag = self.setup_test_feature_flag(
@@ -413,9 +402,9 @@ class TestFeatureFlagToggleEndpoints:
 
         assert response.status_code == 200
 
-        # Verify cache was invalidated (delete and scan_iter were called)
-        assert mock_redis.delete.called
-        assert mock_redis.scan_iter.called
+        # The flag's detail and every cached list were dropped, awaited.
+        mock_redis.delete.assert_any_await(f"feature_flag:{feature_flag.id}")
+        mock_redis.delete.assert_any_await(list_key)
 
     def test_toggle_without_reason(self):
         """Test toggling feature flag without providing a reason."""
@@ -442,10 +431,7 @@ class TestFeatureFlagToggleEndpoints:
         # Override dependencies
         app.dependency_overrides[deps.get_current_active_user] = lambda: mock_user
         app.dependency_overrides[deps.get_db] = lambda: mock_db
-        app.dependency_overrides[deps.get_cache_control] = lambda: {
-            "enabled": False,
-            "redis": None,
-        }
+        app.dependency_overrides[deps.get_cache_control] = lambda: deps.CacheControl()
 
         # Mock audit service
         with patch(
@@ -478,10 +464,7 @@ class TestFeatureFlagToggleEndpoints:
         # Override dependencies
         app.dependency_overrides[deps.get_current_active_user] = lambda: mock_user
         app.dependency_overrides[deps.get_db] = lambda: mock_db
-        app.dependency_overrides[deps.get_cache_control] = lambda: {
-            "enabled": False,
-            "redis": None,
-        }
+        app.dependency_overrides[deps.get_cache_control] = lambda: deps.CacheControl()
 
         client = TestClient(app)
         response = client.post(
@@ -514,10 +497,7 @@ class TestFeatureFlagToggleEndpoints:
         # Override dependencies
         app.dependency_overrides[deps.get_current_active_user] = lambda: mock_user
         app.dependency_overrides[deps.get_db] = lambda: mock_db
-        app.dependency_overrides[deps.get_cache_control] = lambda: {
-            "enabled": False,
-            "redis": None,
-        }
+        app.dependency_overrides[deps.get_cache_control] = lambda: deps.CacheControl()
 
         # Mock audit service to raise exception
         with patch(
@@ -545,10 +525,7 @@ class TestFeatureFlagToggleEndpoints:
         # Override dependencies
         app.dependency_overrides[deps.get_current_active_user] = lambda: mock_user
         app.dependency_overrides[deps.get_db] = lambda: mock_db
-        app.dependency_overrides[deps.get_cache_control] = lambda: {
-            "enabled": False,
-            "redis": None,
-        }
+        app.dependency_overrides[deps.get_cache_control] = lambda: deps.CacheControl()
 
         client = TestClient(app)
         feature_flag_id = uuid4()
