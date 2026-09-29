@@ -41,8 +41,9 @@ function inviteEmailMatches(
 }
 
 /**
- * `alice@example.com` -> `a•••@example.com`, for display on this page only.
- * The invite preview API still returns the full address; this does not hide it.
+ * `alice@example.com` -> `a•••@example.com`, for display on this page.
+ * The API masks it too for anyone but the invitee; masking a masked address
+ * returns it unchanged.
  */
 function maskEmail(email: string): string {
   const trimmed = email.trim();
@@ -72,20 +73,40 @@ function AcceptInvitePage() {
   const mismatch =
     serverMismatch || (!!invite && !!user && !inviteEmailMatches(invite.email, user.email));
 
+  // The API returns the invited address in full only to the invitee, so the
+  // preview is fetched again whenever the signed-in account changes.
+  const userId = user?.id ?? null;
+
   useEffect(() => {
     if (!token) return;
+    let current = true;
 
     // Authentication is enforced by <RequireAuth> in _app.tsx (this route is
     // protected), which redirects anonymous visitors to /login?next=<this page>.
     workspaceService
       .getInvite(token)
-      .then(setInvite)
+      .then((result) => {
+        if (!current) return;
+        setInvite(result);
+        setFetchError(null);
+      })
       .catch((err) => {
+        if (!current) return;
         const msg = err instanceof Error ? err.message : 'Failed to load invite';
         setFetchError(msg);
       })
-      .finally(() => setIsLoading(false));
-  }, [token, router]);
+      .finally(() => {
+        if (current) setIsLoading(false);
+      });
+    return () => {
+      current = false;
+    };
+  }, [token, router, userId]);
+
+  // A 403 from accepting was about the previous account.
+  useEffect(() => {
+    setServerMismatch(false);
+  }, [userId]);
 
   async function handleAccept() {
     if (!token) return;
