@@ -169,9 +169,7 @@ class AssignmentService:
 
         if existing_assignment:
             # Return existing assignment
-            logger.debug(
-                f"Using existing assignment for user {user_id} in experiment {experiment_id}"
-            )
+            logger.debug(f"Using existing assignment in experiment {experiment_id}")
             assignment_dict = self._assigned_result(user_id, experiment_id)
 
             # Optionally track exposure event
@@ -188,9 +186,8 @@ class AssignmentService:
         # Eligibility gate for new users: holdout -> mutual exclusion -> targeting
         eligibility = self.check_eligibility(user_id, experiment, context)
         if not eligibility["eligible"]:
-            logger.info(
-                f"User {user_id} not eligible for experiment {experiment_id}: "
-                f"{eligibility['reason']} ({eligibility.get('detail')})"
+            logger.debug(
+                f"Not eligible for experiment {experiment_id}: {eligibility['reason']}"
             )
             return self._ineligible_result(user_id, experiment, eligibility)
 
@@ -222,9 +219,7 @@ class AssignmentService:
         self.db.commit()
         self.db.refresh(assignment)
 
-        logger.info(
-            f"Assigned user {user_id} to variant {variant_id} in experiment {experiment_id}"
-        )
+        logger.debug(f"Assigned variant {variant_id} in experiment {experiment_id}")
 
         # Track exposure event if requested
         if track_exposure:
@@ -535,8 +530,11 @@ class AssignmentService:
                 assigned += 1
 
             except Exception as e:
+                # The type only: a database error's text repeats the row's
+                # parameters, the user id among them.
                 logger.error(
-                    f"Error assigning user {user_id} to experiment {experiment_id}: {e!s}"
+                    f"Error in bulk assignment to experiment {experiment_id}: "
+                    f"{type(e).__name__}"
                 )
                 errors += 1
 
@@ -605,9 +603,7 @@ class AssignmentService:
         )
 
         if existing_assignment:
-            logger.debug(
-                f"Using existing assignment for user {user_id} in experiment {experiment_id}"
-            )
+            logger.debug(f"Using existing assignment in experiment {experiment_id}")
             assignment_dict = self.get_assignment(user_id, experiment_id)
 
             # Add targeting info
@@ -637,9 +633,7 @@ class AssignmentService:
 
         if not targeting_result["eligible"]:
             # User doesn't match targeting criteria
-            logger.info(
-                f"User {user_id} not eligible for experiment {experiment_id}: {targeting_result['reason']}"
-            )
+            logger.debug(f"Not eligible for experiment {experiment_id}: targeting")
             return {
                 "assignment": None,
                 "targeting_matched": False,
@@ -665,8 +659,8 @@ class AssignmentService:
         self.db.commit()
         self.db.refresh(assignment)
 
-        logger.info(
-            f"Assigned user {user_id} to variant {variant_id} in experiment {experiment_id} via targeting"
+        logger.debug(
+            f"Assigned variant {variant_id} in experiment {experiment_id} via targeting"
         )
 
         # Track exposure event if requested
@@ -776,7 +770,11 @@ class AssignmentService:
                 }
 
         except Exception as e:
-            logger.error(f"Error evaluating experiment targeting: {e!s}")
+            # The type only: the exception's text can repeat an attribute value.
+            logger.error(
+                f"Error evaluating targeting for experiment {getattr(experiment, 'id', None)}: "
+                f"{type(e).__name__}"
+            )
             return {
                 "eligible": False,
                 "rule_id": None,
@@ -919,7 +917,7 @@ class AssignmentService:
         self.db.refresh(assignment)
 
         logger.info(
-            f"Reassigned user {user_id} to variant {variant_id} in experiment {experiment_id}"
+            f"Reassigned a user to variant {variant_id} in experiment {experiment_id}"
         )
 
         # Track exposure event if requested

@@ -150,7 +150,6 @@ def record_evaluation_event_async(
             "Evaluation event recorded to Kinesis",
             extra={
                 "flag_key": flag_config.key,
-                "user_id": user_id,
                 "enabled": evaluation_result["enabled"],
             },
         )
@@ -158,10 +157,9 @@ def record_evaluation_event_async(
     except Exception as e:
         # Log error but don't raise - tracking failures should not block responses
         logger.warning(
-            f"Failed to record evaluation event to Kinesis: {e!s}",
+            f"Failed to record evaluation event to Kinesis: {type(e).__name__}",
             extra={
                 "flag_key": flag_config.key if flag_config else "unknown",
-                "user_id": user_id,
                 "error_type": type(e).__name__,
             },
         )
@@ -251,7 +249,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         if not flag_config:
             logger.warning(
                 "Feature flag not found",
-                extra={"flag_key": flag_key, "user_id": user_id},
+                extra={"flag_key": flag_key},
             )
             return create_error_response(404, f"Feature flag not found: {flag_key}")
 
@@ -272,15 +270,14 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         except Exception as e:
             # Log but don't raise - tracking is non-critical
             logger.warning(
-                f"Failed to record evaluation tracking: {e!s}",
-                extra={"user_id": user_id, "flag_key": flag_key},
+                f"Failed to record evaluation tracking: {type(e).__name__}",
+                extra={"flag_key": flag_key},
             )
 
         # Log evaluation result
-        logger.info(
+        logger.debug(
             "Feature flag evaluated",
             extra={
-                "user_id": user_id,
                 "flag_key": flag_key,
                 "flag_id": flag_config.flag_id,
                 "enabled": evaluation_result["enabled"],
@@ -310,15 +307,16 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
 
     except Exception as e:
         # Handle unexpected errors
+        # The type only, and no traceback: an exception's text can repeat a
+        # request value such as the user id.
         logger.error(
-            f"Internal server error: {e!s}",
+            f"Internal server error: {type(e).__name__}",
             extra={
                 "error_type": type(e).__name__,
                 "request_id": event.get("requestContext", {}).get(
                     "requestId", "unknown"
                 ),
             },
-            exc_info=True,
         )
         return create_error_response(
             500,

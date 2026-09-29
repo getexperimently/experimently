@@ -104,7 +104,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         if not experiment_config:
             logger.warning(
                 "Experiment not found",
-                extra={"experiment_key": experiment_key, "user_id": user_id},
+                extra={"experiment_key": experiment_key},
             )
             return create_error_response(404, f"Experiment not found: {experiment_key}")
 
@@ -115,9 +115,9 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
 
         # Handle excluded users
         if assignment is None:
-            logger.info(
+            logger.debug(
                 "User excluded from experiment",
-                extra={"user_id": user_id, "experiment_key": experiment_key},
+                extra={"experiment_key": experiment_key},
             )
             return create_success_response(
                 {
@@ -129,10 +129,9 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             )
 
         # Return successful assignment
-        logger.info(
+        logger.debug(
             "Assignment returned",
             extra={
-                "user_id": user_id,
                 "experiment_key": experiment_key,
                 "variant": assignment.variant,
                 "assignment_id": assignment.assignment_id,
@@ -157,15 +156,16 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
 
     except Exception as e:
         # Handle unexpected errors
+        # The type only, and no traceback: an exception's text can repeat a
+        # request value such as the user id.
         logger.error(
-            f"Internal server error: {e!s}",
+            f"Internal server error: {type(e).__name__}",
             extra={
                 "error_type": type(e).__name__,
                 "request_id": event.get("requestContext", {}).get(
                     "requestId", "unknown"
                 ),
             },
-            exc_info=True,
         )
         return create_error_response(
             500, "Internal server error occurred while processing assignment request"

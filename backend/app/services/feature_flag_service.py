@@ -369,9 +369,9 @@ class FeatureFlagService:
         except Exception as e:
             # Log and record the error
             error = str(e)
-            logger.error(
-                f"Error evaluating flag {flag.key} for user {user_id}: {error}"
-            )
+            # The type only: the exception's text can repeat a user's value.
+            # The full text is still recorded in error_logs below.
+            logger.error(f"Error evaluating flag {flag.key}: {type(e).__name__}")
 
             # Default behavior on error is to return False
             result = False
@@ -407,7 +407,11 @@ class FeatureFlagService:
                     MetricsService.log_error(db=self.db, data=error_data)
             except Exception as metrics_error:
                 # Don't let metrics collection errors affect flag evaluation
-                logger.error(f"Failed to record metrics: {metrics_error!s}")
+                # The type only: a database error's text repeats the row's
+                # parameters, the user id among them.
+                logger.error(
+                    f"Failed to record metrics: {type(metrics_error).__name__}"
+                )
 
         return {"enabled": result, "reason": reason, "rule_id": targeting_rule_id}
 
