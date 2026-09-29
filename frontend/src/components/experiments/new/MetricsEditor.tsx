@@ -1,0 +1,114 @@
+import React from 'react';
+import { MetricType, METRIC_TYPE_LABELS } from '@/types/experiments';
+import { ExperimentFormAction, MetricFormData } from './formState';
+import { smallInputClass } from './fieldStyles';
+
+const METRIC_TYPES: Array<{ value: MetricType; label: string }> = (
+  Object.keys(METRIC_TYPE_LABELS) as MetricType[]
+).map((value) => ({ value, label: METRIC_TYPE_LABELS[value] }));
+
+interface MetricsEditorProps {
+  metrics: MetricFormData[];
+  dispatch: React.Dispatch<ExperimentFormAction>;
+}
+
+/** The metrics heading and one row per metric. The caller supplies the section. */
+export function MetricsEditor({ metrics, dispatch }: MetricsEditorProps) {
+  return (
+    <>
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-base font-semibold text-slate-800">Metrics</h2>
+          <p className="text-xs text-slate-500 mt-0.5">
+            Conversions are matched by <span className="font-mono">event_name</span> from{' '}
+            <span className="font-mono">/tracking/track</span>. One metric is primary.
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={() => dispatch({ type: 'addMetric' })}
+          className="text-sm text-blue-600 hover:text-blue-800 font-medium"
+          data-testid="add-metric"
+        >
+          + Add Metric
+        </button>
+      </div>
+
+      <div className="space-y-3">
+        {metrics.map((metric, index) => (
+          <div
+            key={index}
+            className="flex gap-3 items-start p-3 rounded-lg border border-slate-200 bg-slate-50"
+            data-testid={`metric-row-${index}`}
+          >
+            <div className="flex-1 space-y-2">
+              <div className="flex flex-col sm:flex-row gap-2">
+                <input
+                  type="text"
+                  name={`metric_name_${index}`}
+                  value={metric.name}
+                  onChange={(e) =>
+                    dispatch({ type: 'changeMetric', index, field: 'name', value: e.target.value })
+                  }
+                  placeholder="Metric name"
+                  aria-label={`Metric ${index + 1} name`}
+                  className={`flex-1 ${smallInputClass}`}
+                  data-testid={`metric-name-${index}`}
+                />
+                <input
+                  type="text"
+                  name={`metric_event_${index}`}
+                  value={metric.event_name}
+                  onChange={(e) =>
+                    dispatch({ type: 'changeMetric', index, field: 'event_name', value: e.target.value })
+                  }
+                  placeholder="event_name (e.g. purchase)"
+                  aria-label={`Metric ${index + 1} event name`}
+                  className={`flex-1 font-mono ${smallInputClass}`}
+                  data-testid={`metric-event-${index}`}
+                />
+                <select
+                  name={`metric_type_${index}`}
+                  value={metric.metric_type}
+                  onChange={(e) =>
+                    dispatch({ type: 'changeMetric', index, field: 'metric_type', value: e.target.value })
+                  }
+                  aria-label={`Metric ${index + 1} type`}
+                  className={smallInputClass}
+                  data-testid={`metric-type-${index}`}
+                >
+                  {METRIC_TYPES.map((t) => (
+                    <option key={t.value} value={t.value}>
+                      {t.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <label className="inline-flex items-center gap-1.5 text-xs text-slate-600">
+                <input
+                  type="radio"
+                  name="primary_metric"
+                  checked={metric.is_primary}
+                  onChange={() => dispatch({ type: 'setPrimary', index })}
+                  data-testid={`metric-primary-${index}`}
+                />
+                Primary metric
+              </label>
+            </div>
+            {metrics.length > 1 && (
+              <button
+                type="button"
+                onClick={() => dispatch({ type: 'removeMetric', index })}
+                className="text-red-400 hover:text-red-600 text-sm mt-1"
+                data-testid={`remove-metric-${index}`}
+                aria-label="Remove metric"
+              >
+                &times;
+              </button>
+            )}
+          </div>
+        ))}
+      </div>
+    </>
+  );
+}
