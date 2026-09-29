@@ -1,0 +1,33 @@
+{
+  "_provenance": {
+    "source": "vendor documentation",
+    "vendor_docs_row": "7c",
+    "url": "https://docs.cloud.google.com/bigquery/docs/reference/rest/v2/jobs/insert",
+    "note": "jobs.insert returns the Job resource; state RUNNING.",
+    "real_run_id": null
+  },
+  "status": 200,
+  "body": {
+    "kind": "bigquery#job",
+    "jobReference": {
+      "projectId": "acme-analytics",
+      "jobId": "JOBID",
+      "location": "US"
+    },
+    "configuration": {
+      "query": {
+        "useLegacySql": false
+      },
+      "labels": {
+        "experimently": "analysis"
+      }
+    },
+    "statistics": {
+      "creationTime": "1759000000000",
+      "startTime": "1759000000100"
+    },
+    "status": {
+      "state": "RUNNING"
+    }
+  }
+}

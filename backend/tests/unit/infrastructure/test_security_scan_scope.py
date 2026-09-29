@@ -17,7 +17,7 @@ fail when a scanner is narrowed back to one tree.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional, Tuple
 
 import pytest
 import yaml
@@ -105,3 +105,114 @@ class TestEveryScannerSeesBothTrees:
         assert "semgrep" in summary["needs"]
         assert "container-security" in summary["needs"]
         assert "python-security" in summary["needs"]
+
+
+# -- every published image is scanned (#77) -----------------------------------
+
+RELEASE = REPO_ROOT / ".github" / "workflows" / "release.yml"
+BUILD_ACTION = "docker/build-push-action"
+MATRIX_PROFILE = "${{ matrix.profile }}"
+
+#: What makes an image: its Dockerfile, its stage, and its profile build-arg.
+ImageKey = Tuple[str, Optional[str], Optional[str]]
+
+
+def _build_args(step: Dict[str, Any]) -> Dict[str, str]:
+    raw = str(step.get("with", {}).get("build-args") or "")
+    pairs = (line.strip().split("=", 1) for line in raw.splitlines() if "=" in line)
+    return {key.strip(): value.strip() for key, value in pairs}
+
+
+def _expand(value: Any, profile: Optional[str], where: str) -> Optional[str]:
+    """``${{ matrix.profile }}`` replaced by *profile*; ``None`` stays ``None``."""
+    if value is None:
+        return None
+    text = str(value)
+    if MATRIX_PROFILE in text:
+        assert profile is not None, f"{where}: {text!r} outside a profile matrix"
+        text = text.replace(MATRIX_PROFILE, profile)
+    return text
+
+
+def _built_images(
+    workflow: Dict[str, Any], job_names: List[str]
+) -> Dict[ImageKey, str]:
+    """``{(file, target, profile): tags}`` for every build-push-action step of
+    *job_names*, with ``${{ matrix.profile }}`` expanded over the job's matrix."""
+    images: Dict[ImageKey, str] = {}
+    for name in job_names:
+        job = workflow["jobs"][name]
+        profiles = job.get("strategy", {}).get("matrix", {}).get("profile") or [None]
+        for step in job["steps"]:
+            if BUILD_ACTION not in str(step.get("uses", "")):
+                continue
+            with_ = step["with"]
+            for profile in profiles:
+                key = (
+                    str(_expand(with_["file"], profile, name)),
+                    _expand(with_.get("target"), profile, name),
+                    _expand(
+                        _build_args(step).get("EXPERIMENTLY_PROFILE"), profile, name
+                    ),
+                )
+                images[key] = str(_expand(with_.get("tags", ""), profile, name))
+    return images
+
+
+def _release_images() -> Dict[ImageKey, str]:
+    release = yaml.safe_load(RELEASE.read_text())
+    publishing = [
+        name
+        for name, job in release["jobs"].items()
+        if any(BUILD_ACTION in str(s.get("uses", "")) for s in job.get("steps", []))
+    ]
+    return _built_images(release, publishing)
+
+
+class TestEveryPublishedImageIsScanned:
+    """release.yml publishes four images, and the Trivy gate scanned two (#77).
+
+    The set of images is read from release.yml's own build steps rather than
+    typed here, so a fifth published image fails these tests until the scan
+    builds and scans it too.
+    """
+
+    def test_the_release_reader_finds_the_published_images(self):
+        """A positive control: if release.yml changes shape so that the reader
+        finds nothing, the comparison below would pass vacuously."""
+        images = _release_images()
+        assert len(images) == 4, images
+        files = {key[0] for key in images}
+        assert files == {"backend/Dockerfile", "frontend/Dockerfile"}, images
+
+    @pytest.mark.regression
+    def test_the_scan_builds_every_image_release_publishes(self):
+        scanned = _built_images(_workflow(), ["container-security"])
+        missing = sorted(set(_release_images()) - set(scanned), key=str)
+        assert not missing, (
+            "release.yml publishes images that security-scan.yml's "
+            "container-security job never builds, so Trivy never scans them: "
+            f"{missing}"
+        )
+
+    @pytest.mark.regression
+    def test_trivy_scans_every_image_the_job_builds(self):
+        """Each built tag must appear literally in the scan script: a tag
+        assembled at run time (`...:scan-$target`) cannot be checked here."""
+        script = _script("container-security", "trivy image")
+        built = _built_images(_workflow(), ["container-security"])
+        assert len(set(built.values())) == len(built), built
+        for key, tag in built.items():
+            assert tag and tag in script, (
+                f"container-security builds {tag or key} and trivy never scans it"
+            )
+
+    def test_the_image_scan_blocks(self):
+        """One policy for every image: HIGH/CRITICAL with a fix fails."""
+        job = _workflow()["jobs"]["container-security"]
+        (step,) = [s for s in job["steps"] if "trivy image" in str(s.get("run", ""))]
+        script = str(step["run"])
+        for flag in ("--severity HIGH,CRITICAL", "--ignore-unfixed", "--exit-code 1"):
+            assert flag in script, f"trivy image runs without {flag}"
+        assert 'exit "$failed"' in script
+        assert not step.get("continue-on-error"), "the image scan does not block"

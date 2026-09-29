@@ -1,0 +1,24 @@
+{
+  "_provenance": {
+    "source": "vendor documentation",
+    "vendor_docs_row": "7c",
+    "url": "https://docs.cloud.google.com/bigquery/docs/error-messages",
+    "note": "notFound, 404; the documented sample response shape.",
+    "real_run_id": null
+  },
+  "status": 404,
+  "body": {
+    "error": {
+      "code": 404,
+      "message": "UPSTREAM-SENTINEL-bq-4d1e message",
+      "status": "NOT_FOUND",
+      "errors": [
+        {
+          "domain": "global",
+          "reason": "notFound",
+          "message": "UPSTREAM-SENTINEL-bq-4d1e detail"
+        }
+      ]
+    }
+  }
+}

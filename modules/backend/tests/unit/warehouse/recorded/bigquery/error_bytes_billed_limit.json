@@ -1,0 +1,24 @@
+{
+  "_provenance": {
+    "source": "vendor documentation",
+    "vendor_docs_row": "7c",
+    "url": "https://docs.cloud.google.com/bigquery/docs/error-messages",
+    "note": "The maximumBytesBilled failure. The reason bytesBilledLimitExceeded is not in the error table; the real check confirms it.",
+    "real_run_id": null
+  },
+  "status": 400,
+  "body": {
+    "error": {
+      "code": 400,
+      "message": "UPSTREAM-SENTINEL-bq-4d1e message",
+      "status": "INVALID_ARGUMENT",
+      "errors": [
+        {
+          "domain": "global",
+          "reason": "bytesBilledLimitExceeded",
+          "message": "UPSTREAM-SENTINEL-bq-4d1e detail"
+        }
+      ]
+    }
+  }
+}
