@@ -73,12 +73,6 @@ const DEFAULTS: Values = {
   database: '',
 };
 
-const TYPE_FIELDS: Record<WarehouseType, string[]> = {
-  snowflake: ['account', 'user', 'role', 'warehouse'],
-  bigquery: ['billing_project', 'location', 'max_bytes_per_query'],
-  athena: ['region', 'role_arn', 'workgroup', 'database', 'max_bytes_per_query'],
-};
-
 /** Where an API `field` lands in this form. */
 const FIELD_ORDER = [
   'name',
@@ -316,7 +310,12 @@ export function ConnectionForm({ mode, connectors, connection, onSaved, onCancel
     // Clear the input so the file's name is not kept either.
     e.target.value = '';
     if (!file) return;
-    const text = await file.text();
+    const text = await new Promise<string>((resolve) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(typeof reader.result === 'string' ? reader.result : '');
+      reader.onerror = () => resolve('');
+      reader.readAsText(file);
+    });
     setServiceAccountJson(text);
     setErrors((prev) => {
       const next = { ...prev };

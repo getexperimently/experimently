@@ -122,10 +122,10 @@ function PreviewPanel({ source, connection }: { source: Source; connection: Conn
         covers the last 7 days.
       </p>
       <form onSubmit={run} noValidate className="grid gap-3 sm:grid-cols-3">
-        <Field id="wh-preview-from" label="From (UTC date)" error={errors.from}>
+        <Field id="wh-preview-start" label="From (UTC date)" error={errors.from}>
           {(aria) => <input {...aria} type="date" value={from} onChange={(e) => setFrom(e.target.value)} className={INPUT_CLASS} />}
         </Field>
-        <Field id="wh-preview-to" label="Until (UTC date, not included)" error={errors.to}>
+        <Field id="wh-preview-end" label="Until (UTC date, not included)" error={errors.to}>
           {(aria) => <input {...aria} type="date" value={to} onChange={(e) => setTo(e.target.value)} className={INPUT_CLASS} />}
         </Field>
         {source.kind === 'assignment' && (

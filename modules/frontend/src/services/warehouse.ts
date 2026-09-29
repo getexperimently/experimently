@@ -11,7 +11,6 @@
  */
 import { apiFetch } from '@/services/api';
 
-const BASE = '/api/v1/warehouse/analysis';
 
 export type WarehouseType = 'bigquery' | 'snowflake' | 'athena';
 
@@ -191,62 +190,62 @@ export interface PreviewResult {
 
 export const warehouseService = {
   listConnectors: () =>
-    apiFetch<{ connectors: Connector[] }>(`${BASE}/connectors`).then((r) => r.connectors),
+    apiFetch<{ connectors: Connector[] }>(`/api/v1/warehouse/analysis/connectors`).then((r) => r.connectors),
 
   listConnections: () =>
-    apiFetch<{ connections: Connection[] }>(`${BASE}/connections`).then((r) => r.connections),
+    apiFetch<{ connections: Connection[] }>(`/api/v1/warehouse/analysis/connections`).then((r) => r.connections),
 
   getConnection: (id: string) =>
-    apiFetch<Connection>(`${BASE}/connections/${encodeURIComponent(id)}`),
+    apiFetch<Connection>(`/api/v1/warehouse/analysis/connections/${encodeURIComponent(id)}`),
 
   createConnection: (body: ConnectionBody) =>
-    apiFetch<ConnectionCreated>(`${BASE}/connections`, { method: 'POST', json: body }),
+    apiFetch<ConnectionCreated>(`/api/v1/warehouse/analysis/connections`, { method: 'POST', json: body }),
 
   updateConnection: (id: string, body: ConnectionBody) =>
-    apiFetch<Connection>(`${BASE}/connections/${encodeURIComponent(id)}`, {
+    apiFetch<Connection>(`/api/v1/warehouse/analysis/connections/${encodeURIComponent(id)}`, {
       method: 'PUT',
       json: body,
     }),
 
   deleteConnection: (id: string) =>
-    apiFetch<void>(`${BASE}/connections/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+    apiFetch<void>(`/api/v1/warehouse/analysis/connections/${encodeURIComponent(id)}`, { method: 'DELETE' }),
 
   /** Test before saving (BigQuery, Athena). The body is held in memory by the API, not stored. */
   testUnsavedConnection: (body: BigQueryBody | AthenaBody) =>
-    apiFetch<ConnectionTestResult>(`${BASE}/connections/test`, { method: 'POST', json: body }),
+    apiFetch<ConnectionTestResult>(`/api/v1/warehouse/analysis/connections/test`, { method: 'POST', json: body }),
 
   testConnection: (id: string) =>
-    apiFetch<ConnectionTestResult>(`${BASE}/connections/${encodeURIComponent(id)}/test`, {
+    apiFetch<ConnectionTestResult>(`/api/v1/warehouse/analysis/connections/${encodeURIComponent(id)}/test`, {
       method: 'POST',
     }),
 
   regenerateKey: (id: string) =>
     apiFetch<ConnectionCreated>(
-      `${BASE}/connections/${encodeURIComponent(id)}/regenerate-key`,
+      `/api/v1/warehouse/analysis/connections/${encodeURIComponent(id)}/regenerate-key`,
       { method: 'POST' },
     ),
 
   listSources: () =>
-    apiFetch<{ sources: Source[] }>(`${BASE}/sources`).then((r) => r.sources),
+    apiFetch<{ sources: Source[] }>(`/api/v1/warehouse/analysis/sources`).then((r) => r.sources),
 
-  getSource: (id: string) => apiFetch<Source>(`${BASE}/sources/${encodeURIComponent(id)}`),
+  getSource: (id: string) => apiFetch<Source>(`/api/v1/warehouse/analysis/sources/${encodeURIComponent(id)}`),
 
   createSource: (body: SourceBody) =>
-    apiFetch<Source>(`${BASE}/sources`, { method: 'POST', json: body }),
+    apiFetch<Source>(`/api/v1/warehouse/analysis/sources`, { method: 'POST', json: body }),
 
   updateSource: (id: string, body: SourceBody) =>
-    apiFetch<Source>(`${BASE}/sources/${encodeURIComponent(id)}`, { method: 'PUT', json: body }),
+    apiFetch<Source>(`/api/v1/warehouse/analysis/sources/${encodeURIComponent(id)}`, { method: 'PUT', json: body }),
 
   deleteSource: (id: string) =>
-    apiFetch<void>(`${BASE}/sources/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+    apiFetch<void>(`/api/v1/warehouse/analysis/sources/${encodeURIComponent(id)}`, { method: 'DELETE' }),
 
   validateSource: (id: string) =>
-    apiFetch<ValidateResult>(`${BASE}/sources/${encodeURIComponent(id)}/validate`, {
+    apiFetch<ValidateResult>(`/api/v1/warehouse/analysis/sources/${encodeURIComponent(id)}/validate`, {
       method: 'POST',
     }),
 
   previewSource: (id: string, body: PreviewRequest = {}) =>
-    apiFetch<PreviewResult>(`${BASE}/sources/${encodeURIComponent(id)}/preview`, {
+    apiFetch<PreviewResult>(`/api/v1/warehouse/analysis/sources/${encodeURIComponent(id)}/preview`, {
       method: 'POST',
       json: body,
     }),

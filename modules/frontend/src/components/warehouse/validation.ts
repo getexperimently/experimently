@@ -8,12 +8,19 @@ import type { SourceKind, WarehouseType } from '@modules/services/warehouse';
 
 export type FieldErrors = Record<string, string>;
 
-const CONTROL = new RegExp('[\\u0000-\\u001f\\u007f\\u2028\\u2029]');
+/** A control character (U+0000-U+001F, U+007F) or a line/paragraph separator (U+2028, U+2029). */
+function hasControlCharacter(value: string): boolean {
+  for (let i = 0; i < value.length; i += 1) {
+    const c = value.charCodeAt(i);
+    if (c < 0x20 || c === 0x7f || c === 0x2028 || c === 0x2029) return true;
+  }
+  return false;
+}
 
 export function checkName(value: string, what = 'Name'): string | null {
   if (!value.trim()) return `${what} is required.`;
   if (value.length > 200) return `${what} must be 200 characters or fewer.`;
-  if (CONTROL.test(value)) return `${what} can't contain line breaks or control characters.`;
+  if (hasControlCharacter(value)) return `${what} can't contain line breaks or control characters.`;
   return null;
 }
 
