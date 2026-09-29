@@ -10,7 +10,7 @@ import { ApiError, apiFetch } from '@/services/api';
 import { routedApi, Route } from '@/tests/pages/helpers/apiMock';
 import WarehouseAnalysisSection from '@modules/components/warehouse/runs/WarehouseAnalysisSection';
 import {
-  KNOWN_FAILURE_CODES,
+  isKnownFailure,
   MEAN_UNAVAILABLE,
   RESULTS_DIFFERENCE,
   RUN_POLL_MS,
@@ -30,6 +30,7 @@ import {
   run,
   runPath,
 } from './fixtures';
+import { storableCodes } from './backendCodes';
 
 jest.mock('@/services/api', () => ({
   ...jest.requireActual('@/services/api'),
@@ -496,7 +497,7 @@ describe('results', () => {
 });
 
 describe('a failed run', () => {
-  it.each(KNOWN_FAILURE_CODES)('shows %s in words, with no numbers', async (code) => {
+  it.each(storableCodes())('shows %s in words, with no numbers', async (code) => {
     install([
       {
         path: RUNS_PATH,
@@ -512,9 +513,13 @@ describe('a failed run', () => {
       connection: 'Prod analytics',
       experimentKey: 'checkout-v2',
     });
+    // The dashboard's own words, not the API's fallback message.
+    expect(isKnownFailure(code)).toBe(true);
+    expect(copy.title).not.toBe('API words');
+    expect(copy.fix).toBeTruthy();
     expect(box).toHaveAttribute('data-code', code);
     expect(box).toHaveTextContent(`Failed: ${copy.title}`);
-    if (copy.fix) expect(box).toHaveTextContent(copy.fix);
+    expect(box).toHaveTextContent(copy.fix as string);
     expect(box).not.toHaveAttribute('role', 'alert');
     expect(screen.queryByTestId('warehouse-results')).toBeNull();
     expect(screen.getByTestId('warehouse-run-status')).toHaveTextContent('Failed: Analysis failed at');
@@ -525,13 +530,13 @@ describe('a failed run', () => {
       {
         path: RUNS_PATH,
         handler: () => ({
-          runs: [run({ status: 'failed', error_code: 'destination_not_allowed', error_message: 'The warehouse address is not one this deployment connects to.' })],
+          runs: [run({ status: 'failed', error_code: 'a_code_added_later', error_message: 'Words the API has for a newer code.' })],
         }),
       },
     ]);
     renderSection();
     expect(await screen.findByTestId('warehouse-run-failed')).toHaveTextContent(
-      'Failed: The warehouse address is not one this deployment connects to.',
+      'Failed: Words the API has for a newer code.',
     );
   });
 

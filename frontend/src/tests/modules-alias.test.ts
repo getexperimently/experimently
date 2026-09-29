@@ -28,6 +28,7 @@
  * one still serves `next build --webpack`.
  */
 import fs from 'fs';
+import { builtinModules } from 'module';
 import path from 'path';
 
 import { RESOLVED_FROM } from '@modules/core-fallback-probe';
@@ -288,6 +289,9 @@ describe('the @modules/* alias — one rule, every toolchain', () => {
         while ((m = re.exec(source)) !== null) {
           const spec = m[1];
           if (spec.startsWith('.') || spec.startsWith('@/') || spec.startsWith('@modules/')) continue;
+          // Node's own modules (`fs`, `path`, `node:fs`) resolve without any
+          // node_modules walk-up, so they need no key. Only tests use them.
+          if (builtinModules.includes(spec.replace(/^node:/, ''))) continue;
           bare.add(spec);
         }
       }

@@ -13,28 +13,8 @@ import {
   untilText,
   utcText,
 } from '@modules/services/warehouseRuns';
-
-/** The run error codes W4 can store (modules/backend/app/warehouse/errors.py). */
-const RUN_ERROR_CODES = [
-  'credentials_unavailable',
-  'auth_failed',
-  'key_revoked',
-  'permission_denied',
-  'object_not_found',
-  'not_a_select',
-  'bytes_limit',
-  'time_limit',
-  'cancelled',
-  'workgroup_unsafe',
-  'timezone_not_utc',
-  'result_invalid',
-  'too_many_variant_values',
-  'join_key_mismatch',
-  'no_units',
-  'abandoned',
-  'warehouse_busy',
-  'unrecognised_warehouse_error',
-];
+import { ERRORS_PY, RUNNER_PY, enumCodes, literalCodes, storableCodes } from './backendCodes';
+import fs from 'fs';
 
 describe('roles (the API matrix: start a run = ADMIN, DEVELOPER; a superuser is ADMIN)', () => {
   it.each([
@@ -56,8 +36,19 @@ describe('roles (the API matrix: start a run = ADMIN, DEVELOPER; a superuser is 
 });
 
 describe('failureCopy', () => {
-  it('has its own words for every run error code the API stores', () => {
-    const missing = RUN_ERROR_CODES.filter((c) => KNOWN_FAILURE_CODES.indexOf(c) === -1);
+  it('reads the backend’s code list (the parser is not vacuous)', () => {
+    const members = enumCodes(fs.readFileSync(ERRORS_PY, 'utf8'));
+    // WarehouseErrorCode has 23 members on main; a parser that found none
+    // would make the check below pass for nothing.
+    expect(members.length).toBeGreaterThanOrEqual(23);
+    expect(members).toEqual(expect.arrayContaining(['auth_failed', 'internal', 'destination_not_allowed']));
+    expect(literalCodes(fs.readFileSync(RUNNER_PY, 'utf8'))).toEqual(
+      expect.arrayContaining(['abandoned', 'no_units', 'result_invalid']),
+    );
+  });
+
+  it('has its own words for every code the backend can store on a run or a metric', () => {
+    const missing = storableCodes().filter((c) => KNOWN_FAILURE_CODES.indexOf(c) === -1);
     expect(missing).toEqual([]);
   });
 

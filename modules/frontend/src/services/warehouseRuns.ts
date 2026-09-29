@@ -325,6 +325,22 @@ const FAILURE_COPY: Record<string, (c: CopyContext) => FailureCopy> = {
     title: `${c.warehouse} could not be reached.`,
     fix: 'Start the analysis again. If it keeps failing, an admin can test the connection.',
   }),
+  destination_not_allowed: (c) => ({
+    title: `The address of ${c.connection} is not one this deployment connects to.`,
+    fix: `An admin can check the connection’s account or region in Warehouse › Connections › ${c.connection}.`,
+  }),
+  redirect_refused: (c) => ({
+    title: `${c.warehouse} answered with a redirect, which is not followed.`,
+    fix: `An admin can check the connection’s account or region in Warehouse › Connections › ${c.connection}.`,
+  }),
+  run_in_progress: () => ({
+    title: 'Another analysis or preview on this connection was already running.',
+    fix: 'Wait for it to finish, then start the analysis again.',
+  }),
+  internal: () => ({
+    title: 'Something went wrong on our side while talking to the warehouse.',
+    fix: 'Start the analysis again. If it keeps failing, an operator can find the run in the API log by its ID.',
+  }),
 };
 
 /** Every code {@link failureCopy} has its own words for. */
