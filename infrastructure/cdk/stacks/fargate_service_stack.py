@@ -24,6 +24,9 @@ from stacks.names import (
     API_TARGET_GROUP_COLOURS,
     BACKEND_ECR_REPOSITORY,
     api_5xx_alarm_name,
+    api_error_logs_alarm_name,
+    api_healthy_alarm_name,
+    api_no_healthy_task_alarm_name,
     codedeploy_application_name,
     glue_names,
 )
@@ -793,6 +796,112 @@ class FargateServiceStack(Stack):
             # ALARM only -- no OK or INSUFFICIENT_DATA action.
             alarm.add_alarm_action(cloudwatch_actions.SnsAction(alarm_topic))
             self.api_5xx_alarms.append(alarm)
+
+        # --- No healthy API task (#390) ---
+        # The 5xx alarms above cannot see this: with no task behind the load
+        # balancer it answers 503 itself, the target groups report no target
+        # 5xx, and missing data is not breaching. So each target group gets a
+        # HealthyHostCount alarm -- in ALARM after three one-minute periods
+        # with no healthy target, missing data included -- and one composite
+        # emails when BOTH are in ALARM at once.
+        #
+        # Between deployments one of blue and green is empty, so its alarm is
+        # in ALARM by design, all the time. That is why the per-colour alarms
+        # have NO action and are NOT in the deployment group:
+        # scripts/refuse_alarm_active.py refuses a deploy while any group
+        # alarm is in ALARM, and the idle colour's would refuse every one. The
+        # composite is what emails; during a canary both colours have healthy
+        # targets, so it stays OK. In an environment running one API task, a
+        # task replacement leaves no healthy target for a few minutes, and the
+        # composite emails for it -- correctly: nothing was serving.
+        #
+        # Built by hand for the reason given above the 5xx alarms: the
+        # target group that is not live is attached to no load balancer, and
+        # `tg.metrics.*` refuses it at synth.
+        self.api_healthy_alarms = []
+        for colour, target_group in zip(
+            API_TARGET_GROUP_COLOURS,
+            (self.blue_target_group, self.green_target_group),
+        ):
+            healthy = cloudwatch.Alarm(
+                self,
+                f"ApiHealthy{colour.capitalize()}",
+                alarm_name=api_healthy_alarm_name(env_name, colour),
+                alarm_description=(
+                    f"The API's {colour} target group has had no healthy "
+                    "target for 3 minutes. Between deployments the target "
+                    "group that is not live is empty, so one of the two "
+                    "healthy alarms is always in ALARM; that is expected. "
+                    f"{api_no_healthy_task_alarm_name(env_name)} is the alarm "
+                    "that emails, when both are."
+                ),
+                metric=cloudwatch.Metric(
+                    namespace="AWS/ApplicationELB",
+                    metric_name="HealthyHostCount",
+                    dimensions_map={
+                        "LoadBalancer": self.alb.load_balancer_full_name,
+                        "TargetGroup": target_group.target_group_full_name,
+                    },
+                    statistic="Maximum",
+                    period=Duration.seconds(60),
+                ),
+                threshold=1,
+                comparison_operator=cloudwatch.ComparisonOperator.LESS_THAN_THRESHOLD,
+                evaluation_periods=3,
+                datapoints_to_alarm=3,
+                treat_missing_data=cloudwatch.TreatMissingData.BREACHING,
+            )
+            self.api_healthy_alarms.append(healthy)
+
+        self.api_no_healthy_task_alarm = cloudwatch.CompositeAlarm(
+            self,
+            "ApiNoHealthyTask",
+            composite_alarm_name=api_no_healthy_task_alarm_name(env_name),
+            alarm_description=(
+                "No API task is healthy: neither the blue nor the green "
+                "target group has had a healthy target for 3 minutes. Every "
+                "API request is answered 503 by the load balancer. See "
+                "docs/deployment/disaster-recovery.md, Scenario 2."
+            ),
+            alarm_rule=cloudwatch.AlarmRule.all_of(
+                *(
+                    cloudwatch.AlarmRule.from_alarm(alarm, cloudwatch.AlarmState.ALARM)
+                    for alarm in self.api_healthy_alarms
+                )
+            ),
+        )
+        self.api_no_healthy_task_alarm.add_alarm_action(
+            cloudwatch_actions.SnsAction(alarm_topic)
+        )
+
+        # --- ERROR lines in the API's logs (#205) ---
+        # On the log group the task definition's awslogs driver writes to.
+        # The monitoring stack's old filter watched
+        # /experimentation/<env>/application, which nothing writes to.
+        error_logs = log_group.add_metric_filter(
+            "ApiErrorLogs",
+            filter_pattern=logs.FilterPattern.all_terms("ERROR"),
+            metric_name="ApiErrorLogLines",
+            metric_namespace=f"Experimently/{env_name}",
+            default_value=0,
+        )
+        error_logs_alarm = cloudwatch.Alarm(
+            self,
+            "ApiErrorLogsAlarm",
+            alarm_name=api_error_logs_alarm_name(env_name),
+            alarm_description=(
+                "At least 10 log lines containing ERROR from the API's tasks "
+                "in 5 minutes"
+            ),
+            metric=error_logs.metric(statistic="Sum", period=Duration.minutes(5)),
+            threshold=10,
+            comparison_operator=(
+                cloudwatch.ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD
+            ),
+            evaluation_periods=1,
+            treat_missing_data=cloudwatch.TreatMissingData.NOT_BREACHING,
+        )
+        error_logs_alarm.add_alarm_action(cloudwatch_actions.SnsAction(alarm_topic))
 
         # --- CodeDeploy Application ---
         self.codedeploy_app = codedeploy.EcsApplication(

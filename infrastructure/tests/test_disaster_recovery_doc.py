@@ -23,10 +23,16 @@ pytestmark = pytest.mark.regression
 
 
 @pytest.fixture(scope="module")
-def prod() -> dict:
-    """{stack name: resources} for the prod app, as `cdk synth` builds it."""
+def templates() -> dict:
+    """{stack name: template} for the prod app, as `cdk synth` builds it."""
     assembly = _synth("prod")
-    return {s.stack_name: s.template.get("Resources", {}) for s in assembly.stacks}
+    return {s.stack_name: s.template for s in assembly.stacks}
+
+
+@pytest.fixture(scope="module")
+def prod(templates) -> dict:
+    """{stack name: resources} for the prod app."""
+    return {name: t.get("Resources", {}) for name, t in templates.items()}
 
 
 @pytest.fixture(scope="module")
@@ -117,14 +123,17 @@ def test_log_retention_and_no_export(prod, page):
     assert retention["/ecs/experimentation-backend-prod"] == 90
     assert retention["/ecs/experimentation-dashboard-prod"] == 90
     assert retention["/ecs/experimentation-migrate-prod"] == 30
-    assert retention["/experimentation/prod/application"] == 14
+    # #205: the monitoring stack's `/experimentation/<env>/application` group
+    # was written to by nothing, and is gone with its ERROR filter; the API's
+    # ERROR filter is on its tasks' own group now.
+    assert "/experimentation/prod/application" not in retention, sorted(retention)
     assert not _of_type(prod, "AWS::Logs::SubscriptionFilter")
     assert "CloudWatch Logs only, with no export to S3" in page
     assert (
         "`/ecs/experimentation-backend-$ENV` and `/ecs/experimentation-dashboard-$ENV` "
-        "are kept 90 days, `/ecs/experimentation-migrate-$ENV` 30 days, and "
-        "`/experimentation/$ENV/application` 14 days"
+        "are kept 90 days, and `/ecs/experimentation-migrate-$ENV` 30 days."
     ) in page
+    assert "/application" not in page
 
 
 def test_the_api_scaling_floor_is_its_task_count(prod, page):
@@ -151,9 +160,14 @@ def _alarms(prod: dict) -> dict:
     }
 
 
-def test_the_alarms_the_page_says_do_not_fire(prod, page):
+def test_the_alarms_the_page_describes(templates, prod, page):
     alarms = _alarms(prod)
-    # Scenario 2: the API's 5xx alarms count the TASKS' 5xx responses.
+    composites = {
+        _props(r)["AlarmName"]: _props(r)
+        for _, r in _of_type(prod, "AWS::CloudWatch::CompositeAlarm")
+    }
+    # Scenario 2: the API's 5xx alarms count the TASKS' 5xx responses, so they
+    # stay quiet with no task running...
     for colour in ("blue", "green"):
         alarm = alarms[f"experimentation-api-5xx-{colour}-prod"]
         names = {
@@ -164,13 +178,66 @@ def test_the_alarms_the_page_says_do_not_fire(prod, page):
         assert "HTTPCode_Target_5XX_Count" in names, names
         assert alarm["TreatMissingData"] == "notBreaching"
     assert "(`HTTPCode_Target_5XX_Count`)" in page
-    # Scenarios 3 and 5: the CPU alarms name identifiers no deployed resource has.
-    aurora = alarms["AuroraHighCPU-prod"]["Dimensions"]
-    assert aurora == [{"Name": "DBClusterIdentifier", "Value": "AuroraCluster"}]
-    redis = alarms["RedisHighCPU-prod"]["Dimensions"]
-    assert redis == [{"Name": "CacheClusterId", "Value": "Redis"}]
-    assert "names the cluster `AuroraCluster`" in page
-    assert "names the cache cluster `Redis`" in page
+    # ...and the composite over the two healthy-task alarms is what emails
+    # (#390). Scenario 1 names all three, and says the idle colour's alarm is
+    # in ALARM by design.
+    for colour in ("blue", "green"):
+        healthy = alarms[f"experimentation-api-healthy-{colour}-prod"]
+        assert healthy["MetricName"] == "HealthyHostCount"
+        assert healthy["TreatMissingData"] == "breaching"
+        assert "AlarmActions" not in healthy
+        assert f"`experimentation-api-healthy-{colour}-$ENV`" in page
+    assert "experimentation-api-no-healthy-task-prod" in composites, sorted(composites)
+    assert "The composite `experimentation-api-no-healthy-task-$ENV` emails" in page
+    assert (
+        "the idle colour's healthy alarm is always in ALARM, by design; that is not "
+        "an incident"
+    ) in page
+    assert 'the composite sends a true "no healthy task" email for it' in page
+    assert "`experimentation-api-no-healthy-task-$ENV` emails `ALARM_EMAIL` once neither" in page
+    assert "No alarm watches the number of running tasks" not in page
+    assert "No alarm the CDK creates fires for this" not in page
+    # Scenario 3: the Aurora alarm names the real cluster, through the
+    # database stack's parameter, and only the writer.
+    aurora = alarms["AuroraHighCPU-prod"]
+    dimensions = {d["Name"]: d["Value"] for d in aurora["Dimensions"]}
+    assert dimensions["Role"] == "WRITER"
+    parameter = dimensions["DBClusterIdentifier"]["Ref"]
+    name = templates["experimentation-monitoring-prod"]["Parameters"][parameter]["Default"]
+    assert name == "/experimentation/prod/database/aurora-cluster-identifier"
+    (cluster,) = [
+        lid
+        for lid, r in prod["experimentation-database-prod"].items()
+        if r["Type"] == "AWS::RDS::DBCluster"
+    ]
+    assert [
+        _props(r)["Value"]
+        for r in prod["experimentation-database-prod"].values()
+        if r["Type"] == "AWS::SSM::Parameter" and _props(r)["Name"] == name
+    ] == [{"Ref": cluster}]
+    assert "`/experimentation/$ENV/database/aurora-cluster-identifier`, `Role=WRITER`" in page
+    assert "`AuroraCluster`" not in page
+    # Scenario 4: a cluster restored beside the stack is not what it watches.
+    assert (
+        "A cluster restored beside the stack is not watched by `AuroraHighCPU-$ENV` either."
+    ) in page
+    assert (
+        "The restored cluster is watched only once the database stack's parameter points "
+        "at it and `experimentation-monitoring-$ENV` is redeployed."
+    ) in page
+    # Scenario 5: one Redis alarm per node, on the nodes' real ids.
+    redis = {
+        n: alarms[n]["Dimensions"] for n in alarms if n.startswith("RedisHighCPU-")
+    }
+    assert redis == {
+        f"RedisHighCPU-00{i}-prod": [
+            {"Name": "CacheClusterId", "Value": f"experimentation-redis-prod-redis-00{i}"}
+        ]
+        for i in (1, 2, 3)
+    }, redis
+    assert "`RedisHighCPU-001-$ENV` (and `-002-`, `-003-` in prod)" in page
+    assert "`experimentation-redis-$ENV-redis-001`" in page
+    assert "names the cache cluster `Redis`" not in page
     # Alarm names the old page gave, none of which exists.
     for gone in (
         "AllTasksDown",

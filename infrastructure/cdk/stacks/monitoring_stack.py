@@ -1,17 +1,18 @@
 from aws_cdk import (
     Stack,
     Duration,
-    RemovalPolicy,
+    Token,
     aws_cloudwatch as cloudwatch,
     aws_cloudwatch_actions as cloudwatch_actions,
     aws_sns as sns,
     aws_sns_subscriptions as sns_subscriptions,
-    aws_iam as iam,
-    aws_logs as logs,
+    aws_ssm as ssm,
 )
 from constructs import Construct
 
 from stacks.alarm_email import resolve_alarm_email
+from stacks.environments import redis_node_count
+from stacks.names import aurora_cluster_identifier_parameter
 
 
 class MonitoringStack(Stack):
@@ -29,6 +30,14 @@ class MonitoringStack(Stack):
     ``alarm_email`` is ``ALARM_EMAIL`` (``app.py`` reads it), the topic's one
     email subscriber; ``stacks/alarm_email.py`` has what is required where and
     what is refused.
+
+    ``redis_replication_group_id`` is the Redis stack's replication group id,
+    a literal string (``redis_stack.replication_group_id``): the per-node CPU
+    alarms are built from it. Required -- there is no default a real
+    deployment's group could have. The Aurora alarm reads the cluster's
+    identifier from the database stack's SSM parameter
+    (``stacks/names.py``), so ``app.py`` makes this stack depend on the
+    database stack.
     """
 
     def __init__(
@@ -36,15 +45,28 @@ class MonitoringStack(Stack):
         scope: Construct,
         construct_id: str,
         vpc,
+        *,
+        redis_replication_group_id: str,
         events_stream_name: str | None = None,
         env_name: str = "dev",
         alarm_email: str | None = None,
         **kwargs,
     ) -> None:
         super().__init__(scope, construct_id, **kwargs)
+        if (
+            not isinstance(redis_replication_group_id, str)
+            or not redis_replication_group_id
+            or Token.is_unresolved(redis_replication_group_id)
+        ):
+            raise ValueError(
+                "MonitoringStack requires redis_replication_group_id: the Redis "
+                "stack's literal replication group id "
+                "(redis_stack.replication_group_id), from which the per-node "
+                "CPU alarms are named."
+            )
 
-        # Every name below is account-scoped (alarms, dashboards, the topic,
-        # the log group), and every one was literal: dev and staging in one
+        # Every name below is account-scoped (alarms, dashboards, the topic),
+        # and every one was literal: dev and staging in one
         # account collided on fourteen of them (#139). Each now ends in the
         # environment.
         suffix = f"-{env_name}"
@@ -310,87 +332,53 @@ class MonitoringStack(Stack):
             ]
         )
 
-        # Create CloudWatch Alarms
-
-        # API Gateway 5XX errors alarm
-        api_5xx_alarm = cloudwatch.Alarm(
-            self,
-            "Api5xxAlarm",
-            metric=cloudwatch.Metric(
-                namespace="AWS/ApiGateway",
-                metric_name="5XXError",
-                dimensions_map={"ApiName": "ExperimentationApi"},
-                statistic="Sum",
-                period=Duration.minutes(1),
-            ),
-            evaluation_periods=1,
-            threshold=5,
-            comparison_operator=cloudwatch.ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD,
-            alarm_description="API Gateway is returning 5XX errors",
-            alarm_name="ExperimentationApi5xxErrors" + suffix,
+        # --- Alarms (#390, #205) ---------------------------------------------
+        # Every alarm here watches a metric a deployed resource publishes. The
+        # ones this stack used to carry did not, and sat in INSUFFICIENT_DATA
+        # for ever: an API Gateway 5xx alarm (no API Gateway is deployed; the
+        # API's 5xx alarms are the fargate stack's, on the load balancer), two
+        # Lambda alarms on `AssignmentLambda` (no stack deploys
+        # backend/lambda/assignment), a throttling alarm on the literal table
+        # `AssignmentsTable` (the table is experimentation-assignments-<env>,
+        # used only by that undeployed Lambda), three alarms on the
+        # `ExperimentationPlatform/Prometheus` namespace (nothing publishes
+        # to it), and an ERROR filter on `/experimentation/<env>/application`,
+        # a log group nothing writes to -- the API's tasks log to
+        # /ecs/experimentation-backend-<env>, where the fargate stack now
+        # filters ERROR lines. The dashboards are unchanged (#424).
+        #
+        # Aurora's writer CPU. CloudWatch publishes Aurora cluster metrics
+        # under the cluster's identifier, which CloudFormation generates; the
+        # alarm named the literal "AuroraCluster". The identifier comes from
+        # the SSM parameter the database stack writes (stacks/names.py), read
+        # when this stack deploys -- not from an export, which would pin the
+        # database stack in place. Role=WRITER: the cluster-level series
+        # without it mixes the writer with prod's reader. Missing data is
+        # breaching: a writer that publishes nothing is not a healthy one.
+        aurora_cluster_identifier = ssm.StringParameter.value_for_string_parameter(
+            self, aurora_cluster_identifier_parameter(env_name)
         )
-
-        api_5xx_alarm.add_alarm_action(cloudwatch_actions.SnsAction(self.alerts_topic))
-
-        # Lambda error alarm
-        lambda_error_alarm = cloudwatch.Alarm(
-            self,
-            "LambdaErrorAlarm",
-            metric=cloudwatch.Metric(
-                namespace="AWS/Lambda",
-                metric_name="Errors",
-                dimensions_map={"FunctionName": "AssignmentLambda"},
-                statistic="Sum",
-                period=Duration.minutes(5),
-            ),
-            evaluation_periods=1,
-            threshold=5,
-            comparison_operator=cloudwatch.ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD,
-            alarm_description="Lambda function is experiencing errors",
-            alarm_name="AssignmentLambdaErrors" + suffix,
-        )
-
-        lambda_error_alarm.add_alarm_action(
-            cloudwatch_actions.SnsAction(self.alerts_topic)
-        )
-
-        # DynamoDB throttling alarm
-        dynamodb_throttling_alarm = cloudwatch.Alarm(
-            self,
-            "DynamoDBThrottlingAlarm",
-            metric=cloudwatch.Metric(
-                namespace="AWS/DynamoDB",
-                metric_name="ThrottledRequests",
-                dimensions_map={"TableName": "AssignmentsTable"},
-                statistic="Sum",
-                period=Duration.minutes(5),
-            ),
-            evaluation_periods=1,
-            threshold=10,
-            comparison_operator=cloudwatch.ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD,
-            alarm_description="DynamoDB table is experiencing throttling",
-            alarm_name="AssignmentsTableThrottling" + suffix,
-        )
-
-        dynamodb_throttling_alarm.add_alarm_action(
-            cloudwatch_actions.SnsAction(self.alerts_topic)
-        )
-
-        # Aurora high CPU alarm
         aurora_cpu_alarm = cloudwatch.Alarm(
             self,
             "AuroraCpuAlarm",
             metric=cloudwatch.Metric(
                 namespace="AWS/RDS",
                 metric_name="CPUUtilization",
-                dimensions_map={"DBClusterIdentifier": "AuroraCluster"},
+                dimensions_map={
+                    "DBClusterIdentifier": aurora_cluster_identifier,
+                    "Role": "WRITER",
+                },
                 statistic="Average",
                 period=Duration.minutes(5),
             ),
             evaluation_periods=3,
             threshold=80,
             comparison_operator=cloudwatch.ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD,
-            alarm_description="Aurora cluster CPU is high",
+            treat_missing_data=cloudwatch.TreatMissingData.BREACHING,
+            alarm_description=(
+                "The Aurora writer's CPU is at 80% or more, or the writer "
+                "publishes no CPU metric"
+            ),
             alarm_name="AuroraHighCPU" + suffix,
         )
 
@@ -422,83 +410,39 @@ class MonitoringStack(Stack):
                 cloudwatch_actions.SnsAction(self.alerts_topic)
             )
 
-        # Lambda duration alarm
-        lambda_duration_alarm = cloudwatch.Alarm(
-            self,
-            "LambdaDurationAlarm",
-            metric=cloudwatch.Metric(
-                namespace="AWS/Lambda",
-                metric_name="Duration",
-                dimensions_map={"FunctionName": "AssignmentLambda"},
-                statistic="p95",
-                period=Duration.minutes(5),
-            ),
-            evaluation_periods=3,
-            threshold=5000,  # 5 seconds
-            comparison_operator=cloudwatch.ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD,
-            alarm_description="Lambda function execution time is high",
-            alarm_name="AssignmentLambdaDuration" + suffix,
-        )
+        # Redis CPU, one alarm per node. ElastiCache publishes host and engine
+        # metrics per node (CacheClusterId), and a replication group's nodes
+        # are <group id>-001 .. -00N; the alarm named the literal "Redis". The
+        # group id is the literal the Redis stack sets (app.py passes it as a
+        # plain string -- no import) and N comes from the function that sizes
+        # the group. EngineCPUUtilization is the Redis engine thread's CPU,
+        # the one that saturates; host CPUUtilization averages every core.
+        for index in range(1, redis_node_count(env_name) + 1):
+            member = f"{redis_replication_group_id}-{index:03d}"
+            redis_cpu_alarm = cloudwatch.Alarm(
+                self,
+                f"RedisCpuAlarm{index:03d}",
+                metric=cloudwatch.Metric(
+                    namespace="AWS/ElastiCache",
+                    metric_name="EngineCPUUtilization",
+                    dimensions_map={"CacheClusterId": member},
+                    statistic="Average",
+                    period=Duration.minutes(5),
+                ),
+                evaluation_periods=3,
+                threshold=80,
+                comparison_operator=cloudwatch.ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD,
+                treat_missing_data=cloudwatch.TreatMissingData.BREACHING,
+                alarm_description=(
+                    f"Redis node {member}: engine CPU is at 80% or more, or "
+                    "the node publishes no CPU metric"
+                ),
+                alarm_name=f"RedisHighCPU-{index:03d}" + suffix,
+            )
 
-        lambda_duration_alarm.add_alarm_action(
-            cloudwatch_actions.SnsAction(self.alerts_topic)
-        )
-
-        # Redis CPU alarm
-        redis_cpu_alarm = cloudwatch.Alarm(
-            self,
-            "RedisCpuAlarm",
-            metric=cloudwatch.Metric(
-                namespace="AWS/ElastiCache",
-                metric_name="CPUUtilization",
-                dimensions_map={"CacheClusterId": "Redis"},
-                statistic="Average",
-                period=Duration.minutes(5),
-            ),
-            evaluation_periods=3,
-            threshold=80,
-            comparison_operator=cloudwatch.ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD,
-            alarm_description="Redis CPU utilization is high",
-            alarm_name="RedisHighCPU" + suffix,
-        )
-
-        redis_cpu_alarm.add_alarm_action(
-            cloudwatch_actions.SnsAction(self.alerts_topic)
-        )
-
-        # Create a Log Group for application logs
-        application_logs = logs.LogGroup(
-            self,
-            "ApplicationLogs",
-            log_group_name=f"/experimentation/{env_name}/application",
-            retention=logs.RetentionDays.TWO_WEEKS,
-            removal_policy=RemovalPolicy.DESTROY,
-        )
-
-        # Create a metric filter for error logs
-        error_metric = application_logs.add_metric_filter(
-            "ErrorMetric",
-            filter_pattern=logs.FilterPattern.all_terms("ERROR"),
-            metric_name="ErrorCount",
-            metric_namespace="ExperimentationPlatform",
-            default_value=0,
-        )
-
-        # Create an alarm for error logs
-        error_logs_alarm = cloudwatch.Alarm(
-            self,
-            "ErrorLogsAlarm",
-            metric=error_metric.metric(statistic="Sum", period=Duration.minutes(5)),
-            evaluation_periods=1,
-            threshold=10,
-            comparison_operator=cloudwatch.ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD,
-            alarm_description="High number of error logs detected",
-            alarm_name="ApplicationErrorLogs" + suffix,
-        )
-
-        error_logs_alarm.add_alarm_action(
-            cloudwatch_actions.SnsAction(self.alerts_topic)
-        )
+            redis_cpu_alarm.add_alarm_action(
+                cloudwatch_actions.SnsAction(self.alerts_topic)
+            )
 
         # Create a dashboard for application-specific metrics
         app_dashboard = cloudwatch.Dashboard(
@@ -698,69 +642,4 @@ class MonitoringStack(Stack):
             active_experiments_widget,
             cache_hit_rate_widget,
             flag_eval_widget,
-        )
-
-        # ---------------------------------------------------------------
-        # EP-013: Application-level alarms (from CLOUDWATCH_ALARMS spec)
-        # ---------------------------------------------------------------
-
-        # High error rate alarm (>1% 5xx)
-        high_error_rate_alarm = cloudwatch.Alarm(
-            self,
-            "HighErrorRateAlarm",
-            metric=cloudwatch.Metric(
-                namespace="ExperimentationPlatform/Prometheus",
-                metric_name="http_requests_total",
-                dimensions_map={"status_code": "500"},
-                statistic="Sum",
-                period=Duration.minutes(1),
-            ),
-            evaluation_periods=2,
-            threshold=10,
-            comparison_operator=cloudwatch.ComparisonOperator.GREATER_THAN_THRESHOLD,
-            alarm_description="High 5xx error rate detected in the FastAPI application",
-            alarm_name="AppHighErrorRate" + suffix,
-        )
-        high_error_rate_alarm.add_alarm_action(
-            cloudwatch_actions.SnsAction(self.alerts_topic)
-        )
-
-        # High p99 latency alarm (>2 s)
-        high_latency_alarm = cloudwatch.Alarm(
-            self,
-            "HighLatencyP99Alarm",
-            metric=cloudwatch.Metric(
-                namespace="ExperimentationPlatform/Prometheus",
-                metric_name="http_request_duration_seconds",
-                statistic="p99",
-                period=Duration.minutes(1),
-            ),
-            evaluation_periods=3,
-            threshold=2.0,
-            comparison_operator=cloudwatch.ComparisonOperator.GREATER_THAN_THRESHOLD,
-            alarm_description="p99 request latency exceeded 2 seconds",
-            alarm_name="AppHighLatencyP99" + suffix,
-        )
-        high_latency_alarm.add_alarm_action(
-            cloudwatch_actions.SnsAction(self.alerts_topic)
-        )
-
-        # High active experiments alarm (>100)
-        high_active_experiments_alarm = cloudwatch.Alarm(
-            self,
-            "HighActiveExperimentsAlarm",
-            metric=cloudwatch.Metric(
-                namespace="ExperimentationPlatform/Prometheus",
-                metric_name="active_experiments_gauge",
-                statistic="Maximum",
-                period=Duration.minutes(5),
-            ),
-            evaluation_periods=1,
-            threshold=100,
-            comparison_operator=cloudwatch.ComparisonOperator.GREATER_THAN_THRESHOLD,
-            alarm_description="More than 100 concurrent active experiments",
-            alarm_name="AppHighActiveExperiments" + suffix,
-        )
-        high_active_experiments_alarm.add_alarm_action(
-            cloudwatch_actions.SnsAction(self.alerts_topic)
         )

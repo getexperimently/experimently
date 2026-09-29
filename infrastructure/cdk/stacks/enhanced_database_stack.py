@@ -15,6 +15,7 @@ from stacks.environments import (
     data_removal_policy,
     database_removal_policy,
 )
+from stacks.names import aurora_cluster_identifier_parameter
 
 # The one Aurora PostgreSQL engine version every environment's cluster and both
 # parameter groups use. It must be a version RDS still offers for new clusters:
@@ -246,6 +247,21 @@ class EnhancedDatabaseStack(Stack):
             parameter_name=f"/experimentation/{environment}/database/aurora-port",
             string_value=str(self.aurora_cluster.cluster_endpoint.port),
             description=f"Port for {construct_id} Aurora PostgreSQL",
+        )
+
+        # The cluster's identifier, for the monitoring stack's AuroraHighCPU
+        # alarm (#390): CloudWatch publishes Aurora's metrics under it, and the
+        # alarm named the literal "AuroraCluster", which no cluster is called.
+        # A parameter, not an export, so this stack is not pinned by an
+        # import; the name is shared through stacks/names.py. The cluster
+        # itself is deliberately not renamed (see the ClusterIdentifier
+        # output below).
+        ssm.StringParameter(
+            self,
+            "DBClusterIdentifierParam",
+            parameter_name=aurora_cluster_identifier_parameter(environment),
+            string_value=self.aurora_cluster.cluster_identifier,
+            description=f"Cluster identifier for {construct_id} Aurora PostgreSQL",
         )
 
         ssm.StringParameter(

@@ -224,9 +224,16 @@ monitoring_stack = MonitoringStack(
     # included (DECISIONS D21). Required for staging and prod, optional for dev
     # and demo; stacks/alarm_email.py has what it refuses.
     alarm_email=os.environ.get("ALARM_EMAIL"),
+    # The per-node Redis CPU alarms (#390): the replication group's id is a
+    # literal, so this is a plain string and no cross-stack import.
+    redis_replication_group_id=redis_stack.replication_group_id,
     env=env,
 )
 monitoring_stack.add_dependency(vpc_stack)
+# AuroraHighCPU reads the cluster identifier from the SSM parameter the
+# database stack creates (#390), resolved when this stack deploys, so the
+# parameter has to exist first. Not an export: nothing pins the database stack.
+monitoring_stack.add_dependency(database_stack)
 if analytics_stack is not None:
     monitoring_stack.add_dependency(analytics_stack)
 
@@ -279,7 +286,9 @@ fargate_stack = FargateServiceStack(
     redis_port=redis_stack.primary_port,
     # The API's two 5xx alarms roll a deployment back by themselves; they
     # announce it on the monitoring topic (DECISIONS D21). Monitoring depends
-    # only on vpc and (with the etl module) analytics, so there is no cycle.
+    # only on vpc, database and (with the etl module) analytics, none of which
+    # depends on this stack, so there is no cycle. The no-healthy-task
+    # composite and the ERROR-log alarm (#390, #205) email through it too.
     alarm_topic=monitoring_stack.alerts_topic,
     env=env,
 )

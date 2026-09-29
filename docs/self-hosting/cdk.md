@@ -246,13 +246,23 @@ dashboard is still on `:bootstrap`.
 
 ### experimentation-monitoring-<env>
 
-- CloudWatch log groups: `/experimentation-platform/api`, `/services`, `/errors`
-- CloudWatch dashboards: API latency, error rates, Lambda invocations, DynamoDB throughput
-- CloudWatch alarms: p99 latency, error rate, dead letter queue depth
+- CloudWatch dashboards `experimentation-platform-<env>` and
+  `experimentation-application-metrics-<env>` (some of their widgets graph
+  metrics nothing publishes, #424)
+- CloudWatch alarms: `AuroraHighCPU-<env>` on the Aurora writer, and one
+  `RedisHighCPU-00N-<env>` per Redis node. The Aurora alarm reads the cluster's
+  identifier from the SSM parameter
+  `/experimentation/<env>/database/aurora-cluster-identifier`, which the
+  database stack writes, so this stack depends on
+  `experimentation-database-<env>`.
 - SNS topic for alarm notifications, `experimentation-alerts-<env>`, with one
   email subscriber: `ALARM_EMAIL` (none in `dev` or `demo` without it). The
-  fargate stack's two API 5xx alarms, which roll a deployment back, publish to
-  it too. That is why `experimentation-fargate-<env>` depends on this stack.
+  fargate stack's alarms publish to it too: the two API 5xx alarms, which roll
+  a deployment back, `experimentation-api-no-healthy-task-<env>`, which fires
+  when no API task is healthy, and `experimentation-api-error-logs-<env>`.
+  That is why `experimentation-fargate-<env>` depends on this stack. The
+  [Monitoring Guide](../monitoring/monitoring-guide.md#6-setting-up-alerts)
+  lists every alarm.
 - With the `etl` module: a Kinesis widget and an iterator-age alarm on that
   module's event stream. A core deployment gets neither, rather than an alarm
   on a stream that does not exist.
