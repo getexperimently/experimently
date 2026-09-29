@@ -121,6 +121,9 @@ Workspace members can be added in two ways:
    response contains the invite token, which you send to the recipient. The
    token is valid for 7 days. When the recipient accepts the invite (while
    authenticated), they are added as a member with the invited role.
+   Anyone with the link can look the invitation up through the API, but only
+   the invited account sees the address in full; everyone else sees it
+   masked, for example `a•••@example.com`.
 
 Only a user signed in with the invited address (compared without regard to
 case) can accept it. Anyone else gets `403` with code `invite_email_mismatch`.
