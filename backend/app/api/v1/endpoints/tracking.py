@@ -10,7 +10,7 @@ import hashlib
 import logging
 import uuid
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import Annotated, Any, Dict, List, Optional
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Path, Query, status
 from sqlalchemy.orm import Session
@@ -23,6 +23,7 @@ from backend.app.models.bandit_state import BanditState
 from backend.app.models.event import Event
 from backend.app.models.experiment import Experiment, ExperimentStatus
 from backend.app.models.feature_flag import FeatureFlag
+from backend.app.schemas.storable_text import storable_text_param
 from backend.app.schemas.tracking import (
     AssignmentRequest,
     EventBatchRequest,
@@ -610,7 +611,9 @@ async def track_events_batch(
     response_description="Returns all active experiment assignments for a user",
 )
 async def get_user_assignments(
-    user_id: str = Path(..., description="ID of the user"),
+    user_id: Annotated[
+        str, Path(description="ID of the user"), storable_text_param("user_id")
+    ],
     db: Session = Depends(deps.get_db),
     api_key_info: Dict[str, Any] = Depends(deps.get_api_key),
     active_only: bool = Query(

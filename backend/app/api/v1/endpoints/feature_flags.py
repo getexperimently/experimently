@@ -8,7 +8,7 @@ manage feature flags for gradual rollouts and A/B testing.
 
 import json
 import logging
-from typing import Any, Dict, Optional
+from typing import Annotated, Any, Dict, Optional
 from uuid import UUID
 
 from fastapi import (
@@ -47,6 +47,7 @@ from backend.app.schemas.feature_flag import (
     FeatureFlagListResponse,
     FeatureFlagUpdate,
 )
+from backend.app.schemas.storable_text import storable_text_param
 from backend.app.services.audit_log_service import AuditLogService
 from backend.app.services.audit_service import AuditService
 from backend.app.services.feature_flag_service import FeatureFlagService
@@ -866,7 +867,11 @@ def _evaluate_flag_by_key(
     response_description="Returns the feature flag evaluation result",
 )
 async def evaluate_feature_flag(
-    flag_key: str = Path(..., description="The key of the feature flag to evaluate"),
+    flag_key: Annotated[
+        str,
+        Path(description="The key of the feature flag to evaluate"),
+        storable_text_param("flag_key"),
+    ],
     user_id: str = Query(..., description="ID of the user to evaluate the flag for"),
     context: Optional[str] = Query(None, description=CONTEXT_QUERY_DESCRIPTION),
     db: Session = Depends(deps.get_db),
@@ -906,7 +911,11 @@ async def evaluate_feature_flag(
     response_description="Returns the feature flag evaluation result",
 )
 async def evaluate_feature_flag_post(
-    flag_key: str = Path(..., description="The key of the feature flag to evaluate"),
+    flag_key: Annotated[
+        str,
+        Path(description="The key of the feature flag to evaluate"),
+        storable_text_param("flag_key"),
+    ],
     request: FlagEvaluationRequest = Body(
         ..., description="User id and targeting context"
     ),
@@ -937,7 +946,11 @@ async def evaluate_feature_flag_post(
     response_description="Returns all feature flags evaluated for a user",
 )
 async def get_user_flags(
-    user_id: str = Path(..., description="ID of the user to get flags for"),
+    user_id: Annotated[
+        str,
+        Path(description="ID of the user to get flags for"),
+        storable_text_param("user_id"),
+    ],
     context: Optional[str] = Query(None, description=CONTEXT_QUERY_DESCRIPTION),
     db: Session = Depends(deps.get_db),
     api_key_info: Dict[str, Any] = Depends(deps.get_api_key),
