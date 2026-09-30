@@ -392,6 +392,27 @@ class FargateServiceStack(Stack):
                 "REDIS_HOST": redis_host,
                 "REDIS_PORT": redis_port,
                 "REDIS_SSL": "true",
+                # The API never writes the schema (#298). The entry point's
+                # default is RUN_MIGRATIONS=true, which bootstraps the database
+                # on every task start; here the deploy's migration task
+                # (migration_task_stack.py, run by deploy.yml before the
+                # CodeDeploy deployment) is the only thing that does. Two
+                # reasons:
+                #   * an OLD image refuses to start against a schema a newer
+                #     release has migrated, so under the default every task an
+                #     older revision starts -- a replacement, a scale-out, a
+                #     rollback -- exits 1 instead of serving;
+                #   * several tasks starting at once would each run the
+                #     bootstrap, where one writer is enough.
+                # Consequence: `cdk deploy` alone leaves a new environment
+                # without a schema (`/health` answers 200, real requests 500)
+                # until the first Deploy runs the migration task.
+                # SEED is empty for the same reason: nothing but a migration
+                # task writes to this database at start-up.
+                # infrastructure/tests/test_api_task_does_not_migrate.py pins
+                # both values exactly.
+                "RUN_MIGRATIONS": "false",
+                "SEED": "",
             },
             secrets={
                 # Both halves from the secret Aurora generated its master

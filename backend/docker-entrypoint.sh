@@ -25,6 +25,20 @@
 # WAIT_FOR_DB=false. The script runs with `set -euo pipefail`: a failed
 # bootstrap or seed stops the container instead of starting a half-initialised
 # API.
+#
+# Who runs step 2 depends on the deployment (#298):
+#   * AWS (CDK): the API task definition sets RUN_MIGRATIONS=false and SEED=
+#     (infrastructure/cdk/stacks/fargate_service_stack.py). The API never
+#     writes the schema; the migration task the Deploy workflow runs is the
+#     only writer. A bootstrap refuses a database a newer release migrated, so
+#     an older API revision started after a newer migration (a replacement, a
+#     scale-out, a rollback) would otherwise exit instead of serving.
+#   * Docker Compose: one API container, RUN_MIGRATIONS=true -- the only writer.
+#   * Helm chart: the bootstrap runs in an init container
+#     (charts/experimently/templates/api-deployment.yaml), not in the serving
+#     container.
+# The default stays true so that a single container started by hand, or by
+# compose, still creates its schema.
 # =========================================================================
 set -euo pipefail
 

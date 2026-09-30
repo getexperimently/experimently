@@ -63,9 +63,12 @@ bootstrap creates the first administrator from `FIRST_SUPERUSER` and
 than 8 characters or a well-known default unless `ENVIRONMENT` is
 `development` or `test`.
 
-The bootstrap is also what the API container runs on start-up
-(`RUN_MIGRATIONS=true`, the default), and it is what makes a **profile switch**
-work; see "Switching profile" below.
+The bootstrap is also what the API container runs on start-up when
+`RUN_MIGRATIONS=true`, the image's default, and it is what makes a **profile
+switch** work; see "Switching profile" below. The AWS (CDK) deployment sets
+`RUN_MIGRATIONS=false` on its API tasks: there, the Deploy workflow's migration
+task is the only thing that runs the bootstrap (see
+[On AWS, the API does not migrate](#on-aws-the-api-does-not-migrate)).
 
 ---
 
@@ -441,4 +444,56 @@ release's code still uses (see *Migration Guidelines*).
 
 ### Rolling back to 0.7.0 after upgrading to a release that adds tables
 
-The release that carries this change adds two tables and changes nothing that 0.7.0 uses. An 0.7.0 image started against the upgraded database refuses at start-up, because the database records a revision 0.7.0 has no file for. The message printed by 0.7.0 and earlier at that point suggests deleting rows from `alembic_version`: do not follow it. Instead, run the 0.7.0 API with `RUN_MIGRATIONS=false`; it then starts without running migrations and works against the upgraded schema. Do not run 0.7.0's migration task against it. On ECS this means registering a revision of the 0.7.0 API task definition with `RUN_MIGRATIONS=false` in its environment and rolling back to that revision; an existing 0.7.0 revision runs migrations on start and will refuse. To upgrade again, deploy the newer release as usual.
+The release that carries this change adds two tables and changes nothing that 0.7.0 uses. An 0.7.0 image started against the upgraded database refuses at start-up, because the database records a revision 0.7.0 has no file for. The message printed by 0.7.0 and earlier at that point suggests deleting rows from `alembic_version`: do not follow it. Instead, run the 0.7.0 API with `RUN_MIGRATIONS=false`; it then starts without running migrations and works against the upgraded schema. Do not run 0.7.0's migration task against it. On the AWS deployment, check the environment of the revision you roll back to: an API revision registered before the Fargate stack carried `RUN_MIGRATIONS=false` (next section) runs migrations on start and will refuse. For such a revision, register a copy of it with `RUN_MIGRATIONS=false` in its environment and roll back to the copy. To upgrade again, deploy the newer release as usual.
+
+### On AWS, the API does not migrate
+
+On the AWS (CDK) deployment the API task definition sets `RUN_MIGRATIONS=false`
+and `SEED=` (empty), for every environment and both profiles. An API task never
+runs the bootstrap; the only thing that writes the schema is the migration task
+the Deploy workflow runs before it shifts traffic (or the Database Migration
+workflow, run by hand). `infrastructure/tests/test_api_task_does_not_migrate.py`
+pins both values.
+
+Why: an image refuses to start against a database a newer release has
+migrated (above). While the API ran the bootstrap on every start, any API task
+started from an older revision after a Deploy's migration -- a replaced task, a
+scale-out, a rollback -- exited instead of serving. With the bootstrap out of
+the API task, an older revision starts against the newer schema and serves it.
+
+What this means for you:
+
+- **`cdk deploy` alone no longer creates the schema.** After the first
+  `cdk deploy` of an environment, the API runs against an empty database until
+  the first Deploy (or a Database Migration run) creates it. In that window
+  `/health` answers 200 -- it checks that the database answers, not that the
+  schema is there -- so the load balancer's health checks pass, while real
+  requests answer 500 and the API logs errors. That is expected until the first
+  Deploy.
+- **The first Deploy may be refused by the API's 5xx alarms.** Anything that
+  reaches the schema-less API in that window, a scanner included, can put
+  `experimentation-api-5xx-blue-<env>` or `-green-<env>` into ALARM, and the
+  Deploy refuses to start while one is. The way through is Deploy's existing
+  break-glass
+  ([rollback runbook, "Fix forward while an alarm is firing"](../deployment/rollback-runbook.md#fix-forward-while-an-alarm-is-firing)),
+  and whether to use it is a person's decision at that moment. Keep the time
+  between the first `cdk deploy` and the first Deploy short.
+- **Rolling back relies on backward-compatible migrations.** A rollback runs the
+  older release against the newer schema. That works only when the migrations
+  in between are backward-compatible (see *Migration Guidelines*). For one that
+  is not -- a dropped or renamed table or column the older release reads --
+  restore the snapshot the Deploy took before migrating
+  ([rollback runbook](../deployment/rollback-runbook.md#database-rollback-procedure)).
+  `modules_0002_warehouse_analysis`, which shipped in 0.11.0, is one: it drops
+  the earlier `warehouse_connections` table and its rows, so a full deployment
+  on 0.11.0 or later rolls back to an earlier release only by restoring the
+  snapshot.
+- **Docker Compose and the Helm chart are deliberately unchanged.** Compose runs
+  one API container, which is the only writer and keeps `RUN_MIGRATIONS=true`.
+  The chart already keeps the bootstrap out of the serving container: it runs
+  it in an init container.
+
+An environment whose Fargate stack was deployed before this change still has
+API revisions that run the bootstrap on start. Those revisions keep doing so,
+and a rollback to one of them after a newer migration refuses to start. Deploy
+the Fargate stack from a checkout with this change before relying on rollback.
