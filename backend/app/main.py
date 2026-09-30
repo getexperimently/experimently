@@ -128,6 +128,12 @@ async def lifespan(app: FastAPI):
         return
 
     logger.info("Starting experiment scheduler")
+    # The singleton is built at import with the class default; the configured
+    # cadence is applied here, before its loop starts (#484). It stays the one
+    # instance, because POST /experiments/schedules/process also uses it.
+    experiment_scheduler.interval_minutes = (
+        settings.EXPERIMENT_SCHEDULER_INTERVAL_MINUTES
+    )
     await experiment_scheduler.start()
 
     logger.info("Starting rollout scheduler")

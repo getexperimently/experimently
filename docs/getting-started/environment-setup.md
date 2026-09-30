@@ -106,9 +106,13 @@ SDK_RATE_LIMIT_PER_MINUTE=6000
 #### Background Jobs
 ```dotenv
 BANDIT_UPDATE_INTERVAL_MINUTES=5
+EXPERIMENT_SCHEDULER_INTERVAL_MINUTES=15
 ```
 
 `BANDIT_UPDATE_INTERVAL_MINUTES` is how often multi-armed bandit weights are refreshed.
+`EXPERIMENT_SCHEDULER_INTERVAL_MINUTES` is how often the experiment scheduler starts and
+completes experiments whose scheduled `start_date` or `end_date` has passed. The default is
+15; a value below 1 is refused when the settings load, so the API does not start.
 
 ### 3. Environment Selection
 
