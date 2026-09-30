@@ -9,6 +9,7 @@ request with a 500.
 :class:`StorableTextModel` refuses them in every field of a request schema --
 a string, or any string inside a dict or list, keys included -- with a
 validation error, i.e. 422. The message names the field and never the value.
+:func:`storable_text_param` does the same for a path or query parameter.
 """
 
 from __future__ import annotations
@@ -16,7 +17,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from pydantic import BaseModel, ValidationInfo, field_validator
+from pydantic import AfterValidator, BaseModel, ValidationInfo, field_validator
 from pydantic_core.core_schema import ValidatorFunctionWrapHandler
 
 #: One character class, so the search is linear and cannot backtrack.
@@ -46,6 +47,27 @@ def contains_unstorable_text(value: Any) -> bool:
 def unstorable_text_message(field: str) -> str:
     """The fixed validation message for *field*; it never includes the value."""
     return f"{field} must not contain NUL or unpaired surrogate characters"
+
+
+def storable_text_param(name: str) -> AfterValidator:
+    """A validator refusing NUL and lone surrogates in the parameter *name* (#547).
+
+    For a path or query parameter whose value reaches a database query::
+
+        user_id: Annotated[str, Path(description=...), storable_text_param("user_id")]
+
+    It runs after the parameter's own validation and adds nothing to the
+    parameter's JSON schema, so the OpenAPI document is unchanged. A refused
+    value is a validation error, i.e. 422, with the message of
+    :func:`unstorable_text_message`, which never includes the value.
+    """
+
+    def _refuse_unstorable(value: Any) -> Any:
+        if contains_unstorable_text(value):
+            raise ValueError(unstorable_text_message(name))
+        return value
+
+    return AfterValidator(_refuse_unstorable)
 
 
 class StorableTextModel(BaseModel):

@@ -1,12 +1,15 @@
 """The request-text check shared by the tracking schemas (#543, #402)."""
 
+from typing import Annotated
+
 import pytest
-from pydantic import ValidationError
+from pydantic import TypeAdapter, ValidationError
 
 from backend.app.api.v1.endpoints.client_errors import ClientErrorRequest
 from backend.app.api.v1.endpoints.flag_evaluations import FlagEvaluationCount
 from backend.app.schemas.storable_text import (
     contains_unstorable_text,
+    storable_text_param,
     unstorable_text_message,
 )
 from backend.app.schemas.tracking import (
@@ -96,3 +99,28 @@ def test_batch_names_the_item_field():
             {"events": [{"event_type": "t", "user_id": "u\x00", "experiment_key": "k"}]}
         )
     assert [e["loc"] for e in exc.value.errors()] == [("events", 0, "user_id")]
+
+
+# ---------------------------------------------------------------------------
+# storable_text_param: the same check for a path or query parameter (#547)
+# ---------------------------------------------------------------------------
+
+PARAM = TypeAdapter(Annotated[str, storable_text_param("flag_key")])
+
+
+@pytest.mark.parametrize("char", REFUSED)
+def test_param_refuses_with_the_fixed_message(char):
+    with pytest.raises(ValidationError) as caught:
+        PARAM.validate_python(f"a{char}b")
+    (error,) = caught.value.errors()
+    assert error["msg"] == f"Value error, {unstorable_text_message('flag_key')}"
+
+
+@pytest.mark.parametrize("text", STORABLE)
+def test_param_accepts_storable_text_unchanged(text):
+    assert PARAM.validate_python(text) == text
+
+
+def test_param_adds_nothing_to_the_json_schema():
+    """The OpenAPI document must not change when a route adopts the check."""
+    assert PARAM.json_schema() == TypeAdapter(str).json_schema()
