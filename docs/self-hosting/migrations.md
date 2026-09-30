@@ -498,3 +498,13 @@ An environment whose Fargate stack was deployed before this change still has
 API revisions that run the bootstrap on start. Those revisions keep doing so,
 and a rollback to one of them after a newer migration refuses to start. Deploy
 the Fargate stack from a checkout with this change before relying on rollback.
+
+The Deploy workflow checks the revision it is about to deploy. After it
+registers the API revision it reads back what ECS stored, and refuses to create
+the CodeDeploy deployment unless the `backend` container sets
+`RUN_MIGRATIONS=false` exactly. By then the migration has run; the revision
+serving before keeps serving. The refusal names the fix, a `cdk deploy` of the
+Fargate stack from a checkout with this change
+([rollback runbook](../deployment/rollback-runbook.md#deploy-refused-an-api-revision-that-would-run-migrations-on-start)).
+Rollback does not check its target in the same way; the runbook gives the
+command to check one by hand.

@@ -938,7 +938,13 @@ jobs:
             fi
             echo ""
             echo "Job status: ${JOB_STATUS}."
-            echo "A migration the bad release applied is still applied: docs/deployment/rollback-runbook.md, Database Rollback Procedure."
+            if [ "$API_VERIFY" = success ] && [ "$ALREADY_SERVING" != true ] && [ -z "$REFUSED" ]; then
+              # The API tasks do not migrate on start (#298): the rolled-back
+              # release starts against the schema the newer one migrated.
+              echo "The database was not rolled back: a migration the newer release applied is still applied, and ${target} runs against that schema as it is. That works only if every migration since ${target}'s release is backward-compatible, and a new task of ${target} starts against it only if the revision sets RUN_MIGRATIONS=false: docs/deployment/rollback-runbook.md#the-rolled-back-api-runs-against-the-current-schema. For a migration that is not backward-compatible: docs/deployment/rollback-runbook.md, Database Rollback Procedure."
+            else
+              echo "A migration the bad release applied is still applied: docs/deployment/rollback-runbook.md, Database Rollback Procedure."
+            fi
           } >> "$GITHUB_STEP_SUMMARY"
 
       # `if: always()`. Without it every failure path above left #deployments

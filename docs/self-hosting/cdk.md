@@ -169,7 +169,9 @@ works only for backward-compatible migrations; for one that is not, restore the
 snapshot the Deploy took before migrating. See
 [On AWS, the API does not migrate](migrations.md#on-aws-the-api-does-not-migrate)
 for why, and for an environment whose Fargate stack was deployed before this
-setting existed.
+setting existed. Deploy refuses to deploy an API revision that lacks the
+setting, and says to `cdk deploy` the Fargate stack from a current checkout
+first.
 
 ### Which stacks you get: core or full
 
