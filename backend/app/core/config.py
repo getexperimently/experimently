@@ -426,6 +426,10 @@ class Settings(BaseSettings):
     # advances time-based rollout stages. Demos set both to 1.
     SAFETY_CHECK_INTERVAL_MINUTES: int = 5
     ROLLOUT_CHECK_INTERVAL_MINUTES: int = 15
+    # ExperimentScheduler starts and completes experiments whose scheduled
+    # start/end date has passed. The lifespan passes this to it (#484). A
+    # value below 1 is refused: 0 would make the loop spin without sleeping.
+    EXPERIMENT_SCHEDULER_INTERVAL_MINUTES: int = Field(default=15, ge=1)
 
     # Per-IP ceiling for SDK-facing endpoints (/tracking/*, flag evaluation).
     # Far above the 300/min default because one server-side SDK or NAT egress
