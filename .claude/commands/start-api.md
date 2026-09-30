@@ -13,7 +13,7 @@ For local development (default):
 4. Start uvicorn server: cd backend && uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 5. Report server status and URLs:
    - API: http://localhost:8000
-   - Docs: http://localhost:8000/docs
+   - Docs: http://localhost:8000/api/v1/docs
    - Health: http://localhost:8000/health
 
 For Docker development (if $ARGUMENTS is "docker"):

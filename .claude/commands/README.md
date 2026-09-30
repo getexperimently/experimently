@@ -86,7 +86,7 @@ Start the FastAPI backend development server.
 
 **URLs reported:**
 - API: http://localhost:8000
-- Docs: http://localhost:8000/docs
+- Docs: http://localhost:8000/api/v1/docs
 - Health: http://localhost:8000/health
 
 ---

@@ -12,6 +12,7 @@ from sqlalchemy.future import select
 
 from backend.app.core.config import settings
 from backend.app.core.security import get_password_hash
+from backend.app.core.settings_rules import first_superuser_password_length_refusal
 from backend.app.db.base import Base
 from backend.app.models.user import Permission, Role, User
 
@@ -72,6 +73,12 @@ async def seed_initial_data(engine: AsyncEngine) -> None:
         admin_user = admin_user.scalars().first()
 
         if not admin_user:
+            # Hashing a password bcrypt cannot take raises; say why instead.
+            too_long = first_superuser_password_length_refusal(
+                settings.FIRST_SUPERUSER_PASSWORD
+            )
+            if too_long:
+                raise ValueError(too_long)
             admin_user = User(
                 email=settings.FIRST_SUPERUSER_EMAIL,
                 username=settings.FIRST_SUPERUSER_EMAIL.split("@")[0],

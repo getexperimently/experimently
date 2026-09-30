@@ -167,4 +167,4 @@ The old key is marked inactive. The response contains the new plaintext key
 ## Next Steps
 
 - [Workspace Overview](./overview.md) — detailed role hierarchy and plan limits
-- [API Reference](http://localhost:8000/docs#/Workspaces) — interactive Swagger UI
+- [API Reference](http://localhost:8000/api/v1/docs#/Workspaces) — interactive Swagger UI

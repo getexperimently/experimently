@@ -38,7 +38,7 @@ applies the `demo` seed (three experiments, two flags). Seeds run once per datab
 | Service | URL |
 |---------|-----|
 | Dashboard | http://localhost:3000 |
-| API and interactive docs | http://localhost:8000 and http://localhost:8000/docs |
+| API and interactive docs | http://localhost:8000 and http://localhost:8000/api/v1/docs |
 | Health | http://localhost:8000/health/ready |
 
 Default credentials: **admin@demo.com / Demo1234!**. Change `FIRST_SUPERUSER_PASSWORD`,

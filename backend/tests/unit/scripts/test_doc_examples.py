@@ -12,12 +12,16 @@ copy.
 
 from __future__ import annotations
 
+import http.client
 import importlib.util
+import io
 import json
 import pathlib
 import re
+import socket
 import sys
 import textwrap
+import threading
 
 import pytest
 import yaml
@@ -2498,6 +2502,130 @@ def test_the_full_profile_probe(tmp_path):
         raise OSError("connection refused")
 
     assert "failed (connection refused)" in dx.full_profile_problem("p.md", refused)
+
+
+@pytest.mark.parametrize(
+    "error",
+    [http.client.IncompleteRead(b"{"), http.client.BadStatusLine("")],
+    ids=["incomplete-read", "bad-status-line"],
+)
+def test_the_full_profile_probe_names_a_cut_off_answer(error):
+    """#207: http.client's own errors are not OSErrors; the probe names them
+    as the page's problem instead of letting them end the shard."""
+
+    def cut_off(url):
+        raise error
+
+    problem = dx.full_profile_problem("p.md", cut_off)
+    assert problem.startswith(
+        f"p.md: the full profile did not load: GET {dx.MODULES_URL} failed ("
+    )
+
+
+def test_the_full_profile_probe_survives_a_dropped_connection(monkeypatch):
+    """The real fetch, against a server that promises a body and hangs up
+    halfway: urllib raises IncompleteRead, and the probe reports it."""
+    server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    server.bind(("127.0.0.1", 0))
+    server.listen(1)
+    port = server.getsockname()[1]
+
+    def answer_half():
+        conn, _ = server.accept()
+        with conn:
+            conn.recv(4096)
+            conn.sendall(
+                b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
+                b'Content-Length: 100\r\n\r\n{"profile"'
+            )
+
+    thread = threading.Thread(target=answer_half, daemon=True)
+    thread.start()
+    url = f"http://127.0.0.1:{port}/api/v1/modules"
+    monkeypatch.setattr(dx, "MODULES_URL", url)
+    try:
+        problem = dx.full_profile_problem("p.md")
+    finally:
+        thread.join(timeout=10)
+        server.close()
+    assert problem is not None
+    assert problem.startswith(
+        f"p.md: the full profile did not load: GET {url} failed ("
+    )
+    assert "IncompleteRead" in problem or "bytes read" in problem
+
+
+@pytest.mark.parametrize(
+    "remaining, expected",
+    [
+        (None, 600),
+        (10_000.0, 600),
+        (300.0, 360),
+        (0.0, dx.TEARDOWN_RESERVE_SECONDS),
+        (-30.0, dx.TEARDOWN_RESERVE_SECONDS),
+    ],
+    ids=["no-deadline", "capped", "before-the-deadline", "at-it", "past-it"],
+)
+def test_a_teardown_is_given_the_reserve_at_least(remaining, expected):
+    deadline = (
+        None if remaining is None else dx.Deadline(at=remaining, clock=lambda: 0.0)
+    )
+    assert dx._teardown_seconds(deadline) == expected
+
+
+def test_the_teardown_reserve_fits_inside_the_margin():
+    """A teardown that starts at the deadline ends inside the margin, with
+    time left for the report and the job's later steps (measured at up to
+    25 s, plus up to 4 s of job clock before DOCEX_JOB_START); and the
+    reserve stays well above the slowest full-profile teardown measured
+    (10.8 s; see TEARDOWN_RESERVE_SECONDS)."""
+    assert dx.DEADLINE_MARGIN_SECONDS - dx.TEARDOWN_RESERVE_SECONDS >= 25 + 4
+    assert dx.TEARDOWN_RESERVE_SECONDS >= 2 * 10.8
+
+
+def test_a_deadline_during_the_full_stack_start_is_named_and_torn_down(monkeypatch):
+    """#207: the deadline lands while the stack is starting (a start that never
+    becomes healthy).  The start's process group is killed, the page's problem
+    names the start and the deadline, the probe is never asked, and the
+    project is still torn down with the reserve."""
+    never_healthy = "sleep 300"
+    monkeypatch.setattr(dx, "STACK_FULL_UP", never_healthy)
+    monkeypatch.setattr(dx, "preflight", lambda env: None)
+    monkeypatch.setattr(dx, "project_resources", lambda project: [])
+
+    def probe(rel, fetch=None):
+        raise AssertionError("the probe ran after a start that did not finish")
+
+    monkeypatch.setattr(dx, "full_profile_problem", probe)
+    teardowns = []
+
+    def docker(*args, env=None, timeout=120):
+        teardowns.append((args, env["COMPOSE_PROJECT_NAME"], timeout))
+        return dx.subprocess.CompletedProcess(["docker", *args], 0, "", "")
+
+    monkeypatch.setattr(dx, "_docker", docker)
+    # A clock that stands still: the deadline is always 1 s away, so the start
+    # is killed by the deadline and never by its own 1200 s timeout.
+    deadline = dx.Deadline(at=1001.0, clock=lambda: 1000.0)
+    doc = {"path": "p.md", "environment": "stack-full", "exec": 1}
+    start = dx.Block(
+        line=3, kind="exec", lang="bash", body=never_healthy + "\n", timeout=1200
+    )
+    out = io.StringIO()
+    problems, reached = dx.run_document(
+        doc, [], 0, {}, None, out, deadline, stack_full_up=start
+    )
+    assert reached == 0
+    assert len(problems) == 1
+    assert problems[0].startswith(
+        f"p.md: the stack did not start ({never_healthy}): the run deadline "
+        f"({deadline.describe()}) was reached; process group killed"
+    )
+    [(args, project, timeout)] = teardowns
+    assert args == ("compose", "down", "-v", "--remove-orphans")
+    assert project.startswith("docex-")
+    assert timeout == dx._teardown_seconds(deadline) >= dx.TEARDOWN_RESERVE_SECONDS
+    assert "p.md: teardown took " in out.getvalue()
 
 
 def test_a_stack_full_page_needs_the_modules_page_s_one_full_start(repo):
