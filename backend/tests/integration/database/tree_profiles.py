@@ -133,6 +133,20 @@ def run(
     *extra_env* puts some of it back, for the tests that are *about* a
     developer's shell.
     """
+    return subprocess.run(
+        [sys.executable, *argv],
+        cwd=str(tree),
+        env=_environment(tree, schema, extra_env),
+        capture_output=True,
+        text=True,
+        timeout=900,
+    )
+
+
+def _environment(
+    tree: pathlib.Path, schema: str, extra_env: Optional[dict] = None
+) -> dict:
+    """The environment :func:`run` and :func:`serve` give their subprocess."""
     env = {
         k: v
         for k, v in os.environ.items()
@@ -149,14 +163,44 @@ def run(
     # with neither, the bootstrap refuses the class-default "admin".
     env.setdefault("FIRST_SUPERUSER_PASSWORD", "Subprocess-Deployment-Passw0rd")
     env.update(extra_env or {})
-    return subprocess.run(
-        [sys.executable, *argv],
-        cwd=str(tree),
-        env=env,
-        capture_output=True,
-        text=True,
-        timeout=900,
-    )
+    # A key set to None in *extra_env* is removed rather than set.
+    return {k: v for k, v in env.items() if v is not None}
+
+
+def serve(
+    tree: pathlib.Path,
+    schema: str,
+    port: int,
+    log: pathlib.Path,
+    extra_env: Optional[dict] = None,
+) -> subprocess.Popen:
+    """Start *tree*'s API with uvicorn on ``127.0.0.1:<port>``, against *schema*.
+
+    What ``docker-entrypoint.sh`` hands over to with ``RUN_MIGRATIONS=false``:
+    the server, and nothing run against the database first.  Output goes to
+    *log* (a file, so a chatty server cannot fill a pipe and stall).  The
+    caller stops the process.
+    """
+    with open(log, "wb") as out:
+        return subprocess.Popen(
+            [
+                sys.executable,
+                "-m",
+                "uvicorn",
+                "backend.app.main:app",
+                "--host",
+                "127.0.0.1",
+                "--port",
+                str(port),
+                "--workers",
+                "1",
+                "--no-server-header",
+            ],
+            cwd=str(tree),
+            env=_environment(tree, schema, extra_env),
+            stdout=out,
+            stderr=subprocess.STDOUT,
+        )
 
 
 def bootstrap_schema(
