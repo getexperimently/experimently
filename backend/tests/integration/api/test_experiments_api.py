@@ -577,19 +577,32 @@ class TestListExperimentsChecksItsPermission:
     """
 
     def test_every_role_that_may_list_still_can(
-        self, admin_client, developer_client, analyst_client, viewer_client
+        self,
+        admin_client,
+        db_session,
+        admin_user,
+        developer_user,
+        analyst_user,
+        viewer_user,
     ):
         """The check must not lock out anyone the role table admits.
 
         Asserted across all four together because a permission check that
         quietly excludes one role is the failure mode worth catching.
+
+        Each client is made immediately before its request: the auth override
+        is app-global, so four role-client fixtures would all act as the last
+        one set up. ``admin_client`` is requested only for its teardown.
         """
-        for name, client in (
-            ("admin", admin_client),
-            ("developer", developer_client),
-            ("analyst", analyst_client),
-            ("viewer", viewer_client),
+        from backend.tests.integration.conftest import make_client_for_user
+
+        for name, user in (
+            ("admin", admin_user),
+            ("developer", developer_user),
+            ("analyst", analyst_user),
+            ("viewer", viewer_user),
         ):
+            client = make_client_for_user(db_session, user)
             response = client.get("/api/v1/experiments/")
             assert response.status_code == 200, f"{name}: {response.text}"
 
