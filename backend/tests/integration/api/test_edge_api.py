@@ -434,3 +434,48 @@ class TestEdgeBootstrapDataIsolation:
         flag_keys = [f["key"] for f in data["flags"]]
         assert own_flag.key in flag_keys
         assert other_flag.key not in flag_keys
+
+
+@pytest.mark.integration
+@pytest.mark.requires_db
+class TestEdgeBootstrapAsDescribed:
+    """The deprecated route answers as its OpenAPI description says (#226)."""
+
+    def test_dashboard_shape_rules_are_left_out(
+        self, db_session, admin_client, admin_user
+    ):
+        rules = {
+            "logical_operator": "AND",
+            "groups": [
+                {
+                    "logical_operator": "AND",
+                    "conditions": [
+                        {"attribute": "country", "operator": "equals", "value": "US"}
+                    ],
+                }
+            ],
+        }
+        flag = _make_flag(db_session, admin_user.id, targeting_rules=rules)
+
+        response = admin_client.get(BOOTSTRAP_URL)
+        assert response.status_code == 200, response.text
+        matched = next(f for f in response.json()["flags"] if f["key"] == flag.key)
+        assert matched["rules"] == []
+
+    def test_experiment_key_is_derived_from_its_name(
+        self, db_session, admin_client, admin_user
+    ):
+        name = f"Edge Described {uuid.uuid4().hex[:6]}"
+        _make_experiment_with_variants(db_session, admin_user.id, name=name)
+
+        response = admin_client.get(BOOTSTRAP_URL)
+        assert response.status_code == 200, response.text
+        keys = [e["key"] for e in response.json()["experiments"]]
+        assert name.lower().replace(" ", "-") in keys
+
+    def test_no_deprecation_or_sunset_header_is_sent(self, admin_client):
+        """docs/api/stability.md: the deprecation is declared in OpenAPI only."""
+        response = admin_client.get(BOOTSTRAP_URL)
+        assert response.status_code == 200
+        assert "deprecation" not in response.headers
+        assert "sunset" not in response.headers
