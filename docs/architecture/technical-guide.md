@@ -187,28 +187,31 @@ The rules engine evaluates targeting rules to determine if a user should be incl
 
 ### Rule Structure
 
+Rules are stored in the shape the dashboard's rule builder writes: a top-level
+`logical_operator` combining groups, each group combining its conditions. An
+experiment's `targeting_rules` must use this shape; any other is refused with
+`422` on create and update.
+
 ```json
 {
-  "operator": "AND",
-  "rules": [
+  "logical_operator": "AND",
+  "groups": [
     {
-      "attribute": "country",
-      "operator": "IN",
-      "value": ["US", "CA", "GB"]
-    },
-    {
-      "attribute": "user_age",
-      "operator": "GREATER_THAN",
-      "value": 18
-    },
-    {
-      "attribute": "plan",
-      "operator": "EQUALS",
-      "value": "premium"
+      "logical_operator": "AND",
+      "conditions": [
+        {"attribute": "country", "operator": "in", "value": ["US", "CA", "GB"]},
+        {"attribute": "user_age", "operator": "greater_than", "value": 18},
+        {"attribute": "plan", "operator": "equals", "value": "premium"}
+      ]
     }
   ]
 }
 ```
+
+The table below lists the engine's own operator names. In stored rules they are
+written in lower case as the dashboard names them (`in`, `greater_than`,
+`semver_gte`, ...); the full list is under "Targeting Rules" in the
+[API endpoints reference](../api/endpoints.md).
 
 ### Supported Operators (20+)
 
@@ -576,12 +579,17 @@ POST /api/v1/experiments
 {
   "name": "Simplified Checkout Test",
   "key": "checkout-simplified",
-  "type": "A_B",
+  "experiment_type": "a_b",
   "targeting_rules": {
-    "operator": "AND",
-    "rules": [
-      {"attribute": "country", "operator": "IN", "value": ["US"]},
-      {"attribute": "account_age_days", "operator": "GREATER_THAN", "value": 7}
+    "logical_operator": "AND",
+    "groups": [
+      {
+        "logical_operator": "AND",
+        "conditions": [
+          {"attribute": "country", "operator": "in", "value": ["US"]},
+          {"attribute": "account_age_days", "operator": "greater_than", "value": 7}
+        ]
+      }
     ]
   },
   "variants": [
@@ -589,11 +597,16 @@ POST /api/v1/experiments
     {"name": "Treatment (2-step)", "is_control": false, "traffic_allocation": 50}
   ],
   "metrics": [
-    {"name": "Purchase Complete", "event_name": "purchase_complete", "metric_type": "CONVERSION", "is_primary": true},
-    {"name": "Revenue", "event_name": "purchase_complete", "metric_type": "REVENUE", "is_primary": false}
+    {"name": "Purchase Complete", "event_name": "purchase_complete", "metric_type": "conversion", "is_primary": true},
+    {"name": "Revenue", "event_name": "purchase_complete", "metric_type": "revenue", "is_primary": false}
   ]
 }
 ```
+
+`targeting_rules` uses the shape the dashboard's rule builder writes: groups of
+conditions, each an `attribute`, an `operator` and a `value`. Rules in any other
+shape are refused with `422` on create and update; the shape and the operators
+are listed under "Targeting Rules" in the [API endpoints reference](../api/endpoints.md).
 
 ```javascript
 // Step 2: In your frontend checkout page
@@ -654,19 +667,30 @@ POST /api/v1/rollout-schedules/stages/STAGE3_ID/advance
 
 **Scenario:** Only run an experiment for users on a paid plan, in the US/EU, who have been active in the last 30 days.
 
+Groups do not nest, so "and either of these two" is written as two groups joined
+by `OR`, each carrying the shared conditions:
+
 ```json
 {
   "targeting_rules": {
-    "operator": "AND",
-    "rules": [
-      {"attribute": "plan", "operator": "IN", "value": ["pro", "enterprise"]},
-      {"attribute": "country", "operator": "IN", "value": ["US", "GB", "DE", "FR"]},
-      {"attribute": "days_since_last_login", "operator": "LESS_THAN", "value": 30},
+    "logical_operator": "OR",
+    "groups": [
       {
-        "operator": "OR",
-        "rules": [
-          {"attribute": "lifetime_value", "operator": "GREATER_THAN", "value": 100},
-          {"attribute": "subscription_months", "operator": "GREATER_THAN", "value": 6}
+        "logical_operator": "AND",
+        "conditions": [
+          {"attribute": "plan", "operator": "in", "value": ["pro", "enterprise"]},
+          {"attribute": "country", "operator": "in", "value": ["US", "GB", "DE", "FR"]},
+          {"attribute": "days_since_last_login", "operator": "less_than", "value": 30},
+          {"attribute": "lifetime_value", "operator": "greater_than", "value": 100}
+        ]
+      },
+      {
+        "logical_operator": "AND",
+        "conditions": [
+          {"attribute": "plan", "operator": "in", "value": ["pro", "enterprise"]},
+          {"attribute": "country", "operator": "in", "value": ["US", "GB", "DE", "FR"]},
+          {"attribute": "days_since_last_login", "operator": "less_than", "value": 30},
+          {"attribute": "subscription_months", "operator": "greater_than", "value": 6}
         ]
       }
     ]

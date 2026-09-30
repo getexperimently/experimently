@@ -569,6 +569,54 @@ class TestSubmitDraft:
         assert data["success"] is False
         assert any("variants" in error for error in data["errors"]), data
 
+    @pytest.mark.regression
+    @pytest.mark.parametrize(
+        "conditions, expected",
+        [
+            (
+                [{"attribute": "plan", "operator": "zq_op_7731", "value": "zq-7731"}],
+                "targeting_rules: Value error, "
+                "groups[0].conditions[0].operator: unknown operator",
+            ),
+            (
+                [{"attribute": "", "operator": "equals", "value": "zq-7731"}],
+                "targeting_rules: Value error, "
+                "groups[0].conditions[0].attribute: attribute is required",
+            ),
+        ],
+        ids=["unknown operator", "blank attribute"],
+    )
+    def test_invalid_targeting_is_refused_with_fixed_text(
+        self, authenticated_client, db_session, conditions, expected
+    ):
+        """Submit validates targeting like create: success false, never a 500.
+
+        Before #523 PR 2 these conditions created an experiment whose rules
+        assignment ignored, so everyone was eligible.
+        """
+        from backend.app.models.experiment import Experiment
+
+        client, owner = authenticated_client
+        draft_id = self._create_complete_draft(client, owner)
+        step = client.put(
+            f"/api/v1/wizard/drafts/{draft_id}/step",
+            json={"step": "targeting", "data": {"targeting_rules": conditions}},
+        )
+        assert step.status_code == 200, step.text
+
+        response = client.post(f"/api/v1/wizard/drafts/{draft_id}/submit")
+
+        assert response.status_code == 200, response.text
+        data = response.json()
+        assert data["success"] is False, data
+        assert data["experiment_id"] is None
+        assert data["errors"] == [expected], data
+        assert "7731" not in response.text, response.text
+        assert (
+            db_session.query(Experiment).filter(Experiment.owner_id == owner.id).count()
+            == 0
+        )
+
 
 # ---------------------------------------------------------------------------
 # GET /api/v1/wizard/drafts

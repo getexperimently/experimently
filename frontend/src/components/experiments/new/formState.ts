@@ -8,7 +8,7 @@
  * than one view of the form share it without drifting apart.
  */
 import { TargetingRules } from '@/types/targeting';
-import { createEmptyRules } from '@/utils/targeting';
+import { createEmptyRules, validateRules } from '@/utils/targeting';
 import { ExperimentType, MetricType, CreateExperimentRequest } from '@/types/experiments';
 
 export function generateKey(name: string): string {
@@ -129,6 +129,24 @@ export function validateForm(
   metrics: MetricFormData[],
 ): string | null {
   return checkName(name) ?? checkVariants(variants) ?? checkMetrics(metrics);
+}
+
+/**
+ * Every problem with the targeting rules, in the builder's words, or [] when
+ * they can be sent. No groups means no targeting and is always fine.
+ *
+ * `validateRules` finds a blank attribute, operator or value (the empty
+ * condition "+ Add Group" starts with); a group whose conditions have all been
+ * removed is caught here, because the API refuses that too. The API is the
+ * real check: anything it refuses beyond these comes back as a 422 and is
+ * shown in the same place (`describeCreateError`).
+ */
+export function checkTargeting(rules: TargetingRules): string[] {
+  if (rules.groups.length === 0) return [];
+  const empty = rules.groups.flatMap((group, gi) =>
+    group.conditions.length === 0 ? [`Group ${gi + 1}: add a condition or remove the group`] : [],
+  );
+  return [...empty, ...validateRules(rules).errors];
 }
 
 /** The parts of the form, in the order a step-by-step view asks for them. */
