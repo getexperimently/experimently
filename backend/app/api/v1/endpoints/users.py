@@ -6,20 +6,30 @@ such as creating, retrieving, updating, and deleting users.
 """
 
 import uuid
-from typing import Optional
+from typing import Any, Dict, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from pydantic import EmailStr, TypeAdapter, ValidationError
 from sqlalchemy.orm import Session
 
 from backend.app.api import deps
+from backend.app.core.config import settings
 from backend.app.core.security import get_password_hash, unwrap_secret
 from backend.app.models.user import User, UserRole
 from backend.app.schemas.user import (
+    PasswordChange,
     UserCreate,
     UserListResponse,
     UserResponse,
     UserUpdate,
+    check_password_strength,
+)
+from backend.app.services.local_auth_service import (
+    AccountLockedError,
+    CurrentPasswordMissingError,
+    InvalidCredentialsError,
+    NoLocalPasswordError,
+    local_auth_service,
 )
 
 router = APIRouter()
@@ -30,6 +40,24 @@ router = APIRouter()
 ADMIN_ONLY_IDENTITY_DETAIL = (
     "Only an administrator can change an account's email address or username."
 )
+
+#: The answer when a request to ``PUT /users/{id}`` or ``PUT /admin/users/{id}``
+#: would set the caller's OWN password. Those routes do not ask for the
+#: current password, so this is refused for every caller, superusers included.
+OWN_PASSWORD_DETAIL = (
+    "To change your own password, use POST /api/v1/users/me/password, "
+    "which asks for your current password."
+)
+
+#: Answers of ``POST /api/v1/users/me/password``.
+CURRENT_PASSWORD_INCORRECT_DETAIL = "The current password is incorrect."
+CURRENT_PASSWORD_MISSING_DETAIL = (
+    "Enter your current password (current_password) to set a new one."
+)
+NO_LOCAL_PASSWORD_DETAIL = (
+    "This account does not sign in with a password, so it has no password to change."
+)
+LOCAL_PROVIDER_ONLY_DETAIL = "Endpoint not available: AUTH_PROVIDER is not 'local'"
 
 #: The same parser ``UserUpdate.email`` applies to the request body.
 _EMAIL = TypeAdapter(EmailStr)
@@ -62,6 +90,62 @@ def _identity_unchanged(user: User, user_in: UserUpdate) -> bool:
         and stored_email == user_in.email
         and user_in.username == user.username
     )
+
+
+def apply_password_change(
+    target: User, caller: User, update_data: Dict[str, Any]
+) -> None:
+    """Turn a ``password`` in *update_data* into ``hashed_password``, or refuse it.
+
+    Shared by ``PUT /api/v1/users/{id}`` and ``PUT /api/v1/admin/users/{id}``;
+    the caller has already been authorised to update *target*. Mutates
+    *update_data*: ``password`` is always removed.
+
+    * absent or ``null``: nothing changes;
+    * *target* is the *caller*: 403, for EVERY caller including superusers.
+      Your own password is changed with ``POST /api/v1/users/me/password``,
+      which asks for the current one;
+    * otherwise (only a superuser gets this far): the password rule is
+      applied again and the password is hashed.
+
+    ``get_password_hash`` is looked up in this module's namespace, so the
+    tests that patch ``backend.app.api.v1.endpoints.users.get_password_hash``
+    see both routes.
+    """
+    if "password" not in update_data:
+        return
+    password = update_data.pop("password")
+    if password is None:
+        return
+    if str(target.id) == str(caller.id):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=OWN_PASSWORD_DETAIL,
+        )
+    plain = unwrap_secret(password)
+    # ``UserUpdate`` has already applied the rule; applying it again here
+    # keeps this function correct for a caller that builds *update_data* some
+    # other way. The messages are fixed and carry no part of the value.
+    try:
+        check_password_strength(plain)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
+        ) from None
+    update_data["hashed_password"] = get_password_hash(plain)
+
+
+def require_local_provider() -> None:
+    """404 unless ``AUTH_PROVIDER`` is ``local``.
+
+    A route dependency, so it answers before authentication and before the
+    body is validated against the schema.
+    """
+    if settings.AUTH_PROVIDER != "local":
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=LOCAL_PROVIDER_ONLY_DETAIL,
+        )
 
 
 @router.get("/", response_model=UserListResponse)
@@ -201,6 +285,88 @@ async def get_user_me(
     return UserResponse(**response_data)
 
 
+@router.post(
+    "/me/password",
+    status_code=status.HTTP_204_NO_CONTENT,
+    response_class=Response,
+    dependencies=[Depends(require_local_provider)],
+    responses={
+        403: {
+            "description": (
+                "The current password is missing or incorrect, or the account "
+                "has no password of its own."
+            )
+        },
+        404: {"description": "AUTH_PROVIDER is not 'local'."},
+        423: {
+            "description": (
+                "Too many failed attempts for this account (counted together "
+                "with sign-in); see Retry-After."
+            )
+        },
+    },
+)
+def change_own_password(
+    body: PasswordChange,
+    db: Session = Depends(deps.get_db),
+    current_user: User = Depends(deps.get_current_active_user),
+) -> Response:
+    """
+    Change your own password.
+
+    Requires your current password. The new password must be at least 8
+    characters and at most 72 bytes (UTF-8), with an upper-case letter, a
+    lower-case letter and a digit. Answers 204 with no body.
+
+    A wrong current password answers 403 (not 401, which would read as a
+    signed-out session) and counts toward the same lockout as sign-in; after
+    too many failures both answer 423 until ``Retry-After`` has passed.
+
+    Changing the password does not end other sessions: a token issued before
+    the change keeps working until it expires.
+    """
+    current = (
+        unwrap_secret(body.current_password)
+        if body.current_password is not None
+        else None
+    )
+    try:
+        local_auth_service.verify_current_password(current_user, current)
+    except AccountLockedError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_423_LOCKED,
+            detail=(
+                "Too many failed attempts; account temporarily locked. "
+                f"Retry in {exc.retry_after_seconds} seconds."
+            ),
+            headers={"Retry-After": str(exc.retry_after_seconds)},
+        )
+    except NoLocalPasswordError:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail=NO_LOCAL_PASSWORD_DETAIL
+        )
+    except CurrentPasswordMissingError:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=CURRENT_PASSWORD_MISSING_DETAIL,
+        )
+    except InvalidCredentialsError:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=CURRENT_PASSWORD_INCORRECT_DETAIL,
+        )
+
+    user = db.query(User).filter(User.id == current_user.id).first()
+    if user is None:
+        # The row went away between authentication and here.
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
+        )
+    user.hashed_password = get_password_hash(unwrap_secret(body.new_password))
+    db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
 @router.get("/{user_id}", response_model=UserResponse)
 async def get_user(
     user_id: str,
@@ -330,6 +496,10 @@ async def update_user(
     # Convert input model to dict, excluding unset fields
     update_data = user_in.model_dump(exclude_unset=True)
 
+    # Before anything is written: refuses the caller's own password (every
+    # caller), hashes another account's (a superuser's reset).
+    apply_password_change(user, current_user, update_data)
+
     if not current_user.is_superuser:
         # Only a superuser changes an account's email address or username,
         # whatever the caller's role. Anyone else must resend the stored
@@ -346,12 +516,6 @@ async def update_user(
         # Regular users cannot change is_superuser or is_active
         update_data.pop("is_superuser", None)
         update_data.pop("is_active", None)
-
-    # Hash password if provided
-    if "password" in update_data:
-        password = update_data.pop("password")
-        if password:
-            update_data["hashed_password"] = get_password_hash(unwrap_secret(password))
 
     # Update user attributes
     for field in update_data:

@@ -216,7 +216,9 @@ curl -s -X POST localhost:8000/api/v1/users/ \
 <!-- expect: "role": "VIEWER" -->
 
 It prints the new account's `email` and `"role": "VIEWER"`. A password needs at least eight
-characters, with an upper-case letter, a lower-case letter and a digit.
+characters and at most 72 bytes (UTF-8; most characters outside English take two or more
+bytes), with an upper-case letter, a lower-case letter and a digit. A longer or weaker one
+answers `422`.
 
 Log in as the viewer, and try to create a flag:
 
@@ -233,6 +235,42 @@ curl -s -X POST localhost:8000/api/v1/feature-flags/ \
 <!-- expect: {"detail":"You don't have permission to create feature flags"} -->
 
 The API answers `403 Forbidden` with `{"detail":"You don't have permission to create feature flags"}`.
+
+### Change Your Own Password
+
+Every user changes their own password with `POST /api/v1/users/me/password`, which asks for
+the current one. A wrong current password is refused:
+
+```{.bash exec}
+curl -s -X POST localhost:8000/api/v1/users/me/password \
+  -H "Authorization: Bearer $VIEWER_TOKEN" \
+  -H 'content-type: application/json' \
+  -d '{"current_password": "Not-the-password1", "new_password": "Viewer5678!"}'
+```
+<!-- expect: {"detail":"The current password is incorrect."} -->
+
+It answers `403` with `{"detail":"The current password is incorrect."}`. That is `403`, not
+`401`: the session is still signed in. Wrong current passwords count toward the same limit as
+failed logins, so after 10 of them within 15 minutes both answer `423`.
+
+With the right one, the password changes and the response is an empty `204`:
+
+```{.bash exec}
+curl -s -o /dev/null -w '%{http_code}\n' -X POST localhost:8000/api/v1/users/me/password \
+  -H "Authorization: Bearer $VIEWER_TOKEN" \
+  -H 'content-type: application/json' \
+  -d '{"current_password": "Viewer1234!", "new_password": "Viewer5678!"}'
+```
+<!-- expect: 204 -->
+
+It prints `204`. The new password follows the same rules as a new account's. Changing it
+doesn't sign out other sessions: a token issued before the change keeps working until it
+expires. To end them straight away, an administrator deactivates the account
+(`"is_active": false`).
+
+Sending your own `password` to `PUT /api/v1/users/{id}` or `PUT /api/v1/admin/users/{id}` is
+refused with `403`, for administrators too. Those routes set **another** account's password:
+a superuser resets a password there, without knowing the old one.
 
 With the modules installed, admins can also create custom roles with fine-grained
 permissions, and grant temporary permissions to individual users. See the

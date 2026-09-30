@@ -159,6 +159,11 @@ describe('InviteUserModal', () => {
 
     // The generated password is what the admin sees.
     expect(screen.getByTestId('invite-temp-password')).toHaveTextContent(body.password);
+    // The dashboard has no password form: the copy names the API route that
+    // changes it, not a screen that does not exist.
+    const created = screen.getByTestId('invite-created');
+    expect(created).toHaveTextContent('POST /api/v1/users/me/password');
+    expect(created).not.toHaveTextContent('after signing in');
     expect(onSuccess).toHaveBeenCalled();
     expect(onClose).not.toHaveBeenCalled();
 

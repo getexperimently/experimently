@@ -117,8 +117,11 @@ describe('LoginPage', () => {
   it('shows the "forgot password" copy without a reset link', () => {
     renderLogin();
     expect(screen.getByText('Forgot password?')).toBeInTheDocument();
+    // The dashboard has no password field anywhere; an administrator resets
+    // it through the API. The copy must not send anyone to a screen that
+    // cannot do it (#396).
     expect(screen.getByTestId('forgot-password-help')).toHaveTextContent(
-      'Ask an administrator to reset it in Admin → Users.',
+      /^Ask an administrator to reset it\.$/,
     );
   });
 

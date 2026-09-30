@@ -11,7 +11,9 @@ Failed logins are counted per e-mail address.  After
 ``LOCAL_AUTH_MAX_FAILED_ATTEMPTS`` failures inside a rolling window of
 ``LOCAL_AUTH_LOCKOUT_MINUTES`` the address is locked for the remainder of
 that window and ``/auth/login`` answers ``423 Locked``.  A successful login
-clears the counter.
+clears the counter.  A wrong current password on ``POST /users/me/password``
+counts against the same address and is locked by the same counter (see
+``LocalAuthService.verify_current_password``).
 
 The counter is an **in-process** dictionary.  That is deliberate: it
 needs no extra infrastructure and is correct for the default single-worker
@@ -64,6 +66,18 @@ class AccountLockedError(Exception):
 
 class InvalidCredentialsError(Exception):
     """Raised for unknown e-mail, wrong password, or an inactive account."""
+
+
+class NoLocalPasswordError(Exception):
+    """Raised when an account has no password of its own to check.
+
+    Such an account signs in some other way; it has no current password to
+    prove, so it cannot set one through a self-service change.
+    """
+
+
+class CurrentPasswordMissingError(Exception):
+    """Raised when a password change arrives without the current password."""
 
 
 def _normalise_email(email: str) -> str:
@@ -235,8 +249,53 @@ class LocalAuthService:
         self.tracker.reset(email_key)
         return user
 
+    def verify_current_password(self, user: User, password: Optional[str]) -> None:
+        """
+        Check that *password* is *user*'s current password, or raise.
 
-# Process-wide tracker shared by /auth/login and /auth/token (local provider).
+        Used by a signed-in user's own password change. It draws on the SAME
+        failure budget as ``/auth/login`` (``self.tracker``), so a session
+        cannot be used to guess the password faster than the sign-in form
+        allows, and a lockout from either place applies to both.
+
+        In order:
+
+        1. the address is locked out: ``AccountLockedError`` (423);
+        2. the account has no password of its own (``hashed_password`` empty
+           or NULL): ``NoLocalPasswordError``. Not counted as a failure --
+           nothing was guessed;
+        3. no current password was sent: ``CurrentPasswordMissingError``.
+           Not counted either;
+        4. the password does not match: the failure is recorded, then
+           ``InvalidCredentialsError``;
+        5. it matches: the counter is cleared.
+
+        The counter is keyed on the account's e-mail address, normalised the
+        way ``authenticate`` normalises it (trimmed, lower-cased). Two
+        consequences, both accepted: a superuser who changes the account's
+        address starts it on a fresh counter, and legacy rows whose addresses
+        differ only in case share one counter.
+        """
+        email_key = _normalise_email(user.email)
+        status = self.tracker.status(email_key)
+        if status.locked:
+            raise AccountLockedError(status.retry_after_seconds)
+
+        if not user.hashed_password:
+            raise NoLocalPasswordError()
+
+        if not password:
+            raise CurrentPasswordMissingError()
+
+        if not verify_password(password, user.hashed_password):
+            self.tracker.record_failure(email_key)
+            raise InvalidCredentialsError("The current password is incorrect.")
+
+        self.tracker.reset(email_key)
+
+
+# Process-wide tracker shared by /auth/login, /auth/token (local provider) and
+# POST /users/me/password.
 login_attempt_tracker = LoginAttemptTracker(
     max_attempts=settings.LOCAL_AUTH_MAX_FAILED_ATTEMPTS,
     window_seconds=settings.LOCAL_AUTH_LOCKOUT_MINUTES * 60,
