@@ -407,7 +407,7 @@ expects = 0
 path = "demo/streampulse/simulator/README.md"
 environment = "bare"
 exec = 0
-skip = 7
+skip = 6
 expects = 0
 
 [[document]]
