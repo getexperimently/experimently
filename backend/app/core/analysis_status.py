@@ -83,6 +83,11 @@ ANALYSIS_STATUS: Dict[str, AnalysisLabel] = {
         "confidence sequence is being corrected. "
         f"{_ISSUES}/231",
     ),
+    # Warehouse analysis (#312): proportion and mean results computed from
+    # the per-variant counts and sums a warehouse returns, by
+    # ``services/sufficient_stats_analysis.py``.
+    "warehouse_proportion": AnalysisLabel(GA),
+    "warehouse_mean": AnalysisLabel(GA),
 }
 
 

@@ -31,6 +31,7 @@ from backend.app.core.stats_engine import ENGINE_VERSION
 from backend.app.services.sufficient_stats_analysis import (
     BinomialVariant,
     binomial_metric_result,
+    mean_metric_result,
 )
 from backend.tests.unit.services.test_binomial_metric_result_characterisation import (
     _FIXTURES,
@@ -45,6 +46,7 @@ pytestmark = [pytest.mark.unit, pytest.mark.regression]
 SUFFICIENT_STATS_FINGERPRINTS: Dict[str, Dict[str, str]] = {
     "1.1.0": {
         "binomial_metric_result": "cd5de7d0dd07d9e53e847cd8bb56a2b7e1c1164b590e2370c50f35aee74e0411",
+        "mean_metric_result": "ad119bc6bfff1ec62f70b7499e7c7eb29341f3a12df69587935128964e03125c",
     },
 }
 
@@ -81,9 +83,56 @@ def _binomial_outputs() -> Dict[str, Any]:
     return outputs
 
 
+_MEAN_METRIC = SimpleNamespace(
+    id="44444444-0000-4000-8000-000000000004",
+    name="Revenue per user",
+    metric_type="revenue",
+    is_primary=False,
+)
+
+
+def _mean_outputs() -> Dict[str, Any]:
+    """Fixed centred sums through ``mean_metric_result``."""
+    control = BinomialVariant(_CONTROL, "control", True)
+    t1 = BinomialVariant(_TREATMENT_1, "t1", False)
+    t2 = BinomialVariant(_TREATMENT_2, "t2", False)
+    sum_sets = {
+        # (k, [(variant, n, sum_d, sum_d2), ...]); treatment first again.
+        "three": (
+            42.5,
+            [
+                (t1, 1000, 180.0, 16300.0),
+                (control, 1000, -150.0, 15800.0),
+                (t2, 1000, -30.0, 16100.0),
+            ],
+        ),
+        "unbalanced": (
+            1e6,
+            [
+                (control, 2000, -12.0, 8000.5),
+                (t1, 150, 30.0, 700.0),
+                (t2, 30000, -18.0, 121000.0),
+            ],
+        ),
+        "no_variation": (
+            3.0,
+            [(control, 10, 0.0, 0.0), (t1, 12, 12.0, 12.0), (t2, 5, 5.0, 9.0)],
+        ),
+    }
+    outputs: Dict[str, Any] = {}
+    for name, (k, sums) in sum_sets.items():
+        for alpha in (0.05, 0.10):
+            for correction in ("none", "bonferroni", "benjamini_hochberg"):
+                outputs[f"{name}/{alpha}/{correction}"] = mean_metric_result(
+                    k, sums, alpha, correction, metric=_MEAN_METRIC
+                )
+    return outputs
+
+
 #: Every function this file pins, by the key it is pinned under.
 _ESTIMATORS: Dict[str, Callable[[], Dict[str, Any]]] = {
     "binomial_metric_result": _binomial_outputs,
+    "mean_metric_result": _mean_outputs,
 }
 
 

@@ -51,6 +51,8 @@ EXPECTED_STATUS = {
     "interactions": "beta",
     "novelty": "beta",
     "sequential": "beta",
+    "warehouse_proportion": "ga",
+    "warehouse_mean": "ga",
 }
 
 EXPECTED_ISSUE = {"cuped": 217, "interactions": 219, "novelty": 219, "sequential": 231}

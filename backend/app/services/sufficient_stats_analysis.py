@@ -13,6 +13,10 @@ gets the same numbers for the same counts.
 ``test_binomial_metric_result_characterisation.py`` pins the ``/results``
 output it has to reproduce, and ``test_sufficient_stats_fingerprint.py`` pins
 its own output per ``ENGINE_VERSION``.
+
+``mean_metric_result`` does the same for a mean metric, from each variant's
+unit count and its sums of ``y - k`` and ``(y - k) ** 2`` centred on the grand
+mean ``k``.  ``test_mean_metric_result.py`` holds it to an exact reference.
 """
 
 import logging
@@ -287,6 +291,257 @@ def binomial_metric_result(
         and (v["relative_improvement_pct"] or 0) > 0
     ]
     winner = max(winners, key=lambda v: v["mean"]) if winners else None
+    metric_type = (
+        metric.metric_type.value
+        if hasattr(metric.metric_type, "value")
+        else str(metric.metric_type)
+    )
+    return {
+        "metric_id": str(metric.id),
+        "metric_name": metric.name,
+        "metric_type": metric_type,
+        "is_primary": bool(metric.is_primary),
+        "variants": results,
+        "has_significant_result": any(v["is_significant"] for v in results),
+        "winning_variant_id": winner["variant_id"] if winner else None,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Mean metrics from centred sums
+# ---------------------------------------------------------------------------
+
+#: ``(variant, n, sum_d, sum_d2)``: the units in the variant and, over their
+#: values ``y``, ``sum(y - k)`` and ``sum((y - k) ** 2)`` for the grand mean
+#: ``k`` the caller centred on.
+MeanSums = Tuple[Any, int, float, float]
+
+FEWER_THAN_2_UNITS = "fewer_than_2_units"
+NO_VARIATION = "Not computed: no variation"
+
+
+class SufficientStatsRefused(ValueError):
+    """Sums that no sample could produce (a negative variance, a non-finite
+    sum): the metric is refused, never computed.  ``code`` is
+    ``result_invalid``."""
+
+    def __init__(self, message: str) -> None:
+        super().__init__(message)
+        self.code = "result_invalid"
+
+
+class SufficientStatsNotComputed(ValueError):
+    """Valid sums, but too few units to compute the metric from.
+
+    ``code`` is ``fewer_than_2_units``; ``message`` is the text a reader sees.
+    """
+
+    def __init__(self, code: str, message: str) -> None:
+        super().__init__(message)
+        self.code = code
+        self.message = message
+
+
+class _MeanArm(NamedTuple):
+    variant: Any
+    n: int
+    c: float  # the centred mean, sum_d / n
+    var: float  # the sample variance, ddof 1
+
+
+def _mean_arm(variant: Any, n: Any, sum_d: Any, sum_d2: Any) -> _MeanArm:
+    if isinstance(n, bool) or not isinstance(n, int) or n < 0:
+        raise SufficientStatsRefused("n is not a non-negative integer")
+    sum_d = float(sum_d)
+    sum_d2 = float(sum_d2)
+    if not (math.isfinite(sum_d) and math.isfinite(sum_d2)):
+        raise SufficientStatsRefused("a sum is not finite")
+    if n < 2:
+        raise SufficientStatsNotComputed(
+            FEWER_THAN_2_UNITS, "Not computed: fewer than 2 units"
+        )
+    c = sum_d / n
+    var = (sum_d2 - sum_d * sum_d / n) / (n - 1)
+    if not math.isfinite(var) or var < 0:
+        # No sample has these sums; refused rather than clamped to 0.
+        raise SufficientStatsRefused("the sums give a negative variance")
+    return _MeanArm(variant, n, c, var)
+
+
+def _mean_comparison(
+    arm: _MeanArm, control: _MeanArm, k: float, alpha: float
+) -> Dict[str, Any]:
+    """One treatment against the control: p-value, effect size, power and
+    relative improvement, or None for each that cannot be computed."""
+    from statsmodels.stats.power import NormalIndPower
+
+    diff = arm.c - control.c
+    control_mean = k + control.c
+    improvement = diff / abs(control_mean) * 100 if control_mean != 0 else None
+    if arm.var == 0 and control.var == 0:
+        return {
+            "p_value": None,
+            "effect_size": None,
+            "power": None,
+            "relative_improvement_pct": improvement,
+            "note": NO_VARIATION,
+        }
+    # The centred means go in, never k + c: at a large k the reconstructed
+    # means round away most of the difference.
+    p_value = float(
+        stats.ttest_ind_from_stats(
+            arm.c,
+            math.sqrt(arm.var),
+            arm.n,
+            control.c,
+            math.sqrt(control.var),
+            control.n,
+            equal_var=False,
+        ).pvalue
+    )
+    effect = diff / math.sqrt((control.var + arm.var) / 2.0)
+    power: Optional[float]
+    try:
+        power = float(
+            NormalIndPower().power(
+                effect_size=abs(effect),
+                nobs1=arm.n,
+                alpha=alpha,
+                ratio=control.n / arm.n,
+            )
+        )
+    except Exception:
+        power = None
+    return {
+        "p_value": p_value,
+        "effect_size": effect,
+        "power": power,
+        "relative_improvement_pct": improvement,
+        "note": None,
+    }
+
+
+def mean_metric_result(
+    k: float,
+    variants: Sequence[MeanSums],
+    alpha: float,
+    correction_method: str,
+    *,
+    metric: Any,
+) -> Dict[str, Any]:
+    """One mean metric's result from per-variant sums centred on ``k``.
+
+    The sums are centred so that a large offset (order values in the
+    thousands, say) does not cancel the variance away: ``k`` is the grand mean
+    over every unit, ``sum_d = sum(y - k)`` and ``sum_d2 = sum((y - k) ** 2)``.
+    Everything compared across variants uses the centred means ``sum_d / n``,
+    in which ``k`` cancels; ``k`` is added back only to the reported ``mean``
+    and interval.
+
+    Per variant: ``mean = k + sum_d / n``; the sample variance (ddof 1) and
+    its square root as ``std_dev``; and ``mean +/- t(1 - alpha/2, n - 1) *
+    sqrt(var / n)`` as the interval.  Per treatment, against the control:
+    Welch's t-test p-value, Cohen's d as ``AnalysisService.cohens_d`` defines
+    it, observed power at ``alpha`` (``NormalIndPower``, the convention of the
+    proportion results) and the relative improvement in percent, which is None
+    when the control's mean is 0.  When neither the treatment nor the control
+    varies, the p-value, effect size and power are None and the treatment's
+    ``note`` says so.
+
+    Args:
+        k: the grand mean the sums are centred on.
+        variants: ``(variant, n, sum_d, sum_d2)`` per variant, in report
+            order; ``variant`` has ``id``, ``name`` and ``is_control``, and
+            exactly one should be the control.
+        alpha: significance level for the interval, ``is_significant`` and
+            observed power.
+        correction_method: ``none``, ``bonferroni`` or ``benjamini_hochberg``,
+            applied across the treatments of this metric.
+        metric: the metric's identity: ``id``, ``name``, ``metric_type`` and
+            ``is_primary``, which the result carries.
+
+    Returns:
+        A dict in the shape of ``schemas.results.MetricResult``.  Each variant
+        also carries ``note``: None, or why a comparison was not computed.
+
+    Raises:
+        SufficientStatsRefused: a count or sum is malformed or not finite, or
+            the sums give a negative variance.
+        SufficientStatsNotComputed: a variant has fewer than 2 units.
+        ValueError: when no variant is the control.
+    """
+    k = float(k)
+    if not math.isfinite(k):
+        raise SufficientStatsRefused("k is not finite")
+    arms = [_mean_arm(*row) for row in variants]
+    control = next((a for a in arms if a.variant.is_control), None)
+    if control is None:
+        raise ValueError("No variant is the control")
+
+    comparisons = [
+        _mean_comparison(arm, control, k, alpha)
+        for arm in arms
+        if not arm.variant.is_control
+    ]
+    adjusted = adjusted_p_values(
+        [comparison["p_value"] for comparison in comparisons], correction_method
+    )
+    pending = list(zip(comparisons, adjusted))
+
+    results: List[Dict[str, Any]] = []
+    for arm in arms:
+        mean = k + arm.c
+        half_width = float(stats.t.ppf(1 - alpha / 2, arm.n - 1)) * math.sqrt(
+            arm.var / arm.n
+        )
+        entry: Dict[str, Any] = {
+            "variant_id": str(arm.variant.id),
+            "variant_name": arm.variant.name,
+            "is_control": arm.variant.is_control,
+            "sample_size": arm.n,
+            "conversions": None,
+            "mean": mean,
+            "std_dev": math.sqrt(arm.var),
+            "confidence_interval": (mean - half_width, mean + half_width),
+            "p_value": None,
+            "adjusted_p_value": None,
+            "is_significant": False,
+            "effect_size": None,
+            "effect_size_label": None,
+            "relative_improvement_pct": None,
+            "power": None,
+            "statistical_test_used": None,
+            "note": None,
+        }
+        if not arm.variant.is_control:
+            # Treatments come out of `pending` in the order they went in.
+            comparison, adj = pending.pop(0)
+            p_value = comparison["p_value"]
+            decisive = adj if adj is not None else p_value
+            effect = comparison["effect_size"]
+            entry.update(
+                p_value=p_value,
+                adjusted_p_value=adj,
+                is_significant=bool(decisive is not None and decisive < alpha),
+                effect_size=effect,
+                effect_size_label=effect_size_label(abs(effect))
+                if effect is not None
+                else None,
+                relative_improvement_pct=comparison["relative_improvement_pct"],
+                power=comparison["power"],
+                statistical_test_used="welch_t_test" if p_value is not None else None,
+                note=comparison["note"],
+            )
+        results.append(entry)
+
+    # A winner is significant and above the control, compared on the centred
+    # means (a relative improvement is None when the control's mean is 0).
+    winners = [
+        (entry, arm)
+        for entry, arm in zip(results, arms)
+        if not entry["is_control"] and entry["is_significant"] and arm.c > control.c
+    ]
+    winner = max(winners, key=lambda pair: pair[1].c)[0] if winners else None
     metric_type = (
         metric.metric_type.value
         if hasattr(metric.metric_type, "value")
