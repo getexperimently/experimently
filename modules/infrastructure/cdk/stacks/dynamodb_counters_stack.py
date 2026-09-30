@@ -32,6 +32,7 @@ from aws_cdk import (
 from constructs import Construct
 
 from stacks.environments import data_removal_policy
+from stacks.names import counters_table_name
 
 
 class DynamoDBCountersStack(Stack):
@@ -62,7 +63,9 @@ class DynamoDBCountersStack(Stack):
         # noticed because the stack was gated behind an environment variable
         # the repository never set, so it had never been synthesised.
         self.environment_name = environment
-        self.table_name = f"experiment-counters-{environment}"
+        # From stacks/names.py: the Fargate stack gives the API task this same
+        # name and its access to the table (#392).
+        self.table_name = counters_table_name(environment)
 
         # Billing mode: on-demand for dev/staging; provisioned for prod
         billing_mode = (
