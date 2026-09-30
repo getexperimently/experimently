@@ -790,6 +790,6 @@ All logs follow structured JSON format:
 
 ### Dashboards
 
-- Overview: http://localhost:8000/docs#/monitoring
+- Overview: http://localhost:8000/api/v1/docs#/monitoring
 - CloudWatch: `/experimentation-platform/api` log group
 - Health: http://localhost:8000/health
