@@ -34,6 +34,7 @@ from backend.app.models.experiment import Experiment
 from backend.app.models.feature_flag import FeatureFlag
 from backend.app.models.metrics.metric import ErrorLog
 from backend.app.schemas.metrics import ErrorLogCreate
+from backend.app.schemas.storable_text import StorableTextModel
 from backend.app.services.metrics_service import MetricsService
 
 router = APIRouter()
@@ -61,7 +62,7 @@ CLIENT_TIMESTAMP_KEY = "client_timestamp"
 # ---------------------------------------------------------------------------
 
 
-class ClientErrorRequest(BaseModel):
+class ClientErrorRequest(StorableTextModel):
     """One client-side error report."""
 
     feature_flag_key: Optional[str] = Field(

@@ -28,6 +28,7 @@ from backend.app.models.event import Event
 from backend.app.models.experiment import ExperimentStatus, Variant
 from backend.app.models.feature_flag import FeatureFlag, FeatureFlagStatus
 from backend.app.models.metrics.metric import ErrorLog
+from backend.app.schemas import storable_text
 from backend.app.schemas.tracking import EventCreate
 from backend.app.services.assignment_service import AssignmentService
 from backend.app.services.event_service import EventService
@@ -315,6 +316,18 @@ def test_a_request_id_of_the_wrong_shape_is_left_out_of_the_sentence(
 # ---------------------------------------------------------------------------
 
 
+@pytest.fixture
+def nul_reaches_the_database(monkeypatch):
+    """Let a NUL past the request schemas, so the database is what refuses it.
+
+    The tracking schemas answer 422 for a NUL (#543); these tests are about
+    what a route answers when the database raises, and a NUL is the simplest
+    real database error to provoke.
+    """
+    monkeypatch.setattr(storable_text, "contains_unstorable_text", lambda value: False)
+
+
+@pytest.mark.usefixtures("nul_reaches_the_database")
 def test_a_track_whose_metadata_the_database_refuses_answers_the_fixed_sentence(
     admin_client: TestClient, experiment
 ) -> None:
@@ -351,6 +364,7 @@ def test_an_event_for_an_unknown_experiment_id_answers_the_fixed_sentence(
     assert resp.json() == {"detail": _with_id(EVENT)}
 
 
+@pytest.mark.usefixtures("nul_reaches_the_database")
 def test_a_batch_item_whose_metadata_the_database_refuses_answers_the_fixed_sentence(
     admin_client: TestClient, experiment
 ) -> None:
@@ -383,6 +397,7 @@ def test_a_batch_item_whose_metadata_the_database_refuses_answers_the_fixed_sent
     ]
 
 
+@pytest.mark.usefixtures("nul_reaches_the_database")
 def test_an_error_report_the_database_refuses_answers_the_fixed_sentence(
     admin_client: TestClient, flag
 ) -> None:
@@ -400,6 +415,7 @@ def test_an_error_report_the_database_refuses_answers_the_fixed_sentence(
     assert resp.json() == {"detail": _with_id(REPORT)}
 
 
+@pytest.mark.usefixtures("nul_reaches_the_database")
 def test_an_error_report_batch_the_database_refuses_answers_the_fixed_sentence(
     admin_client: TestClient, db_session, flag
 ) -> None:
