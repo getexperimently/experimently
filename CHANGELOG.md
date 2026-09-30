@@ -10,6 +10,27 @@ longer applies and release-please can generate this file directly. Until it
 does, entries below 0.2.2 are hand-written and the links in them are the
 reason why.
 
+## [0.15.0](https://github.com/getexperimently/experimently/compare/v0.14.0...v0.15.0) (2026-09-30)
+
+
+### ⚠ BREAKING CHANGES
+
+* **api:** experiment targeting rules are validated on update ([#532](https://github.com/getexperimently/experimently/issues/532))
+
+### Features
+
+* **analysis:** mean-metric results from sufficient statistics ([#510](https://github.com/getexperimently/experimently/issues/510)) ([748839d](https://github.com/getexperimently/experimently/commit/748839d67759ab13509ac7531cbd50c3c5c61ae0))
+* **warehouse:** mean metrics are analysed in warehouse runs ([#522](https://github.com/getexperimently/experimently/issues/522)) ([332b8db](https://github.com/getexperimently/experimently/commit/332b8db514fb3c47aaa4976ac9fb2abbb9be1b6d))
+
+
+### Bug Fixes
+
+* **api:** bad sample-size input answers 422, not 500 ([#528](https://github.com/getexperimently/experimently/issues/528)) ([59d5beb](https://github.com/getexperimently/experimently/commit/59d5beb911f9eaf0b03610d9ace2311ba87e945f))
+* **api:** experiment targeting rules are validated on update ([#532](https://github.com/getexperimently/experimently/issues/532)) ([679eb40](https://github.com/getexperimently/experimently/commit/679eb40359658294479d900d6a1db92a99e77ee5))
+* **api:** wizard drafts are per user; the wizard endpoints are deprecated ([#530](https://github.com/getexperimently/experimently/issues/530)) ([1307b7f](https://github.com/getexperimently/experimently/commit/1307b7f071e9a411f3904f045fbb27fab8e4d3c7))
+* **deps:** PyJWT 2.15.1 ([#534](https://github.com/getexperimently/experimently/issues/534)) ([fef205b](https://github.com/getexperimently/experimently/commit/fef205b6df9ae0772a9f76325b0b57e23f3ac6e2))
+* **deps:** urllib3 2.8.0 in both image locks ([#527](https://github.com/getexperimently/experimently/issues/527)) ([af54af2](https://github.com/getexperimently/experimently/commit/af54af2dc2d9be1ae7afa59203ba2755dcc84e94))
+
 ## [0.14.0](https://github.com/getexperimently/experimently/compare/v0.13.0...v0.14.0) (2026-09-30)
 
 
