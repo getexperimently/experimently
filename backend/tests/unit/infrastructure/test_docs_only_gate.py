@@ -130,6 +130,9 @@ NOT_DOCS_TESTS = {
     "backend/tests/smoke/test_openapi_release_rewrite.py": "docs/api only",
     # Reads only docs/api/warehouse-analytics.md (same reason as above).
     "modules/backend/tests/unit/test_warehouse_docs_availability.py": "docs/api only",
+    # Names docs/api/stability.md in a docstring (the claim its header test
+    # pins); opens no file under docs/, and docs/api/** is never docs-only.
+    "backend/tests/integration/api/test_edge_api.py": "docstring mention only",
     # Hands the classifier path STRINGS such as "docs/a.py"; opens no file.
     "backend/tests/unit/scripts/test_classify_changes.py": "fixture strings only",
     # Assert that the scripts' and workflow's printed copy CONTAINS a
