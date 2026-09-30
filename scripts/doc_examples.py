@@ -307,7 +307,20 @@ PROFILES = ("core", "full")
 # stops this long before GitHub would, so it can name the page and block,
 # tear the stack down and write its report while the job is still alive.
 DEADLINE_MARGIN_SECONDS = 120
-TEARDOWN_RESERVE_SECONDS = 60  # MEASURE
+# The least a page's teardown (`docker compose down -v --remove-orphans`) is
+# given, however late it starts.  Measured for the full profile, 2026-09-30,
+# on GitHub's runners (runs 36673605286, 36674746158): 14 teardowns (5 of a
+# healthy stack, 5 of a start killed at 5-60 s, 3 after the modules page
+# itself, 1 after the run deadline killed the start) took 0.4-10.8 s, and 8 on
+# Docker Desktop took 0.3-10.6 s.  The slow ones fit Docker's 10 s
+# stop grace for a container that does not exit on SIGTERM (not confirmed
+# per container).  Compose stops services in dependency order, three levels
+# here (frontend, api, postgres and redis), so an unmeasured worst case of one
+# grace per level is ~30 s, still inside the reserve.  60 s is the worst measured
+# (10.8 s) plus a margin of ~49 s.  What the margin keeps after it: 60 s for
+# the report and the job's later steps (2-25 s across 90 shard jobs) and the
+# job clock's head start on DOCEX_JOB_START (1-4 s).
+TEARDOWN_RESERVE_SECONDS = 60
 REPORT_VERSION = 1
 
 
@@ -1745,7 +1758,9 @@ def deadline_from_env(
 ) -> Optional[Deadline]:
     """The deadline the workflow exported, or None when it exported none.
 
-    ``DOCEX_JOB_START`` is the job's first step's ``date +%s``;
+    ``DOCEX_JOB_START`` is the job's first step's ``date +%s``, a few seconds
+    after GitHub's clock for the job starts (accepted slack: the deadline is
+    that much late, and the margin absorbs it);
     ``DOCEX_JOB_TIMEOUT_MINUTES`` is the job's ``timeout-minutes`` expression,
     copied textually (a test pins the two as identical).  One without the other
     is refused: a deadline half-configured is not a deadline.

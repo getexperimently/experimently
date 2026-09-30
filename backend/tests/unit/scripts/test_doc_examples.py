@@ -2575,9 +2575,12 @@ def test_a_teardown_is_given_the_reserve_at_least(remaining, expected):
 
 def test_the_teardown_reserve_fits_inside_the_margin():
     """A teardown that starts at the deadline ends inside the margin, with
-    time left for the report and its upload (the job's later steps)."""
-    assert dx.TEARDOWN_RESERVE_SECONDS >= dx.DEADLINE_MARGIN_SECONDS / 2
-    assert dx.DEADLINE_MARGIN_SECONDS - dx.TEARDOWN_RESERVE_SECONDS >= 30
+    time left for the report and the job's later steps (measured at up to
+    25 s, plus up to 4 s of job clock before DOCEX_JOB_START); and the
+    reserve stays well above the slowest full-profile teardown measured
+    (10.8 s; see TEARDOWN_RESERVE_SECONDS)."""
+    assert dx.DEADLINE_MARGIN_SECONDS - dx.TEARDOWN_RESERVE_SECONDS >= 25 + 4
+    assert dx.TEARDOWN_RESERVE_SECONDS >= 2 * 10.8
 
 
 def test_a_deadline_during_the_full_stack_start_is_named_and_torn_down(monkeypatch):
