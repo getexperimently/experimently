@@ -40,6 +40,21 @@ A user who is not eligible is still answered by `POST /api/v1/tracking/assign`, 
 `200`, the control variant, `"assigned": false` and `"reason": "mutual_exclusion"`. Nothing
 is recorded for them.
 
+**Enrolment is sticky across the group.** A user enrolled in one experiment of a group is
+never enrolled in another experiment of that group, even as experiments are activated,
+paused or resumed. The hash divides new users among the experiments that are active at the
+time of the request; a user who already has an assignment in another experiment of the
+group that is active, paused or still a draft is answered as not eligible, with the same
+`"reason": "mutual_exclusion"`. So an experiment activated later in a group fills more
+slowly than one that started with it: only users not yet enrolled elsewhere in the group can
+join it. Completing an experiment, or removing it from the group, releases its users, and
+they can then be enrolled in another experiment of the group. Assignments that already
+exist are always kept, so a user who was enrolled in two experiments of a group before this
+rule applied stays in both.
+
+The check is made per request. If the group's set of active experiments changes while two
+requests for the same new user are in flight, both can succeed.
+
 ---
 
 ## Mutual Exclusion Group API
@@ -157,7 +172,9 @@ Archive a group (soft delete). Requires ADMIN role. Member experiments are not a
 
 ### DELETE /api/v1/mutual-exclusion-groups/{group_id}/experiments/{experiment_id}
 
-Remove an experiment from the group.
+Remove an experiment from the group. Its users are released: from their next request they
+can be enrolled in another experiment of the group. Their assignment in the removed
+experiment is kept.
 
 ---
 

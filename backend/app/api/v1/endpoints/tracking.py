@@ -161,7 +161,10 @@ async def assign_user_to_experiment(
     - Traffic allocation percentages
 
     This means that the same user will always get the same variant assignment
-    for a specific experiment, ensuring a consistent user experience.
+    for a specific experiment, including across experiments in the same mutual
+    exclusion group: a user enrolled in one experiment of a group is not
+    enrolled in another, even as experiments in the group are activated,
+    paused or resumed.
 
     New users are first checked for eligibility: the global holdout, the
     experiment's mutual exclusion group and its targeting rules (evaluated
