@@ -169,16 +169,8 @@ curl -X POST "http://localhost:8000/api/v1/feature-flags/" \
     "status": "ACTIVE",
     "rollout_percentage": 50,
     "targeting_rules": {
-      "logical_operator": "AND",
-      "groups": [
-        {
-          "logical_operator": "AND",
-          "conditions": [
-            {"attribute": "country", "operator": "equals", "value": "US"},
-            {"attribute": "plan", "operator": "equals", "value": "premium"}
-          ]
-        }
-      ]
+      "countries": ["US"],
+      "user_segments": ["premium"]
     }
   }'
 ```

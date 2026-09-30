@@ -313,24 +313,8 @@ class ExperimentCreate(ExperimentBase):
                 "experiment_type": "a_b",
                 "status": "draft",
                 "targeting_rules": {
-                    "logical_operator": "AND",
-                    "groups": [
-                        {
-                            "logical_operator": "AND",
-                            "conditions": [
-                                {
-                                    "attribute": "country",
-                                    "operator": "in",
-                                    "value": ["US", "CA"],
-                                },
-                                {
-                                    "attribute": "device",
-                                    "operator": "in",
-                                    "value": ["desktop", "mobile"],
-                                },
-                            ],
-                        }
-                    ],
+                    "country": ["US", "CA"],
+                    "device": ["desktop", "mobile"],
                 },
                 "tags": ["checkout", "ui", "conversion"],
                 "variants": [

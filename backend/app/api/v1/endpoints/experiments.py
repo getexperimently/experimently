@@ -673,8 +673,10 @@ async def update_experiment(
                         detail=f"Cannot update {field} for experiments in {experiment.status.value} status",
                     )
 
-        # Capture pre-update snapshot for audit trail. Copied: the update
-        # below changes the loaded object in place.
+        # Capture pre-update snapshot for audit trail. The update below
+        # rebinds targeting_rules (setattr) rather than changing the dict,
+        # so today the copy is not needed; it guards the old value against
+        # a future in-place change.
         old_exp_snapshot = {
             "name": experiment.name,
             "status": _status_text(experiment.status),
