@@ -1,4 +1,4 @@
-import { ApiError } from '@/services/api';
+import { ApiError, messageForDetail } from '@/services/api';
 
 /**
  * What a failed create shows, in either view of `/experiments/new`.
@@ -17,6 +17,18 @@ export interface CreateError {
    * targeting rules (not at the foot of the form), with `message` as its heading.
    */
   targeting?: string[];
+  /**
+   * With `targeting`: what the same 422 said about other fields, shown at the
+   * foot of the form as any other error is, so a mixed 422 loses nothing.
+   */
+  otherMessage?: string;
+}
+
+/** The text a view shows at the foot of the form for `error`, or null for none. */
+export function footMessage(error: CreateError | null): string | null {
+  if (!error) return null;
+  if (error.targeting) return error.otherMessage ?? null;
+  return error.message;
 }
 
 /** Heading for targeting problems found before the create was sent. */
@@ -44,16 +56,26 @@ export function describeTargetingIssue(msg: string): string {
   return `${where}: ${problem}`;
 }
 
-/** The API's `targeting_rules` problems in a 422 body, or null when it has none. */
-function targetingIssues(detail: unknown): string[] | null {
+function isTargetingItem(item: unknown): boolean {
+  if (!item || typeof item !== 'object') return false;
+  const { loc } = item as { loc?: unknown };
+  return Array.isArray(loc) && loc[loc.length - 1] === 'targeting_rules';
+}
+
+/**
+ * A 422 body split in two: its `targeting_rules` problems in the builder's
+ * words, and the message for every other item (undefined when there are none).
+ * Null when the body names no targeting problem.
+ */
+function splitTargetingIssues(detail: unknown): { targeting: string[]; otherMessage?: string } | null {
   if (!Array.isArray(detail)) return null;
-  const issues = detail.flatMap((item) => {
-    if (!item || typeof item !== 'object') return [];
-    const { loc, msg } = item as { loc?: unknown; msg?: unknown };
-    if (!Array.isArray(loc) || loc[loc.length - 1] !== 'targeting_rules') return [];
-    return [describeTargetingIssue(typeof msg === 'string' ? msg : 'not valid')];
+  const targeting = detail.filter(isTargetingItem).map((item) => {
+    const { msg } = item as { msg?: unknown };
+    return describeTargetingIssue(typeof msg === 'string' ? msg : 'not valid');
   });
-  return issues.length > 0 ? issues : null;
+  if (targeting.length === 0) return null;
+  const others = detail.filter((item) => !isTargetingItem(item));
+  return others.length > 0 ? { targeting, otherMessage: messageForDetail(422, others) } : { targeting };
 }
 
 export const ROLE_CANNOT_CREATE =
@@ -86,7 +108,8 @@ function sentence(text: string): string {
  *   the page stays and the answers with it.
  * - 403: the API's reason, then what the role means and who can help.
  * - 409: the key is taken; the page's own sentence and "Edit details".
- * - 422 naming `targeting_rules`: each problem, shown at the targeting rules.
+ * - 422 naming `targeting_rules`: each problem, shown at the targeting rules;
+ *   any other item in the same 422 is kept in `otherMessage`.
  * - anything else: the message the API client built (for a server error it
  *   carries the request ID once).
  */
@@ -96,8 +119,8 @@ export function describeCreateError(err: unknown, sentKey: string | undefined, v
     if (err.status === 403) return { message: `${sentence(err.message)} ${ROLE_CANNOT_CREATE}` };
     if (err.status === 409) return { message: duplicateKeyMessage(sentKey, view), editDetails: true };
     if (err.status === 422) {
-      const targeting = targetingIssues(err.detail);
-      if (targeting) return { message: TARGETING_REFUSED, targeting };
+      const split = splitTargetingIssues(err.detail);
+      if (split) return { message: TARGETING_REFUSED, ...split };
     }
   }
   return { message: err instanceof Error ? err.message : 'Failed to create experiment' };

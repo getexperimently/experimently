@@ -6,7 +6,7 @@ import { BasicInfoFields } from './BasicInfoFields';
 import { ExperimentTypeField } from './ExperimentTypeField';
 import { VariantsEditor } from './VariantsEditor';
 import { MetricsEditor } from './MetricsEditor';
-import { CreateError } from './createErrors';
+import { CreateError, footMessage } from './createErrors';
 import { TargetingProblems } from './TargetingProblems';
 
 interface AdvancedFormProps {
@@ -20,6 +20,9 @@ interface AdvancedFormProps {
 /** Every field of a new experiment on one page, submitted with one button. */
 export function AdvancedForm({ state, dispatch, error, isSubmitting, onSubmit }: AdvancedFormProps) {
   // The key field is on this page: take the user straight to it.
+  // A targeting problem is shown at the rules; anything else the error says goes here.
+  const foot = footMessage(error);
+
   const focusKey = () => {
     const key = document.getElementById('experiment-key');
     if (key instanceof HTMLInputElement) {
@@ -53,14 +56,14 @@ export function AdvancedForm({ state, dispatch, error, isSubmitting, onSubmit }:
         <TargetingProblems error={error} />
       </section>
 
-      {/* Error message (a targeting problem is shown at the rules instead) */}
-      {error && !error.targeting && (
+      {/* Error message (a targeting problem is shown at the rules; the rest here) */}
+      {error && foot && (
         <div
           role="alert"
           className="rounded-lg bg-red-50 border border-red-200 p-3 text-sm text-red-700"
           data-testid="form-error"
         >
-          {error.message}
+          {foot}
           {error.editDetails && (
             <>
               {' '}

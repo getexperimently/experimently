@@ -187,28 +187,31 @@ The rules engine evaluates targeting rules to determine if a user should be incl
 
 ### Rule Structure
 
+Rules are stored in the shape the dashboard's rule builder writes: a top-level
+`logical_operator` combining groups, each group combining its conditions. An
+experiment's `targeting_rules` must use this shape; any other is refused with
+`422` on create and update.
+
 ```json
 {
-  "operator": "AND",
-  "rules": [
+  "logical_operator": "AND",
+  "groups": [
     {
-      "attribute": "country",
-      "operator": "IN",
-      "value": ["US", "CA", "GB"]
-    },
-    {
-      "attribute": "user_age",
-      "operator": "GREATER_THAN",
-      "value": 18
-    },
-    {
-      "attribute": "plan",
-      "operator": "EQUALS",
-      "value": "premium"
+      "logical_operator": "AND",
+      "conditions": [
+        {"attribute": "country", "operator": "in", "value": ["US", "CA", "GB"]},
+        {"attribute": "user_age", "operator": "greater_than", "value": 18},
+        {"attribute": "plan", "operator": "equals", "value": "premium"}
+      ]
     }
   ]
 }
 ```
+
+The table below lists the engine's own operator names. In stored rules they are
+written in lower case as the dashboard names them (`in`, `greater_than`,
+`semver_gte`, ...); the full list is under "Targeting Rules" in the
+[API endpoints reference](../api/endpoints.md).
 
 ### Supported Operators (20+)
 

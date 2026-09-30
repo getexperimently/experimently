@@ -221,6 +221,34 @@ describe.each<View>(['guided', 'advanced'])('%s view: targeting rules', (view) =
     expect(screen.queryByTestId('form-error')).not.toBeInTheDocument();
   });
 
+  it('shows both parts of a mixed 422: targeting at the rules, the rest at the foot of the form', async () => {
+    createReplies = [
+      {
+        status: 422,
+        body: {
+          detail: [
+            { type: 'value_error', loc: ['body', 'name'], msg: 'Value error, name is odd' },
+            {
+              type: 'value_error',
+              loc: ['body', 'targeting_rules'],
+              msg: 'Value error, groups[0].conditions[0].operator: unknown operator',
+            },
+          ],
+        },
+      },
+    ];
+    await fillIn(view, addCountryCondition);
+
+    pressCreate(view);
+
+    const alert = await screen.findByTestId('targeting-error');
+    expect(alert).toHaveTextContent('Group 1, Condition 1: unknown operator');
+    expect(alert).not.toHaveTextContent('name is odd');
+    const rest = screen.getByTestId('form-error');
+    expect(rest).toHaveTextContent('name: Value error, name is odd');
+    expect(rest).not.toHaveTextContent('targeting_rules');
+  });
+
   it('shows a 422 on another field at the foot of the form, as before', async () => {
     createReplies = [
       {

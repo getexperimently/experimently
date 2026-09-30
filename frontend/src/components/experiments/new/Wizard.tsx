@@ -20,7 +20,7 @@ import { BasicInfoFields } from './BasicInfoFields';
 import { VariantsEditor } from './VariantsEditor';
 import { MetricsEditor } from './MetricsEditor';
 import { EstimatePanelState, INITIAL_ESTIMATE_PANEL, SampleSizeEstimate } from './SampleSizeEstimate';
-import { CreateError } from './createErrors';
+import { CreateError, footMessage } from './createErrors';
 import { TargetingProblems } from './TargetingProblems';
 
 export const NEW_EXPERIMENT_PATH = '/experiments/new';
@@ -225,6 +225,8 @@ export function Wizard({ state, dispatch, error, isSubmitting, onCreate, onClear
   };
 
   const payload = step === 'review' ? buildCreatePayload(state) : null;
+  // A targeting problem is shown beside the targeting summary; anything else the error says goes below.
+  const foot = footMessage(error);
 
   return (
     <div data-testid="guided-setup">
@@ -473,13 +475,13 @@ export function Wizard({ state, dispatch, error, isSubmitting, onCreate, onClear
             )}
           </div>
 
-          {step === 'review' && error && !error.targeting && (
+          {step === 'review' && error && foot && (
             <div
               role="alert"
               className="rounded-lg bg-red-50 border border-red-200 p-3 text-sm text-red-700"
               data-testid="form-error"
             >
-              {error.message}
+              {foot}
               {error.editDetails && (
                 <>
                   {' '}
