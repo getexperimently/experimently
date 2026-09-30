@@ -88,6 +88,10 @@ class Experiment(Base, BaseModel):
     )
     start_date = Column(DateTime)
     end_date = Column(DateTime)
+    # When a PAUSED experiment is due to resume (#436).  Only a PAUSED
+    # experiment may carry one: ``ck_experiments_resume_only_when_paused``
+    # below refuses any other status with a value set.
+    resume_at = Column(DateTime(timezone=True), nullable=True)
     targeting_rules = Column(JSONB)  # For user segmentation
     metrics = Column(JSONB)  # Metrics to track
     tags = Column(JSONB)  # For categorization
@@ -200,6 +204,12 @@ class Experiment(Base, BaseModel):
             CheckConstraint(
                 "end_date IS NULL OR start_date IS NULL OR end_date > start_date",
                 name="check_experiment_dates",
+            ),
+            # A resume time belongs to a paused experiment and to nothing else.
+            # The status enum is stored by NAME, hence 'PAUSED'.
+            CheckConstraint(
+                "resume_at IS NULL OR status = 'PAUSED'",
+                name="ck_experiments_resume_only_when_paused",
             ),
             {"schema": schema_name},
         )
