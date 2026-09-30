@@ -42,7 +42,9 @@ class AuditLogCreate(AuditLogBase):
             ActionType(v)
             return v
         except ValueError:
-            raise ValueError(f"Invalid action type: {v}")
+            raise ValueError(
+                f"Invalid action type; expected one of {[a.value for a in ActionType]}"
+            )
 
     @field_validator("entity_type")
     @classmethod
@@ -52,7 +54,9 @@ class AuditLogCreate(AuditLogBase):
             EntityType(v)
             return v
         except ValueError:
-            raise ValueError(f"Invalid entity type: {v}")
+            raise ValueError(
+                f"Invalid entity type; expected one of {[e.value for e in EntityType]}"
+            )
 
 
 class AuditLogResponse(AuditLogBase):
@@ -161,7 +165,9 @@ class AuditLogFilterParams(BaseModel):
                 EntityType(v)
                 return v
             except ValueError:
-                raise ValueError(f"Invalid entity type: {v}")
+                raise ValueError(
+                    f"Invalid entity type; expected one of {[e.value for e in EntityType]}"
+                )
         return v
 
     @field_validator("action_type")
@@ -173,7 +179,9 @@ class AuditLogFilterParams(BaseModel):
                 ActionType(v)
                 return v
             except ValueError:
-                raise ValueError(f"Invalid action type: {v}")
+                raise ValueError(
+                    f"Invalid action type; expected one of {[a.value for a in ActionType]}"
+                )
         return v
 
     @model_validator(mode="after")
