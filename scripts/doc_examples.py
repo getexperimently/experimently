@@ -74,6 +74,7 @@ import argparse
 import dataclasses
 import functools
 import html.parser
+import http.client
 import json
 import math
 import os
@@ -306,6 +307,7 @@ PROFILES = ("core", "full")
 # stops this long before GitHub would, so it can name the page and block,
 # tear the stack down and write its report while the job is still alive.
 DEADLINE_MARGIN_SECONDS = 120
+TEARDOWN_RESERVE_SECONDS = 60  # MEASURE
 REPORT_VERSION = 1
 
 
@@ -1777,7 +1779,15 @@ def _teardown_seconds(deadline: Optional[Deadline]) -> int:
     """How long a teardown may take: past the deadline, inside the margin."""
     if deadline is None:
         return 600
-    return int(min(600, max(60, deadline.remaining() + DEADLINE_MARGIN_SECONDS / 2)))
+    return int(
+        min(
+            600,
+            max(
+                TEARDOWN_RESERVE_SECONDS,
+                deadline.remaining() + DEADLINE_MARGIN_SECONDS / 2,
+            ),
+        )
+    )
 
 
 def write_report(
@@ -2449,9 +2459,13 @@ def _get_json(url: str):
 
 def full_profile_problem(rel: str, fetch: Callable[[str], object] = _get_json):
     """None when the running API says it is the full profile, else the problem."""
+    # HTTPException too: an answer the API cuts off raises IncompleteRead or
+    # BadStatusLine, which are not OSErrors.  Uncaught, it escapes run() as a
+    # traceback: the page's teardown still runs, but the shard's later pages
+    # do not, and its report leaves the page out rather than naming why.
     try:
         answer = fetch(MODULES_URL)
-    except (OSError, ValueError) as error:
+    except (OSError, ValueError, http.client.HTTPException) as error:
         return (
             f"{rel}: the full profile did not load: GET {MODULES_URL} failed ({error})"
         )
@@ -2508,6 +2522,9 @@ def run_document(
                     return problems, reached
         problems, reached = execute_counted(blocks, rel, env, deadline)
     finally:
+        # Printed, never asserted: the measurement TEARDOWN_RESERVE_SECONDS is
+        # taken from, kept in every shard's log.
+        torn = time.monotonic()
         try:
             _docker(
                 "compose",
@@ -2519,6 +2536,7 @@ def run_document(
             )
         except subprocess.TimeoutExpired:
             problems.append(f"{rel}: teardown (docker compose down -v) timed out")
+        print(f"{rel}: teardown took {time.monotonic() - torn:.1f}s", file=out)
         left = project_resources(project)
         if left:
             problems.append(
