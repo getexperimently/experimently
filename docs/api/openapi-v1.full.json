@@ -27921,7 +27921,7 @@
     "/api/v1/openfeature/flags": {
       "get": {
         "deprecated": true,
-        "description": "**Deprecated.** Neither OpenFeature provider calls this route: both evaluate through `GET /api/v1/feature-flags/evaluate/{flag_key}`. For server-side local evaluation use `GET /api/v1/sdk/ruleset`, with an API key that carries the `sdk:ruleset` scope. This route still answers as before and may be removed in a later release.\n\nReturns the feature flags owned by the user who created the API key; a key created by a superuser gets every flag. A flag's `rules` carry only rules stored in the legacy list shape; rules written in the dashboard's shape are left out, so a flag that has them is returned with `rules: []`. A flag's `enabled` is true when its status is active.",
+        "description": "**Deprecated.** Neither OpenFeature provider calls this route: both evaluate through `GET /api/v1/feature-flags/evaluate/{flag_key}`. For server-side local evaluation use `GET /api/v1/sdk/ruleset`, with an API key that carries the `sdk:ruleset` scope. This route still answers as before and may be removed in a later release.\n\nReturns the feature flags visible to the user who created the API key. A flag's `rules` carry only rules stored in the legacy list shape; rules written in the dashboard's shape are left out, so a flag that has them is returned with `rules: []`. A flag's `enabled` is true when its status is active.",
         "operationId": "get_openfeature_flags_api_v1_openfeature_flags_get",
         "responses": {
           "200": {

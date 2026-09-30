@@ -319,7 +319,7 @@ be removed in a later release (see [API stability](../api/stability.md#deprecate
 - `GET /api/v1/edge/bootstrap` returns only the flags and experiments owned by the user who
   created the key, and only rules stored in the legacy list shape: a flag with rules written in
   the dashboard's shape comes back with `rules: []`. No Experimently SDK calls it.
-- `GET /api/v1/openfeature/flags` returns the key owner's flags (every flag for a key created by
-  a superuser), with the same limit on rules. Neither OpenFeature provider calls it.
+- `GET /api/v1/openfeature/flags` returns the flags visible to the user who created the key, with
+  the same limit on rules. Neither OpenFeature provider calls it.
 
 Do not build local evaluation on either of them; use the ruleset.

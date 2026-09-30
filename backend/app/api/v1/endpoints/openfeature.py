@@ -130,9 +130,9 @@ def _flag_to_definition(flag: FeatureFlag) -> FeatureFlagDefinition:
         "server-side local evaluation use `GET /api/v1/sdk/ruleset`, with an "
         "API key that carries the `sdk:ruleset` scope. This route still answers "
         "as before and may be removed in a later release.\n\n"
-        "Returns the feature flags owned by the user who created the API key; "
-        "a key created by a superuser gets every flag. A flag's `rules` carry "
-        "only rules stored in the legacy list shape; rules written in the "
+        "Returns the feature flags visible to the user who created the API "
+        "key. A flag's `rules` carry only rules stored in the legacy list "
+        "shape; rules written in the "
         "dashboard's shape are left out, so a flag that has them is returned "
         "with `rules: []`. A flag's `enabled` is true when its status is active."
     ),
@@ -148,7 +148,7 @@ def get_openfeature_flags(
             detail="Valid API key required",
         )
 
-    # Superusers and admins can see all flags; regular users see only their own.
+    # Superusers can see all flags; every other user sees only their own.
     if api_key_user.is_superuser:
         flags = db.query(FeatureFlag).all()
     else:
