@@ -250,9 +250,11 @@ class AssignmentService:
 
         1. global holdout — an active ``GlobalHoldout`` that buckets the user
            (reason ``holdout``);
-        2. mutual exclusion — the experiment belongs to a group and the group's
-           consistent hashing selects a different experiment for the user
-           (reason ``mutual_exclusion``);
+        2. mutual exclusion — the experiment belongs to a group and either the
+           group's consistent hashing selects a different experiment for the
+           user, or the user already holds an assignment in another experiment
+           of the group that is not completed or archived (reason
+           ``mutual_exclusion``);
         3. targeting — the experiment has targeting rules and the user context
            does not match them (reason ``targeting``).
 
@@ -289,7 +291,8 @@ class AssignmentService:
                     "reason": REASON_MUTUAL_EXCLUSION,
                     "detail": (
                         f"Mutual exclusion group {group_id} selected another "
-                        f"experiment (or none) for this user"
+                        f"experiment (or none) for this user, or the user is "
+                        f"already enrolled in another experiment of the group"
                     ),
                 }
 

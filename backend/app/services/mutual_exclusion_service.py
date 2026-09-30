@@ -13,6 +13,7 @@ from uuid import UUID
 
 from sqlalchemy.orm import Session
 
+from backend.app.models.assignment import Assignment
 from backend.app.models.experiment import Experiment, ExperimentStatus
 from backend.app.models.mutual_exclusion_group import (
     MutualExclusionGroup,
@@ -258,7 +259,12 @@ class MutualExclusionService:
 
         Experiments without a group, or whose group has been archived, carry no
         constraint.  Otherwise the user is eligible only when the group's
-        consistent hashing selects this experiment for them.
+        consistent hashing selects this experiment for them AND they hold no
+        assignment in another experiment of the group that is still live
+        (see ``has_sibling_assignment``).  The second condition is what keeps
+        a user in one experiment when the group's active set changes: the hash
+        divides users among the ACTIVE experiments only, so activating,
+        pausing or resuming a sibling moves users between slots.
         """
         group = self.get_user_experiment_group(experiment_id)
         if not group:
@@ -267,4 +273,44 @@ class MutualExclusionService:
             return True  # Archived groups no longer constrain their experiments
 
         selected = self.select_experiment_for_user(user_id, group.id)
-        return selected == experiment_id
+        if selected != experiment_id:
+            return False
+
+        # Only reached once the hash has picked this experiment, so the extra
+        # query runs for users who would otherwise be enrolled.
+        if self.has_sibling_assignment(user_id, group.id, experiment_id):
+            logger.debug(
+                "Mutual exclusion group %s: user already enrolled in another "
+                "experiment of the group; not enrolling in %s",
+                group.id,
+                experiment_id,
+            )
+            return False
+        return True
+
+    def has_sibling_assignment(
+        self, user_id: str, group_id: UUID, experiment_id: UUID
+    ) -> bool:
+        """Whether the user holds an assignment in another live experiment of the group.
+
+        A sibling is any experiment other than ``experiment_id`` whose CURRENT
+        ``mutual_exclusion_group_id`` is ``group_id`` and whose status is not
+        COMPLETED or ARCHIVED -- so ACTIVE, PAUSED and DRAFT siblings all hold
+        their users.  Completing a sibling, or removing it from the group,
+        releases them.
+        """
+        row = (
+            self.db.query(Assignment.id)
+            .join(Experiment, Experiment.id == Assignment.experiment_id)
+            .filter(
+                Assignment.user_id == user_id,
+                Experiment.mutual_exclusion_group_id == group_id,
+                Experiment.id != experiment_id,
+                Experiment.status.notin_(
+                    [ExperimentStatus.COMPLETED, ExperimentStatus.ARCHIVED]
+                ),
+            )
+            .limit(1)
+            .first()
+        )
+        return row is not None
