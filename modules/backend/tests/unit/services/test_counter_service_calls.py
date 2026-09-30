@@ -8,14 +8,19 @@ resource, a call through ``.meta.client`` or a fresh ``boto3.client`` -- would
 pass every moto test and be refused in a deployment. So every public method is
 driven here against a fake that records every attribute reached on the
 resource, the table and any client, and anything but ``query`` and
-``update_item`` on the counters table fails.
+``update_item`` on the counters table fails. Every method that handles an
+error is driven again with ``update_item`` failing, so its ``except`` branch
+runs under the recorder as well.
 """
 
 from __future__ import annotations
 
+import ast
 import inspect
+import textwrap
 
 import pytest
+from botocore.exceptions import ClientError
 
 from modules.backend.app.schemas.realtime_counters import CounterType, IncrementRequest
 from modules.backend.app.services import dynamodb_counter_service
@@ -51,7 +56,26 @@ class _Recorder:
 
 
 class _Table(_Recorder):
-    """A table whose query returns one variant row, so every branch runs."""
+    """A table whose query returns one variant row, so every branch runs.
+
+    ``failures`` is how many of the next ``update_item`` calls raise a
+    ``ClientError`` instead of succeeding, so the callers' error branches run
+    under the recorder too. A failed call is still recorded: it is a call the
+    task role has to allow.
+    """
+
+    def __init__(self, calls: list, kind: str, name: str = ""):
+        super().__init__(calls, kind, name)
+        self.failures = 0
+
+    def _update_item(self, **kwargs):
+        if self.failures:
+            self.failures -= 1
+            raise ClientError(
+                {"Error": {"Code": "ProvisionedThroughputExceededException"}},
+                "UpdateItem",
+            )
+        return {"Attributes": {"assignments": 1}}
 
     def __getattr__(self, attribute: str):
         if attribute == "query":
@@ -70,7 +94,7 @@ class _Table(_Recorder):
             }
         if attribute == "update_item":
             self._calls.append(("table", self._name, "update_item"))
-            return lambda **kwargs: {"Attributes": {"assignments": 1}}
+            return self._update_item
         return super().__getattr__(attribute)
 
 
@@ -117,6 +141,71 @@ def _drive(service: DynamoDBCounterService) -> dict:
     }
 
 
+def _drive_failures(service: DynamoDBCounterService) -> dict:
+    """Call every public method that handles an error, with ``update_item`` failing.
+
+    Each driver makes the first ``update_item`` raise, runs the method, and
+    checks the error branch really ran -- so a call planted in an ``except``
+    block is reached and recorded, not skipped.
+    """
+    request = IncrementRequest(
+        experiment_id="exp-1", variant_id="v1", counter_type=CounterType.EVENT
+    )
+
+    def bulk_increment():
+        service._table.failures = 1
+        result = service.bulk_increment([request, request])
+        assert (result.processed, result.failed) == (1, 1), result
+
+    def reset_counters():
+        for kwargs in ({}, {"variant_id": "v1"}):
+            service._table.failures = 1
+            with pytest.raises(ClientError):
+                service.reset_counters("exp-1", **kwargs)
+
+    return {"bulk_increment": bulk_increment, "reset_counters": reset_counters}
+
+
+def _methods_with_error_handling() -> set[str]:
+    """The public methods whose source has a ``try`` statement."""
+    found = set()
+    for name, member in inspect.getmembers(DynamoDBCounterService, inspect.isfunction):
+        if name.startswith("_"):
+            continue
+        tree = ast.parse(textwrap.dedent(inspect.getsource(member)))
+        if any(isinstance(node, ast.Try) for node in ast.walk(tree)):
+            found.add(name)
+    return found
+
+
+def _assert_allowed(calls: list, name: str, drive) -> set:
+    before = len(calls)
+    drive()
+    made = set(calls[before:])
+    assert made, f"{name} reached DynamoDB not at all"
+    assert made <= ALLOWED, (
+        f"{name} made {sorted(made - ALLOWED)}; the API task role allows "
+        "only dynamodb:Query and dynamodb:UpdateItem on the counters table "
+        "(infrastructure/cdk/stacks/fargate_service_stack.py)"
+    )
+    return made
+
+
+@pytest.mark.regression
+def test_every_error_branch_calls_only_query_and_update_item(calls):
+    """The except branches too: a happy-path drive never reaches them."""
+    service = DynamoDBCounterService(table_name=TABLE)
+    drivers = _drive_failures(service)
+    handling = _methods_with_error_handling()
+    assert handling == set(drivers), (
+        f"methods with error handling {sorted(handling - set(drivers))} are "
+        "not driven down their error branch here"
+    )
+    for name, drive in drivers.items():
+        _assert_allowed(calls, name, drive)
+        assert service._table.failures == 0, f"{name} never reached update_item"
+
+
 @pytest.mark.regression
 def test_every_public_method_calls_only_query_and_update_item(calls):
     service = DynamoDBCounterService(table_name=TABLE)
@@ -137,15 +226,7 @@ def test_every_public_method_calls_only_query_and_update_item(calls):
         "add them, and make sure the task role grants what they call"
     )
     for name, drive in drivers.items():
-        before = len(calls)
-        drive()
-        made = set(calls[before:])
-        assert made, f"{name} reached DynamoDB not at all"
-        assert made <= ALLOWED, (
-            f"{name} made {sorted(made - ALLOWED)}; the API task role allows "
-            "only dynamodb:Query and dynamodb:UpdateItem on the counters table "
-            "(infrastructure/cdk/stacks/fargate_service_stack.py)"
-        )
+        _assert_allowed(calls, name, drive)
     assert {operation for _, _, operation in calls[len(construction) :]} == {
         "query",
         "update_item",
