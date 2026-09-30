@@ -896,6 +896,22 @@ operator with more than 1,000 values. The message names the place, for example
 `groups[0].conditions[1].operator: unknown operator`, and never repeats the
 submitted value.
 
+An experiment's targeting can be changed only while it is `draft` or `paused`,
+whatever the caller's role, superusers included:
+
+- `draft`: `targeting_rules` may be sent with any other field.
+- `paused`: `targeting_rules` must be the only field in the request; together
+  with anything else the request is refused with 403.
+- `active`, `completed`, `archived`: any request that includes
+  `targeting_rules` is refused with 403, even when the value equals the stored
+  one. The detail names the state, for example `Targeting can be changed only
+  while the experiment is draft or paused; it is active.` Pause the experiment,
+  change the targeting, then start it again.
+
+People already assigned keep their variant. The new rules decide for everyone
+not yet in the experiment, including people turned away before the change,
+once the experiment is started again.
+
 ### Experiment Types
 
 #### 1. A/B Testing
