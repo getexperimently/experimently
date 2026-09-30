@@ -13,7 +13,7 @@ at each step, and cross-check that the frontend accurately reflects backend stat
 
 - Frontend: http://localhost:3100
 - Backend API: http://localhost:8000
-- API Docs: http://localhost:8000/docs
+- API Docs: http://localhost:8000/api/v1/docs
 
 ## Core Scenarios to Run
 

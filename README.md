@@ -134,7 +134,7 @@ curl -s localhost:8000/api/v1/auth/me -H "Authorization: Bearer $TOKEN" | jq .ro
 It prints `"ADMIN"`.
 
 Open **http://localhost:3000** and sign in with **admin@demo.com / Demo1234!**.
-The API is on http://localhost:8000, its docs at http://localhost:8000/docs.
+The API is on http://localhost:8000, its docs at http://localhost:8000/api/v1/docs.
 Four containers come up — Postgres, Redis, the API and the dashboard — and the
 database is created and seeded on the way.
 
