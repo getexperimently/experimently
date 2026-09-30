@@ -1,7 +1,10 @@
 /**
  * The results of one succeeded warehouse analysis: where they came from, the
- * sample-ratio check, and one table per metric. A metric the run could not
- * compute says "Not computed" and why; it never shows 0.
+ * sample-ratio check, and one table per metric: conversion for a proportion
+ * metric, the mean and its interval for a mean metric. A metric the run could
+ * not compute says "Not computed" and why; it never shows 0. A treatment whose
+ * comparison was not computed (no variation in either variant) says so in its
+ * Result cell.
  *
  * Nothing here is signalled by colour alone: significance, the SRM warning
  * and "Not computed" are all words.
@@ -11,11 +14,13 @@ import {
   RESULTS_DIFFERENCE,
   RunMetric,
   RunResults as Results,
+  VariantResult,
   WarehouseRun,
   costText,
   durationText,
   failureCopy,
   isKnownFailure,
+  meanText,
   percent,
   pValueText,
   utcText,
@@ -194,6 +199,12 @@ function Diagnostics({ results }: { results: Results }) {
   );
 }
 
+function intervalText(v: VariantResult): string {
+  const ci = v.confidence_interval;
+  if (!ci || ci.length !== 2) return '—';
+  return `${meanText(ci[0])} to ${meanText(ci[1])}`;
+}
+
 function MetricTable({ metric, experimentKey, run }: { metric: RunMetric; experimentKey: string; run: WarehouseRun }) {
   const heading = (
     <h4 className="text-sm font-semibold text-slate-800">
@@ -224,17 +235,29 @@ function MetricTable({ metric, experimentKey, run }: { metric: RunMetric; experi
     );
   }
   const result = metric.result;
+  const isMean = metric.metric_type === 'mean';
   return (
     <div className="overflow-x-auto" data-testid="warehouse-metric">
       {heading}
       <table className="mt-2 w-full text-sm">
-        <caption className="sr-only">{`${metric.name}: conversion by variant`}</caption>
+        <caption className="sr-only">
+          {isMean ? `${metric.name}: mean by variant` : `${metric.name}: conversion by variant`}
+        </caption>
         <thead className="border-b border-slate-200 bg-slate-50">
           <tr>
             <th scope="col" className="px-3 py-2 text-left font-medium text-slate-700">Variant</th>
             <th scope="col" className="px-3 py-2 text-right font-medium text-slate-700">Units</th>
-            <th scope="col" className="px-3 py-2 text-right font-medium text-slate-700">Converted</th>
-            <th scope="col" className="px-3 py-2 text-right font-medium text-slate-700">Rate</th>
+            {isMean ? (
+              <>
+                <th scope="col" className="px-3 py-2 text-right font-medium text-slate-700">Mean</th>
+                <th scope="col" className="px-3 py-2 text-right font-medium text-slate-700">95% interval</th>
+              </>
+            ) : (
+              <>
+                <th scope="col" className="px-3 py-2 text-right font-medium text-slate-700">Converted</th>
+                <th scope="col" className="px-3 py-2 text-right font-medium text-slate-700">Rate</th>
+              </>
+            )}
             <th scope="col" className="px-3 py-2 text-right font-medium text-slate-700">Change</th>
             <th scope="col" className="px-3 py-2 text-right font-medium text-slate-700">p-value</th>
             <th scope="col" className="px-3 py-2 text-left font-medium text-slate-700">Result</th>
@@ -248,8 +271,17 @@ function MetricTable({ metric, experimentKey, run }: { metric: RunMetric; experi
                 {v.is_control && <span className="text-xs text-slate-600"> (control)</span>}
               </th>
               <td className="px-3 py-2 text-right tabular-nums">{v.sample_size.toLocaleString()}</td>
-              <td className="px-3 py-2 text-right tabular-nums">{(v.conversions ?? 0).toLocaleString()}</td>
-              <td className="px-3 py-2 text-right tabular-nums">{percent(v.mean)}</td>
+              {isMean ? (
+                <>
+                  <td className="px-3 py-2 text-right tabular-nums">{meanText(v.mean)}</td>
+                  <td className="px-3 py-2 text-right tabular-nums">{intervalText(v)}</td>
+                </>
+              ) : (
+                <>
+                  <td className="px-3 py-2 text-right tabular-nums">{(v.conversions ?? 0).toLocaleString()}</td>
+                  <td className="px-3 py-2 text-right tabular-nums">{percent(v.mean)}</td>
+                </>
+              )}
               <td className="px-3 py-2 text-right tabular-nums">
                 {v.is_control || v.relative_improvement_pct === null
                   ? '—'
@@ -259,7 +291,13 @@ function MetricTable({ metric, experimentKey, run }: { metric: RunMetric; experi
                 {v.is_control ? '—' : pValueText(v.adjusted_p_value ?? v.p_value)}
               </td>
               <td className="px-3 py-2 text-slate-800">
-                {v.is_control ? 'Baseline' : v.is_significant ? 'Significant' : 'Not significant'}
+                {v.is_control
+                  ? 'Baseline'
+                  : v.note
+                    ? v.note
+                    : v.is_significant
+                      ? 'Significant'
+                      : 'Not significant'}
               </td>
             </tr>
           ))}

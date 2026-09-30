@@ -9,6 +9,7 @@ import {
   costText,
   effectiveRole,
   failureCopy,
+  meanText,
   startRefusal,
   untilText,
   utcText,
@@ -89,7 +90,7 @@ describe('startRefusal', () => {
         resets_at: '2026-09-30T00:00:00Z',
       },
     });
-    const r = startRefusal(err, [], now);
+    const r = startRefusal(err, now);
     expect(r.code).toBe('daily_run_limit_reached');
     expect(r.limit).toBe(20);
     expect(r.resetsAt).toBe('2026-09-30T00:00:00Z');
@@ -98,14 +99,6 @@ describe('startRefusal', () => {
         'included). The count resets at 2026-09-30 00:00 UTC, in 5 h 12 min. An admin can change ' +
         'the limit in Warehouse › Connections.',
     );
-  });
-
-  it('names the metric a 422 metric_type_unavailable points at', () => {
-    const err = new ApiError({
-      status: 422,
-      detail: { code: 'metric_type_unavailable', message: 'x', field: 'metric_source_ids[2]' },
-    });
-    expect(startRefusal(err, ['A', 'B', 'Revenue']).message).toMatch(/^Not started: Revenue is a mean metric\./);
   });
 
   it('keeps the API message for a code it has no words for', () => {
@@ -145,5 +138,19 @@ describe('times and costs', () => {
     ).toBe('Ran 48 s on ANALYTICS_XS');
     expect(costText({ warehouse_type: 'bigquery', job_metadata: [] })).toBeNull();
     expect(costText({ warehouse_type: 'bigquery', job_metadata: null })).toBeNull();
+  });
+});
+
+describe('meanText', () => {
+  it.each([
+    [12.3456, '12.35'],
+    [10000.5, '10,000.5'],
+    [-3.14159, '-3.14'],
+    [0.012345, '0.0123'],
+    [0, '0'],
+    [null, '—'],
+    [Number.NaN, '—'],
+  ])('%p is %p', (value, text) => {
+    expect(meanText(value as number | null)).toBe(text);
   });
 });

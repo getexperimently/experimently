@@ -46,6 +46,7 @@ class WarehouseErrorCode(str, enum.Enum):
     TOO_MANY_VARIANT_VALUES = "too_many_variant_values"
     JOIN_KEY_MISMATCH = "join_key_mismatch"
     NO_UNITS = "no_units"
+    FEWER_THAN_2_UNITS = "fewer_than_2_units"
     ABANDONED = "abandoned"
     WAREHOUSE_BUSY = "warehouse_busy"
     RUN_IN_PROGRESS = "run_in_progress"
@@ -76,6 +77,7 @@ MESSAGES: Mapping[WarehouseErrorCode, str] = {
     _C.TOO_MANY_VARIANT_VALUES: "The variant column has more distinct values than allowed.",
     _C.JOIN_KEY_MISMATCH: "No metric rows matched an exposed unit.",
     _C.NO_UNITS: "No exposed units were found in the window.",
+    _C.FEWER_THAN_2_UNITS: "A variant has fewer than 2 units, so its mean can't be compared.",
     _C.ABANDONED: "The run stopped reporting progress and was marked as failed.",
     _C.WAREHOUSE_BUSY: (
         "Another warehouse analysis is using this deployment's capacity. Try again shortly."

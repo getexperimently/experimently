@@ -56,11 +56,14 @@ export interface VariantResult {
   relative_improvement_pct: number | null;
   power?: number | null;
   statistical_test_used?: string | null;
+  /** Why this variant's comparison was not computed, e.g. "Not computed: no variation". */
+  note?: string | null;
 }
 
 export interface MetricResult {
   metric_id: string;
   metric_name: string;
+  /** `conversion` for a proportion metric, `mean` for a mean metric. */
   metric_type: string;
   is_primary: boolean;
   variants: VariantResult[];
@@ -71,6 +74,7 @@ export interface MetricResult {
 export interface RunMetric {
   metric_source_id: string;
   name: string;
+  /** The metric source's type: `proportion` or `mean`. */
   metric_type: string;
   is_primary: boolean;
   computed: boolean;
@@ -222,9 +226,6 @@ export const RESULTS_DIFFERENCE =
   'exposure and inside the conversion window, and leave out units seen in more than one ' +
   'variant. The Results page counts every distinct converter, so the two can differ.';
 
-export const MEAN_UNAVAILABLE =
-  'Mean metrics can’t be analysed in the warehouse yet. Only proportion metrics can.';
-
 export interface FailureCopy {
   title: string;
   fix?: string;
@@ -308,6 +309,10 @@ const FAILURE_COPY: Record<string, (c: CopyContext) => FailureCopy> = {
   no_units: (c) => ({
     title: `No exposures for ${c.experimentKey} were found in the window.`,
     fix: `Is the experiment key in your table exactly ${c.experimentKey}?`,
+  }),
+  fewer_than_2_units: () => ({
+    title: 'Fewer than 2 units in a variant, so its mean can’t be compared.',
+    fix: 'Analyse a longer window, or check that each variant’s label is mapped to it.',
   }),
   abandoned: () => ({
     title: 'The run stopped reporting progress and was marked as failed.',
@@ -405,16 +410,8 @@ export function utcText(iso: string | null | undefined): string {
   );
 }
 
-/**
- * The words for a refused `POST …/runs`. `metricNames` are the metric
- * sources in the order they were sent, so a refusal naming
- * `metric_source_ids[i]` can name the metric.
- */
-export function startRefusal(
-  err: unknown,
-  metricNames: string[] = [],
-  now: Date = new Date(),
-): StartRefusal {
+/** The words for a refused `POST …/runs`. */
+export function startRefusal(err: unknown, now: Date = new Date()): StartRefusal {
   if (!isApiError(err)) {
     return {
       code: 'unknown',
@@ -424,9 +421,6 @@ export function startRefusal(
   const detail = detailRecord(err);
   const code = err.code ?? (err.isNetworkError ? 'unreachable' : `http_${err.status}`);
   const apiMessage = typeof detail.message === 'string' ? detail.message : err.message;
-  const field = typeof detail.field === 'string' ? detail.field : '';
-  const index = /\[(\d+)\]/.exec(field);
-  const metric = index ? metricNames[Number(index[1])] : undefined;
 
   switch (code) {
     case 'daily_run_limit_reached': {
@@ -453,13 +447,6 @@ export function startRefusal(
           'Not started: an analysis or preview on this connection is already queued or running. ' +
           'Wait for it to finish, then start again.',
       };
-    case 'metric_type_unavailable':
-      return {
-        code,
-        message: metric
-          ? `Not started: ${metric} is a mean metric. ${MEAN_UNAVAILABLE} Remove it and start again.`
-          : `Not started: ${MEAN_UNAVAILABLE}`,
-      };
     case 'source_not_validated':
       return {
         code,
@@ -482,6 +469,14 @@ export function startRefusal(
 // ---------------------------------------------------------------------------
 // Numbers
 // ---------------------------------------------------------------------------
+
+/** A mean as text: 2 decimals from 1 up, 3 significant digits below 1. */
+export function meanText(value: number | null | undefined): string {
+  if (value === null || value === undefined || !Number.isFinite(value)) return '—';
+  return Math.abs(value) >= 1
+    ? value.toLocaleString('en-US', { maximumFractionDigits: 2 })
+    : value.toLocaleString('en-US', { maximumSignificantDigits: 3 });
+}
 
 /** `12.34%` from a 0..1 rate. */
 export function percent(value: number | null | undefined, digits = 2): string {

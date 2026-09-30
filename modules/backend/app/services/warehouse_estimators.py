@@ -1,11 +1,17 @@
-"""The estimator a warehouse run computes proportion results with.
+"""The estimators a warehouse run computes its results with.
 
 Warehouse analysis does not have a statistics engine of its own.  A
 proportion metric's result comes from the function ``/results`` uses,
 :func:`backend.app.services.sufficient_stats_analysis.binomial_metric_result`,
 called with the counts the warehouse returned: units and converting units per
-variant.  On identical counts the two paths give identical numbers.  Nothing
-here computes a p-value, an interval or an effect size.
+variant.  On identical counts the two paths give identical numbers.
+
+A mean metric's result comes from
+:func:`backend.app.services.sufficient_stats_analysis.mean_metric_result`,
+called with the grand mean ``k`` and each variant's unit count and sums of
+``y - k`` and ``(y - k) ** 2``, exactly as the warehouse returned them.
+
+Nothing here computes a p-value, an interval or an effect size.
 """
 
 from __future__ import annotations
@@ -15,10 +21,15 @@ from dataclasses import dataclass
 from typing import Any, Callable, Dict, Sequence
 from uuid import UUID
 
-from backend.app.services.sufficient_stats_analysis import binomial_metric_result
+from backend.app.services.sufficient_stats_analysis import (
+    binomial_metric_result,
+    mean_metric_result,
+)
 
 #: ``binomial_metric_result(variants, alpha, correction_method, *, metric)``.
 BinomialEstimator = Callable[..., Dict[str, Any]]
+#: ``mean_metric_result(k, variants, alpha, correction_method, *, metric)``.
+MeanEstimator = Callable[..., Dict[str, Any]]
 
 
 @dataclass(frozen=True)
@@ -34,9 +45,9 @@ class VariantRef:
 class MetricRef:
     """The metric's identity, which the result carries.
 
-    ``metric_type`` is ``conversion``: a warehouse proportion metric is the
-    share of units with at least one event, what ``/results`` calls a
-    conversion metric.
+    ``metric_type`` is ``conversion`` for a proportion metric: the share of
+    units with at least one event, what ``/results`` calls a conversion
+    metric.  A mean metric carries ``mean``.
     """
 
     id: UUID
@@ -50,6 +61,16 @@ class VariantCounts:
     variant: VariantRef
     n: int
     n_converted: int
+
+
+@dataclass(frozen=True)
+class VariantMeanSums:
+    """One variant's unit count and its sums centred on the grand mean."""
+
+    variant: VariantRef
+    n: int
+    sum_d: float
+    sum_d2: float
 
 
 def _json_safe(value: Any) -> Any:
@@ -82,11 +103,36 @@ def proportion_result(
     return _json_safe(estimator(variants, alpha, correction_method, metric=metric))
 
 
+def mean_result(
+    k: float,
+    sums: Sequence[VariantMeanSums],
+    *,
+    alpha: float,
+    correction_method: str,
+    metric: MetricRef,
+    estimator: MeanEstimator = mean_metric_result,
+) -> Dict[str, Any]:
+    """The ``MetricResult``-shaped result for the warehouse's centred sums, as
+    JSON.  Each variant carries ``note``: None, or why its comparison was not
+    computed.
+
+    ``sums`` holds every experiment variant, the control first.  The core
+    estimator's refusals (``SufficientStatsRefused``,
+    ``SufficientStatsNotComputed``) propagate to the caller.
+    """
+    variants = [(s.variant, s.n, s.sum_d, s.sum_d2) for s in sums]
+    return _json_safe(estimator(k, variants, alpha, correction_method, metric=metric))
+
+
 __all__ = [
     "BinomialEstimator",
+    "MeanEstimator",
     "MetricRef",
     "VariantCounts",
+    "VariantMeanSums",
     "VariantRef",
     "binomial_metric_result",
+    "mean_metric_result",
+    "mean_result",
     "proportion_result",
 ]
