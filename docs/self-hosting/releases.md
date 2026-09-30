@@ -4,7 +4,7 @@ Experimently releases are cut by CI from a tag. Nothing is built or published
 from a laptop, and the version a running deployment reports is the same string
 the tag, the wheel and the image label carry.
 
-## One version, five places
+## One version, seven places
 
 `VERSION` at the repository root is the source. Everything else derives from
 it:
@@ -15,9 +15,13 @@ it:
 | the Python distribution | `pyproject.toml`'s `dynamic = ["version"]` reads the file at build time |
 | `org.opencontainers.image.version` on both images | the release workflow passes `--build-arg VERSION` |
 | `.release-please-manifest.json` | release-please maintains it alongside `VERSION` |
+| `charts/experimently/Chart.yaml` `version` and `appVersion` | release-please rewrites both lines through their `# x-release-please-version` markers; `appVersion` is the chart's default image tag (`<profile>-<appVersion>`) |
+| the two image lines of `deploy/compose/compose.yml` | release-please rewrites them the same way |
 | the git tag | `vX.Y.Z`, written by release-please |
 
-`scripts/check_version_sources.py` fails when any of them disagree. It runs in
+`scripts/check_version_sources.py` fails when any of them disagree. The chart
+lines and the compose image lines must be spelled exactly as `VERSION`, since
+they become image tags and the chart's file name. It runs in
 the test suite on every pull request and again in the release workflow, with
 `--expect <tag>`, before anything is pushed. A drift is not cosmetic: a build
 that cannot read `VERSION` does not fail — setuptools warns and stamps
@@ -52,7 +56,15 @@ For version `X.Y.Z`, in the repository's GitHub Container Registry namespace:
 | `…/experimently-web:core-X.Y.Z` | `linux/amd64` |
 | `…/experimently-web:full-X.Y.Z` | `linux/amd64` |
 
-A final release also moves `:core` and `:full` to point at it.
+A final release also moves `:core` and `:full` to point at it, and only once
+everything else in the release, including the chart below, has succeeded.
+
+The GitHub release also carries the Helm chart as `experimently-X.Y.Z.tgz`,
+packaged from the tagged tree after `helm lint --strict`. Before it is
+attached, `scripts/check_chart_package.py` reads the `Chart.yaml` inside the
+archive and requires its `version` and `appVersion` to be exactly `X.Y.Z`, so
+the chart installs the images of the same release. The chart is a release
+asset only; it is not pushed to a chart registry.
 
 **Every image is `amd64` only, and an `arm64` host runs them under emulation.**
 
