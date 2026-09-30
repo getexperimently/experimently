@@ -55,6 +55,10 @@ status, owned by the caller, and discards the draft.
 The dashboard does not use it. Drafts are held in the API process's memory, so they
 do not survive a restart and are not shared between replicas.
 
+**The wizard endpoints are deprecated** and may be removed in a later release. Drafts are
+per user: a draft that belongs to another user is answered exactly as one that does not
+exist (`404`).
+
 ---
 
 ## Steps Overview
@@ -156,7 +160,10 @@ Valid data answers `{"is_valid":true,"errors":[]}`. The rules, by step:
 ### PUT /api/v1/wizard/drafts/{draft_id}/step
 
 Save one step's data in the draft, and move the draft to the next step. The body names the
-step and its data, as for validation. Fields the step doesn't send are kept.
+step and its data, as for validation. Fields the step doesn't send are kept. `data` may
+only contain step fields (`experiment_type`, `hypothesis`, `primary_metric_id`,
+`guardrail_metric_ids`, `targeting_rules`, `baseline_rate`, `mde`, `name`, `description`);
+any other key answers `422` and the draft is left unchanged.
 
 **Step 1: type.**
 
@@ -241,8 +248,8 @@ It prints `"total": 1`, and the draft's step, `"review"`.
 
 ### GET /api/v1/wizard/drafts/{draft_id}
 
-Retrieve one draft, with all the data its steps have saved. A draft that doesn't exist, or
-was submitted, answers `404`.
+Retrieve one of your drafts, with all the data its steps have saved. A draft that doesn't
+exist, was submitted, or belongs to another user answers `404`.
 
 ---
 
@@ -335,5 +342,8 @@ Where `p₁` = baseline rate, `p₂` = baseline rate × (1 + MDE), `z_α/2` = 1.
 
 ## Permissions
 
-- Any logged-in user can create and manage their own wizard drafts.
+- Any logged-in user can create, read and update their own wizard drafts, and only
+  their own: for every role, another user's draft is answered exactly as a draft that
+  does not exist.
+- Submitting needs permission to create experiments, as `POST /api/v1/experiments` does.
 - Submitted experiments follow the standard experiment RBAC rules.

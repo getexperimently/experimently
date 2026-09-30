@@ -59,6 +59,37 @@ class WizardDraft:
     description: Optional[str] = None
 
 
+# The draft fields a step may set. ``id``, ``user_id`` and ``current_step``
+# belong to the draft itself and are never taken from step data.
+STEP_FIELDS = frozenset(
+    {
+        "experiment_type",
+        "hypothesis",
+        "primary_metric_id",
+        "guardrail_metric_ids",
+        "targeting_rules",
+        "baseline_rate",
+        "mde",
+        "name",
+        "description",
+    }
+)
+
+STEP_DATA_ERROR = "Step data may only contain these fields: " + ", ".join(
+    sorted(STEP_FIELDS)
+)
+
+
+class WizardStepDataError(ValueError):
+    """Step data named a field that is not a step field.
+
+    The message is fixed and never repeats what was submitted.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(STEP_DATA_ERROR)
+
+
 # In-memory draft store (production would use Redis or DB).
 _drafts: Dict[str, WizardDraft] = {}
 
@@ -135,44 +166,61 @@ class ExperimentWizardService:
         return draft
 
     @staticmethod
-    def get_draft(draft_id: str) -> Optional[WizardDraft]:
-        """Retrieve a draft by its ID.
+    def get_draft(draft_id: str, user_id: Any) -> Optional[WizardDraft]:
+        """Retrieve a draft by its ID, if it belongs to *user_id*.
+
+        Drafts are per user: a draft owned by someone else is answered
+        exactly as a draft that does not exist.
 
         Args:
             draft_id: The UUID string of the draft.
+            user_id: The caller; only their own drafts are returned.
 
         Returns:
-            The WizardDraft if found, otherwise None.
+            The WizardDraft if found and owned by *user_id*, otherwise None.
         """
-        return _drafts.get(draft_id)
+        draft = _drafts.get(draft_id)
+        if draft is None or draft.user_id != str(user_id):
+            return None
+        return draft
 
-    @staticmethod
-    def delete_draft(draft_id: str) -> bool:
-        """Drop a draft. Returns True when one was removed."""
+    @classmethod
+    def delete_draft(cls, draft_id: str, user_id: Any) -> bool:
+        """Drop one of *user_id*'s drafts. Returns True when one was removed."""
+        if cls.get_draft(draft_id, user_id) is None:
+            return False
         return _drafts.pop(draft_id, None) is not None
 
-    @staticmethod
+    @classmethod
     def update_draft(
-        draft_id: str, step: str, data: Dict[str, Any]
+        cls, draft_id: str, user_id: Any, step: str, data: Dict[str, Any]
     ) -> Optional[WizardDraft]:
         """Update a draft with data from the given step and advance to the next step.
 
         Args:
             draft_id: The ID of the draft to update.
+            user_id: The caller; only their own drafts can be updated.
             step: The wizard step being completed.
-            data: The data payload for the step.
+            data: The data payload for the step. Only keys in
+                :data:`STEP_FIELDS` are accepted.
 
         Returns:
-            The updated WizardDraft or None if the draft was not found.
+            The updated WizardDraft or None if the draft was not found (or
+            belongs to someone else).
+
+        Raises:
+            WizardStepDataError: *data* names a key outside
+                :data:`STEP_FIELDS`. The draft is left unchanged.
         """
-        draft = _drafts.get(draft_id)
-        if not draft:
+        draft = cls.get_draft(draft_id, user_id)
+        if draft is None:
             return None
 
-        # Apply all matching attributes from the step data.
-        for key, value in data.items():
-            if hasattr(draft, key):
-                setattr(draft, key, value)
+        if not set(data) <= STEP_FIELDS:
+            raise WizardStepDataError()
+
+        for key in STEP_FIELDS & set(data):
+            setattr(draft, key, data[key])
 
         # Advance to the next wizard step.
         if step in WIZARD_STEPS:
@@ -316,27 +364,28 @@ class ExperimentWizardService:
 
     @classmethod
     def validate_and_submit(
-        cls, draft_id: str, db: Any = None, user_id: Any = None
+        cls, draft_id: str, *, user_id: Any, db: Any = None
     ) -> Dict[str, Any]:
         """Validate a completed draft and create the experiment it describes.
 
-        With *db* and *user_id* the draft is turned into a real DRAFT
-        experiment through :class:`ExperimentService`, exactly as
+        With *db* the draft is turned into a real DRAFT experiment owned by
+        *user_id* through :class:`ExperimentService`, exactly as
         ``POST /api/v1/experiments/`` would; the draft is then dropped.
-        Without them (unit tests, dry runs) only the payload is built and
+        Without it (unit tests, dry runs) only the payload is built and
         validated and no experiment is created — the caller can tell the
         cases apart by ``persisted``.
 
         Args:
             draft_id: The ID of the draft to submit.
+            user_id: The caller. Only their own draft can be submitted, and
+                they own the new experiment.
             db: SQLAlchemy session. Required to create the experiment.
-            user_id: Owner of the new experiment. Required with *db*.
 
         Returns:
             Dict with ``success``, ``persisted``, ``experiment_id`` on
             success, or ``errors`` on failure.
         """
-        draft = cls.get_draft(draft_id)
+        draft = cls.get_draft(draft_id, user_id)
         if not draft:
             return {"success": False, "persisted": False, "errors": ["Draft not found"]}
 
@@ -351,7 +400,7 @@ class ExperimentWizardService:
 
         payload = cls.build_experiment_payload(draft)
 
-        if db is None or user_id is None:
+        if db is None:
             # Dry run: validated, nothing written.
             return {
                 "success": True,
@@ -396,7 +445,7 @@ class ExperimentWizardService:
                 "payload": payload,
             }
 
-        cls.delete_draft(draft_id)
+        cls.delete_draft(draft_id, user_id)
         experiment_id = str(created["id"] if isinstance(created, dict) else created.id)
         return {
             "success": True,

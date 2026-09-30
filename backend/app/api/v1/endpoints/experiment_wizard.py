@@ -3,6 +3,10 @@ Experiment Wizard API endpoints.
 
 Provides a step-by-step guided interface for non-technical users to design
 and launch experiments without engineering involvement.
+
+Every operation here is deprecated: the dashboard does not use them. Drafts
+are per user -- a draft that belongs to someone else is answered with the
+same 404 as one that does not exist.
 """
 
 import logging
@@ -27,7 +31,11 @@ from backend.app.schemas.experiment_wizard import (
     WizardValidationRequest,
     WizardValidationResponse,
 )
-from backend.app.services.experiment_wizard_service import ExperimentWizardService
+from backend.app.services.experiment_wizard_service import (
+    ExperimentWizardService,
+    WizardDraft,
+    WizardStepDataError,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -40,8 +48,21 @@ router = APIRouter(
     },
 )
 
+DEPRECATION_NOTE = (
+    "**Deprecated.** The dashboard does not use the wizard API; it may be "
+    "removed in a later release. Drafts are per user and held in the API "
+    "process's memory.\n\n"
+)
 
-def _draft_to_response(draft) -> WizardDraftResponse:
+DRAFT_NOT_FOUND = "Draft not found."
+
+
+def _not_found() -> HTTPException:
+    """The one answer for a draft that is missing or belongs to someone else."""
+    return HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=DRAFT_NOT_FOUND)
+
+
+def _draft_to_response(draft: WizardDraft) -> WizardDraftResponse:
     """Convert a WizardDraft dataclass to a WizardDraftResponse schema."""
     return WizardDraftResponse(
         id=draft.id,
@@ -63,9 +84,10 @@ def _draft_to_response(draft) -> WizardDraftResponse:
     "/drafts",
     response_model=WizardDraftResponse,
     status_code=status.HTTP_201_CREATED,
-    summary="Create a new experiment wizard draft",
+    summary="Create a new experiment wizard draft (deprecated)",
+    deprecated=True,
     description=(
-        "Initialise a new wizard draft for the authenticated user. "
+        DEPRECATION_NOTE + "Initialise a new wizard draft for the authenticated user. "
         "The draft starts at the 'choose_type' step and accumulates data "
         "as the user progresses through the wizard."
     ),
@@ -90,8 +112,12 @@ def create_draft(
 @router.get(
     "/drafts",
     response_model=WizardDraftListResponse,
-    summary="List wizard drafts for the current user",
-    description="Returns all in-progress wizard drafts belonging to the authenticated user.",
+    summary="List wizard drafts for the current user (deprecated)",
+    deprecated=True,
+    description=(
+        DEPRECATION_NOTE
+        + "Returns all in-progress wizard drafts belonging to the authenticated user."
+    ),
 )
 def list_drafts(
     current_user: User = Depends(deps.get_current_active_user),
@@ -106,30 +132,40 @@ def list_drafts(
 @router.get(
     "/drafts/{draft_id}",
     response_model=WizardDraftResponse,
-    summary="Get a wizard draft by ID",
-    description="Retrieve a specific wizard draft including all accumulated step data.",
+    summary="Get a wizard draft by ID (deprecated)",
+    deprecated=True,
+    description=(
+        DEPRECATION_NOTE
+        + "Retrieve one of the caller's wizard drafts, including all accumulated "
+        "step data. A draft that does not exist or belongs to another user "
+        "answers 404."
+    ),
 )
 def get_draft(
     draft_id: str,
     current_user: User = Depends(deps.get_current_active_user),
 ) -> WizardDraftResponse:
-    """Get a specific wizard draft."""
-    draft = ExperimentWizardService.get_draft(draft_id)
-    if not draft:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Draft '{draft_id}' not found.",
-        )
+    """Get one of the caller's wizard drafts."""
+    draft = ExperimentWizardService.get_draft(draft_id, current_user.id)
+    if draft is None:
+        raise _not_found()
     return _draft_to_response(draft)
 
 
 @router.put(
     "/drafts/{draft_id}/step",
     response_model=WizardDraftResponse,
-    summary="Update a wizard draft with step data",
+    summary="Update a wizard draft with step data (deprecated)",
+    deprecated=True,
     description=(
-        "Submit data for the current wizard step and advance to the next step. "
-        "The draft accumulates data across all steps."
+        DEPRECATION_NOTE
+        + "Submit data for the current wizard step and advance to the next step. "
+        "The draft accumulates data across all steps. `data` may only contain "
+        "step fields (`experiment_type`, `hypothesis`, `primary_metric_id`, "
+        "`guardrail_metric_ids`, `targeting_rules`, `baseline_rate`, `mde`, "
+        "`name`, `description`); any other key answers 422 and the draft is "
+        "unchanged. A draft that does not exist or belongs to another user "
+        "answers 404."
     ),
 )
 def update_draft_step(
@@ -137,26 +173,32 @@ def update_draft_step(
     body: WizardStepUpdate,
     current_user: User = Depends(deps.get_current_active_user),
 ) -> WizardDraftResponse:
-    """Update a wizard draft step and advance to the next step."""
-    draft = ExperimentWizardService.update_draft(
-        draft_id=draft_id,
-        step=body.step,
-        data=body.data,
-    )
-    if draft is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Draft '{draft_id}' not found.",
+    """Update one of the caller's drafts and advance to the next step."""
+    try:
+        draft = ExperimentWizardService.update_draft(
+            draft_id=draft_id,
+            user_id=current_user.id,
+            step=body.step,
+            data=body.data,
         )
+    except WizardStepDataError as exc:
+        # A fixed message: it lists the accepted fields, never the submitted keys.
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
+        ) from None
+    if draft is None:
+        raise _not_found()
     return _draft_to_response(draft)
 
 
 @router.post(
     "/validate",
     response_model=WizardValidationResponse,
-    summary="Validate wizard step data",
+    summary="Validate wizard step data (deprecated)",
+    deprecated=True,
     description=(
-        "Validate data for a specific wizard step without modifying any draft. "
+        DEPRECATION_NOTE
+        + "Validate data for a specific wizard step without modifying any draft. "
         "Returns is_valid flag and list of validation errors."
     ),
 )
@@ -178,11 +220,15 @@ def validate_step(
 @router.post(
     "/drafts/{draft_id}/submit",
     response_model=WizardSubmitResponse,
-    summary="Submit a completed wizard draft to create an experiment",
+    summary="Submit a completed wizard draft to create an experiment (deprecated)",
+    deprecated=True,
     description=(
-        "Validate the completed draft and create the experiment it describes "
-        "(status DRAFT, owned by the caller), then discard the draft. Returns "
-        "the new experiment_id on success or validation errors on failure."
+        DEPRECATION_NOTE
+        + "Validate one of the caller's drafts and create the experiment it "
+        "describes (status DRAFT, owned by the caller), then discard the draft. "
+        "Returns the new experiment_id on success or validation errors on "
+        "failure. A draft that does not exist or belongs to another user "
+        "answers 404."
     ),
 )
 def submit_draft(
@@ -199,16 +245,12 @@ def submit_draft(
             detail=get_permission_error_message(ResourceType.EXPERIMENT, Action.CREATE),
         )
 
-    # Check draft exists before attempting submission
-    draft = ExperimentWizardService.get_draft(draft_id)
-    if not draft:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Draft '{draft_id}' not found.",
-        )
+    # Only the caller's own draft: someone else's is answered as missing.
+    if ExperimentWizardService.get_draft(draft_id, current_user.id) is None:
+        raise _not_found()
 
     result = ExperimentWizardService.validate_and_submit(
-        draft_id, db=db, user_id=current_user.id
+        draft_id, user_id=current_user.id, db=db
     )
 
     return WizardSubmitResponse(
