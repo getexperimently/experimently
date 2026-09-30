@@ -93,7 +93,18 @@ ENV PYTHONUNBUFFERED=1 \
 
 # libpq5: psycopg2 runtime; postgresql-client: pg_isready for the entrypoint;
 # curl: HEALTHCHECK.
-RUN apt-get update && apt-get install -y --no-install-recommends \
+#
+# `apt-get upgrade` first: the python:*-slim base is rebuilt on its own
+# schedule, and between a Debian security release and that rebuild the base
+# ships the old package. That happened with OpenSSL 3.5.7-1~deb13u2 (fixed in
+# deb13u3, CVE-2026-75804 and CVE-2026-84782): the security-scan job's Trivy
+# step fails on every fixable HIGH, so every pull request went red until the
+# runtime image took the update itself. Upgrading here takes whatever the
+# Debian archive has at build time rather than one named package, so the next
+# lag is covered too. Only this stage ships; `builder` and `modules-src` are
+# discarded.
+RUN apt-get update && apt-get upgrade -y --no-install-recommends \
+    && apt-get install -y --no-install-recommends \
         libpq5 \
         postgresql-client \
         curl \
