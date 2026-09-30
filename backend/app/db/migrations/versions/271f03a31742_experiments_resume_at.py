@@ -45,7 +45,7 @@ branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
 # The schema name comes from the deployment's own environment, never from a
-# request.  It is the only value interpolated into any statement below.
+# request.
 _SCHEMA = os.environ.get("POSTGRES_SCHEMA", "experimentation")
 
 _TABLE = "experiments"
@@ -72,9 +72,18 @@ def upgrade() -> None:
             schema=_SCHEMA,
         )
     if not _has_check():
+        # Built with SQLAlchemy Core rather than as SQL text: the table and
+        # the schema are identifiers, never string-formatted into a statement.
+        experiments = sa.table(
+            _TABLE, sa.column(_COLUMN), sa.column("status"), schema=_SCHEMA
+        )
         op.execute(
-            f'UPDATE "{_SCHEMA}".{_TABLE} SET {_COLUMN} = NULL '
-            f"WHERE {_COLUMN} IS NOT NULL AND status <> 'PAUSED'"
+            experiments.update()
+            .where(
+                experiments.c.resume_at.isnot(None),
+                experiments.c.status != "PAUSED",
+            )
+            .values(resume_at=None)
         )
         op.create_check_constraint(_CHECK, _TABLE, _CHECK_SQL, schema=_SCHEMA)
 
