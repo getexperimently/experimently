@@ -315,14 +315,18 @@ def main() -> int:
     # the tag and the image tag have to be spelled as.
     version = found["VERSION"]
 
-    # The compose lines are image tags, so they must be VERSION's own
-    # spelling, not merely an equal PEP 440 version: `core-0.1.0rc1` is not
-    # the tag the release pushed for 0.1.0-rc.1.
+    # The compose lines and Chart.yaml's appVersion are image tags, and the
+    # chart's version is the name of the packaged chart, so all four must be
+    # VERSION's own spelling, not merely an equal PEP 440 version:
+    # `core-0.1.0rc1` is not the tag the release pushed for 0.1.0-rc.1, and
+    # `appVersion: v0.1.0` or `0.1.0.0` both compare equal to 0.1.0 and name an
+    # image tag that does not exist.
     for name, value in found.items():
-        if name.startswith(PRODUCTION_COMPOSE) and value != version:
+        exact = name.startswith((PRODUCTION_COMPOSE, "Chart.yaml"))
+        if exact and value != version:
             print(
-                f"error: {name} is {value!r}; the image tag must be spelled "
-                f"exactly as VERSION ({version!r}).",
+                f"error: {name} is {value!r}; it must be spelled exactly as "
+                f"VERSION ({version!r}).",
                 file=sys.stderr,
             )
             return 1

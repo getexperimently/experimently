@@ -199,6 +199,33 @@ def test_checker_refuses_a_missing_chart(tmp_path: Path) -> None:
     assert "Chart.yaml version: could not be read" in result.stderr
 
 
+@pytest.mark.parametrize("field", ["version", "appVersion"])
+@pytest.mark.parametrize("spelling", ["v{v}", "{v}.0"])
+def test_checker_rejects_a_chart_line_spelled_differently(
+    tmp_path: Path, field: str, spelling: str
+) -> None:
+    """`v0.14.0` and `0.14.0.0` equal 0.14.0 as PEP 440 versions, and are wrong.
+
+    appVersion is the chart's default image tag (`core-v0.14.0` does not
+    exist), and version names the packaged chart the release attaches.
+    """
+    copy = _checker_tree(tmp_path)
+    version = (ROOT / "VERSION").read_text(encoding="utf-8").strip()
+    chart = copy / "charts" / "experimently" / "Chart.yaml"
+    text = chart.read_text(encoding="utf-8")
+    line = re.compile(rf'^({field}:\s*"?){re.escape(version)}', re.M)
+    assert line.search(text), f"Chart.yaml has no {field}: {version} line"
+    wrong = spelling.format(v=version)
+    chart.write_text(line.sub(rf"\g<1>{wrong}", text, count=1), encoding="utf-8")
+
+    tampered = run_checker(tree=copy)
+    assert tampered.returncode != 0, (
+        f"the gate passed with Chart.yaml {field} spelled {wrong!r}:\n"
+        + tampered.stdout
+    )
+    assert f"Chart.yaml {field} is {wrong!r}" in tampered.stderr
+
+
 def test_release_please_rewrites_the_chart_through_its_markers() -> None:
     """Chart.yaml is a `generic` extra-file, and both lines carry the marker.
 
