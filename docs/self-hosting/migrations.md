@@ -484,10 +484,9 @@ What this means for you:
   is not -- a dropped or renamed table or column the older release reads --
   restore the snapshot the Deploy took before migrating
   ([rollback runbook](../deployment/rollback-runbook.md#database-rollback-procedure)).
-  `modules_0002_warehouse_analysis`, which shipped in 0.11.0, is one: it drops
-  the earlier `warehouse_connections` table and its rows, so a full deployment
-  on 0.11.0 or later rolls back to an earlier release only by restoring the
-  snapshot.
+  Some data cannot come back any other way: `modules_0002_warehouse_analysis`,
+  which shipped in 0.11.0, drops the earlier `warehouse_connections` table with
+  its rows, and neither a rollback nor a downgrade restores them.
 - **Docker Compose and the Helm chart are deliberately unchanged.** Compose runs
   one API container, which is the only writer and keeps `RUN_MIGRATIONS=true`.
   The chart already keeps the bootstrap out of the serving container: it runs
