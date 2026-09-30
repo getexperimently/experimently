@@ -104,6 +104,60 @@ export function computedMetric(over: Partial<RunMetric> = {}): RunMetric {
   };
 }
 
+/** A mean metric as the runner stores it (core `mean_metric_result`). */
+export function meanMetric(over: Partial<RunMetric> = {}): RunMetric {
+  return {
+    metric_source_id: 'src-m',
+    name: 'Revenue per user',
+    metric_type: 'mean',
+    is_primary: false,
+    computed: true,
+    not_computed_reason: null,
+    message: null,
+    result: {
+      metric_id: 'src-m',
+      metric_name: 'Revenue per user',
+      metric_type: 'mean',
+      is_primary: false,
+      has_significant_result: false,
+      winning_variant_id: null,
+      variants: [
+        {
+          variant_id: CONTROL_ID,
+          variant_name: 'control',
+          is_control: true,
+          sample_size: 10000,
+          conversions: null,
+          mean: 12.3456,
+          std_dev: 4.5,
+          confidence_interval: [12.2574, 12.4338],
+          p_value: null,
+          is_significant: false,
+          relative_improvement_pct: null,
+          note: null,
+        },
+        {
+          variant_id: TREATMENT_ID,
+          variant_name: 'blue',
+          is_control: false,
+          sample_size: 10050,
+          conversions: null,
+          mean: 12.5,
+          std_dev: 4.6,
+          confidence_interval: [12.41, 12.59],
+          p_value: 0.012,
+          adjusted_p_value: null,
+          is_significant: true,
+          relative_improvement_pct: 1.25,
+          statistical_test_used: 'welch_t_test',
+          note: null,
+        },
+      ],
+    },
+    ...over,
+  };
+}
+
 export function notComputedMetric(code: string, over: Partial<RunMetric> = {}): RunMetric {
   return {
     metric_source_id: 'src-s',

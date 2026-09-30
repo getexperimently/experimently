@@ -3,14 +3,12 @@
  * its metric sources, and start a warehouse analysis. ADMIN and DEVELOPER
  * only — the caller renders this only for them.
  *
- * Only proportion metrics can be analysed so far; a mean metric source is
- * listed, cannot be ticked, and says why. A refusal from the API (the daily
- * limit, another analysis in progress, a source that is not validated…) is
- * shown as an alert naming what to do.
+ * Proportion and mean metric sources can both be ticked; each says which it
+ * is. A refusal from the API (the daily limit, another analysis in progress,
+ * a source that is not validated…) is shown as an alert naming what to do.
  */
 import React, { useEffect, useMemo, useState } from 'react';
 import {
-  MEAN_UNAVAILABLE,
   StartRefusal,
   StartRunRequest,
   WarehouseConnectionSummary,
@@ -162,8 +160,7 @@ export default function StartRunForm({ experimentId, hasStartDate, onStarted }: 
       const accepted = await warehouseRunsService.startRun(experimentId, body);
       onStarted(accepted.run_id);
     } catch (err) {
-      const names = metricIds.map((id) => metrics.find((m) => m.id === id)?.name ?? id);
-      setRefusal(startRefusal(err, names));
+      setRefusal(startRefusal(err));
     } finally {
       setSubmitting(false);
     }
@@ -245,9 +242,8 @@ export default function StartRunForm({ experimentId, hasStartDate, onStarted }: 
                     <input
                       type="checkbox"
                       checked={position !== -1}
-                      disabled={isMean}
                       onChange={() => toggleMetric(m.id)}
-                      aria-describedby={isMean || unvalidated ? helpId : 'warehouse-metrics-help'}
+                      aria-describedby={unvalidated ? helpId : 'warehouse-metrics-help'}
                       className="mt-0.5"
                     />
                     <span>
@@ -258,9 +254,9 @@ export default function StartRunForm({ experimentId, hasStartDate, onStarted }: 
                       </span>
                     </span>
                   </label>
-                  {(isMean || unvalidated) && (
+                  {unvalidated && (
                     <p id={helpId} className="ml-6 text-sm text-slate-600">
-                      {isMean ? MEAN_UNAVAILABLE : 'Not validated yet: validate it in Warehouse › Sources before using it.'}
+                      Not validated yet: validate it in Warehouse › Sources before using it.
                     </p>
                   )}
                 </li>

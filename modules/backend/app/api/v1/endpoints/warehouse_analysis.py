@@ -187,6 +187,13 @@ def get_estimator() -> Callable[..., Dict[str, Any]]:
     return binomial_metric_result
 
 
+def get_mean_estimator() -> Callable[..., Dict[str, Any]]:
+    """The core mean estimator for centred sums (tests wrap it to record)."""
+    from backend.app.services.sufficient_stats_analysis import mean_metric_result
+
+    return mean_metric_result
+
+
 def _limits() -> Any:
     from modules.backend.app.settings import settings
 
@@ -1387,13 +1394,6 @@ def _run_sources(
                 "metric_source_ids must name metric sources on this connection.",
                 field=f"metric_source_ids[{index}]",
             )
-        if metric.metric_type != "proportion":
-            raise _error(
-                422,
-                "metric_type_unavailable",
-                "Only proportion metrics can be analysed in the warehouse so far.",
-                field=f"metric_source_ids[{index}]",
-            )
         _require_validated(metric)
         metrics.append(metric)
     return assignment, metrics
@@ -1417,6 +1417,7 @@ def start_run(
     session_factory: runner.SessionFactory = Depends(get_job_session_factory),
     clock: runner.Clock = Depends(get_clock),
     estimator: Callable[..., Dict[str, Any]] = Depends(get_estimator),
+    mean_estimator: Callable[..., Dict[str, Any]] = Depends(get_mean_estimator),
 ) -> Dict[str, Any]:
     """Answers 202 with the run id; the run continues on the warehouse
     executor.  Poll ``GET /runs/{run_id}``."""
@@ -1495,6 +1496,7 @@ def start_run(
         session_factory=session_factory,
         clock=clock,
         estimator=estimator,
+        mean_estimator=mean_estimator,
     )
     total = run_total(connection.query_timeout_seconds, len(metric_plans))
     new = runner.NewRun(

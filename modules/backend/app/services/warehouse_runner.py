@@ -43,10 +43,13 @@ fails the run with its code; a metric whose returned rows are refused is
 "not computed" with its reason, and the others still report.  A failed run
 never reports numbers.
 
-Proportion results come from the core estimator ``/results`` uses
-(:mod:`.warehouse_estimators`); SRM from
+Proportion results come from the core estimator ``/results`` uses, and mean
+results from the core estimator for centred sums (both through
+:mod:`.warehouse_estimators`); SRM from
 :func:`backend.app.services.srm_service.compute_srm`, skipped for adaptive
-allocation.
+allocation.  A mean metric the core estimator refuses (a negative variance) is
+"not computed" as ``result_invalid``; one with fewer than 2 units in a variant
+as ``fewer_than_2_units``.
 """
 
 from __future__ import annotations
@@ -64,6 +67,10 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from backend.app.services.srm_service import compute_srm
+from backend.app.services.sufficient_stats_analysis import (
+    SufficientStatsNotComputed,
+    SufficientStatsRefused,
+)
 from modules.backend.app.models.warehouse_analysis_run import (
     IN_FLIGHT_STATUSES,
     WarehouseAnalysisRun,
@@ -381,6 +388,9 @@ class RunPlan:
     estimator: warehouse_estimators.BinomialEstimator = (
         warehouse_estimators.binomial_metric_result
     )
+    mean_estimator: warehouse_estimators.MeanEstimator = (
+        warehouse_estimators.mean_metric_result
+    )
 
 
 def statements_json(queries: Sequence[BuiltQuery]) -> List[Dict[str, Any]]:
@@ -472,30 +482,52 @@ def run_message(code: Optional[str]) -> Optional[str]:
         return MESSAGES[WarehouseErrorCode.INTERNAL]
 
 
+@dataclass(frozen=True)
+class ArmStats:
+    """One experiment variant's statistics, summed over the labels mapped to it.
+
+    ``sum_d`` and ``sum_d2`` are centred on the metric statement's grand mean
+    ``k``, which every label shares, so they add across labels like counts.
+    """
+
+    n: int = 0
+    n_converted: int = 0
+    sum_d: float = 0.0
+    sum_d2: float = 0.0
+
+
 def _map_labels(
     stats: MetricSufficientStatistics,
     variants: Sequence[VariantInfo],
     variant_map: Mapping[str, UUID],
-) -> Tuple[Dict[UUID, Tuple[int, int]], Dict[UUID, List[str]], List[Dict[str, Any]]]:
-    """Counts per experiment variant, the labels behind each, and unmapped labels."""
+) -> Tuple[Dict[UUID, ArmStats], Dict[UUID, List[str]], List[Dict[str, Any]]]:
+    """Statistics per experiment variant, the labels behind each, and unmapped
+    labels."""
     by_name = {v.name[:LABEL_MAX_CHARS]: v.id for v in variants}
     by_id = {str(v.id): v.id for v in variants}
-    counts: Dict[UUID, Tuple[int, int]] = {v.id: (0, 0) for v in variants}
+    arms: Dict[UUID, ArmStats] = {v.id: ArmStats() for v in variants}
     labels: Dict[UUID, List[str]] = {v.id: [] for v in variants}
     unmapped: List[Dict[str, Any]] = []
     for row in stats.variants:
         label = row.variant[:LABEL_MAX_CHARS]
         target = variant_map.get(label) or by_name.get(label) or by_id.get(label)
-        if target is None or target not in counts:
+        if target is None or target not in arms:
             unmapped.append({"label": label, "units": row.n})
             continue
-        n, converted = counts[target]
-        counts[target] = (n + row.n, converted + row.n_converted)
+        arm = arms[target]
+        arms[target] = ArmStats(
+            arm.n + row.n,
+            arm.n_converted + row.n_converted,
+            arm.sum_d + row.sum_d,
+            arm.sum_d2 + row.sum_d2,
+        )
         labels[target].append(label)
-    return counts, labels, unmapped
+    return arms, labels, unmapped
 
 
-def _not_computed(plan: MetricPlan, code: str) -> Dict[str, Any]:
+def _not_computed(
+    plan: MetricPlan, code: str, message: Optional[str] = None
+) -> Dict[str, Any]:
     return {
         "metric_source_id": str(plan.source_id),
         "name": plan.name,
@@ -503,8 +535,71 @@ def _not_computed(plan: MetricPlan, code: str) -> Dict[str, Any]:
         "is_primary": plan.is_primary,
         "computed": False,
         "not_computed_reason": code,
-        "message": f"Not computed: {run_message(code) or code}",
+        "message": message or f"Not computed: {run_message(code) or code}",
         "result": None,
+    }
+
+
+def _metric_result(
+    plan: RunPlan,
+    metric: MetricPlan,
+    outcome: MetricSufficientStatistics,
+    variants: Sequence[VariantInfo],
+    arms: Mapping[UUID, ArmStats],
+) -> Dict[str, Any]:
+    """One metric's computed result, or its "not computed" entry.
+
+    ``variants`` is every experiment variant, the control first.
+    """
+    refs = [
+        warehouse_estimators.VariantRef(v.id, v.name, v.is_control) for v in variants
+    ]
+    if metric.metric_type == "mean":
+        try:
+            result = warehouse_estimators.mean_result(
+                outcome.k,
+                [
+                    warehouse_estimators.VariantMeanSums(
+                        ref, arms[ref.id].n, arms[ref.id].sum_d, arms[ref.id].sum_d2
+                    )
+                    for ref in refs
+                ],
+                alpha=plan.alpha,
+                correction_method=plan.correction_method,
+                metric=warehouse_estimators.MetricRef(
+                    metric.source_id, metric.name, metric.is_primary, "mean"
+                ),
+                estimator=plan.mean_estimator,
+            )
+        except SufficientStatsNotComputed as exc:
+            # The estimator's own words: "Not computed: fewer than 2 units".
+            return _not_computed(metric, exc.code, exc.message)
+        except SufficientStatsRefused as exc:
+            return _not_computed(metric, exc.code)
+    else:
+        result = warehouse_estimators.proportion_result(
+            [
+                warehouse_estimators.VariantCounts(
+                    ref, arms[ref.id].n, arms[ref.id].n_converted
+                )
+                for ref in refs
+            ],
+            alpha=plan.alpha,
+            correction_method=plan.correction_method,
+            metric=warehouse_estimators.MetricRef(
+                metric.source_id, metric.name, metric.is_primary
+            ),
+            estimator=plan.estimator,
+        )
+    return {
+        "metric_source_id": str(metric.source_id),
+        "name": metric.name,
+        "metric_type": metric.metric_type,
+        "is_primary": metric.is_primary,
+        "computed": True,
+        "not_computed_reason": None,
+        "message": None,
+        "result": result,
     }
 
 
@@ -564,16 +659,12 @@ def _execute(plan: RunPlan, deadline: Deadline, run_id: UUID) -> Dict[str, Any]:
             parsed.append((metric, refused))
 
     variants = sorted(plan.variants, key=lambda v: (not v.is_control, v.name))
-    refs = {
-        v.id: warehouse_estimators.VariantRef(v.id, v.name, v.is_control)
-        for v in variants
-    }
     metric_results: List[Dict[str, Any]] = []
     sufficient: Dict[str, Any] = {
         "diagnostics": dataclasses.asdict(diagnostics),
         "metrics": {},
     }
-    srm_counts: Optional[Dict[UUID, Tuple[int, int]]] = None
+    srm_counts: Optional[Dict[UUID, ArmStats]] = None
     variant_summary: Optional[List[Dict[str, Any]]] = None
     unmapped_labels: List[Dict[str, Any]] = []
 
@@ -582,9 +673,9 @@ def _execute(plan: RunPlan, deadline: Deadline, run_id: UUID) -> Dict[str, Any]:
             metric_results.append(_not_computed(metric, outcome.code))
             continue
         sufficient["metrics"][str(metric.source_id)] = outcome.to_json()
-        counts, labels, unmapped = _map_labels(outcome, variants, plan.variant_map)
+        arms, labels, unmapped = _map_labels(outcome, variants, plan.variant_map)
         if srm_counts is None:
-            srm_counts = counts
+            srm_counts = arms
             unmapped_labels = unmapped
             variant_summary = [
                 {
@@ -592,38 +683,15 @@ def _execute(plan: RunPlan, deadline: Deadline, run_id: UUID) -> Dict[str, Any]:
                     "variant_name": v.name,
                     "is_control": v.is_control,
                     "labels": labels[v.id],
-                    "units": counts[v.id][0],
+                    "units": arms[v.id].n,
                 }
                 for v in variants
             ]
         control = next((v for v in variants if v.is_control), None)
-        if control is None or counts[control.id][0] == 0:
+        if control is None or arms[control.id].n == 0:
             metric_results.append(_not_computed(metric, "no_units"))
             continue
-        result = warehouse_estimators.proportion_result(
-            [
-                warehouse_estimators.VariantCounts(refs[v.id], *counts[v.id])
-                for v in variants
-            ],
-            alpha=plan.alpha,
-            correction_method=plan.correction_method,
-            metric=warehouse_estimators.MetricRef(
-                metric.source_id, metric.name, metric.is_primary
-            ),
-            estimator=plan.estimator,
-        )
-        metric_results.append(
-            {
-                "metric_source_id": str(metric.source_id),
-                "name": metric.name,
-                "metric_type": metric.metric_type,
-                "is_primary": metric.is_primary,
-                "computed": True,
-                "not_computed_reason": None,
-                "message": None,
-                "result": result,
-            }
-        )
+        metric_results.append(_metric_result(plan, metric, outcome, variants, arms))
 
     srm: Optional[Dict[str, Any]] = None
     srm_skipped: Optional[str] = None
@@ -631,7 +699,7 @@ def _execute(plan: RunPlan, deadline: Deadline, run_id: UUID) -> Dict[str, Any]:
         srm_skipped = "adaptive_allocation"
     elif srm_counts is not None:
         found = compute_srm(
-            observed={str(k): n for k, (n, _) in srm_counts.items()},
+            observed={str(k): arm.n for k, arm in srm_counts.items()},
             allocations={
                 str(v.id): float(v.traffic_allocation or 0) for v in plan.variants
             },
@@ -796,6 +864,7 @@ def execute_preview(
 __all__ = [
     "ADMISSION_LOCK_NAME",
     "AdmissionRefused",
+    "ArmStats",
     "MetricPlan",
     "NewRun",
     "Reservation",

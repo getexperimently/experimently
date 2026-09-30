@@ -407,19 +407,20 @@ def test_a_failed_run_reports_its_code_and_no_numbers(wh):
     assert row.results is None and row.sufficient_statistics is None
 
 
-def test_mean_metric_sources_are_not_run_yet(wh):
-    admin = wh.as_("ADMIN")
-    experiment = wh.experiment(end=ts(10))
-    _standard_data(wh, experiment.key)
-    ids = wh.ready(admin)
+def _mean_source(wh, admin, ids, **overrides):
     mean = wh.metric_source(
         admin,
         ids["connection_id"],
         name="Revenue",
         metric_type="mean",
         columns={"unit_id": "user_id", "event_at": "event_at", "value": "amount"},
+        **overrides,
     )
     wh.validate(admin, mean["id"])
+    return mean
+
+
+def _run_mean(wh, experiment, admin, ids, mean):
     response = admin.post(
         f"{WA}/experiments/{experiment.id}/runs",
         json={
@@ -428,8 +429,133 @@ def test_mean_metric_sources_are_not_run_yet(wh):
             "metric_source_ids": [mean["id"]],
         },
     )
-    assert response.status_code == 422
-    assert response.json()["detail"]["code"] == "metric_type_unavailable"
+    assert response.status_code == 202, response.text
+    run = wh.wait_for_run(wh.as_("VIEWER"), response.json()["run_id"])
+    assert run["status"] == "succeeded", run
+    (metric,) = run["results"]["metrics"]
+    return run, metric
+
+
+def _revenue_data(wh, key: str) -> None:
+    """Control units spend 15, 20 and 0; treatment units 7.5, 2.5 and 0."""
+    wh.exposures(
+        [
+            _exposure("u1", key, "control", ts(2)),
+            _exposure("u2", key, "control", ts(2)),
+            _exposure("u3", key, "control", ts(3)),
+            _exposure("u4", key, "treatment", ts(2)),
+            _exposure("u5", key, "treatment", ts(3)),
+            _exposure("u6", key, "treatment", ts(3)),
+        ]
+    )
+    wh.events(
+        [
+            ("u1", ts(2, 5), 10.0),
+            ("u1", ts(2, 6), 5.0),
+            ("u2", ts(4), 20.0),
+            ("u4", ts(3), 7.5),
+            ("u5", ts(4), 2.5),
+            # A NULL value is ignored (and counted), not read as 0 or refused.
+            ("u6", ts(4), None),
+            # Before the unit's exposure: not counted.
+            ("u3", ts(1), 99.0),
+        ]
+    )
+
+
+def test_mean_run_end_to_end(wh):
+    """A mean metric runs like a proportion one: its centred sums come back,
+    the core estimator computes Welch's test from them, and the numbers agree
+    with the same test on the units' values."""
+    from scipy import stats
+
+    admin = wh.as_("ADMIN")
+    experiment = wh.experiment(end=ts(10))
+    _revenue_data(wh, experiment.key)
+    ids = wh.ready(admin)
+    mean = _mean_source(wh, admin, ids)
+    run, metric = _run_mean(wh, experiment, admin, ids, mean)
+
+    assert metric["computed"] is True and metric["metric_type"] == "mean"
+    result = metric["result"]
+    assert result["metric_type"] == "mean"
+    control, treatment = result["variants"]
+    assert (control["variant_name"], treatment["variant_name"]) == (
+        "control",
+        "treatment",
+    )
+    assert (control["sample_size"], treatment["sample_size"]) == (3, 3)
+    assert control["mean"] == pytest.approx(35 / 3, rel=1e-12)
+    assert treatment["mean"] == pytest.approx(10 / 3, rel=1e-12)
+    control_y, treatment_y = [15.0, 20.0, 0.0], [7.5, 2.5, 0.0]
+    welch = stats.ttest_ind(treatment_y, control_y, equal_var=False)
+    assert treatment["p_value"] == pytest.approx(welch.pvalue, rel=1e-9)
+    assert treatment["statistical_test_used"] == "welch_t_test"
+    assert treatment["note"] is None and control["note"] is None
+    assert control["conversions"] is None
+    stored = run["results"]
+    assert stored["srm"]["observed"] == {str(v.id): 3 for v in experiment.variants}
+    row = wh.db.get(WarehouseAnalysisRun, run["id"])
+    wh.db.refresh(row)
+    sums = row.sufficient_statistics["metrics"][mean["id"]]
+    assert sums["null_value_rows"] == 1
+    # The exact strings the warehouse returned are what is stored.
+    assert all(isinstance(v["sum_d"], str) for v in sums["variants"])
+
+
+def test_mean_run_caps_each_units_sum(wh):
+    admin = wh.as_("ADMIN")
+    experiment = wh.experiment(end=ts(10))
+    _revenue_data(wh, experiment.key)
+    ids = wh.ready(admin)
+    mean = _mean_source(wh, admin, ids, cap_value=12.0)
+    _, metric = _run_mean(wh, experiment, admin, ids, mean)
+    control, treatment = metric["result"]["variants"]
+    assert control["mean"] == pytest.approx(24 / 3, rel=1e-12)
+    assert treatment["mean"] == pytest.approx(10 / 3, rel=1e-12)
+
+
+def test_mean_no_variation_note_reaches_the_response(wh):
+    """Every unit's value is 0: the treatment's row says why there is no
+    p-value, in the run the API returns."""
+    admin = wh.as_("ADMIN")
+    experiment = wh.experiment(end=ts(10))
+    wh.exposures(
+        [
+            ("u1", experiment.key, "control", ts(2)),
+            ("u2", experiment.key, "control", ts(2)),
+            ("u3", experiment.key, "treatment", ts(2)),
+            ("u4", experiment.key, "treatment", ts(2)),
+        ]
+    )
+    wh.events([])
+    ids = wh.ready(admin)
+    mean = _mean_source(wh, admin, ids)
+    _, metric = _run_mean(wh, experiment, admin, ids, mean)
+    assert metric["computed"] is True
+    control, treatment = metric["result"]["variants"]
+    assert treatment["note"] == "Not computed: no variation"
+    assert treatment["p_value"] is None
+    assert control["note"] is None
+
+
+def test_mean_with_fewer_than_2_units_says_so(wh):
+    admin = wh.as_("ADMIN")
+    experiment = wh.experiment(end=ts(10))
+    wh.exposures(
+        [
+            ("u1", experiment.key, "control", ts(2)),
+            ("u2", experiment.key, "control", ts(2)),
+            ("u3", experiment.key, "treatment", ts(2)),
+        ]
+    )
+    wh.events([("u1", ts(3), 4.0)])
+    ids = wh.ready(admin)
+    mean = _mean_source(wh, admin, ids)
+    _, metric = _run_mean(wh, experiment, admin, ids, mean)
+    assert metric["computed"] is False and metric["result"] is None
+    assert metric["not_computed_reason"] == "fewer_than_2_units"
+    assert metric["message"] == "Not computed: fewer than 2 units"
 
 
 def test_unvalidated_sources_are_refused(wh):

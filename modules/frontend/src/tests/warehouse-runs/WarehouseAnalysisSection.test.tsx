@@ -11,7 +11,6 @@ import { routedApi, Route } from '@/tests/pages/helpers/apiMock';
 import WarehouseAnalysisSection from '@modules/components/warehouse/runs/WarehouseAnalysisSection';
 import {
   isKnownFailure,
-  MEAN_UNAVAILABLE,
   RESULTS_DIFFERENCE,
   RUN_POLL_MS,
   failureCopy,
@@ -25,6 +24,7 @@ import {
   SQL,
   computedMetric,
   connection,
+  meanMetric,
   notComputedMetric,
   results,
   run,
@@ -165,13 +165,15 @@ describe('starting an analysis', () => {
     );
   });
 
-  it('lists a mean metric but cannot tick it, and says why in text', async () => {
+  it('lets a mean metric be ticked, and says it is a mean', async () => {
     install(formRoutes());
     renderSection();
     await openForm();
     const mean = screen.getByRole('checkbox', { name: /Revenue per user/ });
-    expect(mean).toBeDisabled();
-    expect(mean).toHaveAccessibleDescription(MEAN_UNAVAILABLE);
+    expect(mean).toBeEnabled();
+    tick(/Revenue per user/);
+    expect(mean).toBeChecked();
+    expect(mean).toHaveAccessibleName('Revenue per user (mean, primary)');
   });
 
   it('sends the ticked metrics in tick order (first is primary) and shows the queued run', async () => {
@@ -307,31 +309,6 @@ describe('starting an analysis', () => {
     expect(alert).toHaveAttribute('data-code', code);
     expect(alert).toHaveTextContent(words);
   });
-
-  it('names the mean metric when the API refuses it (422 metric_type_unavailable)', async () => {
-    install(
-      formRoutes([
-        {
-          method: 'POST',
-          path: RUNS_PATH,
-          handler: refusal(422, {
-            code: 'metric_type_unavailable',
-            message: 'Only proportion metrics can be analysed in the warehouse so far.',
-            field: 'metric_source_ids[1]',
-          }),
-        },
-      ]),
-    );
-    renderSection();
-    await openForm();
-    tick(/Purchased/);
-    tick(/Signed up/);
-    fireEvent.click(screen.getByTestId('warehouse-start'));
-    const alert = await screen.findByRole('alert');
-    expect(alert).toHaveTextContent(
-      `Not started: Signed up is a mean metric. ${MEAN_UNAVAILABLE} Remove it and start again.`,
-    );
-  });
 });
 
 describe('a run in progress', () => {
@@ -434,7 +411,42 @@ describe('results', () => {
     expect(screen.queryByTestId('warehouse-srm-warning')).toBeNull();
   });
 
-  it.each(['no_units', 'join_key_mismatch', 'result_invalid', 'too_many_variant_values'])(
+  it('shows a mean metric as its mean and interval, not as a rate', async () => {
+    install([
+      {
+        path: RUNS_PATH,
+        handler: () => ({ runs: [run({ results: results({ metrics: [computedMetric(), meanMetric()] }) })] }),
+      },
+    ]);
+    renderSection();
+    const tables = await screen.findAllByTestId('warehouse-metric');
+    const mean = tables[1];
+    expect(within(mean).getByRole('table')).toHaveAccessibleName('Revenue per user: mean by variant');
+    const headers = within(mean).getAllByRole('columnheader').map((h) => h.textContent);
+    expect(headers).toEqual(['Variant', 'Units', 'Mean', '95% interval', 'Change', 'p-value', 'Result']);
+    const rows = within(mean).getAllByTestId('warehouse-variant-row');
+    expect(rows[0]).toHaveTextContent('control (control)10,00012.3512.26 to 12.43——Baseline');
+    expect(rows[1]).toHaveTextContent('blue10,05012.512.41 to 12.59+1.25%0.0120Significant');
+    expect(mean).not.toHaveTextContent('%—');
+  });
+
+  it('says why a mean comparison was not computed, in the Result cell', async () => {
+    const metric = meanMetric();
+    const [control, treatment] = metric.result!.variants;
+    metric.result!.variants = [
+      control,
+      { ...treatment, p_value: null, is_significant: false, statistical_test_used: null, note: 'Not computed: no variation' },
+    ];
+    install([
+      { path: RUNS_PATH, handler: () => ({ runs: [run({ results: results({ metrics: [metric] }) })] }) },
+    ]);
+    renderSection();
+    const rows = await screen.findAllByTestId('warehouse-variant-row');
+    expect(rows[1]).toHaveTextContent('Not computed: no variation');
+    expect(rows[1]).not.toHaveTextContent('Not significant');
+  });
+
+  it.each(['no_units', 'join_key_mismatch', 'result_invalid', 'too_many_variant_values', 'fewer_than_2_units'])(
     'shows a metric not computed for %s as "Not computed", never as 0',
     async (code) => {
       install([

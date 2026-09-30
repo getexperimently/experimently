@@ -20,15 +20,23 @@ You point Experimently at two of your own tables or views:
 - an **assignment source**: one row per exposure, with the unit id, the
   experiment key, the variant label and the time of the exposure;
 - a **metric source** per metric: one row per event, with the unit id and the
-  time of the event.
+  time of the event, and for a mean metric the event's value.
 
 Experimently generates the SQL (there is no field that takes SQL), runs it
 with the read-only identity you created for it, and computes the results
-from what comes back. At launch the metrics are **proportions**: the share
-of exposed units that had at least one event in the conversion window. The
-statistics are the ones `/results` uses, and every run reports its
-sample-ratio check against the variants' traffic allocation (skipped for
-multi-armed bandit experiments, whose split moves on purpose).
+from what comes back. A metric is one of two types:
+
+- a **proportion**: the share of exposed units that had at least one event in
+  the conversion window, compared with Fisher's exact test, the statistics
+  `/results` uses;
+- a **mean**: the average per exposed unit of the sum of its event values in
+  the conversion window (0 for a unit with no event; a NULL value is ignored
+  and counted), optionally capped per unit with `cap_value`, and compared with
+  Welch's t-test. Each variant reports its mean and a confidence interval.
+
+Every run reports its sample-ratio check against the variants' traffic
+allocation (skipped for multi-armed bandit experiments, whose split moves on
+purpose).
 
 ### What leaves your warehouse
 
@@ -195,7 +203,10 @@ The window defaults to the experiment's start date up to its end date or now;
 a time without an offset is read as UTC. The run moves from `queued` to
 `running` to `succeeded` or `failed`. A failed run carries an `error_code` from
 a fixed set and reports no numbers; a metric that could not be computed says
-`Not computed:` and why, never 0.
+`Not computed:` and why, never 0. A mean metric needs at least 2 units in
+every variant (`Not computed: fewer than 2 units` otherwise). When the values
+vary in neither the control nor a treatment, that treatment has no p-value and
+its `note` says `Not computed: no variation`.
 
 Errors are `{"detail": {"code": ..., "message": ...}}`. A request that fails
 validation lists where and why, but never repeats the value you sent.
