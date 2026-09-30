@@ -7,6 +7,16 @@ name: Chart (kind)
 # scripts/chart_kind.sh; the `chart` workflow checks the chart without a
 # cluster.
 #
+# Two upgrade legs follow the install:
+#   N -> N'   this PR's images plus one more core revision made in the job:
+#             exactly one `migrate` applies it, the old pods keep serving.
+#             Runs everywhere, forks included (it needs no registry).
+#   N-1 -> N  the previous release's chart and images, pulled from GHCR, then
+#             upgraded to this PR's. The images are private until D19, so on a
+#             pull request from a fork it does not run and the job summary
+#             says "not run: images private until D19"; everywhere else an N-1
+#             that cannot be resolved or pulled fails the job.
+#
 # Profiles: both, on every run, as parallel jobs. Measured on the first runs
 # (2026-09-27): core about 4 minutes, full about 5.5, most of the difference
 # the full dashboard image's build. If full grows past the budget, the plan's
@@ -36,6 +46,11 @@ on:
   schedule:
     - cron: '30 3 * * *'
   workflow_dispatch:
+    inputs:
+      previous_version:
+        description: 'N-1 for the upgrade leg, as X.Y.Z (default: the newest release at or below VERSION)'
+        required: false
+        default: ''
 
 concurrency:
   group: chart-kind-${{ github.head_ref || github.ref }}
@@ -66,7 +81,12 @@ jobs:
   chart-kind:
     name: chart-kind (${{ matrix.profile }})
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 40
+    # packages: read pulls N-1's images from GHCR for the upgrade leg; they
+    # are private until D19.
+    permissions:
+      contents: read
+      packages: read
     strategy:
       fail-fast: false
       matrix:
@@ -80,6 +100,17 @@ jobs:
 
       - name: Start the clock
         run: echo "BUILD_START=$(date +%s)" >> "$GITHUB_ENV"
+
+      # N-1 for the upgrade leg, resolved before anything is built so that an
+      # unresolvable one fails in seconds. On a pull request from a fork it
+      # prints the not-run line and the leg is skipped (T41); anywhere else it
+      # fails rather than skips.
+      - name: Resolve the previous release (N-1)
+        id: previous
+        env:
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+          PREVIOUS_VERSION: ${{ inputs.previous_version }}
+        run: bash scripts/chart_kind.sh previous
 
       # The runner image ships its own helm and kubectl; the pinned ones go
       # first on PATH and are asserted.
@@ -175,6 +206,25 @@ jobs:
 
       - name: Fresh install with two API replicas
         run: bash scripts/chart_kind.sh replicas
+
+      - name: Upgrade to a newer revision (N to N')
+        run: bash scripts/chart_kind.sh upgrade-next
+
+      # `!= 'false'`, not `== 'true'`: an output that went missing runs the
+      # leg, which then fails, instead of skipping it.
+      - name: Log in to GHCR
+        if: steps.previous.outputs.run != 'false'
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upgrade from the previous release (N-1 to N)
+        if: steps.previous.outputs.run != 'false'
+        env:
+          PREVIOUS_VERSION: ${{ steps.previous.outputs.version }}
+        run: bash scripts/chart_kind.sh upgrade-previous
 
       - name: Diagnostics
         if: failure()
