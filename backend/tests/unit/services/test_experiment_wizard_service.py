@@ -227,7 +227,7 @@ class TestWizardDraftManagement:
         assert draft.current_step == "choose_type"
 
         updated = ExperimentWizardService.update_draft(
-            draft.id, "choose_type", {"experiment_type": "ab"}
+            draft.id, draft.user_id, "choose_type", {"experiment_type": "ab"}
         )
         assert updated is not None
         assert updated.current_step == "define_hypothesis"
@@ -236,17 +236,18 @@ class TestWizardDraftManagement:
         """update_draft persists data into the draft."""
         draft = ExperimentWizardService.create_draft(user_id="user-1")
         ExperimentWizardService.update_draft(
-            draft.id, "choose_type", {"experiment_type": "ab"}
+            draft.id, draft.user_id, "choose_type", {"experiment_type": "ab"}
         )
         ExperimentWizardService.update_draft(
             draft.id,
+            draft.user_id,
             "define_hypothesis",
             {
                 "hypothesis": "We believe showing a new CTA will improve click-through rates.",
                 "primary_metric_id": "m-001",
             },
         )
-        retrieved = ExperimentWizardService.get_draft(draft.id)
+        retrieved = ExperimentWizardService.get_draft(draft.id, draft.user_id)
         assert retrieved is not None
         assert retrieved.experiment_type == "ab"
         assert retrieved.primary_metric_id == "m-001"
@@ -255,33 +256,36 @@ class TestWizardDraftManagement:
         """get_draft returns draft including all accumulated step data."""
         draft = ExperimentWizardService.create_draft(user_id="user-2")
         ExperimentWizardService.update_draft(
-            draft.id, "choose_type", {"experiment_type": "multivariate"}
+            draft.id, draft.user_id, "choose_type", {"experiment_type": "multivariate"}
         )
-        retrieved = ExperimentWizardService.get_draft(draft.id)
+        retrieved = ExperimentWizardService.get_draft(draft.id, draft.user_id)
         assert retrieved is not None
         assert retrieved.experiment_type == "multivariate"
 
     def test_get_draft_returns_none_for_missing_id(self):
         """get_draft returns None for a non-existent draft id."""
-        result = ExperimentWizardService.get_draft("nonexistent-id")
+        result = ExperimentWizardService.get_draft("nonexistent-id", "user-1")
         assert result is None
 
     def test_validate_and_submit_returns_experiment_id_on_success(self):
         """validate_and_submit returns experiment_id when draft is complete."""
         draft = ExperimentWizardService.create_draft(user_id="user-1")
         ExperimentWizardService.update_draft(
-            draft.id, "choose_type", {"experiment_type": "ab"}
+            draft.id, draft.user_id, "choose_type", {"experiment_type": "ab"}
         )
         ExperimentWizardService.update_draft(
             draft.id,
+            draft.user_id,
             "define_hypothesis",
             {
                 "hypothesis": "We believe adding a new button will increase conversions by 15%.",
                 "primary_metric_id": "metric-123",
             },
         )
-        # No db/user_id: validated dry run, nothing written.
-        result = ExperimentWizardService.validate_and_submit(draft.id)
+        # No db: validated dry run, nothing written.
+        result = ExperimentWizardService.validate_and_submit(
+            draft.id, user_id=draft.user_id
+        )
         assert result["success"] is True
         assert result["persisted"] is False
         assert result["experiment_id"] is None
@@ -290,23 +294,25 @@ class TestWizardDraftManagement:
         assert payload["metrics"][0]["is_primary"] is True
         assert all("traffic_allocation" in v for v in payload["variants"])
         # The draft survives a dry run.
-        assert ExperimentWizardService.get_draft(draft.id) is not None
+        assert ExperimentWizardService.get_draft(draft.id, draft.user_id) is not None
 
     def test_validate_and_submit_returns_errors_when_draft_incomplete(self):
         """validate_and_submit returns errors when draft is missing required fields."""
         draft = ExperimentWizardService.create_draft(user_id="user-1")
         # Only chose type, didn't fill hypothesis or metric
         ExperimentWizardService.update_draft(
-            draft.id, "choose_type", {"experiment_type": "ab"}
+            draft.id, draft.user_id, "choose_type", {"experiment_type": "ab"}
         )
-        result = ExperimentWizardService.validate_and_submit(draft.id)
+        result = ExperimentWizardService.validate_and_submit(
+            draft.id, user_id=draft.user_id
+        )
         assert result["success"] is False
         assert isinstance(result["errors"], list)
         assert len(result["errors"]) > 0
 
     def test_validate_and_submit_missing_draft_returns_error(self):
         """validate_and_submit with non-existent draft_id returns error."""
-        result = ExperimentWizardService.validate_and_submit("bad-id")
+        result = ExperimentWizardService.validate_and_submit("bad-id", user_id="user-1")
         assert result["success"] is False
         assert any("not found" in e.lower() for e in result["errors"])
 

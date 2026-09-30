@@ -32850,7 +32850,8 @@
     },
     "/api/v1/wizard/drafts": {
       "get": {
-        "description": "Returns all in-progress wizard drafts belonging to the authenticated user.",
+        "deprecated": true,
+        "description": "**Deprecated.** The dashboard does not use the wizard API; it may be removed in a later release. Drafts are per user and held in the API process's memory.\n\nReturns all in-progress wizard drafts belonging to the authenticated user.",
         "operationId": "list_drafts_api_v1_wizard_drafts_get",
         "responses": {
           "200": {
@@ -32878,14 +32879,15 @@
             "OAuth2PasswordBearer": []
           }
         ],
-        "summary": "List wizard drafts for the current user",
+        "summary": "List wizard drafts for the current user (deprecated)",
         "tags": [
           "Experiment Wizard",
           "Experiment Wizard"
         ]
       },
       "post": {
-        "description": "Initialise a new wizard draft for the authenticated user. The draft starts at the 'choose_type' step and accumulates data as the user progresses through the wizard.",
+        "deprecated": true,
+        "description": "**Deprecated.** The dashboard does not use the wizard API; it may be removed in a later release. Drafts are per user and held in the API process's memory.\n\nInitialise a new wizard draft for the authenticated user. The draft starts at the 'choose_type' step and accumulates data as the user progresses through the wizard.",
         "operationId": "create_draft_api_v1_wizard_drafts_post",
         "requestBody": {
           "content": {
@@ -32933,7 +32935,7 @@
             "OAuth2PasswordBearer": []
           }
         ],
-        "summary": "Create a new experiment wizard draft",
+        "summary": "Create a new experiment wizard draft (deprecated)",
         "tags": [
           "Experiment Wizard",
           "Experiment Wizard"
@@ -32942,7 +32944,8 @@
     },
     "/api/v1/wizard/drafts/{draft_id}": {
       "get": {
-        "description": "Retrieve a specific wizard draft including all accumulated step data.",
+        "deprecated": true,
+        "description": "**Deprecated.** The dashboard does not use the wizard API; it may be removed in a later release. Drafts are per user and held in the API process's memory.\n\nRetrieve one of the caller's wizard drafts, including all accumulated step data. A draft that does not exist or belongs to another user answers 404.",
         "operationId": "get_draft_api_v1_wizard_drafts__draft_id__get",
         "parameters": [
           {
@@ -32991,7 +32994,7 @@
             "OAuth2PasswordBearer": []
           }
         ],
-        "summary": "Get a wizard draft by ID",
+        "summary": "Get a wizard draft by ID (deprecated)",
         "tags": [
           "Experiment Wizard",
           "Experiment Wizard"
@@ -33000,7 +33003,8 @@
     },
     "/api/v1/wizard/drafts/{draft_id}/step": {
       "put": {
-        "description": "Submit data for the current wizard step and advance to the next step. The draft accumulates data across all steps.",
+        "deprecated": true,
+        "description": "**Deprecated.** The dashboard does not use the wizard API; it may be removed in a later release. Drafts are per user and held in the API process's memory.\n\nSubmit data for the current wizard step and advance to the next step. The draft accumulates data across all steps. `data` may only contain step fields (`experiment_type`, `hypothesis`, `primary_metric_id`, `guardrail_metric_ids`, `targeting_rules`, `baseline_rate`, `mde`, `name`, `description`); any other key answers 422 and the draft is unchanged. A draft that does not exist or belongs to another user answers 404.",
         "operationId": "update_draft_step_api_v1_wizard_drafts__draft_id__step_put",
         "parameters": [
           {
@@ -33059,7 +33063,7 @@
             "OAuth2PasswordBearer": []
           }
         ],
-        "summary": "Update a wizard draft with step data",
+        "summary": "Update a wizard draft with step data (deprecated)",
         "tags": [
           "Experiment Wizard",
           "Experiment Wizard"
@@ -33068,7 +33072,8 @@
     },
     "/api/v1/wizard/drafts/{draft_id}/submit": {
       "post": {
-        "description": "Validate the completed draft and create the experiment it describes (status DRAFT, owned by the caller), then discard the draft. Returns the new experiment_id on success or validation errors on failure.",
+        "deprecated": true,
+        "description": "**Deprecated.** The dashboard does not use the wizard API; it may be removed in a later release. Drafts are per user and held in the API process's memory.\n\nValidate one of the caller's drafts and create the experiment it describes (status DRAFT, owned by the caller), then discard the draft. Returns the new experiment_id on success or validation errors on failure. A draft that does not exist or belongs to another user answers 404.",
         "operationId": "submit_draft_api_v1_wizard_drafts__draft_id__submit_post",
         "parameters": [
           {
@@ -33117,7 +33122,7 @@
             "OAuth2PasswordBearer": []
           }
         ],
-        "summary": "Submit a completed wizard draft to create an experiment",
+        "summary": "Submit a completed wizard draft to create an experiment (deprecated)",
         "tags": [
           "Experiment Wizard",
           "Experiment Wizard"
@@ -33126,7 +33131,8 @@
     },
     "/api/v1/wizard/validate": {
       "post": {
-        "description": "Validate data for a specific wizard step without modifying any draft. Returns is_valid flag and list of validation errors.",
+        "deprecated": true,
+        "description": "**Deprecated.** The dashboard does not use the wizard API; it may be removed in a later release. Drafts are per user and held in the API process's memory.\n\nValidate data for a specific wizard step without modifying any draft. Returns is_valid flag and list of validation errors.",
         "operationId": "validate_step_api_v1_wizard_validate_post",
         "requestBody": {
           "content": {
@@ -33174,7 +33180,7 @@
             "OAuth2PasswordBearer": []
           }
         ],
-        "summary": "Validate wizard step data",
+        "summary": "Validate wizard step data (deprecated)",
         "tags": [
           "Experiment Wizard",
           "Experiment Wizard"
