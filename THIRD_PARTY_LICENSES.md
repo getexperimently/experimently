@@ -24,7 +24,7 @@ Development-only dependencies — what `backend/requirements.txt` adds for test 
 | Package | Version |
 |---|---|
 | `Mako` | 1.4.1 |
-| `PyJWT` | 2.14.0 |
+| `PyJWT` | 2.15.1 |
 | `SQLAlchemy` | 2.0.54 |
 | `alembic` | 1.20.0 |
 | `annotated-doc` | 0.0.5 |
@@ -54,7 +54,7 @@ Development-only dependencies — what `backend/requirements.txt` adds for test 
 | `sqlglot` | 30.20.0 |
 | `truststore` | 0.10.4 |
 | `typing-inspection` | 0.4.4 |
-| `urllib3` | 2.7.0 |
+| `urllib3` | 2.8.0 |
 | `xmlsec` | 1.3.17 |
 
 #### BSD-3-Clause (13)
