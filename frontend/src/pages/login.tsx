@@ -242,7 +242,7 @@ export default function LoginPage() {
                 Forgot password?
               </summary>
               <p className="mt-2 text-slate-600" data-testid="forgot-password-help">
-                Ask an administrator to reset it in <span className="font-medium">Admin → Users</span>.
+                Ask an administrator to reset it.
               </p>
             </details>
           </div>

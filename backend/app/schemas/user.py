@@ -19,6 +19,54 @@ from pydantic import (
 
 from backend.app.schemas.auth import RoleName
 
+#: bcrypt reads at most 72 bytes of a password; the hashing library refuses a
+#: longer one outright, so the rule refuses it first, with a readable message.
+PASSWORD_MAX_BYTES = 72
+PASSWORD_MIN_LENGTH = 8
+
+#: A password that is not valid text (a lone UTF-16 surrogate, which JSON can
+#: carry as ``"\ud800"``) cannot be encoded to bytes, hashed or compared.
+#: The message is fixed and never includes the value.
+PASSWORD_NOT_TEXT_MESSAGE = "Password must be valid text"
+
+
+def check_password_strength(password: str) -> str:
+    """Return ``password`` if it meets the password rules; raise ``ValueError`` if not.
+
+    The one rule for every password a client sets -- a new account, a change
+    of your own password, an administrator's reset of someone else's:
+
+    * valid text (encodable as UTF-8);
+    * at least 8 characters;
+    * at most 72 bytes once encoded as UTF-8 (bcrypt's limit);
+    * at least one upper-case letter, one lower-case letter and one digit.
+
+    The length check is here as well as in ``Field(min_length=8)`` on the
+    models that declare one, because a field validator runs even where the
+    field has no such constraint (``UserUpdate.password``). No message
+    includes the submitted value.
+    """
+    try:
+        encoded = password.encode("utf-8")
+    except UnicodeEncodeError:
+        raise ValueError(PASSWORD_NOT_TEXT_MESSAGE) from None
+    if len(password) < PASSWORD_MIN_LENGTH:
+        raise ValueError(
+            f"Password must be at least {PASSWORD_MIN_LENGTH} characters long"
+        )
+    if len(encoded) > PASSWORD_MAX_BYTES:
+        raise ValueError(
+            f"Password must be at most {PASSWORD_MAX_BYTES} bytes long "
+            "(UTF-8); most characters outside English take two or more bytes"
+        )
+    if not any(c.isupper() for c in password):
+        raise ValueError("Password must contain at least one uppercase letter")
+    if not any(c.islower() for c in password):
+        raise ValueError("Password must contain at least one lowercase letter")
+    if not any(c.isdigit() for c in password):
+        raise ValueError("Password must contain at least one digit")
+    return password
+
 
 class UserBase(BaseModel):
     """Base user model."""
@@ -59,22 +107,29 @@ class UserCreate(UserBase):
     @classmethod
     def validate_password(cls, v: SecretStr) -> SecretStr:
         """Validate password strength."""
-        password = v.get_secret_value()
-        if not any(c.isupper() for c in password):
-            raise ValueError("Password must contain at least one uppercase letter")
-        if not any(c.islower() for c in password):
-            raise ValueError("Password must contain at least one lowercase letter")
-        if not any(c.isdigit() for c in password):
-            raise ValueError("Password must contain at least one digit")
+        check_password_strength(v.get_secret_value())
         return v
 
 
 class UserUpdate(UserBase):
     """User update model."""
 
+    # ``password`` sets ANOTHER account's password (a superuser's reset). Your
+    # own password is changed with ``POST /api/v1/users/me/password``, which
+    # asks for the current one; sending your own ``password`` here is refused
+    # (``apply_password_change`` in the users endpoints). The docstring above
+    # is published in the stable contract, so this note is a comment.
     password: Optional[SecretStr] = None
 
     model_config = ConfigDict(from_attributes=True)
+
+    @field_validator("password")
+    @classmethod
+    def validate_password(cls, v: Optional[SecretStr]) -> Optional[SecretStr]:
+        """The same rule as ``UserCreate``; ``None`` (no change) passes."""
+        if v is not None:
+            check_password_strength(v.get_secret_value())
+        return v
 
 
 class UserInDBBase(UserBase):
@@ -98,22 +153,29 @@ class UserInDB(UserInDBBase):
 
 
 class PasswordChange(BaseModel):
-    """Password change model."""
+    """The body of ``POST /api/v1/users/me/password``."""
 
-    current_password: SecretStr
-    new_password: SecretStr = Field(..., min_length=8)
+    current_password: Optional[SecretStr] = Field(
+        None,
+        description=(
+            "Your current password. Required: a request without it, or with "
+            "an empty one, is refused with 403."
+        ),
+    )
+    new_password: SecretStr = Field(
+        ...,
+        min_length=8,
+        description=(
+            "At least 8 characters and at most 72 bytes (UTF-8), with an "
+            "upper-case letter, a lower-case letter and a digit."
+        ),
+    )
 
     @field_validator("new_password")
     @classmethod
     def validate_new_password(cls, v: SecretStr) -> SecretStr:
         """Validate new password strength."""
-        password = v.get_secret_value()
-        if not any(c.isupper() for c in password):
-            raise ValueError("Password must contain at least one uppercase letter")
-        if not any(c.islower() for c in password):
-            raise ValueError("Password must contain at least one lowercase letter")
-        if not any(c.isdigit() for c in password):
-            raise ValueError("Password must contain at least one digit")
+        check_password_strength(v.get_secret_value())
         return v
 
     model_config = ConfigDict(from_attributes=True)

@@ -1253,6 +1253,12 @@
         "summary": "Get User Me"
       }
     },
+    "/api/v1/users/me/password": {
+      "post": {
+        "operationId": "change_own_password_api_v1_users_me_password_post",
+        "summary": "Change Own Password"
+      }
+    },
     "/api/v1/users/{user_id}": {
       "delete": {
         "operationId": "delete_user_api_v1_users__user_id__delete",

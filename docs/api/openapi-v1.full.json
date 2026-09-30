@@ -10359,6 +10359,38 @@
         "title": "PartitionInfo",
         "type": "object"
       },
+      "PasswordChange": {
+        "description": "The body of ``POST /api/v1/users/me/password``.",
+        "properties": {
+          "current_password": {
+            "anyOf": [
+              {
+                "format": "password",
+                "type": "string",
+                "writeOnly": true
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Your current password. Required: a request without it, or with an empty one, is refused with 403.",
+            "title": "Current Password"
+          },
+          "new_password": {
+            "description": "At least 8 characters and at most 72 bytes (UTF-8), with an upper-case letter, a lower-case letter and a digit.",
+            "format": "password",
+            "minLength": 8,
+            "title": "New Password",
+            "type": "string",
+            "writeOnly": true
+          }
+        },
+        "required": [
+          "new_password"
+        ],
+        "title": "PasswordChange",
+        "type": "object"
+      },
       "PermissionAction": {
         "enum": [
           "create",
@@ -31585,6 +31617,55 @@
           }
         ],
         "summary": "Get User Me",
+        "tags": [
+          "Users"
+        ]
+      }
+    },
+    "/api/v1/users/me/password": {
+      "post": {
+        "description": "Change your own password.\n\nRequires your current password. The new password must be at least 8\ncharacters and at most 72 bytes (UTF-8), with an upper-case letter, a\nlower-case letter and a digit. Answers 204 with no body.\n\nA wrong current password answers 403 (not 401, which would read as a\nsigned-out session) and counts toward the same lockout as sign-in; after\ntoo many failures both answer 423 until ``Retry-After`` has passed.\n\nChanging the password does not end other sessions: a token issued before\nthe change keeps working until it expires.",
+        "operationId": "change_own_password_api_v1_users_me_password_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PasswordChange"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "The current password is missing or incorrect, or the account has no password of its own."
+          },
+          "404": {
+            "description": "AUTH_PROVIDER is not 'local'."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "423": {
+            "description": "Too many failed attempts for this account (counted together with sign-in); see Retry-After."
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Change Own Password",
         "tags": [
           "Users"
         ]

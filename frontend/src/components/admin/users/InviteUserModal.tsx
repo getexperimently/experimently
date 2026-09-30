@@ -150,8 +150,9 @@ export function InviteUserModal({ isOpen, onClose, onSuccess }: InviteUserModalP
             <p className="text-sm text-slate-600">
               <span className="font-medium text-slate-800">{created.user.email}</span> can sign in
               as <span className="font-mono">{created.user.username}</span> with this temporary
-              password. It is shown <strong>once</strong> — share it now and ask them to change
-              it after signing in.
+              password. It is shown <strong>once</strong> — share it now. They can change it
+              through the API with <span className="font-mono">POST /api/v1/users/me/password</span>;
+              the dashboard has no password form yet.
             </p>
             <div className="flex items-center gap-2">
               <code

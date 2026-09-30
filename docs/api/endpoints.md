@@ -378,6 +378,8 @@ curl -X POST "http://localhost:8000/api/v1/users/" \
     "is_superuser": false
   }
   ```
+- **Password**: at least 8 characters and at most 72 bytes (UTF-8), with an
+  upper-case letter, a lower-case letter and a digit. Anything else is a 422.
 - **Response**: 201 Created
 
 ### Get User
@@ -420,11 +422,46 @@ curl -X POST "http://localhost:8000/api/v1/users/" \
     "password": "string"
   }
   ```
+- **Password**: `password` sets **another** account's password: a superuser's
+  reset, which needs no old password. It follows the same rules as a new
+  account's (see Create User); a weaker one, or `""`, is a 422. Leave it out,
+  or send `null`, to keep the password as it is. Your own password is changed
+  with `POST /api/v1/users/me/password` (below), which asks for the current
+  one; sending your own `password` here is a 403 for every caller,
+  superusers included. `PUT /api/v1/admin/users/{user_id}` treats `password`
+  the same way.
 - **Response**: 200 OK, the user as in Get User
 - **Errors**: 403 "Only an administrator can change an account's email address
   or username." when a user who is not a superuser sends a different email
   address or username. Administrators change them with
-  `PUT /api/v1/admin/users/{user_id}`.
+  `PUT /api/v1/admin/users/{user_id}`. 403 "To change your own password, use
+  POST /api/v1/users/me/password, which asks for your current password." when
+  the request sets the caller's own password.
+
+### Change Your Password
+- **Endpoint**: `POST /api/v1/users/me/password`
+- **Description**: Change your own password. Available when `AUTH_PROVIDER`
+  is `local`; otherwise the route answers 404 before the body is validated
+  against the schema. Changing the password does not end other sessions: a
+  token issued before the change keeps working until it expires. To end them
+  straight away, an administrator sets `is_active` to `false`.
+- **Headers**: Authorization: Bearer {token}
+- **Request Body**: `new_password` follows the same rules as a new account's.
+  ```json
+  {
+    "current_password": "string",
+    "new_password": "string"
+  }
+  ```
+- **Response**: 204 No Content
+- **Errors**: 403 when `current_password` is missing or incorrect ("The
+  current password is incorrect."), or when the account has no password of
+  its own; 422 when `new_password` breaks the rules; 423 with `Retry-After`
+  after too many wrong current passwords (the same count as failed logins,
+  10 within 15 minutes by default); 429 after 5 requests a minute from one
+  address. A wrong current password is a 403, not a 401: the session is
+  still signed in. The runnable example is in
+  [Authentication](auth.md#change-your-own-password).
 
 ## Experiment Endpoints
 

@@ -13,6 +13,7 @@ from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
 from sqlalchemy.orm import Session
 
 from backend.app.api import deps
+from backend.app.api.v1.endpoints.users import apply_password_change
 from backend.app.models.user import User
 from backend.app.schemas.user import (
     UserListResponse,
@@ -93,8 +94,13 @@ async def update_user(
             status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
         )
 
+    update_data = user_in.model_dump(exclude_unset=True)
+    # ``password`` becomes ``hashed_password`` (another account's reset), or
+    # is refused (your own: use POST /api/v1/users/me/password). The loop
+    # below cannot set it: the model has no ``password`` attribute.
+    apply_password_change(user, current_user, update_data)
+
     # Update user attributes
-    update_data = user_in.dict(exclude_unset=True)
     for field in update_data:
         if hasattr(user, field):
             setattr(user, field, update_data[field])

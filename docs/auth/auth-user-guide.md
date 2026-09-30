@@ -19,12 +19,11 @@ To create an account on Experimently, you will need to provide:
 - **Username**: 3-20 characters, alphanumeric with underscores and hyphens only
 - **Email**: A valid email address you can access for verification
 - **Password**: Must satisfy the following requirements:
-  - Minimum 8 characters
-  - At least one uppercase letter (A-Z)
-  - At least one lowercase letter (a-z)
-  - At least one number (0-9)
-  - At least one special character (e.g., !@#$%^&*)
-  - Cannot contain your username or email address
+  - At least 8 characters
+  - At most 72 bytes (UTF-8; most characters outside English take two or more bytes)
+  - At least one uppercase letter
+  - At least one lowercase letter
+  - At least one digit (0-9)
 - **First Name** and **Last Name**: Your real name or preferred name
 
 ### Registration Process
@@ -79,19 +78,25 @@ If you forget your password:
 
 ### Password Reset Notes
 
-- Reset codes expire after 15 minutes
+- The reset flow above is the Cognito one; with the default `local` provider there is no
+  self-service reset. If you have forgotten your password, ask an administrator to reset it.
 - New passwords must meet the same requirements as registration
-- You cannot reuse your previous password
-- After resetting your password, all existing sessions will be invalidated
 
 ### Changing Your Password
 
-To change your password while logged in:
+The dashboard has no password form yet. With the default `local` provider, change your
+own password through the API with `POST /api/v1/users/me/password`, sending your current
+password and the new one; see
+[Change Your Own Password](../api/auth.md#change-your-own-password) for a runnable example.
 
-1. Go to "Account Settings" in the user menu
-2. Click "Change Password"
-3. Enter your current password and new password
-4. Submit the form to update your password
+- A wrong current password is refused with `403` and counts toward the same limit as
+  failed logins.
+- The new password must meet the same requirements as registration.
+- Changing your password does **not** sign out your other sessions: a token issued before
+  the change keeps working until it expires. To end them straight away, an administrator
+  deactivates the account (sets `is_active` to `false`).
+- An administrator resets **another** user's password with `PUT /api/v1/admin/users/{id}`;
+  nobody, administrators included, can change their own password that way.
 
 ## Using Authentication Tokens
 
@@ -195,7 +200,7 @@ To keep your account secure:
 
 - Use a unique password not used on other websites
 - Consider using a password manager
-- Change your password periodically (every 3-6 months)
+- Change your password if you think someone else may know it
 - Never share your password with anyone
 
 ### Account Protection
@@ -215,10 +220,15 @@ To keep your account secure:
 ### Suspicious Activity
 
 If you notice suspicious activity on your account:
-1. Change your password immediately
-2. Contact support at support@getexperimently.com
-3. Check your account activity log for unauthorized actions
-4. Review connected devices in account settings
+
+1. Ask an administrator to deactivate the account (`is_active` set to `false`). That ends
+   every session straight away; changing the password alone does not.
+2. Have the administrator reset your password, and reactivate the account once the tokens
+   issued before it was deactivated have expired (12 hours with the default
+   `LOCAL_AUTH_TOKEN_TTL_MINUTES`). A deactivated account's tokens are refused only while
+   it stays deactivated.
+3. Check the audit log for changes you did not make.
+4. Contact support at support@getexperimently.com
 
 ---
 
