@@ -161,7 +161,7 @@ See `demo/streampulse/README.md`.
 - Click the **Sequential** tab (it appears when the experiment has a sequential analysis)
   - "mSPRT lets us peek at results without inflating false positives. No more waiting for a fixed sample size."
 - The dashboard has no Bayesian or CUPED tab. The Bayesian analysis is in the API
-  (`GET /api/v1/results/{id}/bayesian`, see `docs/api/bayesian.md`); show it from http://localhost:8000/docs if
+  (`GET /api/v1/results/{id}/bayesian`, see `docs/api/bayesian.md`); show it from http://localhost:8000/api/v1/docs if
   the audience asks.
   - Do not present CUPED as a variance reduction: it is beta, and its covariate is not yet a pre-experiment metric,
     so it removes almost no variance (#217).
@@ -272,7 +272,8 @@ Algorithm MAB** from the Experiments list.
 ```
 
 This stops the processes `setup-local.sh` started, stops the Docker services with
-`docker-compose down` (the database volume is kept), and removes `demo/.logs`, `demo/.pids`
+`docker compose down` (or `docker-compose down` where only that is installed; the database
+volume is kept), and removes `demo/.logs`, `demo/.pids`
 and the demo API key file.
 
 ---

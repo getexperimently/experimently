@@ -40,6 +40,16 @@ command -v python3  >/dev/null 2>&1 || MISSING+=("python3")
 command -v node     >/dev/null 2>&1 || MISSING+=("node")
 command -v npm      >/dev/null 2>&1 || MISSING+=("npm")
 
+# Compose v2 is the `docker compose` plugin; the standalone `docker-compose`
+# (v1) is used only when the plugin is missing.
+if docker compose version >/dev/null 2>&1; then
+    COMPOSE=(docker compose)
+elif command -v docker-compose >/dev/null 2>&1; then
+    COMPOSE=(docker-compose)
+else
+    MISSING+=("docker compose")
+fi
+
 if [[ ${#MISSING[@]} -gt 0 ]]; then
     err "Missing required tools: ${MISSING[*]}"
     err "Please install them and re-run this script."
@@ -87,7 +97,7 @@ fi
 # 5. Start Docker services (Postgres + Redis)
 # ---------------------------------------------------------------------------
 log "Starting Docker services (postgres, redis)..."
-docker-compose up -d postgres redis
+"${COMPOSE[@]}" up -d postgres redis
 
 # ---------------------------------------------------------------------------
 # 6. Wait for PostgreSQL to be ready
@@ -95,7 +105,7 @@ docker-compose up -d postgres redis
 log "Waiting for PostgreSQL to be ready..."
 MAX_WAIT=30
 WAITED=0
-until docker-compose exec -T postgres pg_isready -U postgres -q 2>/dev/null; do
+until "${COMPOSE[@]}" exec -T postgres pg_isready -U postgres -q 2>/dev/null; do
     WAITED=$((WAITED + 1))
     if [[ $WAITED -ge $MAX_WAIT ]]; then
         err "PostgreSQL did not become ready within ${MAX_WAIT}s."
@@ -327,22 +337,22 @@ ok "Simulator PID: $(cat "$DEMO_DIR/.pids/simulator.pid")"
 # 15. Success banner
 # ---------------------------------------------------------------------------
 echo ""
-echo -e "${GREEN}${BOLD}╔════════════════════════════════════════╗${NC}"
-echo -e "${GREEN}${BOLD}║  Experimently Demo — Ready!            ║${NC}"
-echo -e "${GREEN}${BOLD}║                                        ║${NC}"
-echo -e "${GREEN}${BOLD}║  Frontend:   http://localhost:3100     ║${NC}"
+echo -e "${GREEN}${BOLD}╔════════════════════════════════════════════════╗${NC}"
+echo -e "${GREEN}${BOLD}║  Experimently Demo — Ready!                    ║${NC}"
+echo -e "${GREEN}${BOLD}║                                                ║${NC}"
+echo -e "${GREEN}${BOLD}║  Frontend:    http://localhost:3100            ║${NC}"
 if [[ "$SHOPLAB_STARTED" == "1" ]]; then
-echo -e "${GREEN}${BOLD}║  ShopLab:    http://localhost:3200     ║${NC}"
+echo -e "${GREEN}${BOLD}║  ShopLab:     http://localhost:3200            ║${NC}"
 fi
 if [[ "$STREAMPULSE_STARTED" == "1" ]]; then
-echo -e "${GREEN}${BOLD}║  StreamPulse: http://localhost:3300    ║${NC}"
+echo -e "${GREEN}${BOLD}║  StreamPulse: http://localhost:3300            ║${NC}"
 fi
-echo -e "${GREEN}${BOLD}║  API Docs:   http://localhost:8000/docs║${NC}"
-echo -e "${GREEN}${BOLD}║  Admin:      admin@demo.com            ║${NC}"
-echo -e "${GREEN}${BOLD}║  Password:   Demo1234!                 ║${NC}"
-echo -e "${GREEN}${BOLD}║                                        ║${NC}"
-echo -e "${GREEN}${BOLD}║  Live events streaming in background   ║${NC}"
-echo -e "${GREEN}${BOLD}║  Logs: demo/.logs/                     ║${NC}"
-echo -e "${GREEN}${BOLD}║  Stop: ./demo/teardown-local.sh        ║${NC}"
-echo -e "${GREEN}${BOLD}╚════════════════════════════════════════╝${NC}"
+echo -e "${GREEN}${BOLD}║  API docs:    http://localhost:8000/api/v1/docs║${NC}"
+echo -e "${GREEN}${BOLD}║  Admin:       admin@demo.com                   ║${NC}"
+echo -e "${GREEN}${BOLD}║  Password:    Demo1234!                        ║${NC}"
+echo -e "${GREEN}${BOLD}║                                                ║${NC}"
+echo -e "${GREEN}${BOLD}║  Live events streaming in background           ║${NC}"
+echo -e "${GREEN}${BOLD}║  Logs: demo/.logs/                             ║${NC}"
+echo -e "${GREEN}${BOLD}║  Stop: ./demo/teardown-local.sh                ║${NC}"
+echo -e "${GREEN}${BOLD}╚════════════════════════════════════════════════╝${NC}"
 echo ""

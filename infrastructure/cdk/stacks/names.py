@@ -111,6 +111,18 @@ def glue_names(env_name: str) -> dict[str, str]:
     }
 
 
+def counters_table_name(env_name: str) -> str:
+    """The ``counters`` module's DynamoDB table, ``experiment-counters-<env>`` (#392).
+
+    The counters stack creates the table under this name, and the Fargate
+    stack gives the API task the same name (``DYNAMODB_COUNTERS_TABLE``) and
+    its access to it, both from this function. A plain string rather than the
+    table's token: a token would become a CloudFormation export, and an
+    imported export pins the counters stack in place.
+    """
+    return f"experiment-counters-{env_name}"
+
+
 #: The target groups the API's CodeDeploy deployment group swaps between, in
 #: the order the stack builds its 5xx alarms (#148).
 API_TARGET_GROUP_COLOURS = ("blue", "green")

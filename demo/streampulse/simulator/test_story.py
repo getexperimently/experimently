@@ -394,20 +394,20 @@ def test_auto_runs_all_seven_steps_in_order_through_main():
 def test_main_reports_precondition_and_auth_failures():
     client = FakeStoryClient()
     client.flag["rollout_percentage"] = 25  # healthy: step 4 has nothing to do
-    rc = story.main(["--step", "4"], client_factory=lambda u, t: client, out=io.StringIO())
+    rc = story.main(["--step", "4", "--token", "t0k"], client_factory=lambda u, t: client, out=io.StringIO())
     assert rc == 1
 
     class Unauthorized(FakeStoryClient):
         def flag_by_key(self, key):
             raise story.ApiError(401, "no", "http://x")
 
-    assert story.main(["--step", "1"], client_factory=lambda u, t: Unauthorized(), out=io.StringIO()) == 2
+    assert story.main(["--step", "1", "--token", "t0k"], client_factory=lambda u, t: Unauthorized(), out=io.StringIO()) == 2
 
     class Down(FakeStoryClient):
         def flag_by_key(self, key):
             raise story.ApiError(0, "connection refused", "http://x")
 
-    assert story.main(["--step", "1"], client_factory=lambda u, t: Down(), out=io.StringIO()) == 4
+    assert story.main(["--step", "1", "--token", "t0k"], client_factory=lambda u, t: Down(), out=io.StringIO()) == 4
 
     with pytest.raises(SystemExit):
         story.main([])  # --step or --auto is required
@@ -454,3 +454,103 @@ def test_story_client_uses_bearer_auth_and_the_documented_endpoints(monkeypatch)
     assert captured[-1]["method"] == "PUT" and captured[-1]["body"] == b'{"targeting_rules": {}}'
     client.schedule_for_flag("f-1")
     assert "feature_flag_id=f-1" in captured[-1]["url"]
+
+
+# --------------------------------------------------------------------------------------
+# Sign-in (#195): the old default token "dev" was accepted only by a backend in its
+# development sign-in mode, which neither .env.example nor setup-local.sh turns on, so the
+# documented command exited 2 with a 401.
+# --------------------------------------------------------------------------------------
+
+
+@pytest.mark.regression
+def test_without_token_the_story_signs_in_as_the_seeded_demo_admin():
+    logins: list[tuple[str, str, str]] = []
+    made: list[tuple[str, str]] = []
+
+    def login(api_url, email, password):
+        logins.append((api_url, email, password))
+        return "jwt-from-login"
+
+    def factory(url, token):
+        made.append((url, token))
+        return FakeStoryClient(url, token)
+
+    rc = story.main(["--step", "1"], client_factory=factory, login=login, out=io.StringIO())
+    assert rc == 0
+    assert logins == [("http://localhost:8000", "admin@demo.com", "Demo1234!")]
+    assert made == [("http://localhost:8000", "jwt-from-login")]
+
+
+@pytest.mark.regression
+def test_the_parser_has_no_dev_token_default():
+    args = story.build_parser().parse_args(["--step", "1"])
+    assert args.token is None
+    assert (args.email, args.password) == ("admin@demo.com", "Demo1234!")
+
+
+def test_an_explicit_token_skips_the_sign_in():
+    def login(*a):
+        raise AssertionError("must not sign in when --token is given")
+
+    made: list[str] = []
+
+    def factory(url, token):
+        made.append(token)
+        return FakeStoryClient(url, token)
+
+    rc = story.main(["--step", "1", "--token", "given"], client_factory=factory, login=login, out=io.StringIO())
+    assert rc == 0
+    assert made == ["given"]
+
+
+def test_a_failed_sign_in_exits_2_and_an_unreachable_api_exits_4(capsys):
+    def factory(u, t):
+        raise AssertionError("no client without a token")
+
+    def refused(*a):
+        raise story.ApiError(401, '{"detail":"Incorrect email or password"}', "http://x")
+
+    rc = story.main(
+        ["--step", "1", "--email", "a@b.c", "--password", "x"], client_factory=factory, login=refused, out=io.StringIO()
+    )
+    assert rc == 2
+    assert "could not sign in" in capsys.readouterr().err
+
+    def down(*a):
+        raise story.ApiError(0, "connection refused", "http://x")
+
+    assert story.main(["--step", "1"], client_factory=factory, login=down, out=io.StringIO()) == 4
+
+
+def test_sign_in_posts_the_credentials_and_returns_the_access_token(monkeypatch):
+    captured: list[dict] = []
+
+    class Resp:
+        def __init__(self, body: bytes):
+            self.body = body
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def read(self):
+            return self.body
+
+    bodies = [b'{"access_token": "jwt-1", "token_type": "bearer"}', b'{"detail": "odd"}']
+
+    def fake_urlopen(req, timeout):
+        captured.append({"url": req.full_url, "method": req.get_method(), "body": req.data})
+        return Resp(bodies.pop(0))
+
+    monkeypatch.setattr(story.urllib.request, "urlopen", fake_urlopen)
+    assert story.sign_in("http://localhost:8000/", "admin@demo.com", "Demo1234!") == "jwt-1"
+    assert captured[0] == {
+        "url": "http://localhost:8000/api/v1/auth/login",
+        "method": "POST",
+        "body": b'{"email": "admin@demo.com", "password": "Demo1234!"}',
+    }
+    with pytest.raises(story.ApiError):
+        story.sign_in("http://localhost:8000", "admin@demo.com", "Demo1234!")
