@@ -98,6 +98,7 @@ from sqlalchemy.schema import AddConstraint, CreateSchema
 from backend.app.core.settings_rules import (
     WEAK_FIRST_SUPERUSER_PASSWORD_MESSAGE,
     WEAK_SUPERUSER_PASSWORD_ENVIRONMENTS,
+    first_superuser_password_length_refusal,
     superuser_password_is_weak,
 )
 from backend.app.core.version import get_version
@@ -236,7 +237,17 @@ def first_superuser_refusal(settings) -> str | None:
     production apply at start-up, ``settings_rules.superuser_password_is_weak``)
     is accepted only when ENVIRONMENT was *set* to development or test. The
     development default that an unset ENVIRONMENT falls back to does not count.
+
+    A password longer than bcrypt can hash (72 bytes of UTF-8), or one with no
+    UTF-8 encoding, is refused in every environment: hashing it would stop the
+    start with a traceback. It is checked here, not on the settings, because
+    this runs only while ``users`` is empty.
     """
+    too_long = first_superuser_password_length_refusal(
+        settings.FIRST_SUPERUSER_PASSWORD
+    )
+    if too_long:
+        return too_long
     if (
         settings.environment_explicit
         and settings.ENVIRONMENT in WEAK_SUPERUSER_PASSWORD_ENVIRONMENTS

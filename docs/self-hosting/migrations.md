@@ -61,7 +61,9 @@ Set `ENVIRONMENT` to the environment the database belongs to (`production`,
 bootstrap creates the first administrator from `FIRST_SUPERUSER` and
 `FIRST_SUPERUSER_PASSWORD`, and it refuses a password that is empty, shorter
 than 8 characters or a well-known default unless `ENVIRONMENT` is
-`development` or `test`.
+`development` or `test`. In every environment it also refuses a password
+longer than 72 bytes when encoded as UTF-8 (a character outside ASCII takes two
+to four bytes). Once the database has users the setting is not read.
 
 The bootstrap is also what the API container runs on start-up
 (`RUN_MIGRATIONS=true`, the default), and it is what makes a **profile switch**

@@ -51,6 +51,27 @@ WEAK_FIRST_SUPERUSER_PASSWORD_MESSAGE = (
     "FIRST_SUPERUSER_PASSWORD, or set ENVIRONMENT."
 )
 
+#: The most bcrypt will hash: it refuses a longer password outright.
+MAX_PASSWORD_BYTES = 72
+
+#: What the bootstrap says when the first administrator's password is too long
+#: to hash. Checked only where that administrator is created, never on the
+#: settings: a running deployment whose users table is populated ignores the
+#: setting and must keep starting whatever it holds.
+LONG_FIRST_SUPERUSER_PASSWORD_MESSAGE = (
+    "FIRST_SUPERUSER_PASSWORD is too long: it must be at most "
+    f"{MAX_PASSWORD_BYTES} bytes when encoded as UTF-8 (a character outside "
+    "ASCII takes two to four). Set a shorter FIRST_SUPERUSER_PASSWORD."
+)
+
+#: The same, for a value that has no UTF-8 encoding at all. Fixed text: the
+#: value itself is never repeated.
+UNENCODABLE_FIRST_SUPERUSER_PASSWORD_MESSAGE = (
+    "FIRST_SUPERUSER_PASSWORD cannot be encoded as UTF-8. Set a "
+    "FIRST_SUPERUSER_PASSWORD of at most "
+    f"{MAX_PASSWORD_BYTES} bytes when encoded as UTF-8."
+)
+
 #: Legacy spelling -> canonical spelling.
 LEGACY_ENVIRONMENT_ALIASES: Dict[str, str] = {
     "dev": "development",
@@ -225,6 +246,23 @@ def superuser_password_is_weak(value: Optional[str]) -> bool:
         value.lower() in WEAK_SUPERUSER_PASSWORDS
         or len(value) < MIN_SUPERUSER_PASSWORD_LENGTH
     )
+
+
+def first_superuser_password_length_refusal(value: Optional[str]) -> Optional[str]:
+    """Why ``value`` cannot be hashed as the first administrator's password, or None.
+
+    Length is measured in UTF-8 bytes, which is what bcrypt counts. Call this
+    only where the first administrator is about to be created; see
+    :data:`LONG_FIRST_SUPERUSER_PASSWORD_MESSAGE` for why it is not a setting
+    rule.
+    """
+    try:
+        encoded = (value or "").encode("utf-8")
+    except UnicodeEncodeError:
+        return UNENCODABLE_FIRST_SUPERUSER_PASSWORD_MESSAGE
+    if len(encoded) > MAX_PASSWORD_BYTES:
+        return LONG_FIRST_SUPERUSER_PASSWORD_MESSAGE
+    return None
 
 
 def canonical_environment_quiet(value: str) -> str:
