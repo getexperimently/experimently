@@ -346,7 +346,7 @@ class TestWorkspaceInvites:
         assert "already a member" in resp.json()["detail"], resp.text
 
     def test_accept_expired_invite_returns_400(
-        self, admin_client, developer_client, developer_user, db_session
+        self, admin_client, developer_user, db_session
     ):
         """Accepting an expired invite returns 400."""
         from modules.backend.app.models.workspace import WorkspaceInvite
@@ -367,6 +367,10 @@ class TestWorkspaceInvites:
         if invite:
             invite.expires_at = datetime.utcnow() - timedelta(hours=1)
             db_session.commit()
+        # Switch to the developer only now: the auth override is app-global.
+        from backend.tests.integration.conftest import make_client_for_user
+
+        developer_client = make_client_for_user(db_session, developer_user)
         resp = developer_client.post(f"/api/v1/workspaces/invites/{token}/accept")
         assert resp.status_code == 400, resp.text
 

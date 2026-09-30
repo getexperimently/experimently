@@ -26,7 +26,10 @@ export interface RunResultsProps {
   run: WarehouseRun;
   results: Results;
   experimentKey: string;
-  /** Opens View SQL; given the button so focus can return to it. */
+  /**
+   * Opens View SQL; given the button so focus can return to it. Left out for a
+   * role that may not see the SQL, which hides the button.
+   */
   onViewSql?: (trigger: HTMLElement) => void;
 }
 

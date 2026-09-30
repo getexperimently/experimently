@@ -308,6 +308,13 @@ def make_assignment(db_session: Session) -> Callable:
 def make_client_for_user(db_session: Session, user: User) -> TestClient:
     """Create a TestClient authenticated as the given user.
 
+    The authentication is ``app.dependency_overrides``, which is app-global:
+    every client this returns, including earlier ones, acts as the user of the
+    MOST RECENT call.  So a test must not request two of the role-client
+    fixtures below (it would run as whichever was set up last); make the
+    actor's client after any setup done as another user.
+    ``backend/tests/smoke/test_role_client_fixtures.py`` enforces this.
+
     Each API request gets its own short-lived SQLAlchemy session from the test
     engine.  Using a fresh session per request (rather than the test fixture's
     db_session) prevents state corruption that occurs when the same session is
