@@ -29,7 +29,7 @@ from sqlalchemy.orm import Session
 
 from backend.app.api import deps
 from backend.app.api.v1.endpoints import results as results_endpoints
-from backend.app.core.logger import current_request_id
+from backend.app.core.logger import failure_detail
 from backend.app.core.logging import logger
 from backend.app.core.optional_modules import (
     SPLIT_URL_UNAVAILABLE_DETAIL,
@@ -302,8 +302,11 @@ async def list_experiments(
         # Let deliberate 4xx responses through instead of wrapping them in a 500.
         raise
     except Exception as e:
-        logger.error(f"Error listing experiments: {e!s}")
-        raise HTTPException(status_code=500, detail=str(e))
+        db.rollback()
+        logger.exception("Experiment list failed (%s)", type(e).__name__)
+        raise HTTPException(
+            status_code=500, detail=failure_detail("Could not list the experiments")
+        )
 
 
 #: Postgres error code for a unique constraint violation.
@@ -334,15 +337,9 @@ def is_experiment_key_conflict(exc: BaseException) -> bool:
     )
 
 
-def _create_failed_detail() -> str:
-    """The fixed message for a create that failed for any other reason."""
-    request_id = current_request_id()
-    if request_id is None:
-        return "Something went wrong while creating the experiment."
-    return (
-        "Something went wrong while creating the experiment "
-        f"(request ID: {request_id})."
-    )
+#: The fixed message for a create that failed for any reason other than a
+#: key the caller chose already being taken.
+CREATE_FAILED = "Something went wrong while creating the experiment"
 
 
 @router.post(
@@ -456,14 +453,14 @@ async def create_experiment(
         logger.exception("Experiment create failed (%s)", type(e).__name__)
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=_create_failed_detail(),
+            detail=failure_detail(CREATE_FAILED),
         )
     except Exception as e:
         db.rollback()
         logger.exception("Experiment create failed (%s)", type(e).__name__)
         raise HTTPException(
             status_code=500,
-            detail=_create_failed_detail(),
+            detail=failure_detail(CREATE_FAILED),
         )
 
 
@@ -567,10 +564,13 @@ async def get_experiment(
                                 experiment_dict
                             )
                     except Exception as ex:
-                        logger.error(f"Error serializing experiment: {ex!s}")
+                        db.rollback()
+                        logger.exception(
+                            "Experiment read failed (%s)", type(ex).__name__
+                        )
                         raise HTTPException(
                             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                            detail=f"Error serializing experiment: {ex!s}",
+                            detail=failure_detail("Could not load the experiment"),
                         )
                 else:
                     raise
@@ -586,8 +586,11 @@ async def get_experiment(
         # Let deliberate 4xx responses through instead of wrapping them in a 500.
         raise
     except Exception as e:
-        logger.error(f"Error getting experiment: {e!s}")
-        raise HTTPException(status_code=500, detail=str(e))
+        db.rollback()
+        logger.exception("Experiment read failed (%s)", type(e).__name__)
+        raise HTTPException(
+            status_code=500, detail=failure_detail("Could not load the experiment")
+        )
 
 
 @router.put(
@@ -820,10 +823,11 @@ async def update_experiment(
                         }
                         return ExperimentResponse.model_validate(experiment_dict)
                 except Exception as ex:
-                    logger.error(f"Error serializing experiment update: {ex!s}")
+                    db.rollback()
+                    logger.exception("Experiment update failed (%s)", type(ex).__name__)
                     raise HTTPException(
                         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                        detail=f"Error serializing experiment update: {ex!s}",
+                        detail=failure_detail("Could not update the experiment"),
                     )
             else:
                 raise
@@ -831,8 +835,11 @@ async def update_experiment(
         # Let deliberate 4xx responses through instead of wrapping them in a 500.
         raise
     except Exception as e:
-        logger.error(f"Error updating experiment: {e!s}")
-        raise HTTPException(status_code=500, detail=str(e))
+        db.rollback()
+        logger.exception("Experiment update failed (%s)", type(e).__name__)
+        raise HTTPException(
+            status_code=500, detail=failure_detail("Could not update the experiment")
+        )
 
 
 @router.delete(
@@ -1067,8 +1074,11 @@ async def start_experiment(
         # Let deliberate 4xx responses through instead of wrapping them in a 500.
         raise
     except Exception as e:
-        logger.error(f"Error starting experiment: {e!s}")
-        raise HTTPException(status_code=500, detail=str(e))
+        db.rollback()
+        logger.exception("Experiment start failed (%s)", type(e).__name__)
+        raise HTTPException(
+            status_code=500, detail=failure_detail("Could not start the experiment")
+        )
 
 
 @router.post(
@@ -1137,8 +1147,11 @@ async def pause_experiment(
         # Let deliberate 4xx responses through instead of wrapping them in a 500.
         raise
     except Exception as e:
-        logger.error(f"Error pausing experiment: {e!s}")
-        raise HTTPException(status_code=500, detail=str(e))
+        db.rollback()
+        logger.exception("Experiment pause failed (%s)", type(e).__name__)
+        raise HTTPException(
+            status_code=500, detail=failure_detail("Could not pause the experiment")
+        )
 
 
 @router.put(
@@ -1229,11 +1242,16 @@ async def update_experiment_schedule(
         await _invalidate_experiment_cache(cache_control, experiment_id)
 
         return ExperimentResponse.model_validate(updated_experiment)
+    except HTTPException:
+        # Let deliberate 4xx responses through instead of wrapping them in a 500.
+        raise
     except Exception as e:
-        logger.error(f"Error updating experiment schedule: {e!s}")
-        if isinstance(e, HTTPException):
-            raise e
-        raise HTTPException(status_code=500, detail=str(e))
+        db.rollback()
+        logger.exception("Experiment schedule update failed (%s)", type(e).__name__)
+        raise HTTPException(
+            status_code=500,
+            detail=failure_detail("Could not update the experiment's schedule"),
+        )
 
 
 @router.post(
@@ -1304,8 +1322,11 @@ async def complete_experiment(
         # Let deliberate 4xx responses through instead of wrapping them in a 500.
         raise
     except Exception as e:
-        logger.error(f"Error completing experiment: {e!s}")
-        raise HTTPException(status_code=500, detail=str(e))
+        db.rollback()
+        logger.exception("Experiment complete failed (%s)", type(e).__name__)
+        raise HTTPException(
+            status_code=500, detail=failure_detail("Could not complete the experiment")
+        )
 
 
 @router.get(
@@ -1428,8 +1449,11 @@ async def archive_experiment(
         # Let deliberate 4xx responses through instead of wrapping them in a 500.
         raise
     except Exception as e:
-        logger.error(f"Error archiving experiment: {e!s}")
-        raise HTTPException(status_code=500, detail=str(e))
+        db.rollback()
+        logger.exception("Experiment archive failed (%s)", type(e).__name__)
+        raise HTTPException(
+            status_code=500, detail=failure_detail("Could not archive the experiment")
+        )
 
 
 @router.post(
@@ -1504,8 +1528,11 @@ async def clone_experiment(
         # Let deliberate 4xx responses through instead of wrapping them in a 500.
         raise
     except Exception as e:
-        logger.error(f"Error cloning experiment: {e!s}")
-        raise HTTPException(status_code=500, detail=str(e))
+        db.rollback()
+        logger.exception("Experiment clone failed (%s)", type(e).__name__)
+        raise HTTPException(
+            status_code=500, detail=failure_detail("Could not clone the experiment")
+        )
 
 
 @router.get(
@@ -1590,8 +1617,11 @@ async def get_daily_experiment_results(
         # Let deliberate 4xx responses through instead of wrapping them in a 500.
         raise
     except Exception as e:
-        logger.error(f"Error getting daily experiment results: {e!s}")
-        raise HTTPException(status_code=500, detail=str(e))
+        db.rollback()
+        logger.exception("Experiment daily results failed (%s)", type(e).__name__)
+        raise HTTPException(
+            status_code=500, detail=failure_detail("Could not load the daily results")
+        )
 
 
 @router.get(
@@ -1682,8 +1712,12 @@ async def get_segmented_experiment_results(
         # Let deliberate 4xx responses through instead of wrapping them in a 500.
         raise
     except Exception as e:
-        logger.error(f"Error getting segmented experiment results: {e!s}")
-        raise HTTPException(status_code=500, detail=str(e))
+        db.rollback()
+        logger.exception("Experiment segmented results failed (%s)", type(e).__name__)
+        raise HTTPException(
+            status_code=500,
+            detail=failure_detail("Could not load the segmented results"),
+        )
 
 
 @router.post(
@@ -1746,8 +1780,12 @@ async def update_experiment_metadata(
         # Let deliberate 4xx responses through instead of wrapping them in a 500.
         raise
     except Exception as e:
-        logger.error(f"Error updating experiment metadata: {e!s}")
-        raise HTTPException(status_code=500, detail=str(e))
+        db.rollback()
+        logger.exception("Experiment metadata update failed (%s)", type(e).__name__)
+        raise HTTPException(
+            status_code=500,
+            detail=failure_detail("Could not update the experiment's metadata"),
+        )
 
 
 @router.get(
