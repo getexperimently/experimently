@@ -80,7 +80,7 @@ Put them in a `.env` file next to `docker-compose.yml`:
 ```env
 SECRET_KEY=<at least 32 random characters>
 FIRST_SUPERUSER=you@example.com
-FIRST_SUPERUSER_PASSWORD=<at least 8 characters>
+FIRST_SUPERUSER_PASSWORD=<8 characters to 72 bytes>
 POSTGRES_PASSWORD=<random>
 ```
 
