@@ -8,7 +8,10 @@
  * stub that renders nothing at all.
  *
  * Roles (the API's matrix): every role reads runs and results; ADMIN and
- * DEVELOPER start runs. Others see why they cannot, in text.
+ * DEVELOPER start runs; ADMIN, DEVELOPER and ANALYST see the SQL a run sent.
+ * Others see why they cannot, in text. A View SQL button needs both the
+ * `viewRunSql` capability and statements in the response, which the API sends
+ * as null to the other roles.
  *
  * Accessibility: the latest run's status is announced from a polite live
  * region (`role="status"`); a refused start is `role="alert"` because it is
@@ -32,6 +35,7 @@ import {
   warehouseName,
   warehouseRunsService,
 } from '@modules/services/warehouseRuns';
+import { can, refusal } from '@modules/services/warehouseRoles';
 import RunResults from '@modules/components/warehouse/runs/RunResults';
 import StartRunForm from '@modules/components/warehouse/runs/StartRunForm';
 import ViewSqlDialog from '@modules/components/warehouse/runs/ViewSqlDialog';
@@ -106,6 +110,7 @@ export default function WarehouseAnalysisSection({ experiment }: WarehouseAnalys
   const experimentId = experiment.id;
   const experimentKey = experiment.key ?? 'this experiment';
   const mayStart = canStartRun(user);
+  const maySeeSql = can(user, 'viewRunSql');
 
   const load = useCallback(async () => {
     try {
@@ -209,6 +214,11 @@ export default function WarehouseAnalysisSection({ experiment }: WarehouseAnalys
             {role ?? 'signed in without a role'}. You can read every analysis below.
           </p>
         )}
+        {!maySeeSql && (
+          <p className="text-sm text-slate-700" data-testid="warehouse-sql-note">
+            {refusal(user, 'viewRunSql')}
+          </p>
+        )}
         {latestInFlight && mayStart && !showForm && (
           <p id="warehouse-in-flight-note" className="text-sm text-slate-600">
             An analysis is in progress; you can start another when it finishes.
@@ -277,7 +287,7 @@ export default function WarehouseAnalysisSection({ experiment }: WarehouseAnalys
                 </>
               );
             })()}
-            {shownFailure.statements && shownFailure.statements.length > 0 && (
+            {maySeeSql && shownFailure.statements && shownFailure.statements.length > 0 && (
               <button
                 type="button"
                 onClick={(e) => setSqlFor({ run: shownFailure, trigger: e.currentTarget })}
@@ -302,7 +312,7 @@ export default function WarehouseAnalysisSection({ experiment }: WarehouseAnalys
               run={lastGood}
               results={lastGood.results}
               experimentKey={experimentKey}
-              onViewSql={(trigger) => setSqlFor({ run: lastGood, trigger })}
+              onViewSql={maySeeSql ? (trigger) => setSqlFor({ run: lastGood, trigger }) : undefined}
             />
           </div>
         )}
@@ -339,7 +349,7 @@ export default function WarehouseAnalysisSection({ experiment }: WarehouseAnalys
         )}
       </div>
 
-      {sqlFor && sqlFor.run.statements && (
+      {maySeeSql && sqlFor && sqlFor.run.statements && (
         <ViewSqlDialog
           statements={sqlFor.run.statements}
           returnFocusTo={sqlFor.trigger}

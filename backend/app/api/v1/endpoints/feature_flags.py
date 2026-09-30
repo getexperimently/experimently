@@ -329,7 +329,11 @@ async def create_feature_flag(
                 "name": response_dict.get("name"),
             },
         )
+        # log() only flushes, and the create above has already committed, so
+        # without this the record is rolled back when the session closes.
+        db.commit()
     except Exception as audit_error:
+        db.rollback()
         logger.warning(
             f"Compliance audit logging failed for feature_flag create: {audit_error}"
         )
@@ -511,7 +515,11 @@ async def update_feature_flag(
             old_value=old_flag_snapshot,
             new_value=new_flag_snapshot,
         )
+        # log() only flushes, and the update above has already committed, so
+        # without this the record is rolled back when the session closes.
+        db.commit()
     except Exception as audit_error:
+        db.rollback()
         logger.warning(
             f"Compliance audit logging failed for feature_flag update: {audit_error}"
         )
@@ -623,7 +631,11 @@ async def delete_feature_flag(
             actor_id=str(current_user.id) if current_user else None,
             old_value=deleted_flag_snapshot,
         )
+        # log() only flushes, and the delete above has already committed, so
+        # without this the record is rolled back when the session closes.
+        db.commit()
     except Exception as audit_error:
+        db.rollback()
         logger.warning(
             f"Compliance audit logging failed for feature_flag delete: {audit_error}"
         )

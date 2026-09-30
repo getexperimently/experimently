@@ -39,6 +39,7 @@ from backend.app.schemas.bayesian import (
     BayesianResultsResponse,
     BayesianVariantResult,
 )
+from backend.tests.integration.conftest import make_client_for_user
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -411,13 +412,22 @@ class TestBayesianResultsAccessControl:
         )
         assert response.status_code in (404, 500), response.text
 
-    def test_developer_can_access_results(self, developer_client, admin_client):
-        """Developer role can read experiment results."""
+    def test_developer_can_access_results(
+        self, admin_client, db_session, developer_user
+    ):
+        """Developer role can read experiment results.
+
+        The experiment is created as ADMIN, then the client is switched to the
+        developer: ``make_client_for_user`` replaces the app-global auth override,
+        so the request below carries the developer, not the admin.
+        """
+        assert not developer_user.is_superuser
         exp = _create_experiment(admin_client, "Developer Results Access Test")
         exp_id = exp["id"]
 
         mock_result = _make_base_results(exp_id, bayesian_results=None)
 
+        developer_client = make_client_for_user(db_session, developer_user)
         with patch(
             "backend.app.services.analysis_service.AnalysisService.get_experiment_results",
             return_value=mock_result,
@@ -428,13 +438,20 @@ class TestBayesianResultsAccessControl:
 
         assert response.status_code == 200, response.text
 
-    def test_analyst_can_access_results(self, analyst_client, admin_client):
-        """Analyst role can read experiment results."""
+    def test_analyst_can_access_results(self, admin_client, db_session, analyst_user):
+        """Analyst role can read experiment results.
+
+        The experiment is created as ADMIN, then the client is switched to the
+        analyst: ``make_client_for_user`` replaces the app-global auth override,
+        so the request below carries the analyst, not the admin.
+        """
+        assert not analyst_user.is_superuser
         exp = _create_experiment(admin_client, "Analyst Results Access Test")
         exp_id = exp["id"]
 
         mock_result = _make_base_results(exp_id, bayesian_results=None)
 
+        analyst_client = make_client_for_user(db_session, analyst_user)
         with patch(
             "backend.app.services.analysis_service.AnalysisService.get_experiment_results",
             return_value=mock_result,

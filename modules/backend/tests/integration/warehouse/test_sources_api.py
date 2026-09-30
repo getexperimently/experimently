@@ -86,7 +86,6 @@ def test_a_filter_literal_outside_the_allowlist_is_refused(wh):
 
 def test_validate_returns_columns_and_types(wh):
     _tables(wh)
-    admin = wh.as_("ANALYST")
     connection = wh.athena_connection(wh.as_("ADMIN"))
     analyst = wh.as_("ANALYST")
     metric = wh.metric_source(
@@ -111,8 +110,10 @@ def test_validate_returns_columns_and_types(wh):
     assert validated["source"]["validated_at"] is not None
     # Validation read metadata only: no statement was sent.
     assert wh.queries == []
-    # Editing clears it.
-    edited = admin.put(
+    # Editing clears it.  The analyst who created the source edits it; the
+    # client is re-made here because the auth override is app-global.
+    analyst = wh.as_("ANALYST")
+    edited = analyst.put(
         f"{WA}/sources/{metric['id']}",
         json={
             "kind": "metric",
