@@ -2517,7 +2517,7 @@
         "type": "object"
       },
       "EdgeBootstrapResponse": {
-        "description": "Full edge bootstrap payload.\n\nDesigned to be:\n  - Cached at CDN level (use Cache-Control: public, max-age=60)\n  - Verified via the `version` hash (SHA-256 of the sorted JSON payload)\n  - Consumed by the Edge SDK's `refreshFlags()` method",
+        "description": "The deprecated edge bootstrap payload.\n\n`version` is a SHA-256 of the sorted flags and experiments, so it is the\nsame for the same content. `ttl_seconds` is always 60. No Experimently SDK\nreads this payload; server-side local evaluation uses GET /api/v1/sdk/ruleset.",
         "properties": {
           "experiments": {
             "items": {
@@ -2603,7 +2603,7 @@
         "type": "object"
       },
       "EdgeFeatureFlag": {
-        "description": "Minimal feature flag definition for edge SDK local evaluation.\nUses camelCase keys to match the TypeScript SDK conventions.",
+        "description": "A feature flag as the deprecated edge bootstrap listing returns it.\nUses camelCase keys. `enabled` is true when the flag's status is active.",
         "properties": {
           "enabled": {
             "title": "Enabled",
@@ -2643,7 +2643,7 @@
         "type": "object"
       },
       "EdgeFlagVariant": {
-        "description": "Feature flag variant for local evaluation.",
+        "description": "A feature flag variant.",
         "properties": {
           "key": {
             "title": "Key",
@@ -2671,7 +2671,7 @@
         "type": "object"
       },
       "EdgeTargetingRule": {
-        "description": "Targeting rule used for local evaluation in edge environments.",
+        "description": "A targeting rule stored in the legacy list shape.",
         "properties": {
           "attribute": {
             "title": "Attribute",
@@ -4586,7 +4586,7 @@
         "type": "object"
       },
       "FeatureFlagDefinition": {
-        "description": "Minimal flag definition used for local (client-side) evaluation.",
+        "description": "A feature flag as the deprecated /openfeature/flags listing returns it.",
         "properties": {
           "enabled": {
             "title": "Enabled",
@@ -14775,7 +14775,8 @@
     },
     "/api/v1/edge/bootstrap": {
       "get": {
-        "description": "Returns all feature flags and experiments accessible to this API key in a single response. Optimized for edge SDK initialization. The response includes a stable SHA-256 `version` hash for cache invalidation. Designed to be cached at CDN level with a 60-second TTL. \n\n**Authentication**: Pass a valid API key in the `X-API-Key` header.",
+        "deprecated": true,
+        "description": "**Deprecated.** For server-side local evaluation use `GET /api/v1/sdk/ruleset`, with an API key that carries the `sdk:ruleset` scope; to evaluate one flag use `GET /api/v1/feature-flags/evaluate/{flag_key}`. No Experimently SDK calls this route. It still answers as before and may be removed in a later release.\n\nReturns the feature flags and experiments owned by the user who created the API key, not every flag in the deployment.\n\n- A flag's `rules` carry only rules stored in the legacy list shape. Rules written in the dashboard's shape are left out, so a flag that has them is returned with `rules: []`.\n- A flag's `enabled` is true when its status is active.\n- An experiment's `key` is derived from its name (lower-cased, spaces replaced by hyphens), not the experiment's own `key`.\n- `version` is a SHA-256 of the flags and experiments, the same for the same content. `ttl_seconds` is always 60.\n\n**Authentication**: a valid API key in the `X-API-Key` header.",
         "operationId": "get_edge_bootstrap_api_v1_edge_bootstrap_get",
         "responses": {
           "200": {
@@ -14797,7 +14798,7 @@
             "APIKeyHeader": []
           }
         ],
-        "summary": "Edge SDK bootstrap — all flags and experiments in one call",
+        "summary": "Flags and experiments owned by the API key's user (deprecated)",
         "tags": [
           "Edge",
           "Edge"
@@ -21266,7 +21267,7 @@
     "/api/v1/openfeature/flags": {
       "get": {
         "deprecated": true,
-        "description": "Returns all feature flag definitions accessible to this API key. OpenFeature providers fetch this endpoint once on initialization to warm their local flag cache and perform client-side evaluation without a per-flag network round-trip.",
+        "description": "**Deprecated.** Neither OpenFeature provider calls this route: both evaluate through `GET /api/v1/feature-flags/evaluate/{flag_key}`. For server-side local evaluation use `GET /api/v1/sdk/ruleset`, with an API key that carries the `sdk:ruleset` scope. This route still answers as before and may be removed in a later release.\n\nReturns the feature flags visible to the user who created the API key. A flag's `rules` carry only rules stored in the legacy list shape; rules written in the dashboard's shape are left out, so a flag that has them is returned with `rules: []`. A flag's `enabled` is true when its status is active.",
         "operationId": "get_openfeature_flags_api_v1_openfeature_flags_get",
         "responses": {
           "200": {
@@ -21288,7 +21289,7 @@
             "APIKeyHeader": []
           }
         ],
-        "summary": "List all flags for OpenFeature local evaluation",
+        "summary": "Flag definitions for the API key's user (deprecated)",
         "tags": [
           "OpenFeature",
           "OpenFeature"

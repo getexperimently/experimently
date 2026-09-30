@@ -1,11 +1,19 @@
 """
-Edge Bootstrap API endpoint (EP-047).
-
-Provides a fast, lightweight endpoint optimized for edge SDK initialization:
+Edge bootstrap listing (EP-047). Deprecated (#226).
 
   GET /api/v1/edge/bootstrap
-    Returns all feature flags and experiments for the API key in a single
-    response. Designed to be cached at CDN level with a 60-second TTL.
+    Returns the feature flags and experiments owned by the user who created
+    the API key. It does not return every flag in the deployment.
+
+This route is deprecated and kept with its shape and behaviour unchanged. No
+Experimently SDK calls it: the Edge SDK evaluates through
+``GET /api/v1/feature-flags/evaluate/{key}`` (see docs/sdk/edge.md), and
+server-side local evaluation downloads ``GET /api/v1/sdk/ruleset`` with a key
+that carries the ``sdk:ruleset`` scope (see docs/sdk/local-evaluation.md).
+
+A flag's ``rules`` carry only rules stored in the legacy list shape; rules in
+the dashboard's shape are left out, so such a flag has ``rules: []``.
+An experiment's ``key`` is derived from its name, not its public ``key``.
 
 Response format:
   {
@@ -64,7 +72,7 @@ router = APIRouter(
 
 
 class EdgeTargetingRule(BaseModel):
-    """Targeting rule used for local evaluation in edge environments."""
+    """A targeting rule stored in the legacy list shape."""
 
     attribute: str
     operator: str
@@ -73,7 +81,7 @@ class EdgeTargetingRule(BaseModel):
 
 
 class EdgeFlagVariant(BaseModel):
-    """Feature flag variant for local evaluation."""
+    """A feature flag variant."""
 
     key: str
     weight: float
@@ -82,8 +90,8 @@ class EdgeFlagVariant(BaseModel):
 
 class EdgeFeatureFlag(BaseModel):
     """
-    Minimal feature flag definition for edge SDK local evaluation.
-    Uses camelCase keys to match the TypeScript SDK conventions.
+    A feature flag as the deprecated edge bootstrap listing returns it.
+    Uses camelCase keys. `enabled` is true when the flag's status is active.
     """
 
     key: str
@@ -111,12 +119,11 @@ class EdgeExperiment(BaseModel):
 
 class EdgeBootstrapResponse(BaseModel):
     """
-    Full edge bootstrap payload.
+    The deprecated edge bootstrap payload.
 
-    Designed to be:
-      - Cached at CDN level (use Cache-Control: public, max-age=60)
-      - Verified via the `version` hash (SHA-256 of the sorted JSON payload)
-      - Consumed by the Edge SDK's `refreshFlags()` method
+    `version` is a SHA-256 of the sorted flags and experiments, so it is the
+    same for the same content. `ttl_seconds` is always 60. No Experimently SDK
+    reads this payload; server-side local evaluation uses GET /api/v1/sdk/ruleset.
     """
 
     flags: List[EdgeFeatureFlag]
@@ -233,14 +240,26 @@ def _compute_version(
 @router.get(
     "/bootstrap",
     response_model=EdgeBootstrapResponse,
-    summary="Edge SDK bootstrap — all flags and experiments in one call",
+    summary="Flags and experiments owned by the API key's user (deprecated)",
+    deprecated=True,
     description=(
-        "Returns all feature flags and experiments accessible to this API key "
-        "in a single response. Optimized for edge SDK initialization. "
-        "The response includes a stable SHA-256 `version` hash for cache "
-        "invalidation. Designed to be cached at CDN level with a 60-second TTL. "
-        "\n\n"
-        "**Authentication**: Pass a valid API key in the `X-API-Key` header."
+        "**Deprecated.** For server-side local evaluation use "
+        "`GET /api/v1/sdk/ruleset`, with an API key that carries the "
+        "`sdk:ruleset` scope; to evaluate one flag use "
+        "`GET /api/v1/feature-flags/evaluate/{flag_key}`. No Experimently SDK "
+        "calls this route. It still answers as before and may be removed in a "
+        "later release.\n\n"
+        "Returns the feature flags and experiments owned by the user who "
+        "created the API key, not every flag in the deployment.\n\n"
+        "- A flag's `rules` carry only rules stored in the legacy list shape. "
+        "Rules written in the dashboard's shape are left out, so a flag that "
+        "has them is returned with `rules: []`.\n"
+        "- A flag's `enabled` is true when its status is active.\n"
+        "- An experiment's `key` is derived from its name (lower-cased, spaces "
+        "replaced by hyphens), not the experiment's own `key`.\n"
+        "- `version` is a SHA-256 of the flags and experiments, the same for "
+        "the same content. `ttl_seconds` is always 60.\n\n"
+        "**Authentication**: a valid API key in the `X-API-Key` header."
     ),
 )
 def get_edge_bootstrap(
@@ -248,11 +267,7 @@ def get_edge_bootstrap(
     api_key_user: User = Depends(deps.get_api_key),
 ) -> EdgeBootstrapResponse:
     """
-    Return all flags and experiments for the API key in one lightweight payload.
-
-    This endpoint is the primary entry point for edge SDK initialization.
-    Edge functions call this once at startup (or on cache miss) to warm their
-    in-memory flag store.
+    Return the key owner's flags and experiments. Deprecated; see the module docstring.
     """
     if api_key_user is None:
         raise HTTPException(

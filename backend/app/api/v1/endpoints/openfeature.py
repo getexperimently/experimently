@@ -7,6 +7,7 @@ OpenFeature flag listing (EP-044). Deprecated.
 This route is deprecated and kept with its behaviour unchanged. Neither
 OpenFeature provider calls it: both evaluate through
 ``GET /api/v1/feature-flags/evaluate/{key}`` (see docs/sdk/openfeature.md).
+Server-side local evaluation downloads ``GET /api/v1/sdk/ruleset`` instead (#226).
 
 ``POST /api/v1/openfeature/evaluate`` and ``POST /api/v1/openfeature/bulk-evaluate``
 were removed (#241): they could not evaluate an existing flag (they read a
@@ -58,7 +59,7 @@ class TargetingRuleResponse(BaseModel):
 
 
 class FeatureFlagDefinition(BaseModel):
-    """Minimal flag definition used for local (client-side) evaluation."""
+    """A feature flag as the deprecated /openfeature/flags listing returns it."""
 
     key: str
     enabled: bool
@@ -121,13 +122,19 @@ def _flag_to_definition(flag: FeatureFlag) -> FeatureFlagDefinition:
 @router.get(
     "/flags",
     response_model=FlagsListResponse,
-    summary="List all flags for OpenFeature local evaluation",
+    summary="Flag definitions for the API key's user (deprecated)",
     deprecated=True,
     description=(
-        "Returns all feature flag definitions accessible to this API key. "
-        "OpenFeature providers fetch this endpoint once on initialization to "
-        "warm their local flag cache and perform client-side evaluation without "
-        "a per-flag network round-trip."
+        "**Deprecated.** Neither OpenFeature provider calls this route: both "
+        "evaluate through `GET /api/v1/feature-flags/evaluate/{flag_key}`. For "
+        "server-side local evaluation use `GET /api/v1/sdk/ruleset`, with an "
+        "API key that carries the `sdk:ruleset` scope. This route still answers "
+        "as before and may be removed in a later release.\n\n"
+        "Returns the feature flags visible to the user who created the API "
+        "key. A flag's `rules` carry only rules stored in the legacy list "
+        "shape; rules written in the "
+        "dashboard's shape are left out, so a flag that has them is returned "
+        "with `rules: []`. A flag's `enabled` is true when its status is active."
     ),
 )
 def get_openfeature_flags(
@@ -141,7 +148,7 @@ def get_openfeature_flags(
             detail="Valid API key required",
         )
 
-    # Superusers and admins can see all flags; regular users see only their own.
+    # Superusers can see all flags; every other user sees only their own.
     if api_key_user.is_superuser:
         flags = db.query(FeatureFlag).all()
     else:
