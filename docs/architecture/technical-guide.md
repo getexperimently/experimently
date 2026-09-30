@@ -362,17 +362,25 @@ Five background jobs start with the API process (`lifespan` in `backend/app/main
 
 | Scheduler | Default cycle | Responsibility |
 |-----------|---------------|----------------|
-| Experiment scheduler | 15 min | Starts/stops experiments at `start_date` / `end_date` |
+| Experiment scheduler | `EXPERIMENT_SCHEDULER_INTERVAL_MINUTES` (15) | Starts draft experiments at `start_date`, resumes paused ones at a scheduled `resume_at`, stops experiments at `end_date` |
 | Rollout scheduler | 15 min | Advances feature-flag rollout stages |
 | Metrics scheduler | 15 min | Aggregates raw metrics |
 | Safety monitor | 5 min | Checks per-flag safety thresholds, triggers rollbacks |
 | Bandit scheduler | `BANDIT_UPDATE_INTERVAL_MINUTES` (5) | Recomputes multi-armed bandit weights (DynamoDB counters when their pulls and successes are at least PostgreSQL's, else PostgreSQL) |
 
-### Experiment Scheduler (every 15 min)
+### Experiment Scheduler (every `EXPERIMENT_SCHEDULER_INTERVAL_MINUTES`, default 15)
 
-Transitions experiments based on `start_date`/`end_date`:
+Transitions experiments based on `start_date`, `resume_at` and `end_date`:
 - `DRAFT` + `start_date ≤ now` → `ACTIVE`
+- `PAUSED` + `resume_at ≤ now` → `ACTIVE` (the notification says "resumed automatically")
 - `ACTIVE` + `end_date ≤ now` → `COMPLETED`
+
+A paused experiment's `start_date` is when it first started and never resumes it: a
+`PAUSED` experiment with no `resume_at` stays paused, across ticks and restarts, until
+someone starts it. `PUT /schedule` on a `PAUSED` experiment stores its `start_date` as
+`resume_at` and leaves the experiment's own `start_date` alone. Any change of status clears
+`resume_at` (an ORM listener on `Experiment.status`), and a database constraint
+(`ck_experiments_resume_only_when_paused`) refuses a `resume_at` on any status but `PAUSED`.
 
 ```python
 # API: schedule an experiment

@@ -1,0 +1,698 @@
+"""A paused experiment stays paused until it is started or a resume is scheduled (#436).
+
+Before the fix the scheduler activated every PAUSED experiment whose
+``start_date`` had passed -- which is every experiment that ever ran -- so a
+pause lasted until the next tick, and the scheduler ticks once at startup. A
+resume scheduled with ``PUT /schedule`` was stored by overwriting
+``start_date``, and a later manual pause was undone by that same stale date.
+
+Now a resume on a PAUSED experiment is its own column, ``resume_at``:
+
+* P1  a paused experiment with a past ``start_date`` and no resume stays paused;
+* P2  ``PUT /schedule`` on a PAUSED experiment records ``resume_at`` (in the
+      response and on a later GET), leaves ``start_date`` alone, and the tick
+      resumes it, clears ``resume_at`` and says "resumed automatically";
+* P3  a resume in the future is not fired early;
+* P4  a manual pause after a resume leaves nothing pending, whichever writer
+      pauses it (the sequence pause, schedule, start, pause, tick);
+* P5  every other status change clears a scheduled resume, through every
+      writer that has a route, the two service-only methods, and an instance
+      expired by a commit;
+* P6  a due DRAFT still activates, with "started automatically";
+* P7  ``PUT /schedule`` on a DRAFT experiment is unchanged: no ``resume_at``,
+      and a field the request omits is cleared;
+
+plus the refusals ``PUT /schedule`` on PAUSED makes from the values the
+experiment would end up with (400, never a constraint error), what happens to
+each field the request omits, the 400 text for an ACTIVE experiment, and the
+hazard the rollback note describes: without the listener, ``POST /start`` on a
+paused experiment with a pending resume is a 500.
+
+Every request is a real one: real ``User`` rows, a real local JWT from
+``create_local_access_token``, and no dependency override except
+``deps.get_db``. ``make_client_for_user`` is deliberately not used (#470).
+The scheduler runs against the same database with its ``SessionLocal``
+patched, as ``test_experiment_bayesian_config_api.py`` does. The database is
+shared with other tests, so the tick's own counts are not asserted; which
+experiments it activated is read from the notifications it sends.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import uuid
+from datetime import datetime, timedelta, timezone
+from unittest.mock import MagicMock, patch
+
+import pytest
+from fastapi.testclient import TestClient
+from sqlalchemy import event, text, update
+from sqlalchemy.orm import sessionmaker
+
+from backend.app.api import deps
+
+# The function the local login route signs its tokens with.
+from backend.app.api.v1.endpoints.auth import create_local_access_token
+from backend.app.core.config import settings
+from backend.app.main import app
+from backend.app.models import experiment as experiment_models
+from backend.app.models.experiment import Experiment, ExperimentStatus
+from backend.app.models.user import User, UserRole
+from backend.app.services.experiment_service import ExperimentService
+from backend.app.services.notification_service import NotificationService
+
+pytestmark = [pytest.mark.integration, pytest.mark.regression]
+
+BASE = "/api/v1/experiments"
+
+
+# --- fixtures -----------------------------------------------------------------
+
+
+@pytest.fixture(autouse=True)
+def _local_auth(monkeypatch):
+    monkeypatch.setattr(settings, "AUTH_PROVIDER", "local")
+    monkeypatch.setattr(settings, "ENVIRONMENT", "test")
+    monkeypatch.setattr(settings, "CACHE_ENABLED", False)
+
+
+def _factory(db_session, **kwargs):
+    engine = db_session.get_bind()
+    factory = sessionmaker(bind=engine, **kwargs)
+
+    def session():
+        s = factory()
+        s.execute(text("SET search_path TO test_experimentation"))
+        return s
+
+    return session
+
+
+@pytest.fixture
+def people(db_session):
+    """A DEVELOPER (not a superuser) for the everyday routes, and a superuser
+    for the status PUT, which only a superuser may make on a non-DRAFT."""
+    suffix = uuid.uuid4().hex[:8]
+
+    def make(name, role, is_superuser):
+        user = User(
+            username=f"pause436_{name}_{suffix}",
+            email=f"pause436_{name}_{suffix}@pause.test",
+            full_name="Pause Semantics User",
+            hashed_password="unused: these users sign in by token only",
+            is_active=True,
+            is_superuser=is_superuser,
+            role=role,
+        )
+        db_session.add(user)
+        return user
+
+    users = {
+        "developer": make("developer", UserRole.DEVELOPER, False),
+        "superuser": make("superuser", UserRole.ADMIN, True),
+    }
+    db_session.commit()
+    return users
+
+
+@pytest.fixture
+def client(db_session):
+    session = _factory(db_session, autocommit=False, autoflush=False)
+
+    def override_get_db():
+        s = session()
+        try:
+            yield s
+        finally:
+            s.close()
+
+    app.dependency_overrides[deps.get_db] = override_get_db
+    try:
+        with TestClient(app, raise_server_exceptions=False) as c:
+            yield c
+    finally:
+        app.dependency_overrides.pop(deps.get_db, None)
+
+
+# --- helpers ------------------------------------------------------------------
+
+
+def _auth(user):
+    return {"Authorization": f"Bearer {create_local_access_token(user)}"}
+
+
+def _now():
+    return datetime.now(timezone.utc)
+
+
+def _iso(value: datetime) -> str:
+    return value.isoformat()
+
+
+def _parse(value):
+    if value is None:
+        return None
+    parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+
+
+def _payload():
+    return {
+        "name": f"pause436 {uuid.uuid4().hex[:8]}",
+        "description": "A paused experiment stays paused",
+        "hypothesis": "A pause lasts until someone ends it",
+        "experiment_type": "a_b",
+        "variants": [
+            {"name": "Control", "is_control": True, "traffic_allocation": 50},
+            {"name": "Treatment", "is_control": False, "traffic_allocation": 50},
+        ],
+        "metrics": [
+            {
+                "name": "Conversion Rate",
+                "event_name": "purchase",
+                "metric_type": "conversion",
+                "is_primary": True,
+            }
+        ],
+    }
+
+
+def _ok(response, status=200):
+    assert response.status_code == status, response.text
+    return response.json()
+
+
+def _create(client, people):
+    return _ok(
+        client.post(f"{BASE}/", json=_payload(), headers=_auth(people["developer"])),
+        201,
+    )["id"]
+
+
+def _post(client, people, experiment_id, action, who="developer"):
+    return client.post(f"{BASE}/{experiment_id}/{action}", headers=_auth(people[who]))
+
+
+def _schedule(client, people, experiment_id, body):
+    return client.put(
+        f"{BASE}/{experiment_id}/schedule",
+        json=body,
+        headers=_auth(people["developer"]),
+    )
+
+
+def _put_status(client, people, experiment_id, status):
+    return client.put(
+        f"{BASE}/{experiment_id}",
+        json={"status": status},
+        headers=_auth(people["superuser"]),
+    )
+
+
+def _get(client, people, experiment_id):
+    return _ok(
+        client.get(f"{BASE}/{experiment_id}", headers=_auth(people["developer"]))
+    )
+
+
+def _row(db_session, experiment_id):
+    session = _factory(db_session)()
+    try:
+        row = session.get(Experiment, uuid.UUID(experiment_id))
+        return row.status, row.resume_at, row.start_date, row.end_date
+    finally:
+        session.close()
+
+
+def _paused(client, people):
+    """Created, started and paused through the API: its start_date is now in
+    the past, which is exactly the row the old scheduler resumed."""
+    experiment_id = _create(client, people)
+    _ok(_post(client, people, experiment_id, "start"))
+    assert _ok(_post(client, people, experiment_id, "pause"))["status"] == "paused"
+    return experiment_id
+
+
+def _paused_with_resume(client, people, delta):
+    experiment_id = _paused(client, people)
+    resume = _now() + delta
+    _ok(_schedule(client, people, experiment_id, {"start_date": _iso(resume)}))
+    return experiment_id
+
+
+def _tick(db_session):
+    """One scheduler tick against the test database. Returns the
+    notifications it sent, as {experiment_id: message}."""
+    from backend.app.core.scheduler import ExperimentScheduler
+
+    sent = {}
+    notifications = NotificationService()
+    notifications._slack = MagicMock()
+    notifications._email = MagicMock()
+
+    def capture(event_):
+        assert event_.event_type == "experiment_started"
+        sent[event_.experiment_id] = event_.message
+        return True
+
+    notifications._send = capture
+
+    scheduler = ExperimentScheduler()
+    scheduler._notification_service = notifications
+    with patch("backend.app.core.scheduler.SessionLocal", _factory(db_session)):
+        asyncio.run(scheduler.process_scheduled_experiments())
+    return sent
+
+
+# --- P1: no resume, no activation ----------------------------------------------
+
+
+def test_p1_paused_experiment_with_past_start_stays_paused(client, db_session, people):
+    experiment_id = _paused(client, people)
+    status, resume_at, start_date, _ = _row(db_session, experiment_id)
+    assert status == ExperimentStatus.PAUSED
+    assert resume_at is None
+    assert start_date is not None and start_date.replace(tzinfo=timezone.utc) <= _now()
+
+    sent = _tick(db_session)
+
+    assert experiment_id not in sent
+    assert _row(db_session, experiment_id)[0] == ExperimentStatus.PAUSED
+    assert _get(client, people, experiment_id)["status"] == "paused"
+
+
+# --- P2: a scheduled resume ------------------------------------------------------
+
+
+def test_p2_scheduled_resume_is_recorded_and_fires(client, db_session, people):
+    experiment_id = _paused(client, people)
+    started = _get(client, people, experiment_id)["start_date"]
+    resume = _now() - timedelta(minutes=1)
+
+    body = _ok(_schedule(client, people, experiment_id, {"start_date": _iso(resume)}))
+    assert body["status"] == "paused"
+    assert _parse(body["resume_at"]) == resume
+    assert body["start_date"] == started
+
+    fetched = _get(client, people, experiment_id)
+    assert _parse(fetched["resume_at"]) == resume
+    assert fetched["start_date"] == started
+
+    sent = _tick(db_session)
+
+    assert sent[experiment_id] == (
+        f"Experiment '{fetched['name']}' has been resumed automatically."
+    )
+    after = _get(client, people, experiment_id)
+    assert after["status"] == "active"
+    assert after["resume_at"] is None
+    assert after["start_date"] == started
+
+
+# --- P3: not early ---------------------------------------------------------------
+
+
+def test_p3_future_resume_is_not_fired(client, db_session, people):
+    experiment_id = _paused_with_resume(client, people, timedelta(hours=1))
+
+    sent = _tick(db_session)
+
+    assert experiment_id not in sent
+    status, resume_at, _, _ = _row(db_session, experiment_id)
+    assert status == ExperimentStatus.PAUSED
+    assert resume_at is not None and resume_at > _now()
+
+
+# --- P4: a later manual pause leaves nothing pending ------------------------------
+
+
+def _pause_by_route(client, people, experiment_id, db_session):
+    _ok(_post(client, people, experiment_id, "pause"))
+
+
+def _pause_by_status_put(client, people, experiment_id, db_session):
+    _ok(_put_status(client, people, experiment_id, "paused"))
+
+
+def _pause_by_service(client, people, experiment_id, db_session):
+    session = _factory(db_session)()
+    try:
+        row = session.get(Experiment, uuid.UUID(experiment_id))
+        ExperimentService(session).pause_experiment(row)
+    finally:
+        session.close()
+
+
+PAUSERS = {
+    "post_pause": _pause_by_route,
+    "superuser_put_status": _pause_by_status_put,
+    "service_pause_experiment": _pause_by_service,
+}
+
+
+@pytest.mark.parametrize("pauser", PAUSERS)
+def test_p4_pause_after_a_resume_sticks(client, db_session, people, pauser):
+    """Pause, schedule a resume, start, pause again: the second pause holds.
+    The old code had moved start_date to the resume time, so the tick undid
+    the second pause."""
+    experiment_id = _paused_with_resume(client, people, -timedelta(minutes=1))
+    _ok(_post(client, people, experiment_id, "start"))
+    assert _row(db_session, experiment_id)[:2] == (ExperimentStatus.ACTIVE, None)
+
+    PAUSERS[pauser](client, people, experiment_id, db_session)
+    assert _row(db_session, experiment_id)[:2] == (ExperimentStatus.PAUSED, None)
+
+    sent = _tick(db_session)
+
+    assert experiment_id not in sent
+    assert _row(db_session, experiment_id)[:2] == (ExperimentStatus.PAUSED, None)
+
+
+# --- P5: every status change clears a scheduled resume ---------------------------
+
+
+def _start(client, people, experiment_id, db_session):
+    return _post(client, people, experiment_id, "start")
+
+
+def _complete(client, people, experiment_id, db_session):
+    return _post(client, people, experiment_id, "complete")
+
+
+def _archive(client, people, experiment_id, db_session):
+    return _post(client, people, experiment_id, "archive")
+
+
+def _put_active(client, people, experiment_id, db_session):
+    return _put_status(client, people, experiment_id, "active")
+
+
+def _put_draft(client, people, experiment_id, db_session):
+    return _put_status(client, people, experiment_id, "draft")
+
+
+def _service_complete(client, people, experiment_id, db_session):
+    session = _factory(db_session)()
+    try:
+        row = session.get(Experiment, uuid.UUID(experiment_id))
+        ExperimentService(session).complete_experiment(row)
+    finally:
+        session.close()
+
+
+#: writer -> (how it changes the status, the status afterwards)
+CLEARERS = {
+    "post_start": (_start, ExperimentStatus.ACTIVE),
+    "superuser_put_active": (_put_active, ExperimentStatus.ACTIVE),
+    "superuser_put_draft": (_put_draft, ExperimentStatus.DRAFT),
+    "post_complete": (_complete, ExperimentStatus.COMPLETED),
+    "post_archive": (_archive, ExperimentStatus.ARCHIVED),
+    "service_complete_experiment": (_service_complete, ExperimentStatus.COMPLETED),
+}
+
+
+@pytest.mark.parametrize("writer", CLEARERS)
+def test_p5_status_change_clears_the_resume(client, db_session, people, writer):
+    experiment_id = _paused_with_resume(client, people, timedelta(hours=1))
+    assert _row(db_session, experiment_id)[1] is not None
+
+    do, expected = CLEARERS[writer]
+    response = do(client, people, experiment_id, db_session)
+    if response is not None:
+        body = _ok(response)
+        assert body["status"] == expected.value
+        assert body["resume_at"] is None
+
+    assert _row(db_session, experiment_id)[:2] == (expected, None)
+
+
+def test_p5_scheduler_resume_clears_the_resume(client, db_session, people):
+    experiment_id = _paused_with_resume(client, people, -timedelta(minutes=1))
+
+    assert experiment_id in _tick(db_session)
+
+    assert _row(db_session, experiment_id)[:2] == (ExperimentStatus.ACTIVE, None)
+
+
+def test_p5_expired_instance(client, db_session, people):
+    """A status set on an instance a commit has expired: the old value is
+    loaded (active_history), so re-setting PAUSED keeps the resume and a real
+    change clears it."""
+    experiment_id = _paused_with_resume(client, people, timedelta(hours=1))
+    session = _factory(db_session, expire_on_commit=True)()
+    try:
+        row = session.get(Experiment, uuid.UUID(experiment_id))
+        session.commit()  # expires row
+        assert "status" not in row.__dict__
+        row.status = ExperimentStatus.PAUSED
+        session.commit()
+        assert _row(db_session, experiment_id)[0] == ExperimentStatus.PAUSED
+        assert _row(db_session, experiment_id)[1] is not None
+
+        assert "status" not in row.__dict__
+        row.status = ExperimentStatus.ACTIVE
+        session.commit()
+    finally:
+        session.close()
+
+    assert _row(db_session, experiment_id)[:2] == (ExperimentStatus.ACTIVE, None)
+
+
+# --- the hazard the rollback note describes --------------------------------------
+
+
+def test_without_the_listener_start_on_a_pending_resume_is_a_500(
+    client, db_session, people
+):
+    """Rolling back only the code (keeping resume_at and its CHECK) leaves
+    nothing to clear resume_at: POST /start then violates
+    ck_experiments_resume_only_when_paused. Hence the rollback runs
+    ``UPDATE experiments SET resume_at = NULL`` first."""
+    experiment_id = _paused_with_resume(client, people, timedelta(hours=1))
+    listener = experiment_models._clear_resume_on_status_change
+    event.remove(Experiment.status, "set", listener)
+    try:
+        response = _post(client, people, experiment_id, "start")
+    finally:
+        event.listen(Experiment.status, "set", listener, active_history=True)
+
+    assert response.status_code == 500, response.text
+    assert "ck_experiments_resume_only_when_paused" in response.text
+    status, resume_at, _, _ = _row(db_session, experiment_id)
+    assert status == ExperimentStatus.PAUSED
+    assert resume_at is not None
+
+
+# --- P6 / P7: DRAFT is unchanged --------------------------------------------------
+
+
+def test_p6_due_draft_activates(client, db_session, people):
+    experiment_id = _create(client, people)
+    start = _now() - timedelta(minutes=1)
+    body = _ok(
+        _schedule(
+            client,
+            people,
+            experiment_id,
+            {"start_date": _iso(start), "end_date": _iso(start + timedelta(days=7))},
+        )
+    )
+    assert body["resume_at"] is None
+
+    sent = _tick(db_session)
+
+    assert sent[experiment_id] == (
+        f"Experiment '{body['name']}' has been started automatically."
+    )
+    after = _get(client, people, experiment_id)
+    assert after["status"] == "active"
+    assert after["resume_at"] is None
+    assert _parse(after["start_date"]) == start
+
+
+def test_p7_draft_schedule_writes_start_date_and_clears_what_is_omitted(
+    client, db_session, people
+):
+    experiment_id = _create(client, people)
+    start = _now() + timedelta(days=1)
+    end = start + timedelta(days=7)
+    _ok(
+        _schedule(
+            client,
+            people,
+            experiment_id,
+            {"start_date": _iso(start), "end_date": _iso(end)},
+        )
+    )
+
+    later = start + timedelta(days=1)
+    body = _ok(_schedule(client, people, experiment_id, {"start_date": _iso(later)}))
+
+    assert body["status"] == "draft"
+    assert body["resume_at"] is None
+    assert _parse(body["start_date"]) == later
+    assert body["end_date"] is None  # omitted on DRAFT: cleared, as before (#482)
+    status, resume_at, _, _ = _row(db_session, experiment_id)
+    assert (status, resume_at) == (ExperimentStatus.DRAFT, None)
+
+
+# --- PUT /schedule on PAUSED: each field -----------------------------------------
+
+
+def test_paused_start_date_null_cancels_the_resume(client, db_session, people):
+    experiment_id = _paused_with_resume(client, people, timedelta(hours=1))
+    before = _get(client, people, experiment_id)
+
+    body = _ok(_schedule(client, people, experiment_id, {"start_date": None}))
+
+    assert body["resume_at"] is None
+    assert body["start_date"] == before["start_date"]
+    assert body["end_date"] == before["end_date"]
+    assert experiment_id not in _tick(db_session)
+
+
+def test_paused_omitted_start_date_keeps_the_resume(client, db_session, people):
+    experiment_id = _paused_with_resume(client, people, timedelta(hours=1))
+    before = _get(client, people, experiment_id)
+    end = _now() + timedelta(days=5)
+
+    body = _ok(_schedule(client, people, experiment_id, {"end_date": _iso(end)}))
+
+    assert body["resume_at"] == before["resume_at"]
+    assert body["start_date"] == before["start_date"]
+    assert _parse(body["end_date"]) == end
+
+
+def test_paused_omitted_end_date_is_kept(client, db_session, people):
+    experiment_id = _paused(client, people)
+    end = _now() + timedelta(days=5)
+    _ok(_schedule(client, people, experiment_id, {"end_date": _iso(end)}))
+
+    resume = _now() + timedelta(hours=2)
+    body = _ok(_schedule(client, people, experiment_id, {"start_date": _iso(resume)}))
+
+    assert _parse(body["resume_at"]) == resume
+    assert _parse(body["end_date"]) == end
+
+
+def test_paused_end_date_null_clears_it(client, db_session, people):
+    experiment_id = _paused(client, people)
+    _ok(
+        _schedule(
+            client,
+            people,
+            experiment_id,
+            {"end_date": _iso(_now() + timedelta(days=5))},
+        )
+    )
+
+    body = _ok(_schedule(client, people, experiment_id, {"end_date": None}))
+
+    assert body["end_date"] is None
+
+
+# --- PUT /schedule on PAUSED: refusals from the effective values (400) -----------
+
+
+def test_paused_resume_after_the_stored_end_date_is_400(client, db_session, people):
+    """The request omits end_date; the stored one is sooner than resume + 1 h."""
+    experiment_id = _paused(client, people)
+    stored_end = _now() + timedelta(minutes=30)
+    session = _factory(db_session)()
+    try:
+        session.execute(
+            update(Experiment)
+            .where(Experiment.id == uuid.UUID(experiment_id))
+            .values(end_date=stored_end.replace(tzinfo=None))
+        )
+        session.commit()
+    finally:
+        session.close()
+
+    response = _schedule(
+        client,
+        people,
+        experiment_id,
+        {"start_date": _iso(_now() + timedelta(minutes=10))},
+    )
+
+    assert response.status_code == 400, response.text
+    assert response.json()["detail"] == (
+        "End date must be at least 1:00:00 after the resume time"
+    )
+    assert _row(db_session, experiment_id)[1] is None
+
+
+def test_paused_end_date_before_the_stored_start_date_is_400(
+    client, db_session, people
+):
+    """A DRAFT scheduled for the future, paused by a superuser: an end_date
+    alone that is earlier than its start_date would break check_experiment_dates."""
+    experiment_id = _create(client, people)
+    start = _now() + timedelta(days=2)
+    _ok(
+        _schedule(
+            client,
+            people,
+            experiment_id,
+            {"start_date": _iso(start), "end_date": _iso(start + timedelta(days=8))},
+        )
+    )
+    assert _ok(_put_status(client, people, experiment_id, "paused"))["status"] == (
+        "paused"
+    )
+
+    response = _schedule(
+        client,
+        people,
+        experiment_id,
+        {"end_date": _iso(_now() + timedelta(days=1))},
+    )
+
+    assert response.status_code == 400, response.text
+    assert response.json()["detail"] == (
+        "End date must be after the experiment's start date"
+    )
+    _, _, _, end_date = _row(db_session, experiment_id)
+    assert end_date.replace(tzinfo=timezone.utc) == start + timedelta(days=8)
+
+
+def test_paused_valid_resume_and_end_date(client, db_session, people):
+    experiment_id = _paused(client, people)
+    before = _get(client, people, experiment_id)
+    resume = _now() + timedelta(hours=1)
+    end = resume + timedelta(days=3)
+
+    body = _ok(
+        _schedule(
+            client,
+            people,
+            experiment_id,
+            {"start_date": _iso(resume), "end_date": _iso(end)},
+        )
+    )
+
+    assert _parse(body["resume_at"]) == resume
+    assert _parse(body["end_date"]) == end
+    assert body["start_date"] == before["start_date"]
+
+
+# --- the 400 for an ACTIVE experiment ----------------------------------------------
+
+
+def test_schedule_on_active_names_the_status_by_value(client, db_session, people):
+    experiment_id = _create(client, people)
+    _ok(_post(client, people, experiment_id, "start"))
+
+    response = _schedule(
+        client,
+        people,
+        experiment_id,
+        {"start_date": _iso(_now() + timedelta(days=1))},
+    )
+
+    assert response.status_code == 400, response.text
+    assert response.json()["detail"] == (
+        "Cannot schedule experiment with status active. "
+        "Experiment must be in DRAFT or PAUSED status."
+    )

@@ -10,6 +10,29 @@ longer applies and release-please can generate this file directly. Until it
 does, entries below 0.2.2 are hand-written and the links in them are the
 reason why.
 
+## [0.13.0](https://github.com/getexperimently/experimently/compare/v0.12.0...v0.13.0) (2026-09-30)
+
+
+### Features
+
+* **api:** a setting for how often the experiment scheduler runs ([#486](https://github.com/getexperimently/experimently/issues/486)) ([d127407](https://github.com/getexperimently/experimently/commit/d127407b84f58539e32a1c4f6363a6466775302a))
+* **db:** experiments gain a nullable resume_at column ([#477](https://github.com/getexperimently/experimently/issues/477)) ([2ea6580](https://github.com/getexperimently/experimently/commit/2ea65803d35c48ece136902a8ce5f80f847693cc))
+
+
+### Bug Fixes
+
+* **api:** a warehouse run's SQL is returned to analysts and above ([#468](https://github.com/getexperimently/experimently/issues/468)) ([94654a6](https://github.com/getexperimently/experimently/commit/94654a6accf19de3b4f79fc77f08f82fe5e2824a))
+* **api:** admins and developers can schedule and delete any experiment ([#469](https://github.com/getexperimently/experimently/issues/469)) ([9c9715c](https://github.com/getexperimently/experimently/commit/9c9715ca30809f5df0442cb3ba2b0495f05a7411))
+* **api:** audit records for experiment and flag changes are saved ([#475](https://github.com/getexperimently/experimently/issues/475)) ([b275b26](https://github.com/getexperimently/experimently/commit/b275b26bb78ba0ad3f3294dc41373e9893cb480d))
+* **assignment:** mutual exclusion holds when a sibling experiment is activated ([#478](https://github.com/getexperimently/experimently/issues/478)) ([edb5071](https://github.com/getexperimently/experimently/commit/edb5071639b8dc973ae5f44ae72fae47825c7d41))
+* **dashboard:** the View SQL button appears only for roles that can see it ([#472](https://github.com/getexperimently/experimently/issues/472)) ([04b8b4a](https://github.com/getexperimently/experimently/commit/04b8b4a4ccf5d4b19e6eb41343894a130d7d22c0))
+* **experiments:** a paused experiment stays paused until it is started or a resume is scheduled ([#485](https://github.com/getexperimently/experimently/issues/485)) ([b363453](https://github.com/getexperimently/experimently/commit/b363453a6c2130cee562dded326caa8135fb11bd))
+
+
+### Documentation
+
+* CLAUDE.md states the bandit source rule and drops a note about a removed function ([#463](https://github.com/getexperimently/experimently/issues/463)) ([817cd8a](https://github.com/getexperimently/experimently/commit/817cd8ab2473781ce822a423640d939d32e7daaa))
+
 ## [0.12.0](https://github.com/getexperimently/experimently/compare/v0.11.0...v0.12.0) (2026-09-29)
 
 

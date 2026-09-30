@@ -136,14 +136,21 @@ class NotificationService:
         experiment_name: str,
         owner_email: Optional[str] = None,
         db=None,
+        resumed: bool = False,
     ) -> bool:
-        """Notify all channels that an experiment has been automatically started."""
+        """Notify all channels that an experiment has been automatically started.
+
+        ``resumed`` is true when the scheduler activated a PAUSED experiment
+        at its scheduled resume time; the message then says it was resumed.
+        The event type is ``experiment_started`` either way.
+        """
+        verb = "resumed" if resumed else "started"
         try:
             event = NotificationEvent(
                 event_type="experiment_started",
                 experiment_id=experiment_id,
                 new_status="active",
-                message=f"Experiment '{experiment_name}' has been started automatically.",
+                message=f"Experiment '{experiment_name}' has been {verb} automatically.",
                 timestamp=self._now_iso(),
                 metadata={"experiment_name": experiment_name},
             )

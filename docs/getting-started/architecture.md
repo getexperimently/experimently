@@ -65,7 +65,7 @@ Several background tasks run on a configurable cycle alongside the API process:
 
 | Scheduler | Default Cycle | Responsibility |
 |-----------|---------------|----------------|
-| Experiment scheduler | 15 minutes | Auto-starts experiments at `start_date`, auto-stops at `end_date` |
+| Experiment scheduler | 15 minutes (`EXPERIMENT_SCHEDULER_INTERVAL_MINUTES`) | Auto-starts draft experiments at `start_date`, resumes a paused experiment only at a `resume_at` scheduled after the pause, auto-stops at `end_date` |
 | Rollout scheduler | 15 minutes | Advances rollout schedule stages based on time-based triggers |
 | Metrics collector | 15 minutes | Aggregates raw events into experiment metric summaries |
 | Safety monitor | 5 minutes | Checks error rate and latency thresholds; triggers auto-rollback if breached |
