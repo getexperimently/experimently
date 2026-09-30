@@ -50,6 +50,8 @@ ROLE_CLIENT_FIXTURES = frozenset(
         # test_user_email_and_username_updates.py
         "member",
         "member_as_written",
+        # test_tracking_text_refused.py
+        "sdk_client",
     }
 )
 # Defined under modules/backend/tests, which a core build does not have.

@@ -17,6 +17,8 @@ from pydantic import (
     model_validator,
 )
 
+from backend.app.schemas.storable_text import StorableTextModel
+
 
 class EventBase(BaseModel):
     """Base model for event data."""
@@ -59,7 +61,7 @@ class EventBase(BaseModel):
         return self
 
 
-class EventCreate(EventBase):
+class EventCreate(StorableTextModel, EventBase):
     """Model for creating a new event."""
 
 
@@ -151,7 +153,7 @@ class ExperimentResults(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
-class AssignmentRequest(BaseModel):
+class AssignmentRequest(StorableTextModel):
     """Model for requesting a variant assignment."""
 
     experiment_key: str = Field(
@@ -221,7 +223,7 @@ class VariantAssignmentResponse(BaseModel):
     )
 
 
-class EventRequest(BaseModel):
+class EventRequest(StorableTextModel):
     """
     Model for tracking an event through the public tracking API.
 

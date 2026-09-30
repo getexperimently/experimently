@@ -23,6 +23,7 @@ from sqlalchemy.orm import Session
 from backend.app.api import deps
 from backend.app.api.sdk_scope import require_sdk_ruleset_key
 from backend.app.models.api_key import APIKey
+from backend.app.schemas.storable_text import StorableTextModel
 from backend.app.services.sdk_evaluation_service import (
     EvaluationReport,
     record_local_evaluations,
@@ -44,7 +45,7 @@ def _naive_utc(value: datetime) -> datetime:
     return value
 
 
-class FlagEvaluationCount(BaseModel):
+class FlagEvaluationCount(StorableTextModel):
     """How many times one flag was evaluated locally in one window."""
 
     flag_key: str = Field(..., min_length=1, max_length=100)
