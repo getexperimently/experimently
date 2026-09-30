@@ -14,9 +14,11 @@ from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
+    ValidationInfo,
     field_validator,
     model_validator,
 )
+from pydantic_core import PydanticCustomError
 
 from backend.app.core.targeting_adapter import (
     TargetingRulesError,
@@ -421,22 +423,36 @@ class ExperimentCreate(ExperimentBase):
         return self
 
 
-class ExperimentUpdate(BaseModel):
-    """Model for updating an experiment."""
+#: ``ExperimentUpdate`` fields stored in a NOT NULL column. An update may leave
+#: any of them out, but may not set one to null (#541).
+NOT_NULL_UPDATE_FIELDS = (
+    "name",
+    "status",
+    "experiment_type",
+    "sequential_testing_enabled",
+)
 
-    name: Optional[str] = Field(
-        None, min_length=1, max_length=255, description="Experiment name"
-    )
+
+class ExperimentUpdate(BaseModel):
+    """Model for updating an experiment.
+
+    Every field is optional: a field left out is not changed. `name`,
+    `status`, `experiment_type` and `sequential_testing_enabled` cannot be
+    set to null; a request that does is refused with 422.
+    """
+
+    # The NOT_NULL_UPDATE_FIELDS default to None only to mean "not sent":
+    # pydantic does not validate a default, so leaving one out is accepted,
+    # while an explicit null reaches ``refuse_null`` below.
+    name: str = Field(None, min_length=1, max_length=100, description="Experiment name")
     description: Optional[str] = Field(
         None, max_length=2000, description="Experiment description"
     )
     hypothesis: Optional[str] = Field(
         None, max_length=2000, description="Experiment hypothesis"
     )
-    status: Optional[ExperimentStatus] = Field(None, description="Experiment status")
-    experiment_type: Optional[ExperimentType] = Field(
-        None, description="Type of experiment"
-    )
+    status: ExperimentStatus = Field(None, description="Experiment status")
+    experiment_type: ExperimentType = Field(None, description="Type of experiment")
     targeting_rules: Optional[Dict[str, Any]] = Field(
         None, description="Rules for targeting users"
     )
@@ -450,7 +466,7 @@ class ExperimentUpdate(BaseModel):
     )
 
     # EP-021: Sequential testing
-    sequential_testing_enabled: Optional[bool] = Field(
+    sequential_testing_enabled: bool = Field(
         default=None, description="Enable or disable sequential testing."
     )
     sequential_testing_config: Optional[SequentialTestingConfigInput] = Field(
@@ -501,6 +517,16 @@ class ExperimentUpdate(BaseModel):
             }
         }
     )
+
+    @field_validator(*NOT_NULL_UPDATE_FIELDS, mode="before")
+    @classmethod
+    def refuse_null(cls, value: Any, info: ValidationInfo) -> Any:
+        """Refuse an explicit null for a field stored in a NOT NULL column."""
+        if value is None:
+            raise PydanticCustomError(
+                "null_not_allowed", f"{info.field_name} cannot be null"
+            )
+        return value
 
     @field_validator("targeting_rules")
     @classmethod
