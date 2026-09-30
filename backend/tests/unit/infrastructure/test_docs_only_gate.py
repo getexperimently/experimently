@@ -111,6 +111,9 @@ DOCS_TESTS = (
     # IAM table in docs/deployment/iam-permissions.md; yaml and stdlib only.
     "backend/tests/unit/infrastructure/test_deploy_docs.py",
     "backend/tests/unit/infrastructure/test_iam_actions.py",
+    # Evaluates the rollback runbook's describe-task-definition --query with
+    # jmespath (installed with boto3 from backend/requirements.txt) (#298).
+    "backend/tests/unit/infrastructure/test_rollback_runbook_env_check.py",
     "backend/tests/unit/db/test_alembic_plan.py",
     # Reads docs/auth/sso.md and the SSO code through `ast`; imports no module
     # code, and passes with backend/requirements.txt alone (checked).

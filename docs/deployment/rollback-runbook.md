@@ -145,6 +145,36 @@ own CodeDeploy deployment is active (about an hour after its shift): its stop
 step would stop that deployment with auto-rollback and put the API back on the
 release you rolled back from.
 
+### The rolled-back API runs against the current schema
+
+Rolling back puts back an older API; it does not put back the database. The
+API tasks do not run migrations when they start (`RUN_MIGRATIONS=false` in
+their task definition), so the older release starts against the schema the
+newer one migrated and serves it. That is correct only when every migration
+since the target release is backward-compatible, which is the rule migrations
+here follow ([Deployment Guide](deployment-guide.md#backward-compatible-migrations)).
+When one is not -- it dropped or renamed something the target release reads --
+rolling the API back is not enough: restore the snapshot the deploy took before
+migrating ([Database Rollback Procedure](#database-rollback-procedure)).
+
+Check the target's environment before you roll back to it:
+
+```bash
+aws ecs describe-task-definition --task-definition "$TARGET_TD" \
+  --query "taskDefinition.containerDefinitions[?name=='backend'] | [0].environment[?name=='RUN_MIGRATIONS'] | [0].value" \
+  --output text
+```
+
+It prints `false` for a revision that does not migrate on start. A revision
+registered before the Fargate stack carried the setting prints `None` (the
+variable is absent, and `--output text` prints a missing value as `None`); one
+that prints `true` sets it explicitly. Either way, that revision runs the older
+release's migrations on start, and against a newer schema it refuses to
+start. Register a copy of it with
+`RUN_MIGRATIONS=false` added to the `backend` container's environment, and roll
+back to the copy. Revisions the Deploy workflow registers after the Fargate
+stack has been deployed from a current checkout carry the setting already.
+
 ### Step 1: Find the Previous Task Definition ARN
 
 > **Two producers write to this family, and only one of them is runnable.**
@@ -576,12 +606,19 @@ revision that served before it. There is nothing to roll back for the API.
 CodeDeploy stops **every** deployment to the group while either 5xx alarm is
 in ALARM, a fix included. That is right when the release being replaced is the
 one failing, and Rollback (Method 1) handles it: Rollback always overrides the
-alarms for its own deployment. It is wrong in two cases:
+alarms for its own deployment. It is wrong in three cases:
 
 - the bug is in the release you would roll back to as well, so rolling back
   does not help and only a new release fixes it;
 - a dependency outage holds the alarm in ALARM, and the fix is a configuration
-  change that has to ship during it.
+  change that has to ship during it;
+- the environment has no schema yet. `cdk deploy` does not create it: the
+  first Deploy's migration does, and until then the API answers real requests
+  with 500 ([Deployment Guide, section 1.6](deployment-guide.md#16-the-stacks)).
+  Requests in that window, from scanners as much as from people, can put an
+  alarm into ALARM, and the Deploy that would create the schema is then
+  refused. Rollback has nothing to go back to. Whether to deploy unwatched is
+  decided by a person at that moment.
 
 For those, Deploy has a break-glass: tick **`override_alarms`** and give
 **`override_alarms_reason`**. The run's name then ends in `ALARMS OVERRIDDEN`,
@@ -660,6 +697,7 @@ After the downgrade completes, redeploy the previous application version using M
 
 Only take this path if:
 - The migration downgrade failed or is not available
+- The migration is not backward-compatible, so the release you rolled back to cannot run against the migrated schema
 - The migration caused data corruption or irreversible data loss
 - The Engineering Lead has explicitly approved this path
 

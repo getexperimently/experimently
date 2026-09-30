@@ -166,6 +166,21 @@ then check the subscription is no longer `PendingConfirmation`
 ([AWS CDK Deployment](../self-hosting/cdk.md#required-environment-variables)
 has the commands).
 
+**`cdk deploy` does not create the database schema.** The API tasks run with
+`RUN_MIGRATIONS=false` and `SEED=` (empty); only the migration task, which the
+Deploy workflow runs before it shifts traffic, writes the schema. Until the
+first Deploy (section 2) the API runs against an empty database: `/health`
+answers 200 and the load balancer's health checks pass, while real requests
+answer 500 and the API logs errors. Expect that, and run the first Deploy soon
+after the stacks are up. If a request in that window has put
+`experimentation-api-5xx-blue-<env>` or `-green-<env>` into ALARM, Deploy
+refuses to start; the way through is Deploy's break-glass
+([Rollback Runbook, "Fix forward while an alarm is firing"](rollback-runbook.md#fix-forward-while-an-alarm-is-firing)),
+and a person decides at that moment whether to use it. Docker Compose and the
+Helm chart are unchanged: compose runs one API container that migrates on
+start, and the chart runs the migration in an init container
+([Database Migrations](../self-hosting/migrations.md#on-aws-the-api-does-not-migrate)).
+
 `cdk deploy --all` is for standing an environment up. On one that is already
 running, deploy `experimentation-fargate-<env>` on its own, pinned to what is
 live. Both pins go on **every** such deploy, because releases reach the API and
@@ -236,7 +251,8 @@ usual cause (section 7).
 In **staging**, before prod is ever deployed (DECISIONS D6):
 
 1. **Deploy tag A** (section 3). The first deploy's migration builds the
-   schema from nothing (`backend.app.db.bootstrap`).
+   schema from nothing (`backend.app.db.bootstrap`); until it has, the API
+   answers real requests with 500 (section 1.6).
 2. **Smoke through the public origin**: `curl -s https://app.<domain>/api/v1/experiments/`
    answers `401 {"detail":"Not authenticated"}`. `/health` is not enough: it
    is what the load balancer already probed.
@@ -421,6 +437,12 @@ against the new schema. Every migration must therefore be one the previous
 release can run against: add columns and tables (nullable, or with defaults),
 never drop or rename one the previous release reads in the same release. Drop
 in a later release, once nothing running reads it.
+
+A rollback relies on the same rule. The API tasks do not migrate on start, so
+a rolled-back release runs against the newer schema as it is; it works only if
+every migration since that release is backward-compatible. For one that is
+not, restore the snapshot the deploy took before migrating
+([Rollback Runbook](rollback-runbook.md#database-rollback-procedure)).
 
 ---
 

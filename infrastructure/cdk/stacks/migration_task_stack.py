@@ -130,6 +130,16 @@ class MigrationTaskStack(Stack):
     Callers that override the command (``.github/workflows/db-migrate.yml``,
     ``deploy.yml``) inherit that environment, which is why a *downgrade*
     override is now only a downgrade.
+
+    This task is the **only** thing that writes the schema on AWS (#298). The
+    API task definition (``fargate_service_stack.py``) also sets
+    ``RUN_MIGRATIONS=false`` and ``SEED=``, so no API task bootstraps the
+    database when it starts: an older API revision started after a newer
+    migration -- a replacement, a scale-out, a rollback -- then serves the
+    newer schema instead of refusing it, which is correct only for
+    backward-compatible migrations. It also means ``cdk deploy`` alone leaves a
+    new environment without a schema (``/health`` 200, real requests 500) until
+    the first Deploy runs this task.
     """
 
     def __init__(

@@ -143,6 +143,34 @@ CDK will display a diff of all resources to be created and prompt for confirmati
 
 The first full deployment takes approximately 20–40 minutes (Aurora and OpenSearch provisioning are the slowest steps).
 
+### `cdk deploy` does not create the schema
+
+The API tasks never run database migrations: their task definition sets
+`RUN_MIGRATIONS=false` and `SEED=` (empty). The schema is written only by the
+migration task, which the **Deploy** workflow runs before it shifts traffic
+(and the **Database Migration** workflow when run by hand). So after the first
+`cdk deploy` of an environment the API runs against an empty database until the
+first Deploy:
+
+- `/health` answers 200, because it checks that the database answers, and the
+  load balancer's health checks pass;
+- real requests answer 500, and the API logs errors. This is expected until
+  the first Deploy creates the schema.
+
+Run the first Deploy soon after the first `cdk deploy`. Requests that reach the
+API in between, from scanners as much as from people, can put one of the API's
+5xx alarms into ALARM, and Deploy refuses to start while one is. The way
+through is Deploy's existing break-glass
+([rollback runbook, "Fix forward while an alarm is firing"](../deployment/rollback-runbook.md#fix-forward-while-an-alarm-is-firing));
+whether to use it is decided by a person at that moment.
+
+Rolling the API back runs the older release against the newer schema, which
+works only for backward-compatible migrations; for one that is not, restore the
+snapshot the Deploy took before migrating. See
+[On AWS, the API does not migrate](migrations.md#on-aws-the-api-does-not-migrate)
+for why, and for an environment whose Fargate stack was deployed before this
+setting existed.
+
 ### Which stacks you get: core or full
 
 The CDK app deploys the stacks your checkout has, the same way the API loads
