@@ -40,6 +40,7 @@ experiments it activated is read from the notifications it sends.
 from __future__ import annotations
 
 import asyncio
+import logging
 import uuid
 from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock, patch
@@ -462,22 +463,31 @@ def test_p5_expired_instance(client, db_session, people):
 
 
 def test_without_the_listener_start_on_a_pending_resume_is_a_500(
-    client, db_session, people
+    client, db_session, people, caplog
 ):
     """Rolling back only the code (keeping resume_at and its CHECK) leaves
     nothing to clear resume_at: POST /start then violates
     ck_experiments_resume_only_when_paused. Hence the rollback runs
-    ``UPDATE experiments SET resume_at = NULL`` first."""
+    ``UPDATE experiments SET resume_at = NULL`` first.
+
+    The constraint is named in the server log; the response carries only the
+    fixed message."""
     experiment_id = _paused_with_resume(client, people, timedelta(hours=1))
     listener = experiment_models._clear_resume_on_status_change
     event.remove(Experiment.status, "set", listener)
+    caplog.set_level(logging.ERROR)
     try:
         response = _post(client, people, experiment_id, "start")
     finally:
         event.listen(Experiment.status, "set", listener, active_history=True)
 
     assert response.status_code == 500, response.text
-    assert "ck_experiments_resume_only_when_paused" in response.text
+    assert response.json()["detail"].startswith("Could not start the experiment")
+    assert "ck_experiments_resume_only_when_paused" not in response.text
+    assert any(
+        r.exc_info and "ck_experiments_resume_only_when_paused" in str(r.exc_info[1])
+        for r in caplog.records
+    ), "the constraint must be named in the server log"
     status, resume_at, _, _ = _row(db_session, experiment_id)
     assert status == ExperimentStatus.PAUSED
     assert resume_at is not None

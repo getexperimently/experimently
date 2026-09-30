@@ -225,4 +225,4 @@ The decision is a recommendation: nothing stops the experiment or changes its st
 |---|---|
 | `401 Unauthorized` | Missing or invalid bearer token |
 | `404 Not Found` | The experiment doesn't exist |
-| `500 Internal Server Error` | The computation failed; `detail` starts with `Bayesian computation failed:` |
+| `500 Internal Server Error` | The computation failed; `detail` is `Could not compute the Bayesian results (request ID: <id>).`, where `<id>` is the response's `X-Request-ID`, and the full error is in the server log under that ID |
