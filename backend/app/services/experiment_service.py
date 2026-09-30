@@ -865,6 +865,7 @@ class ExperimentService:
             description=experiment.description,
             hypothesis=experiment.hypothesis,
             experiment_type=experiment.experiment_type,
+            # Copied as stored and not validated, on purpose: stored rules are not re-judged.
             targeting_rules=experiment.targeting_rules,
             status=ExperimentStatus.DRAFT,
             owner_id=str(user_id),

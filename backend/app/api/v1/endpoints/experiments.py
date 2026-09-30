@@ -62,6 +62,12 @@ from backend.app.services.experiment_service import (
     resolve_experiment_status,
 )
 
+#: The states in which ``PUT /experiments/{id}`` accepts ``targeting_rules``
+#: (#523). PAUSED only when targeting is the one field sent; see the route.
+TARGETING_EDITABLE_STATUSES = frozenset(
+    {ExperimentStatus.DRAFT, ExperimentStatus.PAUSED}
+)
+
 # Create router with tag for documentation grouping
 router = APIRouter(
     tags=["Experiments"],
@@ -608,14 +614,24 @@ async def update_experiment(
     - Basic properties: name, description, hypothesis
     - Variants: if experiment is in DRAFT status
     - Metrics: if experiment is in DRAFT status
+    - Targeting (`targeting_rules`): while the experiment is DRAFT or PAUSED,
+      for every role including superusers. On a PAUSED experiment it must be
+      the only field in the request. On an ACTIVE, COMPLETED or ARCHIVED
+      experiment a request that includes `targeting_rules` is refused, even
+      when the value equals the stored one; pause the experiment first.
+      People already assigned keep their variant; the new rules apply to
+      people not yet in the experiment once it is resumed.
 
     Returns:
         ExperimentResponse: The updated experiment
 
     Raises:
-        HTTPException 403: If the caller's role does not hold UPDATE on experiments
+        HTTPException 403: If the caller's role does not hold UPDATE on experiments,
+            or the experiment's state does not allow the change (the detail
+            names the state)
         HTTPException 400: If trying to update variants/metrics for non-DRAFT experiment
         HTTPException 404: If the experiment doesn't exist
+        HTTPException 422: If `targeting_rules` is not a valid rule set
     """
     try:
         # Get experiment
@@ -641,14 +657,50 @@ async def update_experiment(
         ):
             _reject_unroutable_split_url(requested_type)
 
-        # Prevent updates to non-draft experiments unless user is superuser
+        # Targeting by state, for every role including the superuser (#523).
+        # Keyed on the fields the client SENT (``model_fields_set``), not on
+        # the dict built below, so no later processing step (the ``status``
+        # normalisation, dropping nulls) can turn a request carrying another
+        # field into a targeting-only one. Presence, not difference:
+        # re-sending the stored value is an edit.
+        fields_sent = experiment_in.model_fields_set
+        sends_targeting = "targeting_rules" in fields_sent
+        if sends_targeting and experiment.status not in TARGETING_EDITABLE_STATUSES:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=(
+                    "Targeting can be changed only while the experiment is "
+                    f"draft or paused; it is {experiment.status.value}."
+                ),
+            )
+        paused_targeting_only = experiment.status == ExperimentStatus.PAUSED and (
+            fields_sent == {"targeting_rules"}
+        )
+
+        # Prevent updates to non-draft experiments unless user is superuser;
+        # a PAUSED experiment's targeting, sent on its own, is the exception.
         if (
             experiment.status != ExperimentStatus.DRAFT
+            and not paused_targeting_only
             and not current_user.is_superuser
         ):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail=f"Cannot update experiments in {experiment.status.value} status",
+            )
+
+        # The superuser passes the guard above, so say the PAUSED rule for it.
+        if (
+            experiment.status == ExperimentStatus.PAUSED
+            and sends_targeting
+            and not paused_targeting_only
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=(
+                    "While the experiment is paused, targeting can be changed "
+                    "only on its own; send targeting_rules without other fields."
+                ),
             )
 
         # Get update data
