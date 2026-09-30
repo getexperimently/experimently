@@ -10,7 +10,9 @@ from sqlalchemy import and_, desc, func
 from sqlalchemy.orm import Session, joinedload
 
 from backend.app.core.consistent_hash import bucket_of
+from backend.app.core.log_once import EVALUATION_NOTES
 from backend.app.core.targeting_adapter import (
+    _is_dashboard_rules_shape,
     expand_context,
     normalise_targeting_rules,
 )
@@ -31,9 +33,29 @@ REASON_MUTUAL_EXCLUSION = "mutual_exclusion"
 REASON_TARGETING = "targeting"
 
 
-def _is_dashboard_rules_shape(raw: Dict[str, Any]) -> bool:
-    """True for the dashboard editor shape ``{"logical_operator", "groups": [...]}``."""
-    return "rules" not in raw and ("groups" in raw or "logical_operator" in raw)
+#: Keys of a native ``TargetingRules`` value that may be present while it
+#: legitimately carries no rules (``{"rules": []}``, ``{"version": "1.0"}``).
+_EMPTY_NATIVE_KEYS = frozenset({"rules", "version"})
+
+
+def _note_ignored_rules(raw: Dict[str, Any], rules: TargetingRules, owner: str) -> None:
+    """Warn, once per experiment per process, that stored rules yield nothing.
+
+    A flat or unknown-key dict (``{"country": ["US"]}``) reaches
+    ``TargetingRules(**raw)``, which ignores unknown keys, so it becomes "no
+    rules" and everyone is eligible. Only the owner (the experiment id) is
+    named: the value can carry anything.
+    """
+    if rules.rules or rules.default_rule is not None:
+        return
+    if not raw or set(raw) <= _EMPTY_NATIVE_KEYS:
+        return
+    if EVALUATION_NOTES.first(owner, "stored rules yield no rules"):
+        logger.warning(
+            "Targeting rules for %s contain no rules assignment can apply; "
+            "every user is eligible. Logged once.",
+            owner,
+        )
 
 
 class AssignmentService:
@@ -820,6 +842,7 @@ class AssignmentService:
                         return None, no_rules
                 else:
                     rules = TargetingRules(**raw)
+                    _note_ignored_rules(raw, rules, owner)
             elif isinstance(raw, list):
                 # Legacy feature-flag list shape; never valid for experiments.
                 logger.warning(

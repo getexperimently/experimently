@@ -18,6 +18,10 @@ from pydantic import (
     model_validator,
 )
 
+from backend.app.core.targeting_adapter import (
+    TargetingRulesError,
+    validate_experiment_targeting,
+)
 from backend.app.schemas.bandit import OptimizationType
 from backend.app.schemas.bayesian import BayesianConfig
 from backend.app.schemas.split_url_config import SplitUrlConfig
@@ -453,6 +457,22 @@ class ExperimentUpdate(BaseModel):
             }
         }
     )
+
+    @field_validator("targeting_rules")
+    @classmethod
+    def validate_targeting_rules(
+        cls, value: Optional[Dict[str, Any]]
+    ) -> Optional[Dict[str, Any]]:
+        """Refuse rules assignment would not apply as they read.
+
+        The value is stored as given; the error text is fixed and never
+        carries the submitted rules (see ``validate_experiment_targeting``).
+        """
+        try:
+            validate_experiment_targeting(value)
+        except TargetingRulesError as err:
+            raise ValueError(str(err)) from None
+        return value
 
     @model_validator(mode="after")
     def validate_variants(self):

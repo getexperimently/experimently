@@ -124,8 +124,16 @@ curl -X POST "http://localhost:8000/api/v1/experiments/" \
     "start_date": "2024-04-01T00:00:00Z",
     "end_date": "2024-04-30T23:59:59Z",
     "targeting_rules": {
-      "countries": ["US", "CA"],
-      "browsers": ["chrome", "firefox"]
+      "logical_operator": "AND",
+      "groups": [
+        {
+          "logical_operator": "AND",
+          "conditions": [
+            {"attribute": "country", "operator": "in", "value": ["US", "CA"]},
+            {"attribute": "browser", "operator": "in", "value": ["chrome", "firefox"]}
+          ]
+        }
+      ]
     }
   }'
 ```
@@ -843,44 +851,50 @@ Response (429 Too Many Requests):
 
 ### Targeting Rules
 
-#### 1. User-Based Targeting
-```json
-{
-  "user_segments": ["premium", "beta_users"],
-  "user_attributes": {
-    "country": ["US", "CA"],
-    "browser": ["chrome", "firefox"],
-    "device_type": ["mobile", "desktop"],
-    "user_role": ["admin", "editor"]
-  }
-}
-```
+`targeting_rules` uses the shape the dashboard's rule builder writes: groups of
+conditions, each condition an `attribute`, an `operator` and a `value`.
 
-#### 2. Time-Based Targeting
 ```json
 {
-  "time_rules": {
-    "start_date": "2024-04-01T00:00:00Z",
-    "end_date": "2024-04-30T23:59:59Z",
-    "timezone": "America/New_York",
-    "day_of_week": ["monday", "wednesday", "friday"],
-    "hour_of_day": {
-      "start": 9,
-      "end": 17
+  "logical_operator": "OR",
+  "groups": [
+    {
+      "logical_operator": "AND",
+      "conditions": [
+        {"attribute": "country", "operator": "in", "value": ["US", "CA"]},
+        {"attribute": "device_type", "operator": "equals", "value": "mobile"}
+      ]
+    },
+    {
+      "logical_operator": "AND",
+      "conditions": [
+        {"attribute": "plan", "operator": "in", "value": ["premium", "beta"]}
+      ]
     }
-  }
+  ]
 }
 ```
 
-#### 3. Percentage-Based Rollout
-```json
-{
-  "rollout_percentage": 50,
-  "sticky_assignment": true,
-  "excluded_users": ["user1", "user2"],
-  "included_users": ["user3", "user4"]
-}
-```
+- `logical_operator` is `AND`, `OR` or `NOT` (any case), at the top level and
+  on each group. Left out, it is `AND`.
+- The operators are `equals`, `not_equals`, `contains`, `not_contains`,
+  `starts_with`, `ends_with`, `greater_than`, `less_than`,
+  `greater_than_or_equal`, `less_than_or_equal`, `in`, `not_in`, `regex`,
+  `is_null`, `is_not_null`, `semver_eq`, `semver_gt`, `semver_lt`,
+  `semver_gte`, `semver_lte`, `geo_within_radius`, `time_window`,
+  `array_contains` and `array_intersects`.
+- An experiment's rules may carry a top-level `rollout_percentage`, a number
+  from 0 to 100: that share of the users who match is admitted.
+- `null`, `{}` and `{"groups": []}` mean no targeting: every user is eligible.
+
+`PUT /api/v1/experiments/{experiment_id}` answers 422 for experiment rules that
+would not be applied as written: a list of rules, a flat object such as
+`{"country": ["US"]}`, an unknown key, `groups` together with `rules`,
+`logical_operator` without `groups`, a group with no conditions, an unknown
+operator or logical operator, a value the operator cannot use, and a list
+operator with more than 1,000 values. The message names the place, for example
+`groups[0].conditions[1].operator: unknown operator`, and never repeats the
+submitted value.
 
 ### Experiment Types
 

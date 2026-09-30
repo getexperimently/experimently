@@ -310,6 +310,63 @@ def test_audit_record_is_saved(client, fresh, developer, after_request, route):
     assert after_request[-1] is None, type(after_request[-1]).__name__
 
 
+# --- the update record carries what changed (#523) ---------------------------
+
+
+def test_experiment_update_record_carries_targeting_and_status(
+    client, fresh, developer
+):
+    """The update record used to carry only the name, so a change to who can
+    join an experiment left no trace of what it was before or after."""
+    us = {
+        "logical_operator": "AND",
+        "groups": [
+            {
+                "logical_operator": "AND",
+                "conditions": [
+                    {"attribute": "country", "operator": "equals", "value": "US"}
+                ],
+            }
+        ],
+    }
+    gb = {
+        "logical_operator": "OR",
+        "groups": [
+            {
+                "id": "g-1",
+                "logical_operator": "AND",
+                "conditions": [
+                    {
+                        "id": "c-1",
+                        "attribute": "country",
+                        "operator": "in",
+                        "value": ["GB", "IE"],
+                    }
+                ],
+            }
+        ],
+    }
+    body = {**_experiment_payload(), "targeting_rules": us}
+    created = client.post(f"{EXPERIMENTS}/", json=body, headers=_auth(developer))
+    assert created.status_code == 201, created.text
+    experiment_id = created.json()["id"]
+
+    response = client.put(
+        f"{EXPERIMENTS}/{experiment_id}",
+        json={"targeting_rules": gb},
+        headers=_auth(developer),
+    )
+
+    assert response.status_code == 200, response.text
+    rows = _audit_rows(fresh, "experiment_update", experiment_id)
+    assert len(rows) == 1, rows
+    old, new = rows[0].old_value, rows[0].new_value
+    assert old["targeting_rules"] == us, old
+    assert new["targeting_rules"] == gb, new
+    assert old["status"] == "draft" and new["status"] == "draft", (old, new)
+    assert old["name"] == new["name"] == body["name"]
+
+
 # --- a failed audit write changes nothing else --------------------------------
 
 

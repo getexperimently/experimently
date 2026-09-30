@@ -6,6 +6,7 @@ experiments in the experimentation platform. It implements the core functionalit
 AB testing and feature experimentation.
 """
 
+import copy
 import json
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
@@ -158,6 +159,13 @@ async def _invalidate_experiment_cache(
             await cache_control.redis.delete(*keys)
     except Exception as cache_error:
         logger.warning("Experiment cache invalidation failed: %s", cache_error)
+
+
+def _status_text(value: Any) -> Optional[str]:
+    """An experiment status as its value (``"draft"``) for the audit record."""
+    if value is None:
+        return None
+    return str(getattr(value, "value", value))
 
 
 def _same_experiment_type(requested: Any, stored: Any) -> bool:
@@ -665,10 +673,14 @@ async def update_experiment(
                         detail=f"Cannot update {field} for experiments in {experiment.status.value} status",
                     )
 
-        # Capture pre-update snapshot for audit trail
+        # Capture pre-update snapshot for audit trail. The update below
+        # rebinds targeting_rules (setattr) rather than changing the dict,
+        # so today the copy is not needed; it guards the old value against
+        # a future in-place change.
         old_exp_snapshot = {
             "name": experiment.name,
-            "status": str(experiment.status),
+            "status": _status_text(experiment.status),
+            "targeting_rules": copy.deepcopy(experiment.targeting_rules),
         }
 
         # Create experiment service
@@ -695,11 +707,16 @@ async def update_experiment(
         # Compliance audit logging (non-fatal)
         try:
             # As on create: the service returns a dict, not a model.
-            new_name = (
-                updated_experiment.get("name")
-                if isinstance(updated_experiment, dict)
-                else getattr(updated_experiment, "name", None)
-            )
+            def _updated(field: str) -> Any:
+                if isinstance(updated_experiment, dict):
+                    return updated_experiment.get(field)
+                return getattr(updated_experiment, field, None)
+
+            new_exp_snapshot = {
+                "name": _updated("name"),
+                "status": _status_text(_updated("status")),
+                "targeting_rules": _updated("targeting_rules"),
+            }
             audit = AuditLogService(db)
             audit.log(
                 action=AuditAction.UPDATE,
@@ -708,7 +725,7 @@ async def update_experiment(
                 resource_id=str(experiment_id),
                 actor_id=str(current_user.id) if current_user else None,
                 old_value=old_exp_snapshot,
-                new_value={"name": new_name},
+                new_value=new_exp_snapshot,
             )
             # log() only flushes, and the update above has already committed, so
             # without this the record is rolled back when the session closes.

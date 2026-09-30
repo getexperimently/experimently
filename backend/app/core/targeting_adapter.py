@@ -115,6 +115,19 @@ class TargetingRuleShapeError(ValueError):
     """Raised internally when a dashboard rule cannot be converted."""
 
 
+def _is_dashboard_rules_shape(raw: Dict[str, Any]) -> bool:
+    """True for the dashboard editor shape ``{"logical_operator", "groups": [...]}``.
+
+    This is how experiment assignment decides which shape stored rules are in
+    (``AssignmentService._coerce_targeting_rules``), and how
+    :func:`validate_experiment_targeting` decides it, so the two cannot
+    disagree. It is deliberately not :func:`normalise_targeting_rules`'s
+    ``"groups" in raw`` test: a dict carrying both ``groups`` and ``rules`` is
+    native here.
+    """
+    return "rules" not in raw and ("groups" in raw or "logical_operator" in raw)
+
+
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
@@ -240,6 +253,306 @@ def match_targeting_rule(
         if evaluate_rule(rule, context):
             return rule
     return rules.default_rule
+
+
+# ---------------------------------------------------------------------------
+# Strict validation of experiment targeting rules (on write)
+# ---------------------------------------------------------------------------
+
+#: Most items a list operator (``in``, ``not_in``, ``array_contains``,
+#: ``array_intersects``) may carry.
+MAX_LIST_ITEMS = 1000
+
+_DASHBOARD_TOP_KEYS = frozenset(
+    {"logical_operator", "groups", "rollout_percentage", "id"}
+)
+_DASHBOARD_GROUP_KEYS = frozenset({"id", "logical_operator", "conditions"})
+_DASHBOARD_CONDITION_KEYS = frozenset({"id", "attribute", "operator", "value"})
+_NATIVE_TOP_KEYS = frozenset(TargetingRules.model_fields)
+_LOGICAL_OPERATOR_NAMES = frozenset({"and", "or", "not"})
+_MAX_RULE_ID_LENGTH = 100
+
+# RuleValidator's messages can carry the submitted value; each ERROR issue is
+# reported as the fixed text of the first prefix its message starts with.
+_RULE_VALIDATOR_CODES = (
+    ("Invalid regex pattern", "pattern is not valid"),
+    ("Invalid semantic version", "version is not valid"),
+    ("GEO_DISTANCE requires", "location is not valid"),
+    ("Invalid latitude", "latitude is out of range"),
+    ("Invalid longitude", "longitude is out of range"),
+    ("Coordinates must be numeric", "location is not valid"),
+    ("Condition attribute is required", "attribute is required"),
+    ("Rule nesting too deep", "rules are nested too deeply"),
+    ("Duplicate rule IDs", "rule ids must be unique"),
+    ("Rule ID is required", "rule id is required"),
+    ("Invalid rollout percentage", "rollout percentage must be 0 to 100"),
+)
+
+
+class TargetingRulesError(ValueError):
+    """Experiment targeting rules refused on write.
+
+    ``path`` locates the problem (``groups[0].conditions[1].operator``) and
+    ``code`` says what it is. Both are fixed text: neither ever carries a
+    value from the submitted rules, so the message is safe to return in a 422.
+    """
+
+    def __init__(self, path: str, code: str) -> None:
+        self.path = path
+        self.code = code
+        super().__init__(f"{path}: {code}" if path else code)
+
+
+def validate_experiment_targeting(value: Any) -> Optional[TargetingRules]:
+    """
+    Refuse experiment ``targeting_rules`` that assignment would not apply as shown.
+
+    The shape is decided by :func:`_is_dashboard_rules_shape`, the predicate
+    experiment assignment uses. Dashboard rules are converted with
+    ``_from_dashboard``, native rules with ``TargetingRules.model_validate``,
+    and the result is checked by :class:`~backend.app.core.rule_validation.RuleValidator`
+    (ERROR issues only).
+
+    ``None``, ``{}`` and ``{"groups": []}`` mean "no rules" and are accepted.
+
+    Returns:
+        What assignment will evaluate: the ``TargetingRules``, or ``None``
+        when the value carries no rules. The stored value is never changed.
+
+    Raises:
+        TargetingRulesError: with a fixed message keyed by path.
+    """
+    if value is None:
+        return None
+    if isinstance(value, list):
+        raise TargetingRulesError(
+            "", "a list of rules is not supported for experiments"
+        )
+    if not isinstance(value, dict):
+        raise TargetingRulesError("", "must be an object")
+    if not value:
+        return None
+
+    if _is_dashboard_rules_shape(value):
+        rules, groups_base = _validated_dashboard(value), "groups"
+    else:
+        rules, groups_base = _validated_native(value), None
+
+    if not rules.rules and rules.default_rule is None:
+        return None
+    _check_list_sizes(rules, groups_base)
+    _check_rule_validator(rules, groups_base)
+    return rules
+
+
+def _validated_dashboard(raw: Dict[str, Any]) -> TargetingRules:
+    if "name" in raw:
+        # Read by nothing on the experiment path, and the builder cannot keep it.
+        raise TargetingRulesError("name", "not supported for experiment rules")
+    if any(key not in _DASHBOARD_TOP_KEYS for key in raw):
+        raise TargetingRulesError("", "unknown key")
+    if "groups" not in raw:
+        raise TargetingRulesError("logical_operator", "given without groups")
+    _check_logical_operator(raw, "logical_operator")
+    if "rollout_percentage" in raw:
+        percentage = raw["rollout_percentage"]
+        if (
+            isinstance(percentage, bool)
+            or not isinstance(percentage, (int, float))
+            or not 0 <= percentage <= 100
+        ):
+            raise TargetingRulesError(
+                "rollout_percentage", "must be a number from 0 to 100"
+            )
+    if "id" in raw:
+        rule_id = raw["id"]
+        if (
+            not isinstance(rule_id, str)
+            or not rule_id.strip()
+            or len(rule_id) > _MAX_RULE_ID_LENGTH
+        ):
+            raise TargetingRulesError(
+                "id", f"must be text of 1 to {_MAX_RULE_ID_LENGTH} characters"
+            )
+
+    groups = raw["groups"]
+    if not isinstance(groups, list):
+        raise TargetingRulesError("groups", "must be a list")
+    for gi, group in enumerate(groups):
+        gpath = f"groups[{gi}]"
+        if not isinstance(group, dict):
+            raise TargetingRulesError(gpath, "must be an object")
+        if any(key not in _DASHBOARD_GROUP_KEYS for key in group):
+            raise TargetingRulesError(gpath, "unknown key")
+        _check_logical_operator(group, f"{gpath}.logical_operator")
+        conditions = group.get("conditions")
+        if not isinstance(conditions, list) or not conditions:
+            raise TargetingRulesError(
+                f"{gpath}.conditions", "at least one condition is required"
+            )
+        for ci, condition in enumerate(conditions):
+            cpath = f"{gpath}.conditions[{ci}]"
+            if not isinstance(condition, dict):
+                raise TargetingRulesError(cpath, "must be an object")
+            if any(key not in _DASHBOARD_CONDITION_KEYS for key in condition):
+                raise TargetingRulesError(cpath, "unknown key")
+            attribute = condition.get("attribute")
+            if not isinstance(attribute, str) or not attribute.strip():
+                raise TargetingRulesError(f"{cpath}.attribute", "attribute is required")
+            operator = condition.get("operator")
+            if (
+                not isinstance(operator, str)
+                or operator.strip() not in DASHBOARD_OPERATORS
+            ):
+                raise TargetingRulesError(f"{cpath}.operator", "unknown operator")
+
+    try:
+        return _from_dashboard(raw)
+    except (TargetingRuleShapeError, ValidationError, TypeError, ValueError):
+        pass
+    # ``_from_dashboard`` refused it. Find the condition, for the path only:
+    # the decision above is the converter's own.
+    for gi, group in enumerate(groups):
+        for ci, condition in enumerate(group["conditions"]):
+            cpath = f"groups[{gi}].conditions[{ci}]"
+            try:
+                convert_dashboard_condition(condition)
+            except ValidationError as exc:
+                if any("attribute" in error.get("loc", ()) for error in exc.errors()):
+                    raise TargetingRulesError(
+                        f"{cpath}.attribute",
+                        "attribute may contain only letters, digits, underscores and dots",
+                    ) from None
+                raise TargetingRulesError(
+                    f"{cpath}.value", "value is not valid for the operator"
+                ) from None
+            except (TargetingRuleShapeError, TypeError, ValueError):
+                raise TargetingRulesError(
+                    f"{cpath}.value", "value is not valid for the operator"
+                ) from None
+    raise TargetingRulesError("", "rules could not be converted")
+
+
+def _validated_native(raw: Dict[str, Any]) -> TargetingRules:
+    if "groups" in raw:
+        raise TargetingRulesError("groups", "cannot be combined with rules")
+    if any(key not in _NATIVE_TOP_KEYS for key in raw):
+        raise TargetingRulesError("", "unknown key")
+    if "rules" not in raw and "default_rule" not in raw:
+        raise TargetingRulesError("rules", "required")
+    try:
+        return TargetingRules.model_validate(raw)
+    except ValidationError as exc:
+        # The location only, made of field names and indices; never the text.
+        loc = exc.errors()[0].get("loc", ()) if exc.errors() else ()
+        path = "".join(
+            f"[{part}]" if isinstance(part, int) else f".{part}" for part in loc
+        ).lstrip(".")
+        if any(
+            not isinstance(part, int) and part not in _NATIVE_PATH_WORDS for part in loc
+        ):
+            path = ""
+        raise TargetingRulesError(path, "not valid") from None
+
+
+#: Words that may appear in a native path: the schema's own field names. A loc
+#: part outside this set would be a submitted key and is not reported.
+_NATIVE_PATH_WORDS = frozenset(
+    {
+        "version",
+        "rules",
+        "default_rule",
+        "id",
+        "name",
+        "description",
+        "rule",
+        "rollout_percentage",
+        "priority",
+        "operator",
+        "conditions",
+        "groups",
+        "attribute",
+        "value",
+        "additional_value",
+        "attribute_type",
+        "validation_schema",
+    }
+)
+
+
+def _check_logical_operator(container: Dict[str, Any], path: str) -> None:
+    if "logical_operator" not in container or container["logical_operator"] is None:
+        return
+    operator = container["logical_operator"]
+    if (
+        not isinstance(operator, str)
+        or operator.strip().lower() not in _LOGICAL_OPERATOR_NAMES
+    ):
+        raise TargetingRulesError(path, "must be and, or or not")
+
+
+def _rule_base(
+    rules: TargetingRules, rule_id: Optional[str], groups_base: Optional[str]
+) -> str:
+    """Path of the rule an issue belongs to, in the submitted value's terms."""
+    if groups_base is not None:
+        return ""  # dashboard: one rule, its groups are the submitted groups
+    for index, rule in enumerate(rules.rules):
+        if rule.id == rule_id:
+            return f"rules[{index}].rule"
+    if rules.default_rule is not None and rules.default_rule.id == rule_id:
+        return "default_rule.rule"
+    return ""
+
+
+def _join(base: str, tail: Optional[str]) -> str:
+    tail = (tail or "").lstrip(".")
+    if base and tail:
+        return f"{base}.{tail}"
+    return base or tail
+
+
+def _check_list_sizes(rules: TargetingRules, groups_base: Optional[str]) -> None:
+    def walk(group: RuleGroup, path: str) -> None:
+        for ci, condition in enumerate(group.conditions):
+            if (
+                condition.operator in _LIST_OPERATORS
+                and isinstance(condition.value, (list, tuple, set))
+                and len(condition.value) > MAX_LIST_ITEMS
+            ):
+                raise TargetingRulesError(
+                    _join(path, f"conditions[{ci}].value"),
+                    f"at most {MAX_LIST_ITEMS} values are allowed",
+                )
+        for gi, nested in enumerate(group.groups or []):
+            walk(nested, _join(path, f"groups[{gi}]"))
+
+    for index, rule in enumerate(rules.rules):
+        walk(rule.rule, "" if groups_base is not None else f"rules[{index}].rule")
+    if rules.default_rule is not None:
+        walk(rules.default_rule.rule, "default_rule.rule")
+
+
+def _check_rule_validator(rules: TargetingRules, groups_base: Optional[str]) -> None:
+    # Imported here: rule_validation is only needed on the write path.
+    from backend.app.core.rule_validation import RuleValidator, ValidationSeverity
+
+    result = RuleValidator().validate_targeting_rules(rules)
+    for issue in result.issues:
+        if issue.severity != ValidationSeverity.ERROR:
+            continue
+        code = next(
+            (
+                fixed
+                for prefix, fixed in _RULE_VALIDATOR_CODES
+                if issue.message.startswith(prefix)
+            ),
+            "not valid",
+        )
+        path = _join(
+            _rule_base(rules, issue.rule_id, groups_base), issue.condition_path
+        )
+        raise TargetingRulesError(path, code)
 
 
 # ---------------------------------------------------------------------------
