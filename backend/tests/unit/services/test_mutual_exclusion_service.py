@@ -379,9 +379,11 @@ class TestIsUserEligibleForExperiment:
         result = service.is_user_eligible_for_experiment("user1", uuid4())
         assert result is True
 
+    @patch.object(MutualExclusionService, "has_sibling_assignment", return_value=False)
     @patch.object(MutualExclusionService, "select_experiment_for_user")
-    def test_eligible_when_selected(self, mock_select, service, mock_db):
-        """User is eligible if select_experiment_for_user returns this experiment."""
+    def test_eligible_when_selected(self, mock_select, mock_sibling, service, mock_db):
+        """User is eligible if select_experiment_for_user returns this experiment
+        and they hold no assignment in a live sibling."""
         exp_id = uuid4()
         group_id = uuid4()
 
@@ -409,10 +411,45 @@ class TestIsUserEligibleForExperiment:
 
         result = service.is_user_eligible_for_experiment("user1", exp_id)
         assert result is True
+        mock_sibling.assert_called_once_with("user1", group_id, exp_id)
 
+    @patch.object(MutualExclusionService, "has_sibling_assignment", return_value=True)
+    @patch.object(MutualExclusionService, "select_experiment_for_user")
+    def test_not_eligible_when_enrolled_in_a_sibling(
+        self, mock_select, mock_sibling, service, mock_db
+    ):
+        """Selected by the hash, but already enrolled in a live sibling (#446)."""
+        exp_id = uuid4()
+        group_id = uuid4()
+
+        mock_exp = MagicMock(spec=Experiment)
+        mock_exp.id = exp_id
+        mock_exp.mutual_exclusion_group_id = group_id
+
+        mock_group = MagicMock(spec=MutualExclusionGroup)
+        mock_group.id = group_id
+
+        call_count = [0]
+
+        def side_effect(model):
+            call_count[0] += 1
+            result = MagicMock()
+            if model is Experiment or call_count[0] == 1:
+                result.filter.return_value.first.return_value = mock_exp
+            else:
+                result.filter.return_value.first.return_value = mock_group
+            return result
+
+        mock_db.query = MagicMock(side_effect=side_effect)
+        mock_select.return_value = exp_id
+
+        assert service.is_user_eligible_for_experiment("user1", exp_id) is False
+        mock_sibling.assert_called_once_with("user1", group_id, exp_id)
+
+    @patch.object(MutualExclusionService, "has_sibling_assignment", return_value=False)
     @patch.object(MutualExclusionService, "select_experiment_for_user")
     def test_not_eligible_when_different_experiment_selected(
-        self, mock_select, service, mock_db
+        self, mock_select, mock_sibling, service, mock_db
     ):
         """User is NOT eligible if select_experiment_for_user returns a different experiment."""
         exp_id = uuid4()
@@ -442,9 +479,14 @@ class TestIsUserEligibleForExperiment:
 
         result = service.is_user_eligible_for_experiment("user1", exp_id)
         assert result is False
+        # The sibling lookup runs only after the hash has picked this experiment.
+        mock_sibling.assert_not_called()
 
+    @patch.object(MutualExclusionService, "has_sibling_assignment", return_value=False)
     @patch.object(MutualExclusionService, "select_experiment_for_user")
-    def test_archived_group_imposes_no_constraint(self, mock_select, service, mock_db):
+    def test_archived_group_imposes_no_constraint(
+        self, mock_select, mock_sibling, service, mock_db
+    ):
         """An archived (soft-deleted) group must not lock users out of its experiments."""
         exp_id = uuid4()
         group_id = uuid4()
@@ -472,3 +514,4 @@ class TestIsUserEligibleForExperiment:
 
         assert service.is_user_eligible_for_experiment("user1", exp_id) is True
         mock_select.assert_not_called()
+        mock_sibling.assert_not_called()
