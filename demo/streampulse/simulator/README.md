@@ -58,29 +58,26 @@ threshold (≈ 3%, warning only), which is why the story runs the incident after
 
 ## Rollout story
 
-The story calls the dashboard API with a bearer token. `--token` defaults to `dev`, which the
-backend accepts only with its development bypass on: `DEV_AUTH_BYPASS=true` and `ENVIRONMENT`
-`development` or `test`. `.env.example` ships `DEV_AUTH_BYPASS=false` and `setup-local.sh` does
-not change it, so otherwise the story stops with "the dashboard API rejected the bearer token
-(401)". Sign in as the demo admin instead and keep the token:
-
-```{.bash skip reason="demo: runs the demo applications (Stream F)"}
-TOKEN=$(curl -s -X POST localhost:8000/api/v1/auth/login \
-  -H 'content-type: application/json' \
-  -d '{"email":"admin@demo.com","password":"Demo1234!"}' | jq -r .access_token)
-```
+The story calls the dashboard API with a bearer token. Without `--token` it gets one itself:
+it signs in with `POST /api/v1/auth/login` as `--email`/`--password`, which default to the
+seeded demo admin (`admin@demo.com` / `Demo1234!`). That needs the backend on its default local
+sign-in (`AUTH_PROVIDER=local`), which is how `setup-local.sh` starts it. A failed sign-in stops
+the story with exit code 2 and says why.
 
 To run one step, here the first:
 
 ```{.bash skip reason="demo: runs the demo applications (Stream F)"}
-python demo/streampulse/simulator/rollout_story.py --token "$TOKEN" --step 1
+python demo/streampulse/simulator/rollout_story.py --step 1
 ```
 
 To run all seven, pausing 20 seconds between steps (`--pace`, default 15):
 
 ```{.bash skip reason="demo: runs the demo applications (Stream F)"}
-python demo/streampulse/simulator/rollout_story.py --token "$TOKEN" --auto --pace 20
+python demo/streampulse/simulator/rollout_story.py --auto --pace 20
 ```
+
+To use a token you already have instead, pass `--token "$TOKEN"`; to sign in as another user
+who may change flags, pass `--email` and `--password`.
 
 Other options: `--api-url`, `--api-key` (for the step-3 traffic), `--dashboard-url` (default `http://localhost:3100`),
 `--app-url` (default `http://localhost:3300`), `--incident-rate/--incident-duration`, `--rollback-wait`, `--no-wait`.

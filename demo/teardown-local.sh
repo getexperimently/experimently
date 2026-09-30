@@ -33,7 +33,7 @@ if [[ -d "$PIDS_DIR" ]]; then
             log "Stopping $PROC_NAME (PID $PID)..."
             kill "$PID" 2>/dev/null || true
             # Wait up to 5 seconds for graceful shutdown
-            for i in {1..5}; do
+            for _ in {1..5}; do
                 kill -0 "$PID" 2>/dev/null || break
                 sleep 1
             done
@@ -51,10 +51,28 @@ fi
 # ---------------------------------------------------------------------------
 # 2. Stop Docker services
 # ---------------------------------------------------------------------------
+# Same choice as setup-local.sh: the `docker compose` plugin, else the
+# standalone `docker-compose`. If they cannot be stopped the cleanup below
+# still runs, and the script then exits 1.
+DOCKER_STOPPED=1
 log "Stopping Docker services..."
 cd "$REPO_ROOT"
-docker-compose down
-ok "Docker services stopped."
+if docker compose version >/dev/null 2>&1; then
+    COMPOSE=(docker compose)
+elif command -v docker-compose >/dev/null 2>&1; then
+    COMPOSE=(docker-compose)
+else
+    COMPOSE=()
+fi
+if [[ ${#COMPOSE[@]} -eq 0 ]]; then
+    warn "Neither 'docker compose' nor 'docker-compose' found — Docker services not stopped."
+    DOCKER_STOPPED=0
+elif "${COMPOSE[@]}" down; then
+    ok "Docker services stopped."
+else
+    warn "'${COMPOSE[*]} down' failed — Docker services may still be running."
+    DOCKER_STOPPED=0
+fi
 
 # ---------------------------------------------------------------------------
 # 3. Cleanup demo artifacts
@@ -67,5 +85,9 @@ rm -f  "$DEMO_DIR/.demo_api_key_aws"
 ok "Cleanup complete."
 
 echo ""
+if [[ "$DOCKER_STOPPED" != "1" ]]; then
+    warn "Demo processes stopped, but the Docker services were not: stop them with 'docker compose down'."
+    exit 1
+fi
 ok "Demo environment stopped."
 echo ""
