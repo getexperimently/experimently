@@ -1,7 +1,7 @@
 """``PUT /experiments/{id}``: required fields cannot be set to null (#541).
 
-``name``, ``status``, ``experiment_type`` and ``sequential_testing_enabled``
-are stored in NOT NULL columns. An update that sets one of them to null, or
+``name``, ``status``, ``experiment_type``, ``sequential_testing_enabled`` and
+``optimization_type`` are stored in NOT NULL columns. An update that sets one of them to null, or
 sets a name longer than the column's 100 characters, used to reach the
 database and answer 500. It now answers 422 naming the field, and nothing is
 written. Leaving a field out is still allowed: every field of an update is
@@ -40,7 +40,13 @@ EXPERIMENTS = "/api/v1/experiments"
 PREFIX = "reqnull"
 
 #: The fields an update may not set to null: each is a NOT NULL column.
-REQUIRED = ("name", "status", "experiment_type", "sequential_testing_enabled")
+REQUIRED = (
+    "name",
+    "status",
+    "experiment_type",
+    "sequential_testing_enabled",
+    "optimization_type",
+)
 
 #: Fields whose null was accepted before this change and still is.
 NULLABLE = ("description", "variants", "metrics", "bayesian_enabled")
@@ -147,6 +153,7 @@ def _stored(fresh, experiment_id) -> dict:
             "status": row.status,
             "experiment_type": row.experiment_type,
             "sequential_testing_enabled": row.sequential_testing_enabled,
+            "optimization_type": row.optimization_type,
             "bayesian_enabled": row.bayesian_enabled,
             "updated_at": row.updated_at,
         }

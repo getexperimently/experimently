@@ -430,6 +430,7 @@ NOT_NULL_UPDATE_FIELDS = (
     "status",
     "experiment_type",
     "sequential_testing_enabled",
+    "optimization_type",
 )
 
 
@@ -437,8 +438,9 @@ class ExperimentUpdate(BaseModel):
     """Model for updating an experiment.
 
     Every field is optional: a field left out is not changed. `name`,
-    `status`, `experiment_type` and `sequential_testing_enabled` cannot be
-    set to null; a request that does is refused with 422.
+    `status`, `experiment_type`, `sequential_testing_enabled` and
+    `optimization_type` cannot be set to null; a request that does is
+    refused with 422.
     """
 
     # The NOT_NULL_UPDATE_FIELDS default to None only to mean "not sent":
@@ -495,7 +497,7 @@ class ExperimentUpdate(BaseModel):
     )
 
     # Issue #22: MAB optimization type
-    optimization_type: Optional[OptimizationType] = Field(
+    optimization_type: OptimizationType = Field(
         default=None,
         description="Traffic optimization algorithm.",
     )

@@ -6034,7 +6034,7 @@
         "type": "string"
       },
       "ExperimentUpdate": {
-        "description": "Model for updating an experiment.\n\nEvery field is optional: a field left out is not changed. `name`,\n`status`, `experiment_type` and `sequential_testing_enabled` cannot be\nset to null; a request that does is refused with 422.",
+        "description": "Model for updating an experiment.\n\nEvery field is optional: a field left out is not changed. `name`,\n`status`, `experiment_type`, `sequential_testing_enabled` and\n`optimization_type` cannot be set to null; a request that does is\nrefused with 422.",
         "example": {
           "description": "Testing different button colors with updated hypothesis",
           "hypothesis": "Changing the button color to dark blue will increase conversion rates",
@@ -6124,14 +6124,7 @@
             "type": "string"
           },
           "optimization_type": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/OptimizationType"
-              },
-              {
-                "type": "null"
-              }
-            ],
+            "$ref": "#/components/schemas/OptimizationType",
             "description": "Traffic optimization algorithm."
           },
           "schedule": {

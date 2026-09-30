@@ -12,10 +12,16 @@ from backend.app.schemas.experiment import NOT_NULL_UPDATE_FIELDS, ExperimentUpd
 
 pytestmark = [pytest.mark.unit]
 
-REQUIRED = ("name", "status", "experiment_type", "sequential_testing_enabled")
+REQUIRED = (
+    "name",
+    "status",
+    "experiment_type",
+    "sequential_testing_enabled",
+    "optimization_type",
+)
 
 
-def test_the_not_null_fields_are_exactly_the_four():
+def test_the_not_null_fields_are_exactly_these():
     assert NOT_NULL_UPDATE_FIELDS == REQUIRED
 
 
