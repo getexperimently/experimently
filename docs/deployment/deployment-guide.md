@@ -325,8 +325,9 @@ After that hour, the response to a bad release is the Rollback workflow.
    dashboard image (`experimentation-platform/web:<tag>-<profile>`, the profile
    passed as a build argument), and only then
    snapshots the database (`pre-deploy-<env>-<tag>-<time>`), registers and
-   runs the migration by digest, registers the API revision by digest, and
-   creates the CodeDeploy deployment.
+   runs the migration by digest, registers the API revision by digest, refuses
+   it if what ECS stored does not set `RUN_MIGRATIONS=false` on the `backend`
+   container, and creates the CodeDeploy deployment.
 6. **The traffic shift.** When CodeDeploy reports the deployment `Ready`, the
    run checks that every target in the new task set's target group is
    `healthy` and that their number is the task set's desired count. Then it
@@ -565,6 +566,15 @@ alarm and says whether the previous revision is serving again. Read
 If it says "Stopped by an alarm" instead, the alarm was already firing before
 the traffic shift and nothing shifted:
 [Fix forward while an alarm is firing](rollback-runbook.md#fix-forward-while-an-alarm-is-firing).
+
+### "This API revision would run migrations on start"
+
+The API revision this run registered, copied from the family's newest one,
+does not set `RUN_MIGRATIONS=false`, most likely because the Fargate stack was
+last deployed from a checkout older than 0.14.0. No deployment was created and the previous revision
+keeps serving; the migration **has** been applied. Deploy the Fargate stack from
+a current checkout, pinned (section 1.6), then deploy again:
+[Rollback Runbook](rollback-runbook.md#deploy-refused-an-api-revision-that-would-run-migrations-on-start).
 
 ### "Traffic shift not approved"
 

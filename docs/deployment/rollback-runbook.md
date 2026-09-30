@@ -173,7 +173,10 @@ release's migrations on start, and against a newer schema it refuses to
 start. Register a copy of it with
 `RUN_MIGRATIONS=false` added to the `backend` container's environment, and roll
 back to the copy. Revisions the Deploy workflow registers after the Fargate
-stack has been deployed from a current checkout carry the setting already.
+stack has been deployed from a current checkout carry the setting already, and
+Deploy refuses to create a deployment for one that does not
+([Deploy refused an API revision that would run migrations on start](#deploy-refused-an-api-revision-that-would-run-migrations-on-start)).
+Rollback does not check its target: that is this command.
 
 ### Step 1: Find the Previous Task Definition ARN
 
@@ -653,6 +656,41 @@ To see which alarm is firing, and since when:
 ```{.bash skip reason="aws: reads the real alarms' state"}
 aws cloudwatch describe-alarms --alarm-names "experimentation-api-5xx-blue-$ENV" "experimentation-api-5xx-green-$ENV" --query 'MetricAlarms[].{name:AlarmName,state:StateValue,since:StateUpdatedTimestamp,reason:StateReason}'
 ```
+
+## Deploy refused an API revision that would run migrations on start
+
+The deploy run ended with **"This API revision would run migrations on
+start"**. Deploy registers the API's revision by copying the newest revision of
+the family and replacing its image, then reads back what ECS stored. It found
+the `backend` container without `RUN_MIGRATIONS=false` -- the variable missing,
+or set to anything but exactly `false` -- and stopped before creating the
+CodeDeploy deployment.
+
+**What has happened.** The snapshot was taken and the migration was applied;
+the database is at the new release's heads. No deployment was created, so the
+revision that served before the run still serves, on the migrated schema. The
+run also ends with the "Migrated, not deployed" warning, which says the same.
+
+**Why.** The newest revision of the family came from a `cdk deploy` of the
+Fargate stack from a checkout that predates the setting (#499, 0.14.0). A
+revision without it runs the database bootstrap each time a task starts, and a
+bootstrap refuses a database a newer release migrated.
+
+**Fix.** Deploy the Fargate stack of this environment,
+`experimentation-fargate-<env>`, from a checkout that contains #499 (0.14.0 or
+later), pinned to what is live exactly as
+[Deployment Guide, section 1.6](deployment-guide.md#16-the-stacks) says. That
+registers a revision with the setting and does not change what is serving: the
+API service is under CodeDeploy, so a change to its task definition only adds a
+revision. Then run Deploy again with the same tag. Its migration finds the
+database already at the release's heads and changes nothing.
+
+**Meanwhile.** The revision that is serving was probably registered from the
+same older base, so it runs migrations on start too. Its running tasks keep
+serving, but one that starts now -- a replacement, a scale-out -- meets a
+schema newer than its release and refuses to start. Check it with the command
+in [The rolled-back API runs against the current schema](#the-rolled-back-api-runs-against-the-current-schema),
+and do not leave the environment in this state longer than the fix takes.
 
 ---
 

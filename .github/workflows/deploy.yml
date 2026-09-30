@@ -817,6 +817,25 @@ jobs:
           arn="$(bash scripts/register_task_definition.sh "$ECS_BACKEND_TASK_FAMILY" "$IMAGE")"
           echo "arn=$arn" >> "$GITHUB_OUTPUT"
 
+      # The API tasks must not run migrations on start (#298): the migration
+      # above is the only schema writer, and a task that bootstraps refuses a
+      # database a newer release migrated. The revision just registered was
+      # copied from the family's newest one, which lacks RUN_MIGRATIONS=false
+      # when the Fargate stack was last deployed from an older checkout. This
+      # reads back what ECS stored for the ARN and refuses before
+      # CodeDeploy is asked for anything. No `if:`: a failure here ends the
+      # job before the next step, which creates the deployment.
+      - name: Refuse an API revision that would run migrations on start
+        id: api-td-check
+        env:
+          TASK_DEFINITION: ${{ steps.api-td.outputs.arn }}
+        run: |
+          set -euo pipefail
+          python3 scripts/refuse_migrating_api_revision.py \
+            --task-definition "$TASK_DEFINITION" \
+            --environment "$TARGET_ENV" \
+            --fargate-stack "$FARGATE_STACK"
+
       # The deployment group's 5xx alarms watch this deployment (#148), unless
       # the break-glass input is set: then, and only then, THIS deployment is
       # created with the alarms overridden. The override is on this one
@@ -1080,7 +1099,7 @@ jobs:
         run: |
           previous="${PREVIOUS##*/}"
           previous_dashboard="${PREVIOUS_DASHBOARD##*/}"
-          echo "::warning title=Migrated, not deployed::The migration was applied; the deployment then failed before any traffic shifted. The database is at ${VERSION}'s heads; ${previous:-the previous revision} is still serving, and the dashboard is unchanged (${previous_dashboard:-not read}). This is safe only if the migration is backward-compatible (docs/deployment/deployment-guide.md#backward-compatible-migrations)."
+          echo "::warning title=Migrated, not deployed::The migration was applied; the deployment then failed before any traffic shifted. The database is at ${VERSION}'s heads; ${previous:-the previous revision} is still serving, and the dashboard is unchanged (${previous_dashboard:-not read}). The API does not migrate on start: ${previous:-the previous revision} serves the migrated schema as it is, and a task of it that starts from now on (a replacement, a scale-out) starts against it only if its revision sets RUN_MIGRATIONS=false; one that does not runs migrations on start and refuses a newer schema (docs/deployment/rollback-runbook.md#the-rolled-back-api-runs-against-the-current-schema). This is safe only if the migration is backward-compatible (docs/deployment/deployment-guide.md#backward-compatible-migrations)."
 
       # Not when an alarm stopped the deployment (#148 PE condition 7): then
       # CodeDeploy is moving the API back by itself, and "use the rollback
@@ -1092,7 +1111,7 @@ jobs:
         env:
           NEW_REVISION: ${{ steps.api-td.outputs.arn }}
         run: |
-          echo "::warning title=Migrated, shift approved, run failed::The migration was applied and the traffic shift was approved, so ${NEW_REVISION##*/} may be serving some or all traffic. Check with: python3 scripts/api_serving.py ${ECS_CLUSTER} ${ECS_BACKEND_SERVICE} ${NEW_REVISION##*/} (exit 0 = serving). If this release is bad, use the rollback line in this run's summary."
+          echo "::warning title=Migrated, shift approved, run failed::The migration was applied and the traffic shift was approved, so ${NEW_REVISION##*/} may be serving some or all traffic. Check with: python3 scripts/api_serving.py ${ECS_CLUSTER} ${ECS_BACKEND_SERVICE} ${NEW_REVISION##*/} (exit 0 = serving). If this release is bad, use the rollback line in this run's summary. A rollback does not undo the migration: the previous revision then runs against this schema as it is, which is safe only if the migration is backward-compatible (docs/deployment/rollback-runbook.md#the-rolled-back-api-runs-against-the-current-schema)."
 
       # CodeDeploy stopped this run's deployment for an alarm (#148 UX W2).
       # Read-only: whether the revision serving before this run is serving
@@ -1119,7 +1138,7 @@ jobs:
           fi
           migration=""
           if [ "$MIGRATION" = success ]; then
-            migration=" The migration stays applied: the database is at ${VERSION}'s heads (docs/deployment/deployment-guide.md#backward-compatible-migrations)."
+            migration=" The migration stays applied: the database is at ${VERSION}'s heads, and the API tasks do not migrate on start, so the revision serving now runs against that schema as it is. That is safe only if the migration is backward-compatible (docs/deployment/rollback-runbook.md#the-rolled-back-api-runs-against-the-current-schema)."
           fi
           previous_dashboard="${PREVIOUS_DASHBOARD##*/}"
           dashboard="The dashboard was not changed: it is on ${previous_dashboard:-the revision it was on (not read)}."
