@@ -99,10 +99,9 @@ The crash incident is the same simulator with `--incident android12`:
 python demo/streampulse/simulator/traffic.py --rate 5 --incident android12
 ```
 
-**5. The rollout story**, in another terminal. It calls the dashboard API, so it needs a bearer
-token, passed with `--token`; [the simulator's README](simulator/README.md#rollout-story) says
-when the default works and how to get one when it does not. `--auto` runs all seven steps,
-paced:
+**5. The rollout story**, in another terminal. It calls the dashboard API, so it signs in first
+as the seeded demo admin; [the simulator's README](simulator/README.md#rollout-story) says how
+to sign in as someone else or pass a token instead. `--auto` runs all seven steps, paced:
 
 ```{.bash skip reason="demo: runs the demo applications (Stream F)"}
 python demo/streampulse/simulator/rollout_story.py --auto

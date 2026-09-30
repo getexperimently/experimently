@@ -453,7 +453,7 @@ results = await service.batch_evaluate(users=user_list, rules=targeting_rules)
 
 ## Resources
 
-- API Docs: http://localhost:8000/docs
+- API Docs: http://localhost:8000/api/v1/docs
 - Health Check: http://localhost:8000/health
 - Alembic Docs: https://alembic.sqlalchemy.org/
 - FastAPI Docs: https://fastapi.tiangolo.com/

@@ -158,3 +158,140 @@ def test_a_default_password_creates_no_administrator_when_the_environment_is_uns
     finally:
         with engine.begin() as conn:
             conn.execute(text(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE'))
+
+
+# bcrypt hashes at most 72 bytes and raises ValueError on a longer password,
+# so a longer FIRST_SUPERUSER_PASSWORD used to stop the first start with a
+# traceback. 36 x "é" is 72 bytes in 36 characters; 37 of them is 74 bytes.
+_AT_THE_LIMIT = "Aa1-" + "x" * 68
+_OVER_THE_LIMIT = "Aa1-" + "x" * 69
+_ACCENTED_AT_THE_LIMIT = "é" * 36
+_ACCENTED_OVER_THE_LIMIT = "é" * 37
+_TOO_LONG = "must be at most 72 bytes when encoded as UTF-8"
+
+
+def _hashed_password(engine, schema: str) -> str:
+    with engine.connect() as conn:
+        return conn.execute(
+            text(f'SELECT hashed_password FROM "{schema}".users')
+        ).scalar_one()
+
+
+@pytest.mark.integration
+@pytest.mark.regression
+@pytest.mark.parametrize(
+    "environment", [None, "development"], ids=["unset", "development"]
+)
+@pytest.mark.parametrize(
+    "password",
+    [_OVER_THE_LIMIT, _ACCENTED_OVER_THE_LIMIT],
+    ids=["ascii-73-bytes", "accented-74-bytes"],
+)
+def test_a_first_administrator_password_over_72_bytes_is_refused_in_one_line(
+    test_db, password, environment
+):
+    """An empty users table and a password over 72 bytes of UTF-8: exit 1 with
+    one line naming the limit, no traceback, no user, and the value is not
+    repeated. Refused whatever ENVIRONMENT is, since it cannot be hashed."""
+    assert len(password.encode("utf-8")) > 72
+    engine = test_db
+    schema = f"boot_long_{uuid.uuid4().hex[:8]}"
+    overrides = {"FIRST_SUPERUSER_PASSWORD": password}
+    if environment:
+        overrides["ENVIRONMENT"] = environment
+    try:
+        refused = _run_bootstrap(schema, **overrides)
+        assert "Traceback" not in refused.stderr, refused.stderr[-2000:]
+        assert refused.returncode == 1, refused.stderr[-2000:]
+        assert _TOO_LONG in refused.stderr, refused.stderr[-2000:]
+        assert password not in refused.stderr + refused.stdout
+        assert _users(engine, schema) == []
+    finally:
+        with engine.begin() as conn:
+            conn.execute(text(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE'))
+
+
+@pytest.mark.integration
+@pytest.mark.regression
+def test_a_first_administrator_password_with_no_utf8_encoding_is_refused(test_db):
+    """A byte that is not UTF-8 reaches Python as a lone surrogate, which has no
+    UTF-8 encoding; refused with fixed text rather than a traceback."""
+    engine = test_db
+    schema = f"boot_enc_{uuid.uuid4().hex[:8]}"
+    try:
+        refused = _run_bootstrap(
+            schema, FIRST_SUPERUSER_PASSWORD="Race-Passw0rd-\udcff"
+        )
+        assert "Traceback" not in refused.stderr, refused.stderr[-2000:]
+        assert refused.returncode == 1, refused.stderr[-2000:]
+        assert "FIRST_SUPERUSER_PASSWORD cannot be encoded as UTF-8" in (
+            refused.stderr
+        ), refused.stderr[-2000:]
+        assert "Race-Passw0rd" not in refused.stderr + refused.stdout
+        assert _users(engine, schema) == []
+    finally:
+        with engine.begin() as conn:
+            conn.execute(text(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE'))
+
+
+@pytest.mark.integration
+@pytest.mark.regression
+@pytest.mark.parametrize(
+    "password",
+    [_AT_THE_LIMIT, _ACCENTED_AT_THE_LIMIT],
+    ids=["ascii-72-bytes", "accented-72-bytes"],
+)
+def test_a_first_administrator_password_of_exactly_72_bytes_is_accepted(
+    test_db, password
+):
+    import bcrypt
+
+    assert len(password.encode("utf-8")) == 72
+    engine = test_db
+    schema = f"boot_72_{uuid.uuid4().hex[:8]}"
+    try:
+        created = _run_bootstrap(
+            schema, FIRST_SUPERUSER_PASSWORD=password, ENVIRONMENT="development"
+        )
+        assert created.returncode == 0, created.stderr[-2000:]
+        assert _users(engine, schema) == ["race@example.com"]
+        assert bcrypt.checkpw(
+            password.encode("utf-8"),
+            _hashed_password(engine, schema).encode("utf-8"),
+        )
+    finally:
+        with engine.begin() as conn:
+            conn.execute(text(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE'))
+
+
+@pytest.mark.integration
+@pytest.mark.regression
+def test_a_long_password_setting_does_not_stop_a_database_that_has_users(test_db):
+    """The limit applies only while users is empty. A deployment already
+    running with a long value in FIRST_SUPERUSER_PASSWORD keeps starting, and
+    the existing administrator is left alone."""
+    engine = test_db
+    schema = f"boot_kept_{uuid.uuid4().hex[:8]}"
+    try:
+        first = _run_bootstrap(schema)
+        assert first.returncode == 0, first.stderr[-2000:]
+        before = _hashed_password(engine, schema)
+
+        # As production: the settings' own staging/production rules apply, so
+        # this also fails if the limit is ever moved onto the setting.
+        later = _run_bootstrap(
+            schema,
+            FIRST_SUPERUSER_PASSWORD=_OVER_THE_LIMIT,
+            ENVIRONMENT="production",
+            SECRET_KEY="bootstrap-test-" + "k" * 40,
+            AUDIT_HMAC_KEY="bootstrap-test-" + "a" * 40,
+            PUBLIC_BASE_URL="https://experimently.example.com",
+        )
+        assert later.returncode == 0, later.stderr[-2000:]
+        assert "users exist; FIRST_SUPERUSER settings ignored" in later.stderr
+        assert _TOO_LONG not in later.stderr
+        assert _users(engine, schema) == ["race@example.com"]
+        assert _hashed_password(engine, schema) == before
+    finally:
+        with engine.begin() as conn:
+            conn.execute(text(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE'))
