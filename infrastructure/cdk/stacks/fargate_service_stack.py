@@ -2,6 +2,7 @@ from aws_cdk import (
     Stack,
     Duration,
     CfnOutput,
+    Token,
     aws_ec2 as ec2,
     aws_ecs as ecs,
     aws_ecr as ecr,
@@ -28,6 +29,7 @@ from stacks.names import (
     api_healthy_alarm_name,
     api_no_healthy_task_alarm_name,
     codedeploy_application_name,
+    counters_table_name,
     glue_names,
 )
 
@@ -1002,6 +1004,43 @@ class FargateServiceStack(Stack):
         if include_modules:
             for variable, value in glue_names(env_name).items():
                 self.container.add_environment(variable, value)
+
+        # --- The counters module's DynamoDB table (#392) ---
+        # The counters stack creates `counters_table_name(env)`; the API reads
+        # the name from DYNAMODB_COUNTERS_TABLE, whose default is a name no
+        # stack creates. The same function supplies both, as a plain string:
+        # the table's token would become an export that pins the counters
+        # stack. The grant is the two calls DynamoDBCounterService makes
+        # (UpdateItem and Query, on the table itself, not its index);
+        # modules/backend/tests/unit/services/test_counter_service_calls.py
+        # fails if the service starts making any other.
+        #
+        # AWS_DEFAULT_REGION, not AWS_REGION: the service builds its client
+        # with no region, and botocore takes the default region from
+        # AWS_DEFAULT_REGION only. AWS_REGION is read explicitly by other
+        # settings (Cognito among them), which this must not move. Core
+        # deployments have no counters table, so they get none of this.
+        if include_modules:
+            if Token.is_unresolved(self.region):
+                raise ValueError(
+                    "the counters table needs a concrete region: give the "
+                    "stack env=Environment(region=...)"
+                )
+            table_name = counters_table_name(env_name)
+            self.container.add_environment("DYNAMODB_COUNTERS_TABLE", table_name)
+            self.container.add_environment("AWS_DEFAULT_REGION", self.region)
+            task_role.add_to_policy(
+                iam.PolicyStatement(
+                    actions=["dynamodb:Query", "dynamodb:UpdateItem"],
+                    resources=[
+                        self.format_arn(
+                            service="dynamodb",
+                            resource="table",
+                            resource_name=table_name,
+                        )
+                    ],
+                )
+            )
 
         # --- CloudFormation Outputs ---
         # Where the API's tasks run: the subnets and security group a one-off

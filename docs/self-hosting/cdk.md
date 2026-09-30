@@ -249,7 +249,13 @@ dashboard is still on `:bootstrap`.
 - **Application Load Balancer** with an HTTPS listener and an HTTP-to-HTTPS redirect, in front of the API and the dashboard: `/api/*`, `/health`, `/health/*` and `/metrics` go to the API, everything else to the dashboard
 - The dashboard's own ECS service, `experimentation-dashboard-<env>` (rolling deployment with the circuit breaker; 1 task in `staging`, 2 in `prod`), started on `experimentation-platform/web:bootstrap`
 - AWS CodeDeploy deployment group for blue/green deployments
-- IAM task role with permissions for DynamoDB, Kinesis, Secrets Manager, and Cognito
+- IAM task role for the API: the `CloudWatchLogsFullAccess` managed policy,
+  `secretsmanager:GetSecretValue` on the secrets the task reads, and the
+  `ssmmessages` and `logs` actions ECS Exec uses. The full profile adds
+  `dynamodb:Query` and `dynamodb:UpdateItem` on the
+  `experiment-counters-<env>` table alone, and sets `DYNAMODB_COUNTERS_TABLE`
+  and `AWS_DEFAULT_REGION` on the API container. There is no Kinesis, Cognito
+  or other DynamoDB permission
 
 ### experimentation-dynamodb-<env> and experimentation-dynamodb-counters-<env>
 

@@ -134,9 +134,16 @@ counters (`backend/app/core/bandit_scheduler.py`).
 
 ### Configuration
 
-`DYNAMODB_COUNTERS_TABLE` names the table the API uses (default `experiment-counters`). The
-counters stack names the table `experiment-counters-<env>`, and the Fargate stack does not set
-the variable on the API task.
+`DYNAMODB_COUNTERS_TABLE` names the table the API uses (default `experiment-counters`). On the
+full profile the counters stack creates `experiment-counters-<env>`, and the Fargate stack sets
+the variable on the API task to that same name (both come from `counters_table_name` in
+`infrastructure/cdk/stacks/names.py`). It also sets `AWS_DEFAULT_REGION` to the stack's region,
+because the counter service builds its DynamoDB client without naming a region, and gives the
+task role `dynamodb:Query` and `dynamodb:UpdateItem` on that one table: the two calls the
+service makes. The intent is that the `/api/v1/counters` routes and the bandit scheduler's
+DynamoDB read reach the table once this is deployed; nothing writes counters automatically
+yet, so the scheduler still takes its statistics from PostgreSQL while the table is empty.
+The core profile creates no table and sets neither variable.
 
 ---
 
@@ -263,27 +270,21 @@ names are the stack **ids** `cdk deploy` takes, not class names -- run
 
 ## Required IAM Permissions
 
-The ECS task role needs the following permissions:
+The CDK (`infrastructure/cdk/stacks/fargate_service_stack.py`) gives the API's ECS task role
+these permissions:
 
 ### ECS Task Role
 
-```json
-{
-  "Effect": "Allow",
-  "Action": [
-    "dynamodb:GetItem",
-    "dynamodb:PutItem",
-    "dynamodb:UpdateItem",
-    "dynamodb:Query",
-    "kinesis:PutRecord",
-    "kinesis:PutRecords",
-    "secretsmanager:GetSecretValue",
-    "cognito-idp:AdminGetUser",
-    "cognito-idp:ListUsers"
-  ],
-  "Resource": "*"
-}
-```
+- the `CloudWatchLogsFullAccess` managed policy
+- `secretsmanager:GetSecretValue` on the secrets the task reads
+- `ssmmessages:CreateControlChannel`, `CreateDataChannel`, `OpenControlChannel`,
+  `OpenDataChannel`, `logs:DescribeLogGroups`, `CreateLogStream`, `DescribeLogStreams` and
+  `PutLogEvents`, which come with ECS Exec
+- full profile only: `dynamodb:Query` and `dynamodb:UpdateItem` on
+  `arn:aws:dynamodb:<region>:<account>:table/experiment-counters-<env>` (see [DynamoDB](#dynamodb))
+
+There is no Kinesis, Cognito or other DynamoDB permission. The `etl` module's Glue calls are not
+granted yet (#487).
 
 ---
 
@@ -299,7 +300,8 @@ The ECS task role needs the following permissions:
 | `COGNITO_USER_POOL_ID` | Yes | AWS Cognito User Pool ID |
 | `COGNITO_CLIENT_ID` | Yes | Cognito app client ID |
 | `AWS_REGION` | Yes | Primary AWS region |
-| `DYNAMODB_COUNTERS_TABLE` | No | Full profile: the counters table (default `experiment-counters`; see [DynamoDB](#dynamodb)) |
+| `AWS_DEFAULT_REGION` | No | Full profile: set by the CDK to the stack's region, for the DynamoDB counter client (see [DynamoDB](#dynamodb)) |
+| `DYNAMODB_COUNTERS_TABLE` | No | Full profile: the counters table, set by the CDK to `experiment-counters-<env>` (default `experiment-counters`; see [DynamoDB](#dynamodb)) |
 | `SLACK_BOT_TOKEN` | No | Slack bot token for alerting |
 | `SENDGRID_API_KEY` | No | SendGrid API key for email alerts |
 | `AUDIT_HMAC_SECRET` | Yes | Secret for HMAC-SHA256 audit event signing |
