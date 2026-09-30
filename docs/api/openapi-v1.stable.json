@@ -4210,7 +4210,7 @@
         "type": "string"
       },
       "ExperimentUpdate": {
-        "description": "Model for updating an experiment.",
+        "description": "Model for updating an experiment.\n\nEvery field is optional: a field left out is not changed. `name`,\n`status`, `experiment_type`, `sequential_testing_enabled` and\n`optimization_type` cannot be set to null; a request that does is\nrefused with 422.",
         "example": {
           "description": "Testing different button colors with updated hypothesis",
           "hypothesis": "Changing the button color to dark blue will increase conversion rates",
@@ -4261,14 +4261,7 @@
             "title": "Description"
           },
           "experiment_type": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/ExperimentType"
-              },
-              {
-                "type": "null"
-              }
-            ],
+            "$ref": "#/components/schemas/ExperimentType",
             "description": "Type of experiment"
           },
           "hypothesis": {
@@ -4300,28 +4293,14 @@
             "title": "Metrics"
           },
           "name": {
-            "anyOf": [
-              {
-                "maxLength": 255,
-                "minLength": 1,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
             "description": "Experiment name",
-            "title": "Name"
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
           },
           "optimization_type": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/OptimizationType"
-              },
-              {
-                "type": "null"
-              }
-            ],
+            "$ref": "#/components/schemas/OptimizationType",
             "description": "Traffic optimization algorithm."
           },
           "schedule": {
@@ -4347,16 +4326,9 @@
             "description": "Sequential testing configuration."
           },
           "sequential_testing_enabled": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
             "description": "Enable or disable sequential testing.",
-            "title": "Sequential Testing Enabled"
+            "title": "Sequential Testing Enabled",
+            "type": "boolean"
           },
           "split_url_config": {
             "anyOf": [
@@ -4370,14 +4342,7 @@
             "description": "Split URL experiment configuration."
           },
           "status": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/ExperimentStatus"
-              },
-              {
-                "type": "null"
-              }
-            ],
+            "$ref": "#/components/schemas/ExperimentStatus",
             "description": "Experiment status"
           },
           "tags": {

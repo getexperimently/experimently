@@ -296,8 +296,8 @@ def test_paused_targeting_with_another_field_is_refused(
 
 @pytest.mark.parametrize(
     "extra",
-    [{"status": "paused"}, {"status": None}, {"name": None}],
-    ids=["same status", "null status", "null name"],
+    [{"status": "paused"}, {"description": None}, {"hypothesis": None}],
+    ids=["same status", "null description", "null hypothesis"],
 )
 def test_paused_targeting_is_judged_on_the_fields_sent(
     client, make_user, new_experiment, fresh, extra
@@ -315,6 +315,27 @@ def test_paused_targeting_is_judged_on_the_fields_sent(
 
     assert response.status_code == 403, response.text
     assert response.json()["detail"] == OLD_STATE_REFUSAL.format("paused")
+    assert _stored(fresh, experiment_id) == STORED
+
+
+@pytest.mark.parametrize("field", ["status", "name"])
+def test_paused_targeting_with_a_null_required_field_changes_nothing(
+    client, make_user, new_experiment, fresh, field
+):
+    """``status`` and ``name`` cannot be null (#541): the request is refused at
+    parsing (422), before the route, so it cannot become a targeting-only
+    change either."""
+    experiment_id, _ = new_experiment()
+    _set(fresh, experiment_id, status=ExperimentStatus.PAUSED)
+
+    response = client.put(
+        f"{EXPERIMENTS}/{experiment_id}",
+        json={"targeting_rules": NEW, field: None},
+        headers=_auth(make_user("developer")),
+    )
+
+    assert response.status_code == 422, response.text
+    assert [e["msg"] for e in response.json()["detail"]] == [f"{field} cannot be null"]
     assert _stored(fresh, experiment_id) == STORED
 
 

@@ -915,6 +915,16 @@ People already assigned keep their variant. The new rules decide for everyone
 not yet in the experiment, including people turned away before the change,
 once the experiment is started again.
 
+### Updating an experiment
+
+Every field of `PUT /api/v1/experiments/{experiment_id}` is optional: a field
+left out keeps its value. `name`, `status`, `experiment_type`,
+`sequential_testing_enabled` and `optimization_type` cannot be set to `null`;
+such a request is refused with 422, nothing is changed, and the message names
+the field, for example `name cannot be null`. `name` is at most 100
+characters, as on create. Other fields, such as `description`, may still be
+sent as `null`.
+
 ### Experiment Types
 
 #### 1. A/B Testing
