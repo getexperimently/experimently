@@ -268,6 +268,25 @@ def _future(days: int) -> str:
 # name -> (method, suffix, json body, query, starts ACTIVE?, success code)
 MUTATIONS = {
     "update": ("PUT", "", {"description": "changed"}, None, False, 200),
+    "update_targeting": (
+        "PUT",
+        "",
+        {
+            "targeting_rules": {
+                "logical_operator": "AND",
+                "groups": [
+                    {
+                        "conditions": [
+                            {"attribute": "country", "operator": "in", "value": ["GB"]}
+                        ]
+                    }
+                ],
+            }
+        },
+        None,
+        False,
+        200,
+    ),
     "delete": ("DELETE", "", None, "experiment_key", False, 204),
     "start": ("POST", "/start", None, None, False, 200),
     "pause": ("POST", "/pause", None, None, True, 200),
@@ -307,6 +326,58 @@ def test_a_change_drops_the_experiment_and_every_cached_list(
 
     assert redis_server.exists(detail_key) == 0, "the cached detail survived"
     assert redis_server.exists(own_list, other_list) == 0, "a cached list survived"
+
+
+#: Dashboard-shape rules, before and after a targeting change (#523).
+TARGETING_BEFORE = {
+    "logical_operator": "AND",
+    "groups": [
+        {
+            "logical_operator": "AND",
+            "conditions": [
+                {"attribute": "country", "operator": "equals", "value": "US"}
+            ],
+        }
+    ],
+}
+TARGETING_AFTER = {
+    "logical_operator": "AND",
+    "groups": [
+        {
+            "logical_operator": "AND",
+            "conditions": [
+                {"attribute": "country", "operator": "equals", "value": "GB"}
+            ],
+        }
+    ],
+}
+
+
+def test_a_targeting_change_is_read_back_at_once(cached_superuser_client, redis_server):
+    """After a targeting change the detail is the new rules, not the cached
+    old ones: the PUT drops the cached detail."""
+    client = cached_superuser_client
+    exp = _create(client)
+    set_rules = client.put(
+        f"{BASE}/{exp['id']}", json={"targeting_rules": TARGETING_BEFORE}
+    )
+    assert set_rules.status_code == 200, set_rules.text
+    first = client.get(f"{BASE}/{exp['id']}")
+    assert first.status_code == 200, first.text
+    assert first.json()["targeting_rules"] == TARGETING_BEFORE
+    assert redis_server.exists(f"experiment:{exp['id']}") == 1, "not cached"
+
+    change = client.put(
+        f"{BASE}/{exp['id']}", json={"targeting_rules": TARGETING_AFTER}
+    )
+    assert change.status_code == 200, change.text
+
+    assert redis_server.exists(f"experiment:{exp['id']}") == 0, (
+        "the cached detail survived"
+    )
+    second = client.get(f"{BASE}/{exp['id']}")
+    assert second.status_code == 200, second.text
+    assert second.json()["targeting_rules"] == TARGETING_AFTER
 
 
 @pytest.mark.parametrize("action", ["create", "clone"])
