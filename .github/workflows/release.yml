@@ -68,7 +68,8 @@ jobs:
   # ---------------------------------------------------------------------------
   # Nothing is built until the tag and the tree agree. `--expect` compares the
   # tag against VERSION, the release-please manifest, the version the build
-  # backend resolves and settings.VERSION; a tag on the wrong commit, or a
+  # backend resolves, settings.VERSION, Chart.yaml's version and appVersion
+  # and the compose file's image lines; a tag on the wrong commit, or a
   # VERSION that release-please did not bump, stops here rather than becoming
   # images that claim a version they are not.
   # ---------------------------------------------------------------------------
@@ -447,12 +448,16 @@ jobs:
   # every pre-release, which would have silently suppressed the release notes
   # and SBOM upload for exactly the rc runs the launch plan rehearses with.
   #
+  # It also waits for `chart`: a release whose Helm chart did not package or
+  # attach is not finished, and the floating tags are the one step that cannot
+  # be undone.
+  #
   # A pre-release never moves them: `docker pull ...:core` must not hand anyone
   # an rc.
   # ---------------------------------------------------------------------------
   floating-tags:
     name: move :core and :full
-    needs: [verify, api-images, web-images, publish]
+    needs: [verify, api-images, web-images, publish, chart]
     if: needs.verify.outputs.prerelease == 'false'
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -641,3 +646,91 @@ jobs:
             gh release create "$TAG" "${flags[@]}"
           fi
           gh release upload "$TAG" sboms/* --clobber
+
+  # ---------------------------------------------------------------------------
+  # The Helm chart, packaged and attached to the GitHub release as
+  # `experimently-X.Y.Z.tgz`, for `helm install ./experimently-X.Y.Z.tgz`.
+  #
+  # After `publish`, because the release has to exist before an asset can be
+  # attached to it, and `publish` is what creates it on the hand-pushed-tag
+  # path. `verify` has already compared Chart.yaml in the tree with the tag;
+  # this checks the archive itself, which is what a user installs.
+  #
+  # `helm package` is given no `--version` or `--app-version`: those override
+  # Chart.yaml and would make the version check below compare the tag with
+  # itself.
+  # ---------------------------------------------------------------------------
+  chart:
+    name: Helm chart
+    needs: [verify, publish]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    env:
+      # The same pin as chart.yml and chart-kind.yml.
+      HELM_VERSION: '3.19.0'
+      # sha256 of helm-v3.19.0-linux-amd64.tar.gz
+      HELM_SHA256: 'a7f81ce08007091b86d8bd696eb4d86b8d0f2e1b9f6c714be62f82f96a594496'
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.verify.outputs.tag }}
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.11'
+
+      # The runner image ships its own helm; the pinned one goes first on PATH
+      # and the version is asserted, so the job never runs the runner's.
+      - name: Install helm (pinned, checksum-verified)
+        run: |
+          set -euo pipefail
+          bin="$RUNNER_TEMP/bin"
+          mkdir -p "$bin"
+          curl -fsSL -o "$RUNNER_TEMP/helm.tgz" \
+            "https://get.helm.sh/helm-v${HELM_VERSION}-linux-amd64.tar.gz"
+          printf '%s  %s\n' "$HELM_SHA256" "$RUNNER_TEMP/helm.tgz" | sha256sum -c -
+          tar -xzf "$RUNNER_TEMP/helm.tgz" -C "$RUNNER_TEMP" linux-amd64/helm
+          install -m 0755 "$RUNNER_TEMP/linux-amd64/helm" "$bin/helm"
+          printf '%s\n' "$bin" >> "$GITHUB_PATH"
+          printf 'HELM=%s\n' "$bin/helm" >> "$GITHUB_ENV"
+
+      - name: Tool version
+        run: |
+          set -euo pipefail
+          test "$(helm version --template '{{.Version}}')" = "v${HELM_VERSION}"
+          test "$(command -v helm)" = "$HELM"
+
+      - name: helm lint --strict
+        run: |
+          set -euo pipefail
+          for values in charts/experimently/ci/values-core.yaml charts/experimently/ci/values-full.yaml; do
+            helm lint --strict charts/experimently -f "$values"
+          done
+
+      - name: helm package
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          helm package charts/experimently --destination dist
+          ls -l dist
+
+      - name: The packaged chart is this release
+        env:
+          VERSION: ${{ needs.verify.outputs.version }}
+        run: python scripts/check_chart_package.py "dist/experimently-${VERSION}.tgz" --expect "$VERSION"
+
+      # --clobber: re-running this workflow on an existing tag is the documented
+      # recovery for a failed release, and must replace the asset, not fail on it.
+      - name: Attach the chart to the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ needs.verify.outputs.tag }}
+          VERSION: ${{ needs.verify.outputs.version }}
+        run: |
+          set -euo pipefail
+          gh release upload "$TAG" "dist/experimently-${VERSION}.tgz" --clobber
+          gh release view "$TAG" --json assets --jq '.assets[].name' > assets.txt
+          grep -Fx "experimently-${VERSION}.tgz" assets.txt
