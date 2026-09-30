@@ -10,6 +10,35 @@ longer applies and release-please can generate this file directly. Until it
 does, entries below 0.2.2 are hand-written and the links in them are the
 reason why.
 
+## [0.14.0](https://github.com/getexperimently/experimently/compare/v0.13.0...v0.14.0) (2026-09-30)
+
+
+### ⚠ BREAKING CHANGES
+
+* **users:** a client that changes the signed-in user's own password must use `POST /api/v1/users/me/password` with `current_password` and `new_password`. Sending your own `password` to `PUT /api/v1/users/{user_id}` or `PUT /api/v1/admin/users/{user_id}` now returns 403. An empty or weak `password` on those routes returns 422. `PUT /api/v1/admin/users/{user_id}` now resets another user's password.
+* **infra:** API tasks no longer run migrations; the deploy's migration task does ([#499](https://github.com/getexperimently/experimently/issues/499))
+
+### Features
+
+* **infra:** API tasks no longer run migrations; the deploy's migration task does ([#499](https://github.com/getexperimently/experimently/issues/499)) ([a6401ec](https://github.com/getexperimently/experimently/commit/a6401ec81aa8e430493ff58a80ea34b94d738a53))
+
+
+### Bug Fixes
+
+* **api:** validation errors no longer repeat the submitted values ([#509](https://github.com/getexperimently/experimently/issues/509)) ([756e1f4](https://github.com/getexperimently/experimently/commit/756e1f4d114a5b27eacf9babab3c75432538c220))
+* **bootstrap:** a first-admin password longer than 72 bytes is refused with a clear message ([#506](https://github.com/getexperimently/experimently/issues/506)) ([69eb5ca](https://github.com/getexperimently/experimently/commit/69eb5cafa7d0fd43df0406216c1490a790c564de))
+* **demo:** the setup and teardown scripts and the rollout story work as documented ([#491](https://github.com/getexperimently/experimently/issues/491)) ([6088458](https://github.com/getexperimently/experimently/commit/6088458ab9bc1e239b9049b649c1ba557fc19eec))
+* **docker:** the backend image installs the current OpenSSL packages ([#514](https://github.com/getexperimently/experimently/issues/514)) ([27fbaa7](https://github.com/getexperimently/experimently/commit/27fbaa70ccff390c69b1284d2e3f726421ab910c))
+* **docs:** the doc-examples runner measures teardown and survives a dropped connection ([#494](https://github.com/getexperimently/experimently/issues/494)) ([baac924](https://github.com/getexperimently/experimently/commit/baac924f93f0a76df17b5a35361a4bcb846ca9f5))
+* **infra:** the API task is given the counters table name and access to it ([#488](https://github.com/getexperimently/experimently/issues/488)) ([3b84714](https://github.com/getexperimently/experimently/commit/3b8471464809c9d12809d8ad34d8658ab46e893d))
+* **users:** changing your own password requires the current password ([#516](https://github.com/getexperimently/experimently/issues/516)) ([34dae20](https://github.com/getexperimently/experimently/commit/34dae2085e76cabadb6ed7cdc0d20ec7e75ae283))
+
+
+### Documentation
+
+* **api:** /edge/bootstrap is deprecated in favour of the ruleset route ([#495](https://github.com/getexperimently/experimently/issues/495)) ([1cbadfd](https://github.com/getexperimently/experimently/commit/1cbadfdd48d0a6fca2cf44d5d834f0ec43978c7e))
+* links to the API docs point at /api/v1/docs ([#493](https://github.com/getexperimently/experimently/issues/493)) ([3633da6](https://github.com/getexperimently/experimently/commit/3633da6e8fe3bf778e8dc6d70df6a7e8a08c5202))
+
 ## [0.13.0](https://github.com/getexperimently/experimently/compare/v0.12.0...v0.13.0) (2026-09-30)
 
 
