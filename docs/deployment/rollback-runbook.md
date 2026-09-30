@@ -161,13 +161,16 @@ Check the target's environment before you roll back to it:
 
 ```bash
 aws ecs describe-task-definition --task-definition "$TARGET_TD" \
-  --query "taskDefinition.containerDefinitions[?name=='backend'].environment[?name=='RUN_MIGRATIONS'].value" \
+  --query "taskDefinition.containerDefinitions[?name=='backend'] | [0].environment[?name=='RUN_MIGRATIONS'] | [0].value" \
   --output text
 ```
 
-It prints `false`. A revision registered before the Fargate stack carried the
-setting prints nothing: it runs the older release's migrations on start, and
-against a newer schema that refuses to start. Register a copy of it with
+It prints `false` for a revision that does not migrate on start. A revision
+registered before the Fargate stack carried the setting prints `None` (the
+variable is absent, and `--output text` prints a missing value as `None`); one
+that prints `true` sets it explicitly. Either way, that revision runs the older
+release's migrations on start, and against a newer schema it refuses to
+start. Register a copy of it with
 `RUN_MIGRATIONS=false` added to the `backend` container's environment, and roll
 back to the copy. Revisions the Deploy workflow registers after the Fargate
 stack has been deployed from a current checkout carry the setting already.
