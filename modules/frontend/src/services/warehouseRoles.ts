@@ -9,6 +9,12 @@
  * `tests/warehouse/warehouseRoles.test.ts` reads the API's own role test
  * (`modules/backend/tests/integration/warehouse/test_roles.py`) and fails if
  * the two tables differ in any action or role.
+ *
+ * Some response fields are given to fewer roles than the route that returns
+ * them. `WAREHOUSE_FIELDS` lists those, each with the API field it gates, and
+ * the same test reads the API's `FIELD_ROLES` table and fails if the roles
+ * differ. The API sends such a field as null to the other roles; the dashboard
+ * checks both, so it offers nothing the role cannot use.
  */
 import type { Role, UserMe } from '@/services/api';
 
@@ -48,6 +54,25 @@ export const WAREHOUSE_ACTIONS = {
 
 export type WarehouseActionName = keyof typeof WAREHOUSE_ACTIONS;
 
+export interface WarehouseField extends WarehouseAction {
+  /** The response field the API gives only to `roles` (null for the others). */
+  field: string;
+}
+
+export const WAREHOUSE_FIELDS = {
+  viewRunSql: { text: 'Viewing the SQL a run sent', roles: READERS, field: 'statements' },
+} as const satisfies Record<string, WarehouseField>;
+
+export type WarehouseFieldName = keyof typeof WAREHOUSE_FIELDS;
+
+/** Anything `can` and `refusal` answer for: a route's action or a field. */
+export type WarehouseCapability = WarehouseActionName | WarehouseFieldName;
+
+const CAPABILITIES: Record<WarehouseCapability, WarehouseAction> = {
+  ...WAREHOUSE_ACTIONS,
+  ...WAREHOUSE_FIELDS,
+};
+
 type SessionUser = Pick<UserMe, 'role' | 'is_superuser'> | null | undefined;
 
 /** The role the API sees: a superuser counts as ADMIN. */
@@ -57,9 +82,9 @@ export function warehouseRole(user: SessionUser): Role | null {
   return user.role ?? null;
 }
 
-export function can(user: SessionUser, action: WarehouseActionName): boolean {
+export function can(user: SessionUser, action: WarehouseCapability): boolean {
   const role = warehouseRole(user);
-  return role !== null && WAREHOUSE_ACTIONS[action].roles.includes(role);
+  return role !== null && CAPABILITIES[action].roles.includes(role);
 }
 
 function rolesText(roles: readonly Role[]): string {
@@ -68,8 +93,8 @@ function rolesText(roles: readonly Role[]): string {
 }
 
 /** The sentence the API answers with when `user` may not do `action`. */
-export function refusal(user: SessionUser, action: WarehouseActionName): string {
-  const { text, roles } = WAREHOUSE_ACTIONS[action];
+export function refusal(user: SessionUser, action: WarehouseCapability): string {
+  const { text, roles } = CAPABILITIES[action];
   const role = warehouseRole(user);
   const held = role ? `you are ${role}` : 'you have no role';
   return `${text} requires ${rolesText(roles)}; ${held}.`;

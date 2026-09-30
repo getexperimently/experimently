@@ -593,8 +593,8 @@ describe('View SQL', () => {
     expect(trigger).toHaveFocus();
   });
 
-  it('is open to a VIEWER, and a copy is announced politely', async () => {
-    as('VIEWER');
+  it('is open to an ANALYST, and a copy is announced politely', async () => {
+    as('ANALYST');
     const writeText = jest.fn().mockResolvedValue(undefined);
     Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
     install([{ path: RUNS_PATH, handler: () => ({ runs: [run()] }) }]);
@@ -606,5 +606,57 @@ describe('View SQL', () => {
     );
     expect(writeText).toHaveBeenCalledWith(SQL);
     expect(screen.getByTestId('warehouse-sql-copied')).toHaveAttribute('aria-live', 'polite');
+  });
+  const SQL_NOTE =
+    'Viewing the SQL a run sent requires the ADMIN, DEVELOPER or ANALYST role; you are VIEWER.';
+
+  // Both runs carry statements, so what hides the buttons here is the role,
+  // not a null from the API.
+  const withStatements = () => [
+    run({ id: 'run-2', status: 'failed', error_code: 'auth_failed', created_at: '2026-09-29T09:00:00Z', finished_at: '2026-09-29T09:00:03Z' }),
+    run(),
+  ];
+
+  it('is not offered to a VIEWER, even when the response carries statements', async () => {
+    as('VIEWER');
+    const runs = withStatements();
+    expect(runs.every((r) => r.statements && r.statements.length > 0)).toBe(true);
+    install([{ path: RUNS_PATH, handler: () => ({ runs }) }]);
+    renderSection();
+    expect(await screen.findByTestId('warehouse-results')).toBeInTheDocument();
+    expect(screen.getByTestId('warehouse-run-failed')).toBeInTheDocument();
+    expect(screen.queryByTestId('warehouse-view-sql')).toBeNull();
+    expect(screen.queryByTestId('warehouse-failed-view-sql')).toBeNull();
+    expect(screen.queryByText('View SQL')).toBeNull();
+    expect(screen.getByTestId('warehouse-sql-note')).toHaveTextContent(SQL_NOTE);
+  });
+
+  it.each([['ADMIN'], ['DEVELOPER'], ['ANALYST']])(
+    'is offered to %s on both the results and a failed run, with no note',
+    async (role) => {
+      as(role);
+      install([{ path: RUNS_PATH, handler: () => ({ runs: withStatements() }) }]);
+      renderSection();
+      expect(await screen.findByTestId('warehouse-view-sql')).toHaveTextContent('View SQL');
+      expect(screen.getByTestId('warehouse-failed-view-sql')).toHaveTextContent('View SQL');
+      expect(screen.queryByTestId('warehouse-sql-note')).toBeNull();
+    },
+  );
+
+  it('is not offered when the API sends no statements', async () => {
+    as('ANALYST');
+    install([
+      {
+        path: RUNS_PATH,
+        handler: () => ({
+          runs: withStatements().map((r) => ({ ...r, statements: null })),
+        }),
+      },
+    ]);
+    renderSection();
+    expect(await screen.findByTestId('warehouse-results')).toBeInTheDocument();
+    expect(screen.getByTestId('warehouse-run-failed')).toBeInTheDocument();
+    expect(screen.queryByTestId('warehouse-view-sql')).toBeNull();
+    expect(screen.queryByTestId('warehouse-failed-view-sql')).toBeNull();
   });
 });

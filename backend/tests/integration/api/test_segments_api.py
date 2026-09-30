@@ -320,10 +320,15 @@ class TestUpdateSegment:
         assert response.status_code == 200, response.text
         assert response.json()["description"] == "New integration test description"
 
-    def test_developer_can_update_segment(self, admin_client, developer_client):
+    def test_developer_can_update_segment(
+        self, admin_client, db_session, developer_user
+    ):
         """Developer can update a segment — returns 200."""
         seg = _create_segment(admin_client, "Dev Update Segment")
 
+        # Switch to the developer only after the admin's setup: the auth
+        # override is app-global, so the last client made is the one in effect.
+        developer_client = make_client_for_user(db_session, developer_user)
         payload = {"name": "Dev Updated Segment"}
         response = developer_client.put(f"/api/v1/segments/{seg['id']}", json=payload)
         assert response.status_code == 200, response.text
@@ -408,10 +413,14 @@ class TestArchiveSegment:
         assert get_response.status_code == 200, get_response.text
         assert get_response.json()["status"] == "archived"
 
-    def test_developer_can_archive_segment(self, admin_client, developer_client):
+    def test_developer_can_archive_segment(
+        self, admin_client, db_session, developer_user
+    ):
         """Developer can archive a segment."""
         seg = _create_segment(admin_client, "Dev Archive Segment")
 
+        # Switch to the developer only after the admin's setup (see above).
+        developer_client = make_client_for_user(db_session, developer_user)
         response = developer_client.delete(f"/api/v1/segments/{seg['id']}")
         assert response.status_code == 204, response.text
 
