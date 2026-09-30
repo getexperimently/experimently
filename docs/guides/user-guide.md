@@ -481,7 +481,7 @@ If high-risk pairs are found, add the experiments to a [Mutual Exclusion Group](
 
 ## Getting Help
 
-- **API Documentation**: http://localhost:8000/docs
+- **API Documentation**: http://localhost:8000/api/v1/docs
 - **Technical Guide**: See [Technical Guide](../architecture/technical-guide.md) for implementation details
 - **Testing Guide**: See [Testing Guide](../development/testing-guide.md) for test workflows
 - **Issues**: https://github.com/getexperimently/experimently/issues

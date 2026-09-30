@@ -403,7 +403,8 @@ curl -s -H "Authorization: Bearer $TOKEN" \
 <!-- expect: scope=events is not supported; the export is available with scope=summary only -->
 
 A value the parameter does not accept, such as `format=xml`, fails validation instead,
-and the body lists each invalid parameter:
+and the body lists each invalid parameter. It names the parameter and the rule, not the
+value that was sent:
 
 ```json
 {
@@ -412,7 +413,6 @@ and the body lists each invalid parameter:
       "type": "enum",
       "loc": ["query", "format"],
       "msg": "Input should be 'csv' or 'json'",
-      "input": "xml",
       "ctx": {"expected": "'csv' or 'json'"}
     }
   ]
