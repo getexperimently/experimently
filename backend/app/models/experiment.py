@@ -18,6 +18,7 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
+    event,
 )
 from sqlalchemy import (
     Enum as SQLAEnum,
@@ -25,6 +26,7 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.ext.declarative import declared_attr
 from sqlalchemy.orm import relationship
+from sqlalchemy.orm.base import NEVER_SET, NO_VALUE
 
 from backend.app.core.database_config import get_schema_name
 
@@ -216,6 +218,32 @@ class Experiment(Base, BaseModel):
 
     def __repr__(self):
         return f"<Experiment {self.name}>"
+
+
+@event.listens_for(Experiment.status, "set", active_history=True)
+def _clear_resume_on_status_change(target, value, oldvalue, initiator):
+    """Drop a scheduled resume whenever the status really changes (#436).
+
+    A resume time is scheduled on a PAUSED experiment and means "resume this
+    pause at T". Any change of status -- a start, a completion, an archive, a
+    new pause after a resume, or the scheduler's own activation -- ends that
+    pause, so the resume goes with it. Doing it here covers every writer that
+    assigns ``Experiment.status`` through the ORM, present and future.
+
+    ``active_history=True`` loads the previous value when the instance has
+    been expired (after a commit), so re-assigning the same status is
+    recognised as no change and keeps the resume. A previous value that was
+    never loaded or set (a new, unsaved instance) is not a change either.
+
+    A Core ``UPDATE`` never reaches this listener; the
+    ``ck_experiments_resume_only_when_paused`` constraint then refuses a
+    non-PAUSED row that still carries a resume time.
+    """
+    if oldvalue is NO_VALUE or oldvalue is NEVER_SET:
+        return
+    if value == oldvalue:
+        return
+    target.resume_at = None
 
 
 class Variant(Base, BaseModel):

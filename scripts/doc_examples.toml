@@ -12,7 +12,7 @@
 # scripts/doc_examples.py), and each page's residual counts can only fall.
 
 [meta]
-documents = 33
+documents = 34
 exec = 163
 universe = [
     ".github/pull_request_template.md",
@@ -408,6 +408,13 @@ path = "demo/streampulse/simulator/README.md"
 environment = "bare"
 exec = 0
 skip = 7
+expects = 0
+
+[[document]]
+path = "docs/guides/user-guide.md"
+environment = "bare"
+exec = 0
+skip = 1
 expects = 0
 
 # Its blocks need a Kubernetes cluster: the chart-kind job extracts and runs

@@ -1022,7 +1022,10 @@ async def pause_experiment(
     - New user assignments (existing assignments remain in effect)
     - Data collection and analysis
 
-    The experiment can later be resumed by using the start endpoint.
+    The experiment stays paused until it is started again with the start
+    endpoint. It is never resumed automatically unless a resume is scheduled
+    after pausing (PUT /{experiment_id}/schedule with a start_date), and a
+    restart of the service does not resume it.
 
     Returns:
         ExperimentResponse: The updated experiment with PAUSED status
@@ -1085,13 +1088,24 @@ async def update_experiment_schedule(
     """
     Update experiment scheduling configuration.
 
-    This endpoint allows scheduling experiments for future activation and automatic completion.
+    On a **DRAFT** experiment this schedules its activation and completion:
 
     - **start_date**: When the experiment should automatically activate
     - **end_date**: When the experiment should automatically complete
     - **time_zone**: Time zone for interpreting the dates (default: UTC)
 
-    Both dates must be in the future, and end_date must be after start_date.
+    A field the request omits is cleared. end_date must be at least an hour
+    after start_date.
+
+    On a **PAUSED** experiment, start_date is the time to resume it at. It is
+    stored as ``resume_at``; the experiment's own start_date is never moved. A
+    null start_date cancels a scheduled resume, and a field the request omits
+    is left unchanged. end_date must be later than the experiment's start date
+    and, with a resume scheduled, at least an hour after the resume time. A
+    paused experiment is resumed automatically only by a resume scheduled after
+    it was paused; any change of status cancels a scheduled resume.
+
+    start_date may not be more than ten minutes in the past.
 
     Returns:
         ExperimentResponse: The updated experiment with scheduling information
@@ -1120,7 +1134,7 @@ async def update_experiment_schedule(
         if experiment.status not in [ExperimentStatus.DRAFT, ExperimentStatus.PAUSED]:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Cannot schedule experiment with status {experiment.status}. "
+                detail=f"Cannot schedule experiment with status {experiment.status.value}. "
                 f"Experiment must be in DRAFT or PAUSED status.",
             )
 
@@ -1135,7 +1149,9 @@ async def update_experiment_schedule(
 
             # Update the experiment
             updated_experiment = experiment_service.update_experiment_schedule(
-                experiment=experiment, schedule=schedule_dict
+                experiment=experiment,
+                schedule=schedule_dict,
+                fields_set=schedule.model_fields_set,
             )
 
         except ValueError as e:

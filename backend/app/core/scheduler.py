@@ -9,7 +9,7 @@ import asyncio
 from datetime import datetime, timezone
 from typing import Dict, Optional
 
-from sqlalchemy import and_
+from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session
 
 from backend.app.core.logging import get_logger
@@ -90,7 +90,8 @@ class ExperimentScheduler:
         Process experiments that need status updates based on their scheduled dates.
 
         This checks for:
-        1. Experiments in DRAFT or PAUSED status that should be activated
+        1. Experiments to activate: DRAFT ones whose start_date has passed,
+           and PAUSED ones whose scheduled resume (``resume_at``) has passed
         2. Experiments in ACTIVE status that should be completed (time-based)
 
         An experiment's ``bayesian_decision`` is a recommendation only: nothing
@@ -109,36 +110,50 @@ class ExperimentScheduler:
         try:
             current_time = datetime.now(timezone.utc)
 
-            # Find experiments to activate (start_date has passed)
+            # Find experiments to activate: a DRAFT whose start_date has
+            # passed, or a PAUSED one whose scheduled resume has (#436). A
+            # PAUSED experiment's start_date is when it first started and is
+            # never a reason to activate it. One filter, so the query keeps
+            # the shape the unit tests mock.
             experiments_to_activate = (
                 db.query(Experiment)
                 .filter(
-                    and_(
-                        Experiment.status.in_(
-                            [ExperimentStatus.DRAFT, ExperimentStatus.PAUSED]
+                    or_(
+                        and_(
+                            Experiment.status == ExperimentStatus.DRAFT,
+                            Experiment.start_date.isnot(None),
+                            Experiment.start_date <= current_time,
                         ),
-                        Experiment.start_date.isnot(None),
-                        Experiment.start_date <= current_time,
+                        and_(
+                            Experiment.status == ExperimentStatus.PAUSED,
+                            Experiment.resume_at.isnot(None),
+                            Experiment.resume_at <= current_time,
+                        ),
                     )
                 )
                 .all()
             )
 
-            # Activate experiments
+            # Activate experiments. Setting the status clears resume_at (the
+            # listener on Experiment.status).
             for experiment in experiments_to_activate:
                 try:
+                    resumed = experiment.status == ExperimentStatus.PAUSED
+                    due = experiment.resume_at if resumed else experiment.start_date
                     experiment.status = ExperimentStatus.ACTIVE
                     experiment.updated_at = current_time
                     db.add(experiment)
                     activated_count += 1
                     logger.info(
                         f"Activating experiment: {experiment.id} - {experiment.name} "
-                        f"(scheduled start: {experiment.start_date})"
+                        f"({'scheduled resume' if resumed else 'scheduled start'}: "
+                        f"{due})"
                     )
                     try:
                         self._notification_service.notify_experiment_started(
                             experiment_id=str(experiment.id),
                             experiment_name=experiment.name,
+                            resumed=resumed,
                         )
                     except Exception as exc:
                         logger.warning("Notification failed (non-critical): %s", exc)

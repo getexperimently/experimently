@@ -118,13 +118,39 @@ The experiment is created as a draft and you land on its page.
 
 Click **Start** on the experiment's page. The status changes to `ACTIVE`.
 
-You can also schedule automatic start/end dates: go to **Experiment → Schedule** and set future dates. The experiment will auto-activate at the start date and auto-complete at the end date.
+You can also schedule automatic start and end dates. The dashboard has no schedule
+screen yet, so this is an API call: `PUT /api/v1/experiments/{experiment_id}/schedule`,
+on a `DRAFT` experiment, with an ADMIN or DEVELOPER token. The experiment activates at
+`start_date` and completes at `end_date`, which must be at least an hour later. On a draft,
+a date you leave out of the request is cleared.
+
+```{.bash skip reason="server: needs a running API, a signed-in token in TOKEN and a draft experiment's id in EXPERIMENT_ID"}
+curl -s -X PUT "localhost:8000/api/v1/experiments/$EXPERIMENT_ID/schedule" \
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{"start_date": "2026-11-02T09:00:00Z", "end_date": "2026-11-16T09:00:00Z"}'
+```
 
 ---
 
 ### Pausing and Stopping
 
 **Pause**: Temporarily halt assignment of new users. Existing assignments are preserved. Use when you need to investigate anomalies or if there's a critical bug.
+
+A paused experiment stays paused until you click **Start** again. Nothing resumes it
+behind your back: not the scheduler, and not a restart of the service.
+
+To have it resume by itself at a set time, schedule a resume *after* pausing: the same
+`PUT /api/v1/experiments/{experiment_id}/schedule` call, where `start_date` is the time
+to resume at. It is stored as `resume_at` (returned with the experiment); the experiment's own
+start date does not move. On a paused experiment:
+
+- `"start_date": null` cancels a scheduled resume;
+- a field you leave out is left as it is;
+- `end_date` must be later than the experiment's start date and, with a resume scheduled,
+  at least an hour after the resume time.
+
+Starting, completing or archiving the experiment cancels a scheduled resume, and so does
+any other change of status.
 
 **Complete**: Stop the experiment. Use when you have sufficient data and are ready to make a decision. Existing data is preserved.
 
