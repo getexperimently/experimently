@@ -532,11 +532,11 @@ class PowerCalculatorService:
         if not (0 < power < 1):
             raise ValueError(f"power must be in (0, 1), got {power}")
         if metric_type not in ("proportion", "mean", "ratio"):
+            raise ValueError("metric_type must be 'proportion', 'mean', or 'ratio'")
+        if metric_type in ("mean", "ratio") and baseline_std is None:
             raise ValueError(
-                f"metric_type must be 'proportion', 'mean', or 'ratio', got '{metric_type}'"
+                f"baseline_std is required when metric_type='{metric_type}'"
             )
-        if metric_type == "mean" and baseline_std is None:
-            raise ValueError("baseline_std is required when metric_type='mean'")
         # Validate that treatment rate is a valid probability
         mde_abs = baseline_rate * mde_relative
         p2 = baseline_rate + mde_abs

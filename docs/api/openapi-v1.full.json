@@ -16828,7 +16828,7 @@
                 "type": "null"
               }
             ],
-            "description": "Standard deviation of the baseline metric (required for metric_type='mean').",
+            "description": "Standard deviation of the baseline metric (required for metric_type='mean' or 'ratio').",
             "title": "Baseline Std"
           },
           "daily_traffic": {

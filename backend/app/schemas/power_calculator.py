@@ -67,7 +67,7 @@ class SampleSizeRequest(BaseModel):
     baseline_std: Optional[float] = Field(
         default=None,
         gt=0,
-        description="Standard deviation of the baseline metric (required for metric_type='mean').",
+        description="Standard deviation of the baseline metric (required for metric_type='mean' or 'ratio').",
     )
     daily_traffic: Optional[int] = Field(
         default=None,
@@ -85,9 +85,7 @@ class SampleSizeRequest(BaseModel):
     @classmethod
     def validate_metric_type(cls, v: str) -> str:
         if v not in VALID_METRIC_TYPES:
-            raise ValueError(
-                f"metric_type must be one of {VALID_METRIC_TYPES}, got '{v}'"
-            )
+            raise ValueError(f"metric_type must be one of {VALID_METRIC_TYPES}")
         return v
 
     @field_validator("minimum_detectable_effect")
@@ -103,8 +101,10 @@ class SampleSizeRequest(BaseModel):
 
     @model_validator(mode="after")
     def validate_mean_requires_std(self) -> "SampleSizeRequest":
-        if self.metric_type == "mean" and self.baseline_std is None:
-            raise ValueError("baseline_std is required when metric_type='mean'")
+        if self.metric_type in ("mean", "ratio") and self.baseline_std is None:
+            raise ValueError(
+                f"baseline_std is required when metric_type='{self.metric_type}'"
+            )
         return self
 
     @model_validator(mode="after")
