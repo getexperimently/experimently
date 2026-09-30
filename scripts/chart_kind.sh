@@ -19,6 +19,18 @@
 #                  helm test, migrations ran once, upgrade, no restarts
 #   replicas   a fresh install with api.replicaCount=2: exactly one bootstrap
 #              says "(created)", the other "(upgraded)", no restarts
+#   upgrade-next
+#              N -> N': that release upgraded to this PR's image plus one
+#              more core revision (made here, never committed): exactly one
+#              `migrate` logs `Running upgrade`, and every old pod stays Ready
+#              and answers /health/ready until it is being deleted
+#   previous   resolve N-1, the newest release at or below VERSION (or
+#              PREVIOUS_VERSION); writes run=/version= to $GITHUB_OUTPUT. On a
+#              pull request from a fork it prints the not-run line instead
+#   upgrade-previous
+#              N-1 -> N: the N-1 release's chart and images (from GHCR)
+#              upgraded to this PR's chart and images; the same Ready
+#              assertion, and it prints whether the delta has a migration
 #   summary    the per-phase timings (also to $GITHUB_STEP_SUMMARY)
 #   diagnose   pods, events and API logs, for a failed run
 #   teardown   delete the cluster
@@ -26,7 +38,9 @@
 # Inputs (environment): PROFILE (core|full); API_IMAGE and WEB_IMAGE, the local
 # images to load; INGRESS_NGINX_MANIFEST_URL and INGRESS_NGINX_MANIFEST_SHA256;
 # KIND_NODE_IMAGE; optional KIND_CLUSTER, KIND_HOST (must resolve to
-# 127.0.0.1), CHART_KIND_WORK.
+# 127.0.0.1), CHART_KIND_WORK. For `previous`: HEAD_REPO (the pull request's
+# head repository, empty otherwise), GITHUB_REPOSITORY, optional
+# PREVIOUS_VERSION. For `upgrade-previous`: PREVIOUS_VERSION.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -205,11 +219,13 @@ run_block() {
     return "$status"
 }
 
-# The pods running our images run exactly the images this job loaded.
+# assert_images NS [IMAGES]: the pods running our images run exactly the
+# images this job loaded (IMAGES, default $WORK/images.txt: api=ID, web=ID).
 assert_images() {
-    local ns=$1 api web ids
-    api=$(sed -n 's/^api=//p' "$WORK/images.txt")
-    web=$(sed -n 's/^web=//p' "$WORK/images.txt")
+    local ns=$1 images=${2:-$WORK/images.txt} api web ids
+    api=$(sed -n 's/^api=//p' "$images")
+    web=$(sed -n 's/^web=//p' "$images")
+    : "${api:?no api image id in $images}" "${web:?no web image id in $images}"
     ids=$(kubectl get pods -n "$ns" -l "app.kubernetes.io/component in (api,web)" \
         -o jsonpath='{range .items[*]}{range .status.initContainerStatuses[*]}{.image}{" "}{.imageID}{"\n"}{end}{range .status.containerStatuses[*]}{.image}{" "}{.imageID}{"\n"}{end}{end}')
     printf '%s\n' "$ids"
@@ -278,6 +294,41 @@ assert_no_restarts() {
     say "$ns: 0 restarts in $(printf '%s\n' "$counts" | grep -c .) containers"
 }
 
+# wait_routed URL CODE: wait until the Ingress answers URL with CODE five
+# times in a row, half a second apart; the last status is left in ROUTED_CODE.
+#
+# `helm install --wait` returns when the pods are Ready; ingress-nginx picks up
+# their endpoints a few seconds later and answers 503 until then. And one
+# answer is not enough: each nginx worker takes the new endpoints on its own
+# timer (about once a second), so for up to a second one request can reach the
+# API and the next a worker that still answers 503 -- a 401 followed 70 ms later
+# by a 503 is how a run failed. Two and a half seconds of the same answer spans
+# that timer. Only "not routed yet" (no answer, 404, 502, 503, 504) is waited
+# out; any other status ends the wait at once and is the caller's to judge.
+ROUTED_CODE=
+wait_routed() {
+    local url=$1 want=$2 streak=0 attempt code
+    for attempt in $(seq 1 180); do
+        code=$(curl -s -o "$WORK/ingress.body" -w '%{http_code}' "$url" || true)
+        if [ "$code" = "$want" ]; then
+            streak=$((streak + 1))
+            [ "$streak" -lt 5 ] || break
+        else
+            streak=0
+            case "$code" in
+                000 | 404 | 502 | 503 | 504) ;;
+                *) break ;;
+            esac
+        fi
+        sleep 0.5
+    done
+    say "through the Ingress, $url: $code after $attempt request(s), the last $streak in a row"
+    if [ "$code" = "$want" ] && [ "$streak" -lt 5 ]; then
+        code="$code (not stable: $streak in a row)"
+    fi
+    ROUTED_CODE=$code
+}
+
 secret_state() {
     kubectl get secret "$SECRET" -n "$NS" -o jsonpath='{.metadata.resourceVersion} {.data}' | sha256_of /dev/stdin
 }
@@ -301,18 +352,9 @@ do_guide() {
     run_block install || fail "the guide's install block failed"
     assert_images "$NS"
 
-    # `helm install --wait` returns when the pods are Ready; ingress-nginx
-    # picks up their endpoints a few seconds later and answers 503 until then.
-    # Only "not routed yet" is waited out -- never a 400 or a 401.
-    local code attempt
-    for attempt in $(seq 1 45); do
-        code=$(curl -s -o "$WORK/ingress.body" -w '%{http_code}' "http://$HOST/api/v1/experiments/")
-        case "$code" in
-            404 | 502 | 503 | 504) sleep 2 ;;
-            *) break ;;
-        esac
-    done
-    say "through the Ingress after $attempt attempt(s)"
+    local code
+    wait_routed "http://$HOST/api/v1/experiments/" 401
+    code=$ROUTED_CODE
     case "$code" in
         401) say "through the Ingress, http://$HOST/api/v1/experiments/: 401" ;;
         400)
@@ -324,7 +366,8 @@ do_guide() {
             fail "through the Ingress, http://$HOST/api/v1/experiments/: $code, expected 401"
             ;;
     esac
-    code=$(curl -s -o /dev/null -w '%{http_code}' "http://$HOST/")
+    wait_routed "http://$HOST/" 200
+    code=$ROUTED_CODE
     [ "$code" = 200 ] || fail "through the Ingress, the dashboard http://$HOST/: $code, expected 200"
     say "through the Ingress, the dashboard http://$HOST/: 200"
 
@@ -370,6 +413,360 @@ do_replicas() {
 }
 
 # ---------------------------------------------------------------------------
+# The upgrade legs. Each upgrades a running two-replica release with
+# `helm upgrade --wait` while a sampler watches the old api pods, then checks
+# which `migrate` container applied which revisions.
+
+# revisions IMAGE: every alembic revision id the image carries, core and
+# modules, sorted, one per line. Read from the files, not by loading alembic.
+revisions() {
+    docker run --rm -i --entrypoint python "$1" - <<'PY'
+import pathlib
+import re
+
+REVISION = re.compile(r"""^revision\s*(?::[^=\n]*)?=\s*['"]([^'"]+)['"]""", re.M)
+CORE = pathlib.Path("/app/backend/app/db/migrations/versions")
+MODULES = pathlib.Path("/app/modules/backend/app/db/migrations/versions")
+if not CORE.is_dir():
+    raise SystemExit(f"{CORE}: not a directory")
+found = set()
+for directory in (CORE, MODULES):
+    if directory.is_dir():
+        for path in directory.glob("*.py"):
+            found.update(REVISION.findall(path.read_text(encoding="utf-8")))
+if not found:
+    raise SystemExit(f"no revisions under {CORE}")
+print("\n".join(sorted(found)))
+PY
+}
+# (Python's sorted() is code-point order: callers compare with LC_ALL=C.)
+
+# applied_revisions NS RELEASE OUT: what each api pod's `migrate` logged as
+# `Running upgrade A -> B, ...`; OUT gets one "POD B" line per revision.
+applied_revisions() {
+    local ns=$1 release=$2 out=$3 pod
+    : >"$out"
+    for pod in $(kubectl get pods -n "$ns" \
+        -l "app.kubernetes.io/component=api,app.kubernetes.io/instance=$release" \
+        -o jsonpath='{.items[*].metadata.name}'); do
+        kubectl logs -n "$ns" "$pod" -c migrate >"$WORK/$pod.migrate.log"
+        grep 'Running upgrade' "$WORK/$pod.migrate.log" || true
+        sed -n "s/.*Running upgrade .* -> \([^ ,]*\).*/$pod \1/p" "$WORK/$pod.migrate.log" >>"$out"
+    done
+}
+
+# sample_surge NS RELEASE OLD_PODS: prints "SERVING BAD NEW MIGRATED" --
+# old pods (not being deleted) that are Ready and answer /health/ready with
+# 200; old pods (not being deleted) that are not; new pods; new pods whose
+# `migrate` has exited 0. Returns 3, naming the pod in $WORK/migrate-failed,
+# when a new pod's `migrate` exited non-zero.
+sample_surge() {
+    local ns=$1 release=$2 old=" $3 " json name deleting ready migrate_ok code gone
+    local serving=0 bad=0 new=0 migrated=0
+    json=$(kubectl get pods -n "$ns" \
+        -l "app.kubernetes.io/component=api,app.kubernetes.io/instance=$release" -o json)
+    while IFS=$'\t' read -r name deleting ready migrate_ok; do
+        [ -n "$name" ] || continue
+        case "$old" in
+            *" $name "*) ;;
+            *)
+                new=$((new + 1))
+                case "$migrate_ok" in
+                    0) migrated=$((migrated + 1)) ;;
+                    '' | none) ;;
+                    *)
+                        printf '%s exited %s\n' "$name" "$migrate_ok" >"$WORK/migrate-failed"
+                        return 3
+                        ;;
+                esac
+                continue
+                ;;
+        esac
+        [ "$deleting" = false ] || continue
+        code=$(kubectl exec -n "$ns" "$name" -c api -- \
+            curl -s -o /dev/null -w '%{http_code}' --max-time 5 http://localhost:8000/health/ready 2>/dev/null || true)
+        if [ "$ready" = True ] && [ "$code" = 200 ]; then
+            serving=$((serving + 1))
+            continue
+        fi
+        # Deleted, or being deleted, since the listing: that is the rollout.
+        gone=$(kubectl get pod -n "$ns" "$name" --ignore-not-found \
+            -o jsonpath='{.metadata.name}/{.metadata.deletionTimestamp}')
+        case "$gone" in
+            '' | */?*) continue ;;
+        esac
+        bad=$((bad + 1))
+        say "old pod $name: Ready=$ready, /health/ready answered '$code'" >&2
+    done < <(jq -r '.items[] | [
+            .metadata.name,
+            (.metadata.deletionTimestamp != null),
+            ([(.status.conditions // [])[] | select(.type == "Ready") | .status][0] // "Unknown"),
+            ([.status.initContainerStatuses[]? | select(.name == "migrate")
+                | (.state.terminated.exitCode // .lastState.terminated.exitCode)][0] // "none")
+        ] | @tsv' <<<"$json")
+    printf '%s %s %s %s\n' "$serving" "$bad" "$new" "$migrated"
+}
+
+# upgrade_watched NS RELEASE HELM_UPGRADE_ARGS...: `helm upgrade` in the
+# background, sampled every second until it returns. Fails when an old pod
+# stops being Ready or answering /health/ready before it is deleted, when a
+# new pod's `migrate` fails (at once, not at helm's timeout), when no sample
+# saw an old pod serving after a new pod had migrated -- the moment the leg
+# exists to cover -- or when helm fails. Waits for the old pods to be gone.
+upgrade_watched() {
+    local ns=$1 release=$2 old helm_pid status=0 sample samples line
+    shift 2
+    old=$(kubectl get pods -n "$ns" \
+        -l "app.kubernetes.io/component=api,app.kubernetes.io/instance=$release" \
+        -o jsonpath='{.items[*].metadata.name}')
+    [ -n "$old" ] || fail "$ns: no api pods before the upgrade"
+    say "$ns: old api pods: $old"
+    samples="$WORK/$release.surge"
+    : >"$samples"
+    rm -f "$WORK/migrate-failed"
+    helm upgrade "$release" "$@" >"$WORK/$release.upgrade.log" 2>&1 &
+    helm_pid=$!
+    while kill -0 "$helm_pid" 2>/dev/null; do
+        sample=$(sample_surge "$ns" "$release" "$old") || status=$?
+        if [ "$status" -eq 3 ]; then
+            kill "$helm_pid" 2>/dev/null || true
+            wait "$helm_pid" 2>/dev/null || true
+            line=$(cat "$WORK/migrate-failed")
+            kubectl logs -n "$ns" "${line%% *}" -c migrate --tail=60 || true
+            kubectl logs -n "$ns" "${line%% *}" -c migrate --previous --tail=60 2>/dev/null || true
+            fail "$ns: the upgrade's migrate failed ($line)"
+        fi
+        [ "$status" -eq 0 ] || fail "$ns: sampling the surge failed ($status)"
+        printf '%s\n' "$sample" >>"$samples"
+        sleep 1
+    done
+    wait "$helm_pid" || status=$?
+    cat "$WORK/$release.upgrade.log"
+    [ "$status" -eq 0 ] || fail "$ns: helm upgrade $release exited $status"
+
+    local n bad overlap
+    n=$(grep -c . "$samples" || true)
+    bad=$(awk '$2 > 0' "$samples" | grep -c . || true)
+    overlap=$(awk '$1 > 0 && $4 > 0' "$samples" | grep -c . || true)
+    say "$ns: $n samples during the upgrade; $bad with an old pod not serving; $overlap with an old pod serving after a new pod migrated"
+    [ "$bad" -eq 0 ] || fail "$ns: an old api pod stopped serving before it was deleted"
+    [ "$overlap" -gt 0 ] ||
+        fail "$ns: no sample saw an old pod serving after a new pod had migrated; the surge was not observed"
+
+    local pod
+    for pod in $old; do
+        kubectl wait -n "$ns" --for=delete "pod/$pod" --timeout=120s
+    done
+}
+
+# ---------------------------------------------------------------------------
+# N -> N': the release the replicas phase installed (N, two api pods), upgraded
+# to this PR's image plus one more core revision. The revision is made here, in
+# a copy of the image, and never committed; its down_revision is the image's
+# own core head.
+NEXT_REVISION=zz_next_release_0001
+
+do_upgrade_next() {
+    local ns=chart-kind-replicas release=r2 tag next core_head cid
+    tag="$PROFILE-$(app_version)"
+    next="$tag-next"
+    core_head=$(docker run --rm --entrypoint python "$API_REPO:$tag" -c '
+from alembic.config import Config
+from alembic.script import ScriptDirectory
+
+config = Config()
+config.set_main_option("script_location", "backend/app/db/migrations")
+config.set_main_option("version_locations", "backend/app/db/migrations/versions")
+(head,) = ScriptDirectory.from_config(config).get_heads()
+print(head)
+')
+    : "${core_head:?no core head in $API_REPO:$tag}"
+    say "N' = $API_REPO:$tag plus $NEXT_REVISION (down_revision $core_head)"
+    cat >"$WORK/$NEXT_REVISION.py" <<EOF
+"""A migration the next release carries (chart-kind fixture, never committed).
+
+Revision ID: $NEXT_REVISION
+Revises: $core_head
+"""
+
+import os
+
+import sqlalchemy as sa
+from alembic import op
+
+revision = "$NEXT_REVISION"
+down_revision = "$core_head"
+branch_labels = None
+depends_on = None
+
+SCHEMA = os.environ.get("POSTGRES_SCHEMA", "experimentation")
+
+
+def upgrade() -> None:
+    op.create_table(
+        "next_release_probe",
+        sa.Column("id", sa.Integer(), primary_key=True),
+        schema=SCHEMA,
+    )
+
+
+def downgrade() -> None:
+    op.drop_table("next_release_probe", schema=SCHEMA)
+EOF
+    chmod 0644 "$WORK/$NEXT_REVISION.py"
+    # No build: the docker-container builder cannot see a local image.
+    cid=$(docker create "$API_REPO:$tag")
+    docker cp "$WORK/$NEXT_REVISION.py" "$cid:/app/backend/app/db/migrations/versions/$NEXT_REVISION.py"
+    docker commit "$cid" "$API_REPO:$next" >/dev/null
+    docker rm "$cid" >/dev/null
+    docker tag "$WEB_REPO:$tag" "$WEB_REPO:$next"
+    kind load docker-image --name "$CLUSTER" "$API_REPO:$next" "$WEB_REPO:$next"
+    local api web
+    api=$(docker image inspect --format '{{.Id}}' "$API_REPO:$next")
+    web=$(docker image inspect --format '{{.Id}}' "$WEB_REPO:$next")
+    printf 'api=%s\nweb=%s\n' "$api" "$web" >"$WORK/images-next.txt"
+    [ "$(revisions "$API_REPO:$next" | grep -cx "$NEXT_REVISION")" = 1 ] ||
+        fail "$API_REPO:$next does not carry $NEXT_REVISION"
+
+    upgrade_watched "$ns" "$release" "$CHART_DIR" -n "$ns" \
+        --reuse-values --set image.tag="$next" --wait --timeout 8m
+    assert_images "$ns" "$WORK/images-next.txt"
+
+    applied_revisions "$ns" "$release" "$WORK/next.applied"
+    say "N -> N': applied: $(tr '\n' ';' <"$WORK/next.applied")"
+    [ "$(grep -c . "$WORK/next.applied" || true)" = 1 ] ||
+        fail "N -> N': $(grep -c . "$WORK/next.applied" || true) 'Running upgrade' lines across the migrate containers, expected exactly 1"
+    grep -q " $NEXT_REVISION\$" "$WORK/next.applied" ||
+        fail "N -> N': the one 'Running upgrade' was not to $NEXT_REVISION"
+    assert_no_restarts "$ns"
+    say "N -> N': exactly one migrate applied $NEXT_REVISION; the old pods served until deleted"
+
+    helm uninstall "$release" -n "$ns" --wait
+    kubectl delete namespace "$ns" --wait=true
+}
+
+# ---------------------------------------------------------------------------
+# N-1: the newest release at or below VERSION, whose images are on GHCR.
+#
+# On a pull request from a fork the images cannot be pulled (the packages are
+# private until D19), so the leg does not run there and says so. Everywhere
+# else -- this repository's pull requests, main, the nightly run, a manual
+# run -- an N-1 that cannot be resolved or pulled fails the job; it is never
+# skipped.
+NOT_RUN_LINE="N-1 -> N upgrade: not run: images private until D19"
+
+do_previous() {
+    local repo=${GITHUB_REPOSITORY:?} head=${HEAD_REPO:-} version prev tags
+    version=$(cat VERSION)
+    if [ -n "$head" ] && [ "$head" != "$repo" ]; then
+        say "$NOT_RUN_LINE (pull request from $head)"
+        [ -z "${GITHUB_STEP_SUMMARY:-}" ] ||
+            printf '### chart-kind (%s)\n\n%s\n\n' "$PROFILE" "$NOT_RUN_LINE" >>"$GITHUB_STEP_SUMMARY"
+        [ -z "${GITHUB_OUTPUT:-}" ] || printf 'run=false\n' >>"$GITHUB_OUTPUT"
+        return 0
+    fi
+    tags=$(git ls-remote --tags --refs origin 'v*' | sed -n 's#.*refs/tags/v\([0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\)$#\1#p')
+    [ -n "$tags" ] || fail "N-1 cannot be resolved: no vX.Y.Z tags on origin"
+    if [ -n "${PREVIOUS_VERSION:-}" ]; then
+        prev=$PREVIOUS_VERSION
+        printf '%s\n' "$prev" | grep -Eqx '[0-9]+\.[0-9]+\.[0-9]+' ||
+            fail "N-1 cannot be resolved: PREVIOUS_VERSION '$prev' is not X.Y.Z"
+        printf '%s\n' "$tags" | grep -Fqx "$prev" ||
+            fail "N-1 cannot be resolved: there is no release tag v$prev"
+    else
+        # The newest tag that sorts at or below VERSION.
+        prev=$(printf '%s\n' "$tags" | while read -r t; do
+            [ "$(printf '%s\n%s\n' "$t" "$version" | sort -V | sed -n '$p')" != "$version" ] || printf '%s\n' "$t"
+        done | sort -V | sed -n '$p')
+        [ -n "$prev" ] || fail "N-1 cannot be resolved: no release tag at or below VERSION $version"
+    fi
+    say "N-1 = $prev (VERSION $version)"
+    [ -z "${GITHUB_OUTPUT:-}" ] || printf 'run=true\nversion=%s\n' "$prev" >>"$GITHUB_OUTPUT"
+}
+
+do_upgrade_previous() {
+    local prev=${PREVIOUS_VERSION:?PREVIOUS_VERSION: run the previous phase first}
+    local ns=chart-kind-previous release=prev ptag ltag ref
+    ptag="$PROFILE-$prev"
+    # A local tag of its own: N-1 is usually the release VERSION names, whose
+    # tag is the one this job gave the PR's images. Same profile prefix, so the
+    # chart's tag rule accepts it.
+    ltag="$ptag-previous"
+    for ref in "$API_REPO" "$WEB_REPO"; do
+        docker pull "$ref:$ptag" ||
+            fail "N-1 cannot be resolved: docker pull $ref:$ptag failed (the job needs packages: read, and the package must grant this repository read access)"
+        docker tag "$ref:$ptag" "$ref:$ltag"
+    done
+    kind load docker-image --name "$CLUSTER" "$API_REPO:$ltag" "$WEB_REPO:$ltag"
+    local api web
+    api=$(docker image inspect --format '{{.Id}}' "$API_REPO:$ltag")
+    web=$(docker image inspect --format '{{.Id}}' "$WEB_REPO:$ltag")
+    printf 'api=%s\nweb=%s\n' "$api" "$web" >"$WORK/images-previous.txt"
+
+    # N-1's own chart, from its tag.
+    git fetch --no-tags --depth 1 origin "+refs/tags/v$prev:refs/tags/v$prev"
+    rm -rf "$WORK/previous"
+    mkdir -p "$WORK/previous"
+    git archive "v$prev" "$CHART_DIR" | tar -x -C "$WORK/previous"
+    [ -f "$WORK/previous/$CHART_DIR/Chart.yaml" ] ||
+        fail "N-1 cannot be resolved: v$prev has no $CHART_DIR"
+
+    # What N adds: revisions in this PR's image and not in N-1's.
+    revisions "$API_REPO:$ptag" >"$WORK/revisions-previous"
+    revisions "$API_REPO:$PROFILE-$(app_version)" >"$WORK/revisions-this"
+    LC_ALL=C comm -13 "$WORK/revisions-previous" "$WORK/revisions-this" >"$WORK/revisions-delta"
+    LC_ALL=C comm -23 "$WORK/revisions-previous" "$WORK/revisions-this" >"$WORK/revisions-only-previous"
+    if [ -s "$WORK/revisions-only-previous" ]; then
+        cat "$WORK/revisions-only-previous"
+        fail "N-1 ($prev) carries revisions this PR's image does not: an upgrade from it would be refused"
+    fi
+
+    kubectl create namespace "$ns"
+    helm install "$release" "$WORK/previous/$CHART_DIR" -n "$ns" \
+        --set profile="$PROFILE" \
+        --set image.tag="$ltag" \
+        --set publicBaseUrl="http://previous.$HOST" \
+        --set firstSuperuser="$ADMIN" \
+        --set ingress.enabled=false \
+        --set api.replicaCount=2 \
+        --set secrets.secretKey="$(openssl rand -hex 32)" \
+        --set secrets.firstSuperuserPassword="$(openssl rand -hex 16)" \
+        --set secrets.postgresUser=experimently \
+        --set secrets.postgresPassword="$(openssl rand -hex 32)" \
+        --set secrets.auditHmacKey="$(openssl rand -hex 32)" \
+        --wait --timeout 10m
+    assert_images "$ns" "$WORK/images-previous.txt"
+
+    # A reader's upgrade: this chart, the install's values kept. The one
+    # difference is image.tag, set at install only because of the local tag
+    # above; cleared here, the chart's default (this PR's images) applies.
+    upgrade_watched "$ns" "$release" "$CHART_DIR" -n "$ns" \
+        --reset-then-reuse-values --set image.tag= --wait --timeout 8m
+    assert_images "$ns"
+
+    applied_revisions "$ns" "$release" "$WORK/previous.applied"
+    local delta applied pods line
+    delta=$(grep -c . "$WORK/revisions-delta" || true)
+    applied=$(cut -d' ' -f2 "$WORK/previous.applied" | LC_ALL=C sort)
+    pods=$(cut -d' ' -f1 "$WORK/previous.applied" | sort -u | grep -c . || true)
+    [ "$applied" = "$(cat "$WORK/revisions-delta")" ] ||
+        fail "N-1 -> N: the migrate containers applied [$(printf '%s' "$applied" | tr '\n' ' ')], the delta is [$(tr '\n' ' ' <"$WORK/revisions-delta")]"
+    if [ "$delta" -gt 0 ]; then
+        [ "$pods" -eq 1 ] || fail "N-1 -> N: $pods migrate containers applied revisions, expected exactly 1"
+        line="N-1 -> N ($prev -> this PR): the delta contains $delta migration(s), applied by one migrate: $(tr '\n' ' ' <"$WORK/revisions-delta")"
+    else
+        line="N-1 -> N ($prev -> this PR): the delta contains no migration, so this run proves the upgrade path, not a schema change"
+    fi
+    assert_no_restarts "$ns"
+    say "$line"
+    [ -z "${GITHUB_STEP_SUMMARY:-}" ] ||
+        printf '### chart-kind (%s)\n\n%s\n\n' "$PROFILE" "$line" >>"$GITHUB_STEP_SUMMARY"
+
+    helm uninstall "$release" -n "$ns" --wait
+    kubectl delete namespace "$ns" --wait=true
+}
+
+# ---------------------------------------------------------------------------
 do_summary() {
     [ -f "$TIMINGS" ] || { say "no timings recorded"; return 0; }
     local total
@@ -393,7 +790,7 @@ do_diagnose() {
     kubectl get pods -A -o wide
     kubectl get events -A --sort-by=.lastTimestamp | tail -n 60
     local ns pod
-    for ns in "$NS" chart-kind-replicas; do
+    for ns in "$NS" chart-kind-replicas chart-kind-previous; do
         for pod in $(kubectl get pods -n "$ns" -l app.kubernetes.io/component=api -o jsonpath='{.items[*].metadata.name}' 2>/dev/null); do
             echo "=== $ns/$pod migrate"
             kubectl logs -n "$ns" "$pod" -c migrate --tail=100
@@ -421,12 +818,15 @@ case "${1:-}" in
     dry-run) phase dry-run do_dry_run ;;
     guide) phase guide do_guide ;;
     replicas) phase replicas do_replicas ;;
+    upgrade-next) phase upgrade-next do_upgrade_next ;;
+    previous) do_previous ;;
+    upgrade-previous) phase upgrade-previous do_upgrade_previous ;;
     summary) do_summary ;;
     diagnose) do_diagnose ;;
     teardown) do_teardown ;;
     time) do_time "$2" "$3" ;;
     *)
-        echo "usage: $0 cluster|load|dry-run|guide|replicas|summary|diagnose|teardown|time NAME START" >&2
+        printf 'usage: %s cluster|load|dry-run|guide|replicas|upgrade-next|previous|upgrade-previous|summary|diagnose|teardown|time NAME START\n' "$0" >&2
         exit 2
         ;;
 esac
