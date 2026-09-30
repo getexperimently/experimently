@@ -24,7 +24,7 @@ Development-only dependencies — what `backend/requirements.txt` adds for test 
 | Package | Version |
 |---|---|
 | `Mako` | 1.4.1 |
-| `PyJWT` | 2.14.0 |
+| `PyJWT` | 2.15.1 |
 | `SQLAlchemy` | 2.0.54 |
 | `alembic` | 1.20.0 |
 | `annotated-doc` | 0.0.5 |
