@@ -296,6 +296,11 @@ fargate_stack.add_dependency(compute_stack)
 fargate_stack.add_dependency(monitoring_stack)
 fargate_stack.add_dependency(database_stack)
 fargate_stack.add_dependency(redis_stack)
+if ENABLE_MODULE_STACKS:
+    # The API task is given the counters table's name and access to it (#392);
+    # the table is created first. By name, not by reference, so this is the
+    # only thing ordering the two stacks.
+    fargate_stack.add_dependency(dynamodb_counters_stack)
 
 # Migration task stack: one-shot Fargate task for Alembic migrations
 migration_stack = MigrationTaskStack(

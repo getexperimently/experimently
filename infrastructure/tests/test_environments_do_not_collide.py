@@ -24,11 +24,14 @@ accepts. Four properties, each asserted as exact values:
 
 from __future__ import annotations
 
+import json
 import re
+import runpy
+import shutil
 
 import pytest
 
-from .test_app_profiles import REPO_ROOT
+from .test_app_profiles import CDK_DIR, REPO_ROOT, _app_environment
 from .test_dashboard_service import _synth
 
 ENVIRONMENTS = ("dev", "staging", "prod", "demo")
@@ -130,10 +133,16 @@ PSEUDO_PARAMETERS = {
 class Synth:
     """One environment's assembly, reduced to what these tests read."""
 
-    def __init__(self, env: str):
-        assembly = _synth(env)
+    def __init__(self, env: str, assembly=None):
+        if assembly is None:
+            assembly = _synth(env)
         self.env = env
         self.templates = {s.stack_name: s.template for s in assembly.stacks}
+        #: ``stack name -> (account, region)`` as the assembly resolved them.
+        self.locations = {
+            s.stack_name: (s.environment.account, s.environment.region)
+            for s in assembly.stacks
+        }
         self.dependencies = {
             s.stack_name: {
                 d.stack_name for d in s.dependencies if hasattr(d, "stack_name")
@@ -328,6 +337,191 @@ def test_the_api_is_given_the_glue_names_the_glue_stack_creates(synths, env):
         "GLUE_CRAWLER_NAME",
     }, told
     assert set(told.values()) == created, (told, created)
+
+
+# --- the counters table (#392) ------------------------------------------------
+#
+# The API task was given neither the counters table's name nor any access to
+# it: DYNAMODB_COUNTERS_TABLE fell back to a name no stack creates, and the task
+# role carried no dynamodb action at all. Every assertion below compares with
+# what the counters stack actually SYNTHESISED -- its TableName, its account and
+# region -- not with stacks/names.py, so the producer and the consumer are each
+# checked against the other rather than both against one helper.
+
+
+def _backend_task_definition(synth: Synth) -> dict:
+    fargate = synth.templates[f"experimentation-fargate-{synth.env}"]["Resources"]
+    (task_definition,) = [
+        r
+        for r in fargate.values()
+        if r["Type"] == "AWS::ECS::TaskDefinition"
+        and r["Properties"]["Family"] == f"experimentation-backend-{synth.env}"
+    ]
+    return task_definition
+
+
+def _backend_environment(synth: Synth) -> list[tuple[str, object]]:
+    (backend,) = _backend_task_definition(synth)["Properties"]["ContainerDefinitions"]
+    return [(e["Name"], e["Value"]) for e in backend.get("Environment", [])]
+
+
+def _counters_table(synth: Synth) -> tuple[str, str, str]:
+    """``(TableName, account, region)`` of the table the counters stack creates."""
+    stack = f"experimentation-dynamodb-counters-{synth.env}"
+    tables = [
+        r["Properties"]["TableName"]
+        for r in synth.templates[stack]["Resources"].values()
+        if r["Type"] == "AWS::DynamoDB::Table"
+    ]
+    assert len(tables) == 1 and isinstance(tables[0], str), tables
+    account, region = synth.locations[stack]
+    return tables[0], account, region
+
+
+def _render(value, account: str, region: str) -> str | None:
+    """An IAM resource as the ARN CloudFormation would produce, or ``None``.
+
+    Strings, and ``Fn::Join`` over strings and the partition/account/region
+    pseudo parameters -- what ``Stack.format_arn`` emits. Anything else (a
+    resource reference, an import) is not a name this test can check, and
+    renders as ``None`` so it fails the comparison.
+    """
+    pseudo = {"AWS::Partition": "aws", "AWS::AccountId": account, "AWS::Region": region}
+    if isinstance(value, str):
+        return value
+    if isinstance(value, dict) and set(value) == {"Ref"}:
+        return pseudo.get(value["Ref"])
+    if isinstance(value, dict) and set(value) == {"Fn::Join"}:
+        separator, parts = value["Fn::Join"]
+        rendered = [_render(part, account, region) for part in parts]
+        return None if None in rendered else separator.join(rendered)
+    return None
+
+
+def _as_list(value) -> list:
+    return value if isinstance(value, list) else [value]
+
+
+def _task_role_statements(synth: Synth) -> list[dict]:
+    """Every policy statement attached to the API task role, found via TaskRoleArn."""
+    task_role_arn = _backend_task_definition(synth)["Properties"]["TaskRoleArn"]
+    role_id, attribute = task_role_arn["Fn::GetAtt"]
+    assert attribute == "Arn", task_role_arn
+    fargate = synth.templates[f"experimentation-fargate-{synth.env}"]["Resources"]
+    role = fargate[role_id]
+    assert role["Type"] == "AWS::IAM::Role", role["Type"]
+    statements = [
+        statement
+        for policy in role["Properties"].get("Policies", [])
+        for statement in _as_list(policy["PolicyDocument"]["Statement"])
+    ]
+    for resource in fargate.values():
+        if resource["Type"] == "AWS::IAM::Policy" and {"Ref": role_id} in resource[
+            "Properties"
+        ].get("Roles", []):
+            statements += _as_list(resource["Properties"]["PolicyDocument"]["Statement"])
+    return statements
+
+
+@pytest.mark.regression
+@pytest.mark.parametrize("env", ENVIRONMENTS)
+def test_the_api_is_given_the_counters_table_the_counters_stack_creates(synths, env):
+    """#392: the API task was told no table name, so it used one nothing creates."""
+    if not MODULES_PRESENT:
+        pytest.skip("core checkout: no counters module")
+    synth = synths[env]
+    table_name, _, table_region = _counters_table(synth)
+    _, fargate_region = synth.locations[f"experimentation-fargate-{env}"]
+    told = _backend_environment(synth)
+
+    names = [value for name, value in told if name == "DYNAMODB_COUNTERS_TABLE"]
+    assert names == [table_name], (
+        f"{env}: the API task is told DYNAMODB_COUNTERS_TABLE={names}; the "
+        f"counters stack creates {table_name!r}"
+    )
+    # The service builds its client with no region, and botocore reads the
+    # default region from AWS_DEFAULT_REGION only.
+    regions = [value for name, value in told if name == "AWS_DEFAULT_REGION"]
+    assert regions == [fargate_region] == [table_region], (
+        f"{env}: AWS_DEFAULT_REGION={regions}; the stacks are in "
+        f"{fargate_region} (fargate) and {table_region} (counters)"
+    )
+    # AWS_REGION is read explicitly by other settings; this change must not set it.
+    assert "AWS_REGION" not in {name for name, _ in told}, told
+
+
+@pytest.mark.regression
+@pytest.mark.parametrize("env", ENVIRONMENTS)
+def test_the_api_task_role_may_query_and_update_the_counters_table_only(synths, env):
+    """#392: the task role carried no dynamodb action at all.
+
+    Exactly the two calls DynamoDBCounterService makes, on exactly the table the
+    counters stack creates: not its index, not a wildcard, not another role.
+    """
+    if not MODULES_PRESENT:
+        pytest.skip("core checkout: no counters module")
+    synth = synths[env]
+    table_name, account, region = _counters_table(synth)
+
+    dynamodb = [
+        statement
+        for statement in _task_role_statements(synth)
+        if any(
+            str(action).lower().startswith("dynamodb:")
+            for action in _as_list(statement.get("Action", []))
+        )
+    ]
+    assert len(dynamodb) == 1, f"{env}: task role dynamodb statements: {dynamodb}"
+    (statement,) = dynamodb
+    assert statement["Effect"] == "Allow", statement
+    assert set(_as_list(statement["Action"])) == {
+        "dynamodb:Query",
+        "dynamodb:UpdateItem",
+    }, statement["Action"]
+
+    resources = _as_list(statement["Resource"])
+    assert len(resources) == 1, f"{env}: expected the table alone, got {resources}"
+    assert _render(resources[0], account, region) == (
+        f"arn:aws:dynamodb:{region}:{account}:table/{table_name}"
+    ), resources[0]
+
+
+@pytest.fixture(scope="module")
+def core_synths(tmp_path_factory) -> dict[tuple[str, str], Synth]:
+    """Every environment's core assembly, by both routes to the core profile.
+
+    ``copy``: a checkout with no ``modules/`` beside the CDK app (what a core
+    checkout is). ``variable``: this checkout with ``EXPERIMENTLY_PROFILE=core``.
+    """
+    root = tmp_path_factory.mktemp("core-counters")
+    core_dir = root / "infrastructure" / "cdk"
+    shutil.copytree(CDK_DIR, core_dir)
+    routes = {"copy": (core_dir, {}), "variable": (CDK_DIR, {"EXPERIMENTLY_PROFILE": "core"})}
+    found = {}
+    for route, (cdk_dir, overrides) in routes.items():
+        for env in ENVIRONMENTS:
+            with _app_environment(cdk_dir, ENVIRONMENT=env, **overrides):
+                namespace = runpy.run_path(str(cdk_dir / "app.py"), run_name="__main__")
+            assert not namespace["ENABLE_MODULE_STACKS"], (route, env)
+            found[(route, env)] = Synth(env, namespace["app"].synth())
+    return found
+
+
+@pytest.mark.parametrize("route", ["copy", "variable"])
+@pytest.mark.parametrize("env", ENVIRONMENTS)
+def test_the_core_api_is_given_no_counters_table(core_synths, route, env):
+    """A core deployment has no counters table, so its API gets none of #392."""
+    synth = core_synths[(route, env)]
+    assert not [s for s in synth.templates if "dynamodb-counters" in s], sorted(
+        synth.templates
+    )
+    told = {name for name, _ in _backend_environment(synth)}
+    assert not told & {"DYNAMODB_COUNTERS_TABLE", "AWS_DEFAULT_REGION"}, told
+    fargate = f"experimentation-fargate-{env}"
+    assert "dynamodb" not in json.dumps(synth.templates[fargate]).lower()
+    assert not [d for d in synth.dependencies[fargate] if "counters" in d], (
+        synth.dependencies[fargate]
+    )
 
 
 # --- retention ----------------------------------------------------------------
