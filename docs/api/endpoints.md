@@ -887,14 +887,17 @@ conditions, each condition an `attribute`, an `operator` and a `value`.
   from 0 to 100: that share of the users who match is admitted.
 - `null`, `{}` and `{"groups": []}` mean no targeting: every user is eligible.
 
-`PUT /api/v1/experiments/{experiment_id}` answers 422 for experiment rules that
-would not be applied as written: a list of rules, a flat object such as
+`POST /api/v1/experiments/` and `PUT /api/v1/experiments/{experiment_id}` answer
+422 for experiment rules that would not be applied as written: a list of rules, a flat object such as
 `{"country": ["US"]}`, an unknown key, `groups` together with `rules`,
 `logical_operator` without `groups`, a group with no conditions, an unknown
 operator or logical operator, a value the operator cannot use, and a list
 operator with more than 1,000 values. The message names the place, for example
 `groups[0].conditions[1].operator: unknown operator`, and never repeats the
 submitted value.
+
+Cloning an experiment copies its stored rules as they are, without this check,
+so an experiment created before the check keeps rules it would now refuse.
 
 An experiment's targeting can be changed only while it is `draft` or `paused`,
 whatever the caller's role, superusers included:

@@ -5201,14 +5201,30 @@
             "conversion"
           ],
           "targeting_rules": {
-            "country": [
-              "US",
-              "CA"
+            "groups": [
+              {
+                "conditions": [
+                  {
+                    "attribute": "country",
+                    "operator": "in",
+                    "value": [
+                      "US",
+                      "CA"
+                    ]
+                  },
+                  {
+                    "attribute": "device",
+                    "operator": "in",
+                    "value": [
+                      "desktop",
+                      "mobile"
+                    ]
+                  }
+                ],
+                "logical_operator": "AND"
+              }
             ],
-            "device": [
-              "desktop",
-              "mobile"
-            ]
+            "logical_operator": "AND"
           },
           "variants": [
             {
