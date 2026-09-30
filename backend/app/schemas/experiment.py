@@ -182,6 +182,22 @@ class VariantBase(BaseModel):
         return v
 
 
+def _checked_targeting_rules(
+    value: Optional[Dict[str, Any]],
+) -> Optional[Dict[str, Any]]:
+    """Validate experiment ``targeting_rules`` on create and update.
+
+    The value is returned as given (never rewritten), so running this twice
+    gives the same result. The error text is fixed and never carries the
+    submitted rules (see ``validate_experiment_targeting``).
+    """
+    try:
+        validate_experiment_targeting(value)
+    except TargetingRulesError as err:
+        raise ValueError(str(err)) from None
+    return value
+
+
 class ExperimentBase(BaseModel):
     """Base model for experiment data."""
 
@@ -313,8 +329,24 @@ class ExperimentCreate(ExperimentBase):
                 "experiment_type": "a_b",
                 "status": "draft",
                 "targeting_rules": {
-                    "country": ["US", "CA"],
-                    "device": ["desktop", "mobile"],
+                    "logical_operator": "AND",
+                    "groups": [
+                        {
+                            "logical_operator": "AND",
+                            "conditions": [
+                                {
+                                    "attribute": "country",
+                                    "operator": "in",
+                                    "value": ["US", "CA"],
+                                },
+                                {
+                                    "attribute": "device",
+                                    "operator": "in",
+                                    "value": ["desktop", "mobile"],
+                                },
+                            ],
+                        }
+                    ],
                 },
                 "tags": ["checkout", "ui", "conversion"],
                 "variants": [
@@ -353,6 +385,18 @@ class ExperimentCreate(ExperimentBase):
             }
         }
     )
+
+    @field_validator("targeting_rules")
+    @classmethod
+    def validate_targeting_rules(
+        cls, value: Optional[Dict[str, Any]]
+    ) -> Optional[Dict[str, Any]]:
+        """Refuse rules assignment would not apply as they read.
+
+        Idempotent: the create route builds ``ExperimentCreate`` a second time
+        from the first one's dump, and the value is returned unchanged.
+        """
+        return _checked_targeting_rules(value)
 
     @model_validator(mode="after")
     def default_bayesian_config(self):
@@ -463,16 +507,8 @@ class ExperimentUpdate(BaseModel):
     def validate_targeting_rules(
         cls, value: Optional[Dict[str, Any]]
     ) -> Optional[Dict[str, Any]]:
-        """Refuse rules assignment would not apply as they read.
-
-        The value is stored as given; the error text is fixed and never
-        carries the submitted rules (see ``validate_experiment_targeting``).
-        """
-        try:
-            validate_experiment_targeting(value)
-        except TargetingRulesError as err:
-            raise ValueError(str(err)) from None
-        return value
+        """Refuse rules assignment would not apply as they read."""
+        return _checked_targeting_rules(value)
 
     @model_validator(mode="after")
     def validate_variants(self):

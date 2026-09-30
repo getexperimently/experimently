@@ -8,6 +8,7 @@ import { Wizard, NEW_EXPERIMENT_PATH } from '@/components/experiments/new/Wizard
 import { navigateHard, useLeaveGuard } from '@/components/experiments/new/leaveGuard';
 import {
   buildCreatePayload,
+  checkTargeting,
   createInitialFormState,
   experimentFormReducer,
   validateForm,
@@ -19,6 +20,7 @@ import {
   CreateView,
   describeCreateError,
   ROLE_CANNOT_CREATE,
+  TARGETING_INCOMPLETE,
 } from '@/components/experiments/new/createErrors';
 
 // The form's state, validation and payload live in `formState.ts`; these stay
@@ -61,6 +63,14 @@ export default function NewExperimentPage() {
     const problem = validateForm(state.name, state.variants, state.metrics);
     if (problem) {
       setError({ message: problem });
+      return;
+    }
+
+    // A blank condition ("+ Add Group" starts with one) would be refused by
+    // the API; say so at the rules before sending anything.
+    const targeting = checkTargeting(state.rules);
+    if (targeting.length > 0) {
+      setError({ message: TARGETING_INCOMPLETE, targeting });
       return;
     }
 

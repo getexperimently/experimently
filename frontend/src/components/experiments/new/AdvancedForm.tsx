@@ -7,6 +7,7 @@ import { ExperimentTypeField } from './ExperimentTypeField';
 import { VariantsEditor } from './VariantsEditor';
 import { MetricsEditor } from './MetricsEditor';
 import { CreateError } from './createErrors';
+import { TargetingProblems } from './TargetingProblems';
 
 interface AdvancedFormProps {
   state: ExperimentFormState;
@@ -47,12 +48,13 @@ export function AdvancedForm({ state, dispatch, error, isSubmitting, onSubmit }:
       </section>
 
       {/* Targeting Rules */}
-      <section className="bg-white rounded-lg border border-slate-200 p-6">
+      <section className="bg-white rounded-lg border border-slate-200 p-6 space-y-4" data-testid="targeting-section">
         <TargetingRuleBuilder value={state.rules} onChange={(rules) => dispatch({ type: 'setRules', rules })} />
+        <TargetingProblems error={error} />
       </section>
 
-      {/* Error message */}
-      {error && (
+      {/* Error message (a targeting problem is shown at the rules instead) */}
+      {error && !error.targeting && (
         <div
           role="alert"
           className="rounded-lg bg-red-50 border border-red-200 p-3 text-sm text-red-700"

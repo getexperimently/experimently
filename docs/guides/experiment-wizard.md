@@ -153,7 +153,7 @@ Valid data answers `{"is_valid":true,"errors":[]}`. The rules, by step:
 - `define_hypothesis`: a `hypothesis` of at least 10 characters, and a `primary_metric_id`;
 - `sample_size`: `baseline_rate` and `mde` each between 0 and 1;
 - `review`: `experiment_type`, `hypothesis` and `primary_metric_id` are all set;
-- `targeting`: anything.
+- `targeting`: anything. The conditions are checked when the draft is submitted.
 
 ---
 
@@ -276,6 +276,11 @@ jq '{success, errors}' <<<"$SUBMIT"
 
 A draft that fails the review step's rules answers `"success": false`, with `errors` listing
 them.
+
+So does a draft whose targeting conditions would not be applied as written, such as an
+unknown operator or a blank attribute. The error names the condition, for example
+`targeting_rules: Value error, groups[0].conditions[0].operator: unknown operator`,
+and no experiment is created.
 
 The experiment is an ordinary one. An `ab` draft gets two variants, `Control` and
 `Variant A`, at 50% each; its primary metric counts `checkout_completed`:
