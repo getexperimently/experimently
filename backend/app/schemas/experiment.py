@@ -525,6 +525,14 @@ class ExperimentResponse(BaseModel):
     owner_id: UUID4
     start_date: Optional[datetime] = None
     end_date: Optional[datetime] = None
+    resume_at: Optional[datetime] = Field(
+        None,
+        description=(
+            "When a PAUSED experiment is scheduled to resume, set by PUT "
+            "/experiments/{id}/schedule on a paused experiment. Null when no "
+            "resume is scheduled; any change of status clears it."
+        ),
+    )
     created_at: datetime
     updated_at: datetime
     variants: List[VariantResponse]

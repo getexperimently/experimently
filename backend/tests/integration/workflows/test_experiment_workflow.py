@@ -106,29 +106,18 @@ class TestExperimentLifecycleWorkflow:
 
         # Step 4: Pause the experiment → PAUSED
         pause_resp = admin_client.post(f"/api/v1/experiments/{exp_id}/pause")
-        # Pause may return 200 or 500 (known serialization issue with metrics)
-        assert pause_resp.status_code in (200, 500), f"Pause failed: {pause_resp.text}"
-        if pause_resp.status_code == 200:
-            assert pause_resp.json()["status"] == "paused"
+        assert pause_resp.status_code == 200, f"Pause failed: {pause_resp.text}"
+        assert pause_resp.json()["status"] == "paused"
 
-        # Verify paused state via GET (accept PAUSED or ACTIVE if pause had a 500)
+        # Verify paused state via GET: a paused experiment stays paused (#436)
         get_paused = admin_client.get(f"/api/v1/experiments/{exp_id}")
         assert get_paused.status_code == 200
-        current_status = get_paused.json()["status"]
-        assert current_status in ("paused", "active"), (
-            f"Expected 'paused' or 'active' after pause attempt, got: {current_status}"
-        )
+        assert get_paused.json()["status"] == "paused"
 
         # Step 5: Resume by starting again (from PAUSED → ACTIVE)
         resume_resp = admin_client.post(f"/api/v1/experiments/{exp_id}/start")
-        if current_status == "paused":
-            # Should succeed from PAUSED
-            assert resume_resp.status_code in (200, 400, 500), (
-                f"Resume failed unexpectedly: {resume_resp.text}"
-            )
-        # If still ACTIVE, starting again returns 400 (already active)
-        elif current_status == "active":
-            assert resume_resp.status_code in (200, 400, 500)
+        assert resume_resp.status_code == 200, f"Resume failed: {resume_resp.text}"
+        assert resume_resp.json()["status"] == "active"
 
     def test_experiment_starts_in_draft_status(self, admin_client):
         """Newly created experiment always has DRAFT status."""
@@ -163,14 +152,12 @@ class TestExperimentLifecycleWorkflow:
 
         # Now pause
         pause_resp = admin_client.post(f"/api/v1/experiments/{exp_id}/pause")
-        # Accept 200 or 500 (known issue with metrics serialization on pause response)
-        assert pause_resp.status_code in (200, 500), f"Pause failed: {pause_resp.text}"
+        assert pause_resp.status_code == 200, f"Pause failed: {pause_resp.text}"
 
         # Verify state via GET
         get_resp = admin_client.get(f"/api/v1/experiments/{exp_id}")
         assert get_resp.status_code == 200
-        # Expect paused (or active if pause endpoint returned 500)
-        assert get_resp.json()["status"] in ("paused", "active")
+        assert get_resp.json()["status"] == "paused"
 
     def test_cannot_start_active_experiment_again(self, admin_client):
         """Starting an already-ACTIVE experiment returns a 400 or 500 error."""

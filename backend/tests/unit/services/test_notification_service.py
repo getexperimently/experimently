@@ -247,6 +247,31 @@ class TestNotifyExperimentStarted:
         )
         assert "My Great Experiment" in captured_events[0].message
 
+    @pytest.mark.regression
+    def test_message_says_started_or_resumed(self):
+        """A scheduled resume of a PAUSED experiment is reported as resumed
+        (#436); the event type stays experiment_started."""
+        captured_events = []
+
+        def fake_send_webhook(url, event):
+            captured_events.append(event)
+            return True
+
+        self.service.send_webhook = fake_send_webhook
+        self.service.notify_experiment_started(
+            experiment_id="exp-1", experiment_name="Alpha"
+        )
+        self.service.notify_experiment_started(
+            experiment_id="exp-2", experiment_name="Beta", resumed=True
+        )
+        assert [(e.event_type, e.message) for e in captured_events] == [
+            (
+                "experiment_started",
+                "Experiment 'Alpha' has been started automatically.",
+            ),
+            ("experiment_started", "Experiment 'Beta' has been resumed automatically."),
+        ]
+
 
 # ---------------------------------------------------------------------------
 # notify_experiment_ended
