@@ -101,6 +101,10 @@ Only want to test on specific users? Add targeting rules on the same step:
 
 Users who don't match targeting rules are excluded from the experiment entirely.
 
+Every condition needs an attribute, an operator and (for most operators) a value. If one is
+missing, **Create Experiment** stops and the problem is shown beside the targeting rules; a
+condition the server cannot apply is reported there too.
+
 **Step 4: Estimate (optional)**
 
 Enter your baseline conversion rate and the smallest change worth detecting — a
