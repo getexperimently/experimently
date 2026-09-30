@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """StreamPulse rollout story — the 7-step "Player v2" narrative, driven against the platform API.
 
-Every step talks to the dashboard API with bearer auth (``--token``; the default ``dev`` works
-locally because Cognito is not configured, so any bearer token maps to the dev admin) and
-prints what to look at in the platform dashboard and in the StreamPulse app afterwards.
+Every step talks to the dashboard API with bearer auth and prints what to look at in the
+platform dashboard and in the StreamPulse app afterwards.  Without ``--token`` the story signs
+in first with ``POST /api/v1/auth/login`` as ``--email``/``--password``, which default to the
+seeded demo admin (``admin@demo.com`` / ``Demo1234!``), so it works against the local demo
+backend as ``setup-local.sh`` starts it.  ``--token`` uses a bearer token you already have.
 
   1  Internal + 5%      show the flag at 5% with the ``employee equals true`` rule
   2  25%                advance the rollout schedule to stage 2 → flag at 25%
@@ -41,7 +43,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from traffic import DEFAULT_API_KEY_FILE, PLAYER_FLAG, read_api_key_file  # noqa: E402
 
 DEFAULT_API_URL = "http://localhost:8000"
-DEFAULT_TOKEN = "dev"
+# The seeded demo admin (backend/scripts/seed_demo_data.py); used to sign in when no --token is given.
+DEFAULT_EMAIL = "admin@demo.com"
+DEFAULT_PASSWORD = "Demo1234!"
 DEFAULT_DASHBOARD_URL = "http://localhost:3100"
 DEFAULT_APP_URL = "http://localhost:3300"
 TRAFFIC_SCRIPT = Path(__file__).resolve().parent / "traffic.py"
@@ -81,8 +85,40 @@ class StoryError(Exception):
 # --------------------------------------------------------------------------------------
 
 
+def sign_in(api_url: str, email: str, password: str, timeout: float = 15.0) -> str:
+    """Return a bearer token from ``POST /api/v1/auth/login`` (the local auth provider).
+
+    Raises ``ApiError`` on any failure: status 0 when the API is unreachable, otherwise the
+    HTTP status (401 wrong credentials, 404 the backend is not on the local provider,
+    423 locked, 429 rate limited).
+    """
+    url = f"{api_url.rstrip('/')}/api/v1/auth/login"
+    req = urllib.request.Request(
+        url,
+        data=json.dumps({"email": email, "password": password}).encode("utf-8"),
+        method="POST",
+        headers={"Content-Type": "application/json", "Accept": "application/json"},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            raw = resp.read()
+    except urllib.error.HTTPError as e:
+        raise ApiError(e.code, e.read().decode("utf-8", "replace"), url) from None
+    except urllib.error.URLError as e:
+        raise ApiError(0, str(e.reason), url) from None
+    except (TimeoutError, OSError) as e:
+        raise ApiError(0, str(e), url) from None
+    try:
+        token = json.loads(raw).get("access_token")
+    except (ValueError, AttributeError):
+        token = None
+    if not isinstance(token, str) or not token:
+        raise ApiError(502, "the login response carried no access_token", url)
+    return token
+
+
 class StoryClient:
-    def __init__(self, api_url: str = DEFAULT_API_URL, token: str = DEFAULT_TOKEN, timeout: float = 15.0):
+    def __init__(self, api_url: str = DEFAULT_API_URL, token: str = "", timeout: float = 15.0):
         self.api_url = api_url.rstrip("/")
         self.token = token
         self.timeout = timeout
@@ -565,7 +601,9 @@ def build_parser() -> argparse.ArgumentParser:
         description="Drive the StreamPulse 'Player v2' rollout story against the Experimently API.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
-    parser.add_argument("--token", default=DEFAULT_TOKEN, help="bearer token for the dashboard API ('dev' works locally: Cognito is unset, so any token maps to the dev admin)")
+    parser.add_argument("--token", default=None, help="bearer token for the dashboard API (default: sign in with --email/--password)")
+    parser.add_argument("--email", default=DEFAULT_EMAIL, help="user to sign in as when --token is not given")
+    parser.add_argument("--password", default=DEFAULT_PASSWORD, help="password for --email")
     parser.add_argument("--api-url", default=DEFAULT_API_URL, help="Experimently API origin")
     parser.add_argument("--api-key", default=None, help=f"X-API-Key for the incident traffic (default: contents of {DEFAULT_API_KEY_FILE})")
     parser.add_argument("--dashboard-url", default=DEFAULT_DASHBOARD_URL, help="platform dashboard origin (for the 'look at' hints)")
@@ -587,9 +625,24 @@ def main(
     sleep: Callable[[float], None] = time.sleep,
     run_traffic: Callable[[list[str]], int] | None = None,
     out: TextIO = sys.stdout,
+    login: Callable[[str, str, str], str] = sign_in,
 ) -> int:
     args = build_parser().parse_args(argv)
-    client = client_factory(args.api_url, args.token)
+    token = args.token
+    if not token:
+        try:
+            token = login(args.api_url, args.email, args.password)
+        except ApiError as err:
+            if err.status == 0:
+                print(f"\nerror: cannot reach {args.api_url}: {err.body}. Is the backend running?", file=sys.stderr)
+                return 4
+            print(
+                f"\nerror: could not sign in to {args.api_url} as {args.email} ({err.status}: {err.body[:200]}). "
+                "Pass --email/--password for an existing user, or --token with a bearer token.",
+                file=sys.stderr,
+            )
+            return 2
+    client = client_factory(args.api_url, token)
     story = Story(
         client=client,
         out=out,
@@ -616,7 +669,11 @@ def main(
         return 1
     except ApiError as err:
         if err.status in (401, 403):
-            print(f"\nerror: the dashboard API rejected the bearer token ({err.status}). Pass --token with a valid token.", file=sys.stderr)
+            print(
+                f"\nerror: the dashboard API rejected the bearer token ({err.status}). "
+                "Pass --token with a valid token, or --email/--password for a user who may change flags.",
+                file=sys.stderr,
+            )
             return 2
         if err.status == 0:
             print(f"\nerror: cannot reach {args.api_url}: {err.body}. Is the backend running?", file=sys.stderr)

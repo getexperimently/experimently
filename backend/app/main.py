@@ -9,6 +9,7 @@ import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.docs import get_redoc_html, get_swagger_ui_html
 from fastapi.openapi.utils import get_openapi
@@ -24,6 +25,7 @@ from backend.app.core.rollout_scheduler import rollout_scheduler
 from backend.app.core.safety_scheduler import safety_scheduler
 from backend.app.core.scheduler import experiment_scheduler
 from backend.app.core.settings_rules import ENVIRONMENT_NOT_SET_MESSAGE
+from backend.app.core.validation_errors import request_validation_error_handler
 from backend.app.middleware.rate_limiter import RateLimitMiddleware
 from backend.app.middleware.relative_redirect_middleware import (
     RelativeSlashRedirectMiddleware,
@@ -180,6 +182,11 @@ app = FastAPI(
     openapi_tags=tags_metadata,
     lifespan=lifespan,
 )
+
+# A request that fails validation is answered with each error's type, loc, msg
+# and ctx, and without the submitted values (#500). Every route included below,
+# core and module alike, gets it; see backend/app/core/validation_errors.py.
+app.add_exception_handler(RequestValidationError, request_validation_error_handler)
 
 # ---------------------------------------------------------------------------
 # Middleware stack

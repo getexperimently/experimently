@@ -154,7 +154,10 @@ jobs:
       matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
     steps:
       # First, so the runner's deadline counts from (within seconds of) the
-      # moment timeout-minutes starts counting.
+      # moment timeout-minutes starts counting. It is still taken after the
+      # job's clock starts (1-4 s across 90 shard jobs, 2026-09-30), so the
+      # deadline is that much late; accepted slack, well inside
+      # DEADLINE_MARGIN_SECONDS.
       - name: Record the job start
         run: echo "DOCEX_JOB_START=$(date +%s)" >> "$GITHUB_ENV"
 

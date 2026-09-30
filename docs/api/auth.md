@@ -49,7 +49,7 @@ A wrong email address or password answers `401` with `{"detail":"Invalid email o
 `POST /api/v1/auth/login` takes JSON with `email` and `password`.
 `POST /api/v1/auth/token` takes the same two as a form, with the email address in the
 `username` field. That's the OAuth2 form the API's interactive documentation at
-`localhost:8000/docs` uses for its **Authorize** button.
+`localhost:8000/api/v1/docs` uses for its **Authorize** button.
 
 ### Check Who You Are Logged In As
 
