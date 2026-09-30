@@ -36,6 +36,10 @@ pytestmark = [pytest.mark.integration]
 #: This revision, and the core revision it extends.
 REVISION = "8fd44fb483a2"
 PREVIOUS_CORE_HEAD = "b8c9d0e1f2a3"
+#: The core head of this tree: ``upgrade heads`` runs on past this revision to
+#: ``271f03a31742`` (``experiments.resume_at``), which a database built by
+#: ``create_all`` already carries and which therefore adds nothing here.
+CORE_HEAD = "271f03a31742"
 #: The modules revision the previous full release (0.10.0) recorded, and the
 #: branch's head in this one.  This release also carries
 #: ``modules_0002_warehouse_analysis`` (#312), so a full database at the
@@ -49,8 +53,8 @@ WAREHOUSE_TABLES = {"warehouse_sources", "warehouse_analysis_runs"}
 #: What each profile's previous release recorded, and what this one records.
 PREVIOUS_CORE_ROWS = {PREVIOUS_CORE_HEAD}
 PREVIOUS_FULL_ROWS = {PREVIOUS_CORE_HEAD, PREVIOUS_MODULES_REVISION}
-CORE_ROWS = {REVISION}
-FULL_ROWS = {REVISION, MODULES_HEAD}
+CORE_ROWS = {CORE_HEAD}
+FULL_ROWS = {CORE_HEAD, MODULES_HEAD}
 
 TABLES = {"sdk_evaluation_key_counts", "sdk_evaluation_flag_counts"}
 
