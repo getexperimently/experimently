@@ -19,6 +19,7 @@ from backend.tests.integration.conftest import (  # fixture re-exports
     make_feature_flag,
     make_metric,
     make_variant,
+    restore_dependency_overrides,
     viewer_client,
     viewer_user,
 )
