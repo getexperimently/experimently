@@ -5363,7 +5363,7 @@
           "status": {
             "$ref": "#/components/schemas/ExperimentStatus",
             "default": "draft",
-            "description": "Initial experiment status"
+            "description": "Always `draft`: a new experiment is created as a draft, and any other value is refused with 422. Start it with `POST /api/v1/experiments/{id}/start`."
           },
           "tags": {
             "anyOf": [
@@ -6039,7 +6039,6 @@
           "description": "Testing different button colors with updated hypothesis",
           "hypothesis": "Changing the button color to dark blue will increase conversion rates",
           "name": "Updated Button Color Test",
-          "status": "draft",
           "tags": [
             "checkout",
             "ui",
@@ -6167,7 +6166,7 @@
           },
           "status": {
             "$ref": "#/components/schemas/ExperimentStatus",
-            "description": "Experiment status"
+            "description": "Not changed by an update. A value equal to the current status is accepted and changes nothing; any other value is refused with 422. Status changes through `POST /api/v1/experiments/{id}/start`, `/pause`, `/complete` or `/archive`."
           },
           "tags": {
             "anyOf": [
@@ -20789,7 +20788,7 @@
         ]
       },
       "post": {
-        "description": "Create new experiment.\n\nThis endpoint allows users to create a new experiment with variants and metrics.\nThe created experiment is owned by the current user.\n\nReturns:\n    ExperimentResponse: The created experiment\n\nRaises:\n    HTTPException: If the experiment data is invalid or creation fails",
+        "description": "Create new experiment.\n\nThis endpoint allows users to create a new experiment with variants and metrics.\nThe created experiment is owned by the current user.\n\nA new experiment is always created as `draft`. `status` may be left out or\nsent as `\"draft\"`; any other value is refused with 422. Start it with\n`POST /api/v1/experiments/{id}/start`.\n\nReturns:\n    ExperimentResponse: The created experiment\n\nRaises:\n    HTTPException 422: If the experiment data is invalid, or `status` is\n        anything other than `draft`\n    HTTPException: If creation fails",
         "operationId": "create_experiment_api_v1_experiments__post",
         "parameters": [
           {
@@ -21386,7 +21385,7 @@
         ]
       },
       "put": {
-        "description": "Update experiment.\n\nThis endpoint allows users to update an existing experiment.\nThe caller's role must hold UPDATE on experiments; who created the\nexperiment is not considered.\n\nFields that can be updated:\n- Basic properties: name, description, hypothesis\n- Variants: if experiment is in DRAFT status\n- Metrics: if experiment is in DRAFT status\n- Targeting (`targeting_rules`): while the experiment is DRAFT or PAUSED,\n  for every role including superusers. On a PAUSED experiment it must be\n  the only field in the request. On an ACTIVE, COMPLETED or ARCHIVED\n  experiment a request that includes `targeting_rules` is refused, even\n  when the value equals the stored one; pause the experiment first.\n  People already assigned keep their variant; the new rules apply to\n  people not yet in the experiment once it is resumed.\n\nReturns:\n    ExperimentResponse: The updated experiment\n\nRaises:\n    HTTPException 403: If the caller's role does not hold UPDATE on experiments,\n        or the experiment's state does not allow the change (the detail\n        names the state)\n    HTTPException 400: If trying to update variants/metrics for non-DRAFT experiment\n    HTTPException 404: If the experiment doesn't exist\n    HTTPException 422: If `targeting_rules` is not a valid rule set",
+        "description": "Update experiment.\n\nThis endpoint allows users to update an existing experiment.\nThe caller's role must hold UPDATE on experiments; who created the\nexperiment is not considered.\n\nFields that can be updated:\n- Basic properties: name, description, hypothesis\n- Variants: if experiment is in DRAFT status\n- Metrics: if experiment is in DRAFT status\n- Targeting (`targeting_rules`): while the experiment is DRAFT or PAUSED,\n  for every role including superusers. On a PAUSED experiment it must be\n  the only field in the request. On an ACTIVE, COMPLETED or ARCHIVED\n  experiment a request that includes `targeting_rules` is refused, even\n  when the value equals the stored one; pause the experiment first.\n  People already assigned keep their variant; the new rules apply to\n  people not yet in the experiment once it is resumed.\n\n`status` is not changed by an update, for any role including superusers.\nA `status` equal to the current one is accepted and changes nothing, so an\nexperiment fetched with GET can be sent back. Any other value is refused\nwith 422; status changes through `POST /api/v1/experiments/{id}/start`,\n`/pause`, `/complete` or `/archive`. `status` still counts as a field\nsent, so on a PAUSED experiment `targeting_rules` must be sent without it.\n\nReturns:\n    ExperimentResponse: The updated experiment\n\nRaises:\n    HTTPException 403: If the caller's role does not hold UPDATE on experiments,\n        or the experiment's state does not allow the change (the detail\n        names the state)\n    HTTPException 400: If trying to update variants/metrics for non-DRAFT experiment\n    HTTPException 404: If the experiment doesn't exist\n    HTTPException 422: If `targeting_rules` is not a valid rule set, or\n        `status` differs from the experiment's current status",
         "operationId": "update_experiment_api_v1_experiments__experiment_id__put",
         "parameters": [
           {

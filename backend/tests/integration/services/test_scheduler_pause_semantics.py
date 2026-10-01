@@ -202,12 +202,17 @@ def _schedule(client, people, experiment_id, body):
     )
 
 
-def _put_status(client, people, experiment_id, status):
-    return client.put(
-        f"{BASE}/{experiment_id}",
-        json={"status": status},
-        headers=_auth(people["superuser"]),
-    )
+def _set_status_in_db(db_session, experiment_id, status):
+    """Write a status straight to the row. Since #542 no route sets a status
+    except the lifecycle endpoints, so a state those cannot reach (a DRAFT
+    paused before it started, as older data may hold) is set up here."""
+    session = _factory(db_session)()
+    try:
+        row = session.get(Experiment, uuid.UUID(experiment_id))
+        row.status = status
+        session.commit()
+    finally:
+        session.close()
 
 
 def _get(client, people, experiment_id):
@@ -331,10 +336,6 @@ def _pause_by_route(client, people, experiment_id, db_session):
     _ok(_post(client, people, experiment_id, "pause"))
 
 
-def _pause_by_status_put(client, people, experiment_id, db_session):
-    _ok(_put_status(client, people, experiment_id, "paused"))
-
-
 def _pause_by_service(client, people, experiment_id, db_session):
     session = _factory(db_session)()
     try:
@@ -346,7 +347,6 @@ def _pause_by_service(client, people, experiment_id, db_session):
 
 PAUSERS = {
     "post_pause": _pause_by_route,
-    "superuser_put_status": _pause_by_status_put,
     "service_pause_experiment": _pause_by_service,
 }
 
@@ -384,14 +384,6 @@ def _archive(client, people, experiment_id, db_session):
     return _post(client, people, experiment_id, "archive")
 
 
-def _put_active(client, people, experiment_id, db_session):
-    return _put_status(client, people, experiment_id, "active")
-
-
-def _put_draft(client, people, experiment_id, db_session):
-    return _put_status(client, people, experiment_id, "draft")
-
-
 def _service_complete(client, people, experiment_id, db_session):
     session = _factory(db_session)()
     try:
@@ -404,8 +396,6 @@ def _service_complete(client, people, experiment_id, db_session):
 #: writer -> (how it changes the status, the status afterwards)
 CLEARERS = {
     "post_start": (_start, ExperimentStatus.ACTIVE),
-    "superuser_put_active": (_put_active, ExperimentStatus.ACTIVE),
-    "superuser_put_draft": (_put_draft, ExperimentStatus.DRAFT),
     "post_complete": (_complete, ExperimentStatus.COMPLETED),
     "post_archive": (_archive, ExperimentStatus.ARCHIVED),
     "service_complete_experiment": (_service_complete, ExperimentStatus.COMPLETED),
@@ -636,7 +626,8 @@ def test_paused_resume_after_the_stored_end_date_is_400(client, db_session, peop
 def test_paused_end_date_before_the_stored_start_date_is_400(
     client, db_session, people
 ):
-    """A DRAFT scheduled for the future, paused by a superuser: an end_date
+    """A DRAFT scheduled for the future and then paused (older data; no route
+    can do this since #542): an end_date
     alone that is earlier than its start_date would break check_experiment_dates."""
     experiment_id = _create(client, people)
     start = _now() + timedelta(days=2)
@@ -648,9 +639,7 @@ def test_paused_end_date_before_the_stored_start_date_is_400(
             {"start_date": _iso(start), "end_date": _iso(start + timedelta(days=8))},
         )
     )
-    assert _ok(_put_status(client, people, experiment_id, "paused"))["status"] == (
-        "paused"
-    )
+    _set_status_in_db(db_session, experiment_id, ExperimentStatus.PAUSED)
 
     response = _schedule(
         client,

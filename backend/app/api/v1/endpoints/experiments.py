@@ -59,13 +59,23 @@ from backend.app.services.audit_log_service import AuditLogService
 from backend.app.services.experiment_service import (
     AnalysisConfigError,
     ExperimentService,
-    resolve_experiment_status,
 )
 
 #: The states in which ``PUT /experiments/{id}`` accepts ``targeting_rules``
 #: (#523). PAUSED only when targeting is the one field sent; see the route.
 TARGETING_EDITABLE_STATUSES = frozenset(
     {ExperimentStatus.DRAFT, ExperimentStatus.PAUSED}
+)
+
+#: An experiment's status changes only through the lifecycle endpoints, which
+#: carry each transition's checks (#542). The refusal names them.
+STATUS_THROUGH_LIFECYCLE = (
+    "status changes through POST /api/v1/experiments/{id}/start, /pause, "
+    "/complete or /archive; it cannot be set by an update."
+)
+STATUS_ON_CREATE = (
+    "a new experiment is created as draft; status changes through "
+    "POST /api/v1/experiments/{id}/start, /pause, /complete or /archive."
 )
 
 # Create router with tag for documentation grouping
@@ -177,6 +187,14 @@ def _status_text(value: Any) -> Optional[str]:
 def _same_experiment_type(requested: Any, stored: Any) -> bool:
     """Compare an incoming ``experiment_type`` with the stored one by value."""
     return getattr(requested, "value", requested) == getattr(stored, "value", stored)
+
+
+def _refuse_status(message: str) -> HTTPException:
+    """A 422 on ``status`` in the shape of a request-validation error."""
+    return HTTPException(
+        status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+        detail=[{"loc": ["body", "status"], "msg": message, "type": "value_error"}],
+    )
 
 
 def _reject_unroutable_split_url(experiment_type: Any) -> None:
@@ -361,11 +379,17 @@ async def create_experiment(
     This endpoint allows users to create a new experiment with variants and metrics.
     The created experiment is owned by the current user.
 
+    A new experiment is always created as `draft`. `status` may be left out or
+    sent as `"draft"`; any other value is refused with 422. Start it with
+    `POST /api/v1/experiments/{id}/start`.
+
     Returns:
         ExperimentResponse: The created experiment
 
     Raises:
-        HTTPException: If the experiment data is invalid or creation fails
+        HTTPException 422: If the experiment data is invalid, or `status` is
+            anything other than `draft`
+        HTTPException: If creation fails
     """
     # Role decides, not the username: this used to gate on the substring
     # "viewer" appearing in `username`, which both let a VIEWER named e.g.
@@ -375,6 +399,11 @@ async def create_experiment(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=get_permission_error_message(ResourceType.EXPERIMENT, Action.CREATE),
         )
+
+    # Refused, not silently replaced by DRAFT (#542): a client that asked for
+    # an ACTIVE experiment must learn it did not get one.
+    if _status_text(experiment_in.status) != ExperimentStatus.DRAFT.value:
+        raise _refuse_status(STATUS_ON_CREATE)
 
     _reject_unroutable_split_url(getattr(experiment_in, "experiment_type", None))
 
@@ -388,8 +417,6 @@ async def create_experiment(
 
         # Ensure status is a string (convert enum to value if needed)
         if "status" in experiment_data:
-            from backend.app.models.experiment import ExperimentStatus
-
             if isinstance(experiment_data["status"], ExperimentStatus):
                 experiment_data["status"] = experiment_data["status"].value
             elif not isinstance(experiment_data["status"], str):
@@ -625,6 +652,13 @@ async def update_experiment(
       People already assigned keep their variant; the new rules apply to
       people not yet in the experiment once it is resumed.
 
+    `status` is not changed by an update, for any role including superusers.
+    A `status` equal to the current one is accepted and changes nothing, so an
+    experiment fetched with GET can be sent back. Any other value is refused
+    with 422; status changes through `POST /api/v1/experiments/{id}/start`,
+    `/pause`, `/complete` or `/archive`. `status` still counts as a field
+    sent, so on a PAUSED experiment `targeting_rules` must be sent without it.
+
     Returns:
         ExperimentResponse: The updated experiment
 
@@ -634,7 +668,8 @@ async def update_experiment(
             names the state)
         HTTPException 400: If trying to update variants/metrics for non-DRAFT experiment
         HTTPException 404: If the experiment doesn't exist
-        HTTPException 422: If `targeting_rules` is not a valid rule set
+        HTTPException 422: If `targeting_rules` is not a valid rule set, or
+            `status` differs from the experiment's current status
     """
     try:
         # Get experiment
@@ -706,17 +741,22 @@ async def update_experiment(
                 ),
             )
 
-        # Get update data
-        update_data = experiment_in.model_dump(exclude_unset=True)
+        # Status changes only through /start, /pause, /complete and /archive,
+        # which carry each transition's checks (#542), for every role
+        # including the superuser. A status equal to the current one is a
+        # no-op so a GET-then-PUT round trip still works. This runs after the
+        # role and state refusals above, so a request those refuse keeps its
+        # 403; and ``status`` stays in ``fields_sent``, so a PAUSED
+        # experiment's targeting sent with a status is still refused there.
+        # A null status never gets here: the schema refuses it (#541).
+        if "status" in fields_sent:
+            if _status_text(experiment_in.status) != _status_text(experiment.status):
+                raise _refuse_status(STATUS_THROUGH_LIFECYCLE)
 
-        # Handle status conversion if needed.  Accepts the enum value
-        # ("draft") or its name ("DRAFT"); anything else leaves the status be.
-        if "status" in update_data and isinstance(update_data["status"], str):
-            resolved_status = resolve_experiment_status(update_data["status"])
-            if resolved_status is None:
-                del update_data["status"]
-            else:
-                update_data["status"] = resolved_status
+        # Get update data. The status, equal to the stored one if present, is
+        # never written by an update.
+        update_data = experiment_in.model_dump(exclude_unset=True)
+        update_data.pop("status", None)
 
         # For non-draft experiments, prevent updates to restricted fields
         if experiment.status != ExperimentStatus.DRAFT:
