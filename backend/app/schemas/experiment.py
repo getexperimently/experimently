@@ -116,7 +116,7 @@ class MetricBase(BaseModel):
     metric_type: MetricType = Field(MetricType.CONVERSION, description="Type of metric")
     is_primary: bool = Field(False, description="Whether this is the primary metric")
     aggregation_method: str = Field(
-        "average", description="How to aggregate the metric"
+        "average", max_length=50, description="How to aggregate the metric"
     )
     minimum_sample_size: int = Field(
         100, ge=10, description="Minimum sample size for statistical significance"
@@ -125,7 +125,9 @@ class MetricBase(BaseModel):
         None, description="Expected effect size for power calculations"
     )
     event_value_path: Optional[str] = Field(
-        None, description="JSON path to extract value from event payload"
+        None,
+        max_length=100,
+        description="JSON path to extract value from event payload",
     )
     lower_is_better: bool = Field(False, description="Whether lower values are better")
 

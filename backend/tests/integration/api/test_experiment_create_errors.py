@@ -1,8 +1,8 @@
 """What POST /api/v1/experiments/ answers when a create cannot be completed.
 
 * A key the caller chose that another experiment already has: 409, naming it.
-* Anything else the database refuses (two metrics with one name, a value too
-  long for its column, a generated key that happens to collide): 400 with a
+* Anything else the database refuses (two metrics with one name, a value its
+  column cannot hold, a generated key that happens to collide): 400 with a
   fixed message carrying the request ID.
 * Any other failure: 500 with the same fixed message.
 * Every refused create leaves the session usable for the next request.
@@ -121,10 +121,13 @@ def test_an_unexpected_failure_answers_500_with_the_fixed_message(
     assert logged, "the full error must reach the server log"
 
 
-def test_a_value_too_long_for_its_column_answers_the_fixed_message(
+def test_a_value_its_column_cannot_hold_answers_the_fixed_message(
     admin_client: TestClient,
 ) -> None:
-    body = _payload(_key("long"), aggregation_method="a" * 51)
+    # A sample size past the INTEGER column's range is refused by the
+    # database, not the schema. (An over-length string no longer gets this
+    # far: the schema answers 422, #551.)
+    body = _payload(_key("long"), minimum_sample_size=2**31)
 
     resp = admin_client.post(URL, json=body, headers={"X-Request-ID": "prb-e-789"})
 

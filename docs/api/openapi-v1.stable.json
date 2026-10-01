@@ -6552,6 +6552,7 @@
           "aggregation_method": {
             "default": "average",
             "description": "How to aggregate the metric",
+            "maxLength": 50,
             "title": "Aggregation Method",
             "type": "string"
           },
@@ -6577,6 +6578,7 @@
           "event_value_path": {
             "anyOf": [
               {
+                "maxLength": 100,
                 "type": "string"
               },
               {
