@@ -17,12 +17,25 @@ import uuid
 import pytest
 from sqlalchemy.orm import Session
 
+from backend.app.main import app
 from backend.app.models.audit_log import ActionType, EntityType
 from backend.app.models.user import User, UserRole
 from backend.app.services.audit_service import AuditService
 from backend.tests.integration.conftest import HASHED_PASSWORD, make_client_for_user
 
 pytestmark = [pytest.mark.integration, pytest.mark.regression]
+
+
+@pytest.fixture(autouse=True)
+def _clear_overrides():
+    """Undo the app-global overrides ``make_client_for_user`` installs.
+
+    Left in place, the next test's requests run as this test's reader -- a
+    ``User`` whose session has closed, so the first attribute read raises
+    ``DetachedInstanceError`` and the route answers 500 (#569).
+    """
+    yield
+    app.dependency_overrides.clear()
 
 
 @pytest.fixture
