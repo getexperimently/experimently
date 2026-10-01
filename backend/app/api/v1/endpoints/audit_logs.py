@@ -38,6 +38,15 @@ logger = logging.getLogger(__name__)
 
 AUDIT_LIST_FAILED = "Failed to retrieve audit logs"
 
+# A refused filter names the accepted values and never repeats the submitted
+# one, as the schema validators do (#528, #529).
+INVALID_ENTITY_TYPE = (
+    f"Invalid entity type; expected one of {[e.value for e in EntityType]}"
+)
+INVALID_ACTION_TYPE = (
+    f"Invalid action type; expected one of {[a.value for a in ActionType]}"
+)
+
 # Create router with tag for documentation grouping
 router = APIRouter(
     tags=["Audit Logs"],
@@ -137,7 +146,7 @@ async def list_audit_logs(
         except ValueError:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Invalid entity type: {entity_type}",
+                detail=INVALID_ENTITY_TYPE,
             )
 
     action_type_enum = None
@@ -147,7 +156,7 @@ async def list_audit_logs(
         except ValueError:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Invalid action type: {action_type}",
+                detail=INVALID_ACTION_TYPE,
             )
 
     # Validate date range
@@ -244,7 +253,7 @@ async def get_entity_audit_history(
     except ValueError:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Invalid entity type: {entity_type}",
+            detail=INVALID_ENTITY_TYPE,
         )
 
     try:
