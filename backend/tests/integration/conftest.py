@@ -38,6 +38,32 @@ HASHED_PASSWORD = "$2b$12$EixZaYVK1fsbw1ZfbX3OXePaWxn96p36WQoeG6Lruj3vjPGga31lW"
 
 
 # ---------------------------------------------------------------------------
+# App-global state
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture(autouse=True)
+def restore_dependency_overrides():
+    """Put ``app.dependency_overrides`` back exactly as it was before the test.
+
+    ``make_client_for_user`` and many test files write the app-global
+    overrides; a caller that does not clean up would leave every later test
+    running as its last user (#569, #571).  This snapshots the dict before
+    each test and restores it afterwards -- restore, not clear, so overrides
+    a module- or session-scoped fixture installed before the test survive.
+    pytest sets up broader-scoped fixtures first, so the snapshot is taken
+    after them; being autouse, this is torn down after the test's other
+    function-scoped fixtures, so it has the last word.
+
+    The modules' integration conftest re-exports it.
+    """
+    saved = dict(app.dependency_overrides)
+    yield
+    app.dependency_overrides.clear()
+    app.dependency_overrides.update(saved)
+
+
+# ---------------------------------------------------------------------------
 # User fixtures
 # ---------------------------------------------------------------------------
 
