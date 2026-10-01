@@ -7,6 +7,11 @@
 
 import React from 'react';
 import { DimensionalBreakdownResponse } from '@/types/results';
+import {
+  NOT_ENOUGH_DATA,
+  formatRate,
+  isFiniteNumber,
+} from '@/components/results/shared/resultFormat';
 
 export interface SegmentComparisonTableProps {
   breakdown: DimensionalBreakdownResponse;
@@ -87,10 +92,14 @@ export function SegmentComparisonTable({
                   Mean
                 </th>
                 <th className="px-4 py-3 text-right text-xs font-medium uppercase tracking-wide text-slate-500">
-                  p-value
+                  p-value (unadjusted)
                 </th>
-                <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wide text-slate-500">
-                  Significance
+                <th className="px-4 py-3 text-left text-xs font-medium tracking-wide text-slate-500">
+                  {/* The breakdown keeps the raw p and moves the threshold:
+                      significant means p below the Bonferroni-adjusted alpha
+                      (its value is in the note above). */}
+                  <span className="uppercase">Significance</span>{' '}
+                  <span className="normal-case">at adjusted (Bonferroni) α</span>
                 </th>
               </tr>
             </thead>
@@ -122,10 +131,14 @@ export function SegmentComparisonTable({
                       )}
                     </td>
                     <td className="px-4 py-3 text-right text-sm tabular-nums text-slate-900">
-                      {(v.mean * 100).toFixed(2)}%
+                      {formatRate(v.mean, v.sample_size)}
                     </td>
                     <td className="px-4 py-3 text-right text-sm tabular-nums text-slate-600">
-                      {v.p_value != null ? v.p_value.toFixed(4) : '—'}
+                      {v.is_control
+                        ? '—'
+                        : isFiniteNumber(v.p_value)
+                          ? v.p_value.toFixed(4)
+                          : NOT_ENOUGH_DATA}
                     </td>
                     <td className="px-4 py-3 text-sm">
                       {!v.is_control && (

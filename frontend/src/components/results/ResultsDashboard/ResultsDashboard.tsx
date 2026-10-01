@@ -5,7 +5,9 @@ import {
   DailyResultsResponse,
   SampleSizeResult,
   DimensionalBreakdownResponse,
+  MetricResult,
 } from '@/types/results';
+import { analysedAsRate, rateDescription } from '@/components/results/shared/resultFormat';
 import { SequentialTestingResponse } from '@/types/sequential';
 import { ExperimentSummary } from './ExperimentSummary';
 import { SampleSizeMeter } from './SampleSizeMeter';
@@ -23,6 +25,17 @@ interface ResultsDashboardProps {
 }
 
 type Tab = 'overview' | 'trends' | 'sample-size' | 'sequential' | 'breakdowns' | 'live';
+
+/**
+ * The chart heading says what the bars are. A revenue, count or duration
+ * metric is still analysed as a share of users with an event, so it is not
+ * headed as revenue, nor as a "conversion rate" of revenue.
+ */
+function primaryMetricHeading(metric: MetricResult): string {
+  if (metric.metric_type === 'conversion') return `Conversion Rates — ${metric.metric_name}`;
+  if (analysedAsRate(metric)) return `${metric.metric_name} — ${rateDescription(metric)}`;
+  return `${metric.metric_name} — mean`;
+}
 
 function LoadingSkeleton() {
   return (
@@ -184,9 +197,12 @@ export function ResultsDashboard({ experimentId }: ResultsDashboardProps) {
             ) : (
               <>
                 {primaryMetric && (
-                  <section aria-label="Conversion rates">
-                    <h3 className="text-base font-semibold text-slate-800 mb-4">
-                      Conversion Rates — {primaryMetric.metric_name}
+                  <section aria-labelledby="primary-metric-heading">
+                    <h3
+                      id="primary-metric-heading"
+                      className="text-base font-semibold text-slate-800 mb-4"
+                    >
+                      {primaryMetricHeading(primaryMetric)}
                     </h3>
                     <ConversionChart variants={primaryMetric.variants} />
                   </section>
@@ -198,6 +214,7 @@ export function ResultsDashboard({ experimentId }: ResultsDashboardProps) {
                   <MetricComparisonTable
                     metrics={results.metrics}
                     confidenceLevel={results.confidence_level}
+                    correctionMethod={results.correction_method}
                   />
                 </section>
               </>
