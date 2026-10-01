@@ -10,6 +10,14 @@ longer applies and release-please can generate this file directly. Until it
 does, entries below 0.2.2 are hand-written and the links in them are the
 reason why.
 
+## [0.16.2](https://github.com/getexperimently/experimently/compare/v0.16.1...v0.16.2) (2026-10-01)
+
+
+### Bug Fixes
+
+* **api:** audit-log filters name the accepted values in their 400 ([#568](https://github.com/getexperimently/experimently/issues/568)) ([af712b1](https://github.com/getexperimently/experimently/commit/af712b1fe95c5f9e8939913f9ec2e8819f05b969))
+* **api:** unexpected errors answer a fixed message with the request ID ([#567](https://github.com/getexperimently/experimently/issues/567)) ([d19741a](https://github.com/getexperimently/experimently/commit/d19741adda67ba6fdbd2e9699a4ed1ff09a6e390))
+
 ## [0.16.1](https://github.com/getexperimently/experimently/compare/v0.16.0...v0.16.1) (2026-10-01)
 
 
