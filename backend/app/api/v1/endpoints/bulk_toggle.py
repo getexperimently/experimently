@@ -17,6 +17,7 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from backend.app.api import deps
+from backend.app.core.logger import failure_detail
 from backend.app.core.permissions import (
     Action,
     can_act_on_feature_flag,
@@ -143,13 +144,20 @@ async def bulk_toggle_flags(
             )
 
         except Exception as e:
-            logger.error(f"Error processing flag {flag_id_str} in bulk toggle: {e}")
+            # The full error goes to the log under this request's ID; the
+            # per-flag result carries a fixed sentence with that ID.
+            logger.error(
+                "Bulk toggle of flag %s failed (%s)",
+                flag_id_str,
+                type(e).__name__,
+                exc_info=e,
+            )
             results.append(
                 BulkToggleResult(
                     flag_id=flag_id_str,
                     flag_key="error",
                     success=False,
-                    error=str(e),
+                    error=failure_detail("Could not change this flag"),
                 )
             )
 

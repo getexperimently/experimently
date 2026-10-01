@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 
 from backend.app.core.cognito import map_cognito_groups_to_role, should_be_superuser
 from backend.app.core.config import settings
+from backend.app.core.logger import unexpected_failure
 from backend.app.core.permissions import (
     Action,
     ResourceType,
@@ -248,8 +249,12 @@ def get_current_user(
         try:
             return _get_or_create_dev_user(db)
         except Exception as dev_err:
-            logger.error(f"Dev user creation failed: {dev_err}")
-            raise HTTPException(status_code=500, detail=f"Dev auth error: {dev_err}")
+            raise unexpected_failure(
+                dev_err,
+                "Dev user creation",
+                "Could not sign in the development user",
+                db=db,
+            )
 
     if not token:
         raise _credentials_exception("Not authenticated")

@@ -29,7 +29,7 @@ from sqlalchemy.orm import Session
 
 from backend.app.api import deps
 from backend.app.api.v1.endpoints import results as results_endpoints
-from backend.app.core.logger import failure_detail
+from backend.app.core.logger import failure_detail, unexpected_failure
 from backend.app.core.logging import logger
 from backend.app.core.optional_modules import (
     SPLIT_URL_UNAVAILABLE_DETAIL,
@@ -320,10 +320,8 @@ async def list_experiments(
         # Let deliberate 4xx responses through instead of wrapping them in a 500.
         raise
     except Exception as e:
-        db.rollback()
-        logger.exception("Experiment list failed (%s)", type(e).__name__)
-        raise HTTPException(
-            status_code=500, detail=failure_detail("Could not list the experiments")
+        raise unexpected_failure(
+            e, "Experiment list", "Could not list the experiments", db=db, logger=logger
         )
 
 
@@ -483,11 +481,8 @@ async def create_experiment(
             detail=failure_detail(CREATE_FAILED),
         )
     except Exception as e:
-        db.rollback()
-        logger.exception("Experiment create failed (%s)", type(e).__name__)
-        raise HTTPException(
-            status_code=500,
-            detail=failure_detail(CREATE_FAILED),
+        raise unexpected_failure(
+            e, "Experiment create", CREATE_FAILED, db=db, logger=logger
         )
 
 
@@ -591,13 +586,13 @@ async def get_experiment(
                                 experiment_dict
                             )
                     except Exception as ex:
-                        db.rollback()
-                        logger.exception(
-                            "Experiment read failed (%s)", type(ex).__name__
-                        )
-                        raise HTTPException(
+                        raise unexpected_failure(
+                            ex,
+                            "Experiment read",
+                            "Could not load the experiment",
+                            db=db,
+                            logger=logger,
                             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                            detail=failure_detail("Could not load the experiment"),
                         )
                 else:
                     raise
@@ -613,10 +608,8 @@ async def get_experiment(
         # Let deliberate 4xx responses through instead of wrapping them in a 500.
         raise
     except Exception as e:
-        db.rollback()
-        logger.exception("Experiment read failed (%s)", type(e).__name__)
-        raise HTTPException(
-            status_code=500, detail=failure_detail("Could not load the experiment")
+        raise unexpected_failure(
+            e, "Experiment read", "Could not load the experiment", db=db, logger=logger
         )
 
 
@@ -863,11 +856,13 @@ async def update_experiment(
                         }
                         return ExperimentResponse.model_validate(experiment_dict)
                 except Exception as ex:
-                    db.rollback()
-                    logger.exception("Experiment update failed (%s)", type(ex).__name__)
-                    raise HTTPException(
+                    raise unexpected_failure(
+                        ex,
+                        "Experiment update",
+                        "Could not update the experiment",
+                        db=db,
+                        logger=logger,
                         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                        detail=failure_detail("Could not update the experiment"),
                     )
             else:
                 raise
@@ -875,10 +870,12 @@ async def update_experiment(
         # Let deliberate 4xx responses through instead of wrapping them in a 500.
         raise
     except Exception as e:
-        db.rollback()
-        logger.exception("Experiment update failed (%s)", type(e).__name__)
-        raise HTTPException(
-            status_code=500, detail=failure_detail("Could not update the experiment")
+        raise unexpected_failure(
+            e,
+            "Experiment update",
+            "Could not update the experiment",
+            db=db,
+            logger=logger,
         )
 
 
@@ -1114,10 +1111,12 @@ async def start_experiment(
         # Let deliberate 4xx responses through instead of wrapping them in a 500.
         raise
     except Exception as e:
-        db.rollback()
-        logger.exception("Experiment start failed (%s)", type(e).__name__)
-        raise HTTPException(
-            status_code=500, detail=failure_detail("Could not start the experiment")
+        raise unexpected_failure(
+            e,
+            "Experiment start",
+            "Could not start the experiment",
+            db=db,
+            logger=logger,
         )
 
 
@@ -1187,10 +1186,12 @@ async def pause_experiment(
         # Let deliberate 4xx responses through instead of wrapping them in a 500.
         raise
     except Exception as e:
-        db.rollback()
-        logger.exception("Experiment pause failed (%s)", type(e).__name__)
-        raise HTTPException(
-            status_code=500, detail=failure_detail("Could not pause the experiment")
+        raise unexpected_failure(
+            e,
+            "Experiment pause",
+            "Could not pause the experiment",
+            db=db,
+            logger=logger,
         )
 
 
@@ -1286,11 +1287,12 @@ async def update_experiment_schedule(
         # Let deliberate 4xx responses through instead of wrapping them in a 500.
         raise
     except Exception as e:
-        db.rollback()
-        logger.exception("Experiment schedule update failed (%s)", type(e).__name__)
-        raise HTTPException(
-            status_code=500,
-            detail=failure_detail("Could not update the experiment's schedule"),
+        raise unexpected_failure(
+            e,
+            "Experiment schedule update",
+            "Could not update the experiment's schedule",
+            db=db,
+            logger=logger,
         )
 
 
@@ -1362,10 +1364,12 @@ async def complete_experiment(
         # Let deliberate 4xx responses through instead of wrapping them in a 500.
         raise
     except Exception as e:
-        db.rollback()
-        logger.exception("Experiment complete failed (%s)", type(e).__name__)
-        raise HTTPException(
-            status_code=500, detail=failure_detail("Could not complete the experiment")
+        raise unexpected_failure(
+            e,
+            "Experiment complete",
+            "Could not complete the experiment",
+            db=db,
+            logger=logger,
         )
 
 
@@ -1489,10 +1493,12 @@ async def archive_experiment(
         # Let deliberate 4xx responses through instead of wrapping them in a 500.
         raise
     except Exception as e:
-        db.rollback()
-        logger.exception("Experiment archive failed (%s)", type(e).__name__)
-        raise HTTPException(
-            status_code=500, detail=failure_detail("Could not archive the experiment")
+        raise unexpected_failure(
+            e,
+            "Experiment archive",
+            "Could not archive the experiment",
+            db=db,
+            logger=logger,
         )
 
 
@@ -1568,10 +1574,12 @@ async def clone_experiment(
         # Let deliberate 4xx responses through instead of wrapping them in a 500.
         raise
     except Exception as e:
-        db.rollback()
-        logger.exception("Experiment clone failed (%s)", type(e).__name__)
-        raise HTTPException(
-            status_code=500, detail=failure_detail("Could not clone the experiment")
+        raise unexpected_failure(
+            e,
+            "Experiment clone",
+            "Could not clone the experiment",
+            db=db,
+            logger=logger,
         )
 
 
@@ -1657,10 +1665,12 @@ async def get_daily_experiment_results(
         # Let deliberate 4xx responses through instead of wrapping them in a 500.
         raise
     except Exception as e:
-        db.rollback()
-        logger.exception("Experiment daily results failed (%s)", type(e).__name__)
-        raise HTTPException(
-            status_code=500, detail=failure_detail("Could not load the daily results")
+        raise unexpected_failure(
+            e,
+            "Experiment daily results",
+            "Could not load the daily results",
+            db=db,
+            logger=logger,
         )
 
 
@@ -1752,11 +1762,12 @@ async def get_segmented_experiment_results(
         # Let deliberate 4xx responses through instead of wrapping them in a 500.
         raise
     except Exception as e:
-        db.rollback()
-        logger.exception("Experiment segmented results failed (%s)", type(e).__name__)
-        raise HTTPException(
-            status_code=500,
-            detail=failure_detail("Could not load the segmented results"),
+        raise unexpected_failure(
+            e,
+            "Experiment segmented results",
+            "Could not load the segmented results",
+            db=db,
+            logger=logger,
         )
 
 
@@ -1820,11 +1831,12 @@ async def update_experiment_metadata(
         # Let deliberate 4xx responses through instead of wrapping them in a 500.
         raise
     except Exception as e:
-        db.rollback()
-        logger.exception("Experiment metadata update failed (%s)", type(e).__name__)
-        raise HTTPException(
-            status_code=500,
-            detail=failure_detail("Could not update the experiment's metadata"),
+        raise unexpected_failure(
+            e,
+            "Experiment metadata update",
+            "Could not update the experiment's metadata",
+            db=db,
+            logger=logger,
         )
 
 

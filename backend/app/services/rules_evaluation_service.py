@@ -245,11 +245,12 @@ class RulesEvaluationService:
             self.error_counts["evaluation_error"] += 1
 
             if track_metrics:
+                # The type only: the text can repeat an attribute value.
                 metrics = RuleEvaluationMetrics(
                     rule_id="error",
                     evaluation_time_ms=(time.time() - start_time) * 1000,
                     matched=False,
-                    error=str(e),
+                    error=f"Evaluation failed ({type(e).__name__})",
                 )
 
         return matched_rule, metrics
@@ -296,9 +297,10 @@ class RulesEvaluationService:
             return AttributeValidationResult(is_valid=True)
 
         except Exception as e:
+            # The type only: the text can repeat an attribute value.
             return AttributeValidationResult(
                 is_valid=False,
-                error_message=f"Validation error: {e!s}",
+                error_message=f"Validation error ({type(e).__name__})",
             )
 
     def _validate_attribute_value(
@@ -386,9 +388,12 @@ class RulesEvaluationService:
             return AttributeValidationResult(is_valid=True)
 
         except Exception as e:
+            # The type only: the text can repeat the attribute's value.
             return AttributeValidationResult(
                 is_valid=False,
-                error_message=f"Validation error for attribute '{attr_name}': {e!s}",
+                error_message=(
+                    f"Validation error for attribute '{attr_name}' ({type(e).__name__})"
+                ),
             )
 
     def _evaluate_targeting_rules_enhanced(
@@ -833,7 +838,7 @@ class RulesEvaluationService:
 
             return EvaluationResult(
                 matched=False,
-                error=str(e),
+                error=f"Evaluation failed ({type(e).__name__})",
                 evaluation_time_ms=(time.time() - start_time) * 1000,
             )
 

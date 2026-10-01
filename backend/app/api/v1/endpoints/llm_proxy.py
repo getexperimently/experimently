@@ -5,12 +5,14 @@ Routes completion requests, collects evaluation scores, returns analytics,
 and runs LLM-as-judge scoring.
 """
 
+import logging
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from backend.app.api import deps
+from backend.app.core.logger import unexpected_failure
 from backend.app.core.permissions import Action, ResourceType, check_permission
 from backend.app.models.llm_experiment import LLMEvaluation, LLMExperimentStatus
 from backend.app.models.user import User
@@ -24,9 +26,10 @@ from backend.app.schemas.llm_experiments import (
 )
 from backend.app.services.llm_analytics_service import LLMEvaluationAnalyticsService
 from backend.app.services.llm_experiment_service import LLMExperimentService
-from backend.app.services.llm_proxy_service import LLMProxyService
+from backend.app.services.llm_proxy_service import GeminiError, LLMProxyService
 
 router = APIRouter(tags=["LLM Proxy"])
+logger = logging.getLogger(__name__)
 _experiment_service = LLMExperimentService()
 _proxy_service = LLMProxyService()
 _analytics_service = LLMEvaluationAnalyticsService()
@@ -100,10 +103,21 @@ async def llm_complete(
         )
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
-    except Exception as exc:
+    except GeminiError as exc:
+        # The Gemini client's own sentences (HTTP status, finish reason, a
+        # missing key): written by llm_proxy_service, kept for the caller.
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail=f"LLM provider error: {exc}",
+        )
+    except Exception as exc:
+        raise unexpected_failure(
+            exc,
+            "LLM completion",
+            "The LLM provider could not complete the request",
+            db=db,
+            logger=logger,
+            status_code=status.HTTP_502_BAD_GATEWAY,
         )
 
     # Load the variant for the response

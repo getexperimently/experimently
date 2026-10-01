@@ -229,11 +229,40 @@ class TestReadiness:
         assert body["checks"]["modules"] == {"status": "unhealthy"}
         assert "boom in modules" not in resp_text(body)
 
-    def test_error_text_never_contains_password(self):
-        err = health._safe_error(
-            RuntimeError('FATAL: password authentication failed for user "x"')
+    @pytest.mark.regression
+    def test_a_failed_check_reports_the_type_not_the_text(self, caplog):
+        """Outside production the readiness body shows each check's error:
+        the type only. The text (host, port, user) goes to the log."""
+
+        class OperationalError(Exception):
+            pass
+
+        exc = OperationalError(
+            'connection to server at "db.example" (10.0.0.5), port 5432 '
+            'failed: FATAL: password authentication failed for user "app"'
         )
-        assert "password" not in err.lower()
+        result = health._check_failed("database", exc)
+        assert result == {"status": "unhealthy", "error": "OperationalError"}
+        assert "10.0.0.5" in caplog.text  # the full error is in the log
+
+    def test_the_database_check_reports_only_the_type(
+        self, client, monkeypatch, fake_settings
+    ):
+        import backend.app.db.session as session_module
+
+        class OperationalError(Exception):
+            pass
+
+        def broken_session():
+            raise OperationalError('could not connect to "db.example" port 5432')
+
+        monkeypatch.setattr(session_module, "SessionLocal", broken_session)
+        body = client.get("/health/ready").json()
+        assert body["checks"]["database"] == {
+            "status": "unhealthy",
+            "error": "OperationalError",
+        }
+        assert "db.example" not in resp_text(body)
 
 
 # ---------------------------------------------------------------------------

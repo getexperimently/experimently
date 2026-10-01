@@ -82,6 +82,42 @@ def failure_detail(sentence: str) -> str:
     return f"{sentence} (request ID: {request_id})."
 
 
+def unexpected_failure(
+    exc: BaseException,
+    operation: str,
+    sentence: str,
+    *,
+    db: Any = None,
+    logger: Any = None,
+    status_code: int = 500,
+) -> Any:
+    """The ``HTTPException`` for a failure nobody planned for.
+
+    ``raise unexpected_failure(e, "Flag toggle", "Could not toggle the
+    feature flag", db=db, logger=logger)`` inside an ``except`` block:
+
+    * rolls ``db`` back when one is given (a failed rollback is logged, not
+      raised, so it cannot replace the original error);
+    * logs ``"<operation> failed (<exception type>)"`` at ERROR with the full
+      traceback, under this request's ID;
+    * returns an ``HTTPException`` with ``status_code`` whose ``detail`` is
+      :func:`failure_detail` of ``sentence`` -- never the error's own text.
+    """
+    # Imported here so this module stays importable without FastAPI.
+    from fastapi import HTTPException
+
+    log = logger if logger is not None else logging.getLogger(__name__)
+    if db is not None:
+        try:
+            db.rollback()
+        except Exception:
+            log.warning("Rollback after a failed %s also failed", operation)
+    # What logger.exception() logs, from outside the except block: ERROR,
+    # with the traceback.
+    log.error("%s failed (%s)", operation, type(exc).__name__, exc_info=exc)
+    return HTTPException(status_code=status_code, detail=failure_detail(sentence))
+
+
 # ---------------------------------------------------------------------------
 # structlog context-variable processor
 # ---------------------------------------------------------------------------

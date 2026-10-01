@@ -68,9 +68,11 @@ def create_role(
     try:
         role = RBACService.create_custom_role(db, data, current_user.id)
         db.commit()
-        return _role_to_response(role, db)
     except ValueError as e:
+        # The service's own sentence ("Role '<name>' already exists").
         raise HTTPException(status_code=409, detail=str(e))
+    # Built outside the try: a response that fails to build is not a 409.
+    return _role_to_response(role, db)
 
 
 @router.get("/roles/{role_name}", response_model=CustomRoleResponse)
@@ -98,11 +100,13 @@ def update_role(
     try:
         role = RBACService.update_custom_role(db, role_name, data)
         db.commit()
-        return _role_to_response(role, db)
     except ValueError as e:
+        # The service's own sentences ("not found", "Cannot modify system roles").
         error_str = str(e)
         status_code = 404 if "not found" in error_str else 400
         raise HTTPException(status_code=status_code, detail=error_str)
+    # Built outside the try: a response that fails to build is not a 4xx.
+    return _role_to_response(role, db)
 
 
 @router.delete("/roles/{role_name}", status_code=204)

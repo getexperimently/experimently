@@ -91,9 +91,10 @@ _SECRET_ASSIGNMENT = re.compile(
 def _scrub(text: str) -> str:
     """One line of *text*, at most 200 characters, carrying no credential.
 
-    Every string a check puts in a response body goes through this: the
-    readiness probe is unauthenticated, and outside production it reports the
-    checks' own error text.  Exceptions from this layer are rich in
+    The modules check's failure string goes through this before it reaches a
+    response body: the readiness probe is unauthenticated, and outside
+    production it reports that string.  (The other checks report only an
+    error's type -- ``_check_failed``.)  Exceptions from this layer are rich in
     credentials -- psycopg2 quotes the whole DSN, botocore the ARN, authlib
     the client secret it was given -- and none of that is diagnosis.
 
@@ -119,12 +120,17 @@ def _scrub(text: str) -> str:
     return first
 
 
-def _safe_error(exc: BaseException) -> str:
-    """First line of the error without credentials (never echo a password)."""
-    text = str(exc).splitlines()[0] if str(exc) else exc.__class__.__name__
-    if "password" in text.lower():
-        return f"{exc.__class__.__name__}: authentication failed"
-    return _scrub(text)
+def _check_failed(check: str, exc: BaseException) -> Dict[str, Any]:
+    """The result of a check that raised: the error's type, never its text.
+
+    The text of a database, Redis or OS error names hosts, ports, users and
+    paths, and the readiness probe is unauthenticated, so the response
+    carries only the type; the full error goes to the server log.
+    """
+    logger.warning(
+        "Readiness check %s failed (%s)", check, type(exc).__name__, exc_info=exc
+    )
+    return {"status": "unhealthy", "error": type(exc).__name__}
 
 
 # Environment and feature switches come from ``settings`` only: pydantic-
@@ -181,7 +187,7 @@ def check_database() -> Dict[str, Any]:
             "latency_ms": round((time.perf_counter() - t0) * 1000, 2),
         }
     except Exception as exc:
-        return {"status": "unhealthy", "error": _safe_error(exc)}
+        return _check_failed("database", exc)
 
 
 def check_redis() -> Dict[str, Any]:
@@ -203,7 +209,7 @@ def check_redis() -> Dict[str, Any]:
             "latency_ms": round((time.perf_counter() - t0) * 1000, 2),
         }
     except Exception as exc:
-        return {"status": "unhealthy", "error": _safe_error(exc)}
+        return _check_failed("redis", exc)
 
 
 def check_modules() -> Dict[str, Any]:
@@ -251,7 +257,7 @@ def check_disk(path: str = "/") -> Dict[str, Any]:
         free_gb = round(usage.free / (1024**3), 2)
         return {"status": "healthy" if free_gb > 1.0 else "low", "free_gb": free_gb}
     except Exception as exc:
-        return {"status": "unhealthy", "error": _safe_error(exc)}
+        return _check_failed("disk", exc)
 
 
 # ---------------------------------------------------------------------------

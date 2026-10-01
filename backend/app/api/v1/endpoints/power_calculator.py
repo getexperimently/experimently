@@ -14,6 +14,7 @@ from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Query, status
 
+from backend.app.core.logger import unexpected_failure
 from backend.app.schemas.power_calculator import (
     MDERequest,
     MDEResponse,
@@ -269,10 +270,11 @@ async def get_planning_advice(body: PlanRequest) -> PlanResponse:
             business_context=body.business_context,
         )
     except Exception as exc:
-        logger.error("Failed to generate planning advice: %s", exc)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to generate planning advice: {exc}",
+        raise unexpected_failure(
+            exc,
+            "Planning advice",
+            "Could not generate the planning advice",
+            logger=logger,
         ) from exc
 
     return PlanResponse(

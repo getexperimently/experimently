@@ -6,6 +6,7 @@ enabling administrators and authorized users to view the complete
 audit trail of all system actions.
 """
 
+import logging
 from datetime import datetime
 from typing import Optional
 from uuid import UUID
@@ -18,9 +19,11 @@ from fastapi import (
     Query,
     status,
 )
+from pydantic import ValidationError
 from sqlalchemy.orm import Session
 
 from backend.app.api import deps
+from backend.app.core.logger import unexpected_failure
 from backend.app.core.permissions import can_read_all_audit_logs
 from backend.app.models.audit_log import ActionType, EntityType
 from backend.app.models.user import User
@@ -30,6 +33,10 @@ from backend.app.schemas.audit_log import (
     AuditStatsResponse,
 )
 from backend.app.services.audit_service import AuditService
+
+logger = logging.getLogger(__name__)
+
+AUDIT_LIST_FAILED = "Failed to retrieve audit logs"
 
 # Create router with tag for documentation grouping
 router = APIRouter(
@@ -180,15 +187,21 @@ async def list_audit_logs(
             total_pages=total_pages,
         )
 
+    except ValidationError as e:
+        # A row that does not fit the response model is not the caller's
+        # mistake, and pydantic's text repeats the row: answer as below.
+        raise unexpected_failure(
+            e, "Audit log list", AUDIT_LIST_FAILED, db=db, logger=logger
+        )
     except ValueError as e:
+        # The service's own page/limit refusals.
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(e),
         )
-    except Exception:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to retrieve audit logs",
+    except Exception as e:
+        raise unexpected_failure(
+            e, "Audit log list", AUDIT_LIST_FAILED, db=db, logger=logger
         )
 
 

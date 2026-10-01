@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
 from backend.app.api import deps
+from backend.app.core.logger import unexpected_failure
 from backend.app.models.feature_flag import FeatureFlag
 from backend.app.models.user import User
 from backend.app.schemas.feature_flag import (
@@ -38,9 +39,12 @@ def create_feature_flag(
     try:
         return flag_service.create_feature_flag(flag_in, current_user.id)
     except Exception as e:
-        raise HTTPException(
+        raise unexpected_failure(
+            e,
+            "Feature flag create",
+            "Could not create the feature flag",
+            db=db,
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(e),
         )
 
 
