@@ -75,6 +75,9 @@ marked `x-stability: beta` (the CUPED, interaction-pair and novelty routes, issu
 and #219), because fixing the numbers will change its response;
 `/interactions/scan` stays stable, and its items keep their shape with the
 not-computed sub-results `null`.
+`POST /api/v1/results/{id}/post-stratification` is beta as well (#443): it
+answers 501 until it computes its estimate from an experiment's own
+assignments and events, rather than report numbers that do not.
 
 ## Changing a stable route
 
