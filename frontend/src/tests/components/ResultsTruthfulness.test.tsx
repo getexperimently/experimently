@@ -11,7 +11,8 @@
  *  - a revenue/count/duration metric that the engine still analyses as a
  *    conversion (statistical_test_used = fisher_exact) is labelled as a share
  *    of users, never in currency or "per user";
- *  - the Live tab says which test it runs.
+ *  - the Live tab says which test it runs;
+ *  - sortable headers are keyboard-operable buttons.
  */
 import React from 'react';
 import { render, screen, waitFor, within } from '@testing-library/react';
@@ -432,6 +433,28 @@ describe('the Live tab says what it computes', () => {
     render(<LiveResultsPanel experimentId="exp-1" />);
     expect(screen.queryByText(/^significant$/i)).not.toBeInTheDocument();
     expect(within(screen.getByTestId('variant-row-b')).getByText(/p < 0\.05 \(unadjusted\)/)).toBeInTheDocument();
+  });
+});
+
+describe('sortable headers', () => {
+  it('sorts from the keyboard through a button inside the header', async () => {
+    const user = userEvent.setup();
+    render(
+      <MetricComparisonTable
+        metrics={[conversionMetric({}), revenueMetric]}
+        confidenceLevel={0.95}
+      />
+    );
+    const header = screen.getByRole('columnheader', { name: /variant/i });
+    const button = within(header).getByRole('button', { name: /variant/i });
+    expect(header).toHaveAttribute('aria-sort', 'none');
+
+    button.focus();
+    expect(button).toHaveFocus();
+    await user.keyboard('{Enter}');
+    expect(header).toHaveAttribute('aria-sort', 'ascending');
+    await user.keyboard(' ');
+    expect(header).toHaveAttribute('aria-sort', 'descending');
   });
 });
 

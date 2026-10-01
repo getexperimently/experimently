@@ -179,15 +179,18 @@ export function MetricComparisonTable({
             {COLUMNS.map(([key, label]) => (
               <th
                 key={key}
-                onClick={() => handleSort(key)}
                 scope="col"
-                className="px-4 py-3 text-left font-medium text-slate-600 cursor-pointer hover:bg-slate-100 select-none"
+                className="px-4 py-3 text-left font-medium text-slate-600"
                 aria-sort={ariaSort(key)}
               >
-                <span className="inline-flex items-center gap-1">
+                <button
+                  type="button"
+                  onClick={() => handleSort(key)}
+                  className="inline-flex items-center gap-1 rounded hover:text-slate-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+                >
                   {label}
                   <span aria-hidden="true">{sortIcon(key)}</span>
-                </span>
+                </button>
               </th>
             ))}
             <th scope="col" className="px-4 py-3 text-left font-medium text-slate-600">
