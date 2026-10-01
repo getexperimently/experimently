@@ -146,7 +146,11 @@ class TestSplitUrlRefusedWithoutRouting:
 
     def _create_kwargs(self, experiment_type):
         return {
-            "experiment_in": SimpleNamespace(experiment_type=experiment_type),
+            # `status` as ExperimentCreate defaults it: the route refuses any
+            # other value before it looks at the experiment type (#542).
+            "experiment_in": SimpleNamespace(
+                experiment_type=experiment_type, status="draft"
+            ),
             "db": MagicMock(),
             "current_user": _user(),
             "cache_control": {},
