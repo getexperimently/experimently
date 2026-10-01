@@ -1,0 +1,191 @@
+/**
+ * Reading an experiment's stored `targeting_rules` on its page.
+ *
+ * The rule builder reads and writes one shape, the dashboard's
+ * `{logical_operator, groups: [{logical_operator, conditions: [{attribute,
+ * operator, value}]}]}`, and `jsonToRules` drops anything else. So a stored
+ * value is offered for editing only when the builder can show it exactly as
+ * stored and save it back without losing anything; any other value is shown
+ * as JSON, and the only change offered is to replace it.
+ */
+import { ApiError } from '@/services/api';
+import { describeTargetingIssue } from '@/components/experiments/new/createErrors';
+import { OPERATOR_LABELS, OperatorType, TargetingRules } from '@/types/targeting';
+import { getOperatorsForAttribute, rulesToJson } from '@/utils/targeting';
+
+type Stored = Record<string, unknown> | null | undefined;
+
+const TOP_KEYS = new Set(['logical_operator', 'groups']);
+const GROUP_KEYS = new Set(['id', 'logical_operator', 'conditions']);
+const CONDITION_KEYS = new Set(['id', 'attribute', 'operator', 'value']);
+const BUILDER_LOGICAL_OPERATORS = new Set(['AND', 'OR']);
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function keysWithin(obj: Record<string, unknown>, allowed: Set<string>): boolean {
+  return Object.keys(obj).every((key) => allowed.has(key));
+}
+
+/** A logical operator the builder's AND/OR toggle can show: absent, AND or OR. */
+function builderLogicalOperator(value: unknown): boolean {
+  return value === undefined || (typeof value === 'string' && BUILDER_LOGICAL_OPERATORS.has(value));
+}
+
+/** The operators that take no value; the builder hides the value input and stores null. */
+const NO_VALUE_OPERATORS = new Set(['is_null', 'is_not_null']);
+
+/**
+ * A value the builder keeps exactly as stored, for this operator.
+ *
+ * `is_null` / `is_not_null`: only null (the builder stores null for them and
+ * `targetingPayload` sends null back). Any other operator: a string, number,
+ * boolean or list of strings, never null, because `jsonToRules` turns null
+ * into "" and the engine does not treat the two alike (`equals` with a
+ * missing attribute matches null and not ""; `contains` and the other text
+ * operators never match null and match everything with "").
+ */
+function builderValue(operator: string, value: unknown): boolean {
+  if (NO_VALUE_OPERATORS.has(operator)) return value === null;
+  if (['string', 'number', 'boolean'].includes(typeof value)) return true;
+  return Array.isArray(value) && value.every((item) => typeof item === 'string');
+}
+
+/**
+ * True for the values that mean "no rules, everyone is eligible": `null`,
+ * `{}`, and a dashboard value whose `groups` is empty (`{"groups": []}`, with
+ * or without a top-level `logical_operator`).
+ */
+export function isNoRules(value: Stored): boolean {
+  if (value === null || value === undefined) return true;
+  if (!isPlainObject(value)) return false;
+  const keys = Object.keys(value);
+  if (keys.length === 0) return true;
+  return (
+    keysWithin(value, TOP_KEYS) &&
+    Array.isArray(value.groups) &&
+    value.groups.length === 0 &&
+    builderLogicalOperator(value.logical_operator)
+  );
+}
+
+/**
+ * Whether the rule builder can edit `value` without changing what it means.
+ *
+ * Editable: "no rules" (see `isNoRules`), or a dashboard value whose top-level
+ * keys are within {logical_operator, groups}, group keys within {id,
+ * logical_operator, conditions} and condition keys within {id, attribute,
+ * operator, value}; where every logical operator is AND or OR (the builder
+ * has no NOT), every operator is one the builder offers for that attribute,
+ * and every value is one it keeps exactly (see `builderValue`).
+ *
+ * Not editable, among others: a top-level `rollout_percentage` or `id` (the
+ * API accepts them, `jsonToRules` drops them), the native `{"rules": [...]}`
+ * shape, and a flat `{"country": ["US"]}`.
+ */
+export function isEditableTargeting(value: Stored): boolean {
+  if (isNoRules(value)) return true;
+  if (!isPlainObject(value) || !keysWithin(value, TOP_KEYS)) return false;
+  if (!builderLogicalOperator(value.logical_operator) || !Array.isArray(value.groups)) return false;
+  return value.groups.every((group) => {
+    if (!isPlainObject(group) || !keysWithin(group, GROUP_KEYS)) return false;
+    if (!builderLogicalOperator(group.logical_operator) || !Array.isArray(group.conditions)) return false;
+    if (group.conditions.length === 0) return false;
+    return group.conditions.every((condition) => {
+      if (!isPlainObject(condition) || !keysWithin(condition, CONDITION_KEYS)) return false;
+      const { attribute, operator, value: conditionValue } = condition;
+      if (typeof attribute !== 'string' || typeof operator !== 'string') return false;
+      if (!getOperatorsForAttribute(attribute).includes(operator as OperatorType)) return false;
+      return builderValue(operator, conditionValue);
+    });
+  });
+}
+
+/** One condition in words: `country is one of US, CA`. */
+export function describeCondition(condition: Record<string, unknown>): string {
+  const attribute = String(condition.attribute ?? '');
+  const operator = String(condition.operator ?? '');
+  const label = OPERATOR_LABELS[operator as OperatorType] ?? operator;
+  if (operator === 'is_null' || operator === 'is_not_null') return `${attribute} ${label}`;
+  const value = condition.value;
+  const shown = Array.isArray(value) ? value.join(', ') : String(value ?? '');
+  return `${attribute} ${label} ${shown}`;
+}
+
+/** "all" for AND (or absent), "any" for OR: how a list of things combines, in words. */
+export function combineWord(logicalOperator: unknown): 'all' | 'any' {
+  return logicalOperator === 'OR' ? 'any' : 'all';
+}
+
+/**
+ * What the page sends as `targeting_rules` for the builder's rules: the
+ * dashboard shape without the builder's ids, or `{}` when there are no
+ * groups (no rules, everyone is eligible).
+ *
+ * `is_null` / `is_not_null` conditions are sent with `value: null`, as stored:
+ * `jsonToRules` reads null as "" for the text input, and this puts it back.
+ * So opening and saving untouched rules sends what was stored, apart from two
+ * normalisations the API reads identically: the builder's group and condition
+ * ids are dropped (nothing below the top level reads an id), and an absent
+ * logical operator is written as AND (the API's default).
+ */
+export function targetingPayload(rules: TargetingRules): Record<string, unknown> {
+  if (rules.groups.length === 0) return {};
+  const json = rulesToJson(rules);
+  return {
+    ...json,
+    groups: json.groups.map((group) => ({
+      ...group,
+      conditions: group.conditions.map((condition) =>
+        NO_VALUE_OPERATORS.has(condition.operator) ? { ...condition, value: null } : condition,
+      ),
+    })),
+  };
+}
+
+/** What a failed save shows: a heading, and one line per targeting problem when the API named them. */
+export interface TargetingSaveError {
+  message: string;
+  problems?: string[];
+}
+
+/** Heading for problems found before the save was sent. */
+export const TARGETING_SAVE_INCOMPLETE = 'Finish or remove these conditions before saving:';
+
+/** Heading for rules the API refused (422 on `targeting_rules`). */
+export const TARGETING_SAVE_REFUSED = 'The rules were not accepted:';
+
+function targetingProblems(detail: unknown): string[] {
+  if (!Array.isArray(detail)) return [];
+  return detail
+    .filter((item) => {
+      const loc = isPlainObject(item) ? item.loc : undefined;
+      return Array.isArray(loc) && loc[loc.length - 1] === 'targeting_rules';
+    })
+    .map((item) => {
+      const msg = (item as { msg?: unknown }).msg;
+      return describeTargetingIssue(typeof msg === 'string' ? msg : 'not valid');
+    });
+}
+
+/**
+ * The error a failed targeting save shows.
+ *
+ * - 422 naming `targeting_rules`: each problem in the builder's words
+ *   ("Group 1, Condition 2: unknown operator").
+ * - 403 and 409: the API's own reason. A refusal for the experiment's state
+ *   names the state, one for the role names the role, so the page does not
+ *   guess which it was.
+ * - anything else: the message the API client built.
+ *
+ * Deliberately separate from `describeCreateError`, whose 403 and 409 copy is
+ * about creating an experiment (the role to create, a key already taken).
+ */
+export function describeTargetingSaveError(err: unknown): TargetingSaveError {
+  if (err instanceof ApiError && err.status === 422) {
+    const problems = targetingProblems(err.detail);
+    if (problems.length > 0) return { message: TARGETING_SAVE_REFUSED, problems };
+  }
+  return { message: err instanceof Error && err.message ? err.message : 'Could not save the rules.' };
+}

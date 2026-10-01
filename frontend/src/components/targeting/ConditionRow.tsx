@@ -12,12 +12,23 @@ interface ConditionRowProps {
   onChange: (updated: TargetingCondition) => void;
   onRemove: () => void;
   readOnly?: boolean;
+  /**
+   * Where this condition is, for the accessible names of its controls
+   * ("Group 1, condition 2 attribute"). Labels only; it changes no behaviour.
+   */
+  label?: string;
 }
 
 const NO_VALUE_OPERATORS: OperatorType[] = ['is_null', 'is_not_null'];
 const MULTI_VALUE_OPERATORS: OperatorType[] = ['in', 'not_in'];
 
-export function ConditionRow({ condition, onChange, onRemove, readOnly = false }: ConditionRowProps) {
+export function ConditionRow({
+  condition,
+  onChange,
+  onRemove,
+  readOnly = false,
+  label = 'Condition',
+}: ConditionRowProps) {
   const availableOperators = getOperatorsForAttribute(condition.attribute);
   const showValueInput = !NO_VALUE_OPERATORS.includes(condition.operator);
   const isMultiValue = MULTI_VALUE_OPERATORS.includes(condition.operator);
@@ -52,6 +63,7 @@ export function ConditionRow({ condition, onChange, onRemove, readOnly = false }
       {/* Attribute input with datalist */}
       <input
         data-testid="condition-attribute"
+        aria-label={`${label} attribute`}
         type="text"
         list={datalistId}
         value={condition.attribute}
@@ -71,6 +83,7 @@ export function ConditionRow({ condition, onChange, onRemove, readOnly = false }
       {/* Operator dropdown */}
       <select
         data-testid="condition-operator"
+        aria-label={`${label} operator`}
         value={condition.operator}
         onChange={handleOperatorChange}
         disabled={readOnly}
@@ -87,6 +100,7 @@ export function ConditionRow({ condition, onChange, onRemove, readOnly = false }
       {showValueInput && (
         <input
           data-testid="condition-value"
+          aria-label={`${label} value`}
           type="text"
           value={condition.value === null || condition.value === undefined ? '' : String(condition.value)}
           onChange={handleValueChange}

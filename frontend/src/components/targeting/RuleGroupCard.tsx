@@ -50,15 +50,20 @@ export function RuleGroupCard({
         </span>
         <div className="flex items-center gap-2">
           {/* AND/OR toggle */}
-          <div className="flex rounded overflow-hidden border border-blue-300">
+          <div
+            role="group"
+            aria-label={`How the conditions in group ${groupIndex + 1} combine`}
+            className="flex rounded overflow-hidden border border-blue-300"
+          >
             <button
               data-testid="group-logical-and"
               type="button"
+              aria-pressed={group.logical_operator === 'AND'}
               disabled={readOnly}
               onClick={() => handleLogicalOperatorChange('AND')}
               className={`px-2 py-0.5 text-xs font-medium transition-colors disabled:opacity-50 ${
                 group.logical_operator === 'AND'
-                  ? 'bg-blue-600 text-white'
+                  ? 'bg-blue-600 text-white underline'
                   : 'bg-white text-blue-600 hover:bg-blue-50'
               }`}
             >
@@ -67,11 +72,12 @@ export function RuleGroupCard({
             <button
               data-testid="group-logical-or"
               type="button"
+              aria-pressed={group.logical_operator === 'OR'}
               disabled={readOnly}
               onClick={() => handleLogicalOperatorChange('OR')}
               className={`px-2 py-0.5 text-xs font-medium transition-colors disabled:opacity-50 ${
                 group.logical_operator === 'OR'
-                  ? 'bg-blue-600 text-white'
+                  ? 'bg-blue-600 text-white underline'
                   : 'bg-white text-blue-600 hover:bg-blue-50'
               }`}
             >
@@ -109,6 +115,7 @@ export function RuleGroupCard({
               onChange={(updated) => handleConditionChange(index, updated)}
               onRemove={() => handleRemoveCondition(index)}
               readOnly={readOnly}
+              label={`Group ${groupIndex + 1}, condition ${index + 1}`}
             />
           </div>
         ))}

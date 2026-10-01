@@ -49,15 +49,20 @@ export function TargetingRuleBuilder({
 
         {/* Top-level AND/OR toggle */}
         {rules.groups.length > 0 && (
-          <div className="flex rounded overflow-hidden border border-slate-300">
+          <div
+            role="group"
+            aria-label="How the groups combine"
+            className="flex rounded overflow-hidden border border-slate-300"
+          >
             <button
               data-testid="root-logical-and"
               type="button"
+              aria-pressed={rules.logical_operator === 'AND'}
               disabled={readOnly}
               onClick={() => handleRootLogicalOperatorChange('AND')}
               className={`px-3 py-1 text-xs font-medium transition-colors disabled:opacity-50 ${
                 rules.logical_operator === 'AND'
-                  ? 'bg-slate-700 text-white'
+                  ? 'bg-slate-700 text-white underline'
                   : 'bg-white text-slate-600 hover:bg-slate-50'
               }`}
             >
@@ -66,11 +71,12 @@ export function TargetingRuleBuilder({
             <button
               data-testid="root-logical-or"
               type="button"
+              aria-pressed={rules.logical_operator === 'OR'}
               disabled={readOnly}
               onClick={() => handleRootLogicalOperatorChange('OR')}
               className={`px-3 py-1 text-xs font-medium transition-colors disabled:opacity-50 ${
                 rules.logical_operator === 'OR'
-                  ? 'bg-slate-700 text-white'
+                  ? 'bg-slate-700 text-white underline'
                   : 'bg-white text-slate-600 hover:bg-slate-50'
               }`}
             >
