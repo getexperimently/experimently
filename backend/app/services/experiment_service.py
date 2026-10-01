@@ -9,6 +9,11 @@ from pydantic import BaseModel
 from sqlalchemy import func, or_
 from sqlalchemy.orm import Session, joinedload
 
+from backend.app.core.targeting_adapter import (
+    _is_dashboard_rules_shape,
+    buckets_on_rule_id,
+    stored_rule_id,
+)
 from backend.app.models.experiment import (
     Experiment,
     ExperimentStatus,
@@ -219,6 +224,78 @@ def _normalise_analysis_configs(
     if enabled and not config:
         data["bayesian_config"] = BayesianConfig().model_dump(mode="json")
     return data
+
+
+# --- each experiment's partial rollout buckets on its own id (#533) ------------
+#
+# The rules engine admits a user to a rule with a partial ``rollout_percentage``
+# when ``md5("<user_id>:<rule id>") % 100`` is below it. A dashboard-shaped
+# rule with no top-level ``id`` gets the shared id ``"dashboard"``, so every
+# such experiment admitted the same users. An experiment's rule is therefore
+# given the experiment's own id when that id starts to decide who is admitted:
+#
+# * on DRAFT -> ACTIVE (``start_experiment`` and the scheduler; never on a
+#   resume from PAUSED, so an experiment already running keeps the users it
+#   admits on ``"dashboard"``);
+# * on a PAUSED edit that turns a rule admitting everyone it matches into one
+#   admitting part of them (people already assigned keep their variant: an
+#   existing assignment is returned before targeting is evaluated);
+# * and a later ``PUT`` whose rule carries no id keeps the stored one.
+#
+# Only stored dashboard rules are changed; flags never bucket on a rule id.
+
+
+def stamp_rollout_rule_id(
+    experiment: Experiment, previous_status: Optional[ExperimentStatus]
+) -> bool:
+    """Give a starting experiment's partial-rollout rule the experiment's id.
+
+    Called on every write of ``ExperimentStatus.ACTIVE``, with the status the
+    experiment had before it. Changes ``targeting_rules`` only when the
+    experiment is leaving DRAFT and its stored dashboard rule admits part of
+    the users it matches (:func:`buckets_on_rule_id`) with no id of its own.
+
+    Returns:
+        Whether ``targeting_rules`` was changed. The caller commits.
+    """
+    if previous_status != ExperimentStatus.DRAFT:
+        return False
+    rules = experiment.targeting_rules
+    if not buckets_on_rule_id(rules) or stored_rule_id(rules) is not None:
+        return False
+    # A new dict, so the JSONB column is seen as changed.
+    experiment.targeting_rules = {**rules, "id": str(experiment.id)}
+    return True
+
+
+def rules_with_rule_id(experiment: Experiment, new_rules: Any) -> Any:
+    """The ``targeting_rules`` an update stores, given the ones it sent.
+
+    A dashboard rule sent without an ``id`` keeps the stored rule's id, so
+    saving the rules again never changes which users a partial rollout
+    admits. With no stored id, a PAUSED experiment whose stored rule admitted
+    everyone it matched, and whose new rule admits only part of them, gets the
+    experiment's id now: it already ran, so this edit is the moment the id
+    starts to decide. Anything else is returned unchanged.
+    """
+    if (
+        not isinstance(new_rules, dict)
+        or not _is_dashboard_rules_shape(new_rules)
+        or not new_rules.get("groups")
+        or stored_rule_id(new_rules) is not None
+    ):
+        return new_rules
+    stored = experiment.targeting_rules
+    inherited = stored_rule_id(stored)
+    if inherited is not None:
+        return {**new_rules, "id": inherited}
+    if (
+        experiment.status == ExperimentStatus.PAUSED
+        and buckets_on_rule_id(new_rules)
+        and not buckets_on_rule_id(stored)
+    ):
+        return {**new_rules, "id": str(experiment.id)}
+    return new_rules
 
 
 class ExperimentService:
@@ -573,6 +650,14 @@ class ExperimentService:
 
         _normalise_analysis_configs(update_data, experiment)
 
+        # A rule sent without an id keeps the one its partial rollout buckets
+        # on (#533). Before any attribute changes: it reads the stored rules
+        # and status.
+        if "targeting_rules" in update_data:
+            update_data["targeting_rules"] = rules_with_rule_id(
+                experiment, update_data["targeting_rules"]
+            )
+
         # Extract nested objects if present
         variants_data = update_data.pop("variants", None)
         metrics_data = update_data.pop("metrics", None)
@@ -645,7 +730,9 @@ class ExperimentService:
         if not self._validate_experiment_for_start(experiment):
             raise ValueError("Experiment does not meet requirements to start")
 
-        # Update status and start date
+        # Update status and start date. Only a first start stamps the rule
+        # id; a resume from PAUSED keeps the users the rule admits (#533).
+        stamp_rollout_rule_id(experiment, experiment.status)
         experiment.status = ExperimentStatus.ACTIVE
         if not experiment.start_date:
             experiment.start_date = datetime.now(timezone.utc).isoformat()

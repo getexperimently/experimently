@@ -884,7 +884,19 @@ conditions, each condition an `attribute`, an `operator` and a `value`.
   `semver_gte`, `semver_lte`, `geo_within_radius`, `time_window`,
   `array_contains` and `array_intersects`.
 - An experiment's rules may carry a top-level `rollout_percentage`, a number
-  from 0 to 100: that share of the users who match is admitted.
+  from 0 to 100: that share of the users who match is admitted. Which users
+  is decided by the rules' top-level `id` (text, at most 100 characters):
+  two rules with the same `id` and percentage admit the same users.
+- When rules with a `rollout_percentage` below 100 and no `id` are stored on
+  an experiment that is started for the first time (from `draft`, by
+  `POST /start` or by its scheduled `start_date`), the experiment's own id is
+  stored as their `id`, so each experiment admits its own share of users.
+  The same happens when such rules are saved on a `paused` experiment whose
+  stored rules admitted everyone they matched. A `PUT` whose rules have no
+  `id` keeps the stored one. An `id` you send is never replaced, and
+  resuming a `paused` experiment changes nothing: an experiment started
+  without an `id` before this behaviour existed keeps admitting the users it
+  admitted then.
 - `null`, `{}` and `{"groups": []}` mean no targeting: every user is eligible.
 
 `POST /api/v1/experiments/` and `PUT /api/v1/experiments/{experiment_id}` answer

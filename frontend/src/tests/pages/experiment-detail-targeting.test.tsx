@@ -51,6 +51,9 @@ const BUILDER_RULES = {
   ],
 };
 
+/** The id the server gives a starting experiment's partial-rollout rule (#533). */
+const STAMPED_ID = '3f6a2c1e-9b8d-4e7f-a5c2-1d0e9f8b7a6c';
+
 /** The documented-once flat shape: shown as JSON, never in the builder. */
 const FLAT_RULES = { country: ['US'] };
 
@@ -134,6 +137,7 @@ describe('which stored values the builder may edit', () => {
     ['{}', {}],
     ['{"groups": []}', { groups: [] }],
     ['a builder value with id keys', BUILDER_RULES],
+    ['a top-level rule id', { ...BUILDER_RULES, id: STAMPED_ID }],
   ])('%s is editable', (_name, value) => {
     expect(isEditableTargeting(value as Record<string, unknown> | null)).toBe(true);
   });
@@ -142,7 +146,9 @@ describe('which stored values the builder may edit', () => {
     ['a flat dict', FLAT_RULES],
     ['the native shape', { rules: [] }],
     ['a top-level rollout_percentage', { ...BUILDER_RULES, rollout_percentage: 50 }],
-    ['a top-level id', { ...BUILDER_RULES, id: 'r-1' }],
+    ['a stamped rule that admits part of the users', { ...BUILDER_RULES, id: STAMPED_ID, rollout_percentage: 50 }],
+    ['an empty top-level id', { ...BUILDER_RULES, id: '' }],
+    ['a top-level id that is not text', { ...BUILDER_RULES, id: 7 }],
     ['a NOT logical operator', { ...BUILDER_RULES, logical_operator: 'NOT' }],
     ['an unknown group key', { groups: [{ ...BUILDER_RULES.groups[0], name: 'x' }] }],
     ['an unknown condition key', { groups: [{ conditions: [{ attribute: 'user.plan', operator: 'equals', value: 'pro', extra: 1 }] }] }],
@@ -196,9 +202,29 @@ describe('an untouched open and save keeps what is stored', () => {
         ],
       },
     ],
+    ['a top-level rule id (#533)', { ...one(cond('user.plan', 'equals', 'pro')), id: STAMPED_ID }],
+    [
+      'a rule id with two groups, OR at the top',
+      {
+        id: 'checkout-half',
+        logical_operator: 'OR',
+        groups: [
+          { logical_operator: 'AND', conditions: [cond('user.plan', 'equals', 'pro')] },
+          { logical_operator: 'OR', conditions: [cond('user.country', 'in', ['US', 'CA'])] },
+        ],
+      },
+    ],
   ])('%s', (_name, stored) => {
     expect(isEditableTargeting(stored)).toBe(true);
-    expect(targetingPayload(jsonToRules(stored))).toEqual(stored);
+    expect(targetingPayload(jsonToRules(stored), stored)).toEqual(stored);
+  });
+
+  it('the rule id is sent back unchanged after an edit, and not when every group is removed', () => {
+    const stored = { ...one(cond('user.plan', 'equals', 'pro')), id: STAMPED_ID };
+    const rules = jsonToRules(stored);
+    rules.groups[0].conditions[0].value = 'team';
+    expect(targetingPayload(rules, stored)).toEqual({ ...one(cond('user.plan', 'equals', 'team')), id: STAMPED_ID });
+    expect(targetingPayload({ ...rules, groups: [] }, stored)).toEqual({});
   });
 
   // Normalisations the API evaluates identically, each justified:
@@ -364,6 +390,14 @@ describe('Who can join — rules the builder cannot show', () => {
     expect(within(s).queryByRole('button', { name: 'Replace rules' })).toBeNull();
   });
 
+  it('shows a stamped rule with a rollout_percentage as JSON, like any rollout_percentage', async () => {
+    install({ targeting_rules: { ...BUILDER_RULES, id: STAMPED_ID, rollout_percentage: 50 } });
+    render(<ExperimentDetailPage />);
+    const s = await section();
+    expect(within(s).getByTestId('targeting-raw')).toBeInTheDocument();
+    expect(editButton()).toBeNull();
+  });
+
   it('shows a top-level rollout_percentage as JSON, since the builder would drop it', async () => {
     install({ targeting_rules: { ...BUILDER_RULES, rollout_percentage: 50 } });
     render(<ExperimentDetailPage />);
@@ -476,6 +510,34 @@ describe('Who can join — saving', () => {
     expect(Object.keys(puts[0])).toEqual(['targeting_rules']);
     expect(within(s).queryByTestId('targeting-editor')).toBeNull();
     expect(within(s).getByTestId('targeting-summary')).toHaveTextContent('user.country is one of US, CA');
+  });
+
+  it('edits a rule with a stored id and sends the id back unchanged (#533)', async () => {
+    const puts = install({ status: 'paused', targeting_rules: { ...BUILDER_RULES, id: STAMPED_ID } });
+    render(<ExperimentDetailPage />);
+    const s = await section();
+    expect(within(s).getByTestId('targeting-summary')).toHaveTextContent('user.country is one of US, CA');
+    fireEvent.click(editButton()!);
+    fireEvent.click(within(s).getByRole('button', { name: 'Save rules' }));
+    fireEvent.click(
+      within(within(s).getByRole('dialog', { name: 'Save rules while paused' })).getByRole('button', {
+        name: 'Save rules',
+      }),
+    );
+    await within(s).findByText('Saved. The new rules apply when you resume the experiment.');
+    expect(puts).toHaveLength(1);
+    expect(puts[0]).toEqual({
+      targeting_rules: {
+        id: STAMPED_ID,
+        logical_operator: 'AND',
+        groups: [
+          {
+            logical_operator: 'AND',
+            conditions: [{ attribute: 'user.country', operator: 'in', value: ['US', 'CA'] }],
+          },
+        ],
+      },
+    });
   });
 
   it('sends {} when every group is removed', async () => {
