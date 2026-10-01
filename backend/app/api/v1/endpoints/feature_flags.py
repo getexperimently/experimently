@@ -25,6 +25,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session
 
 from backend.app.api import deps
+from backend.app.core.logger import unexpected_failure
 from backend.app.core.metrics import (
     record_cache_hit,
     record_cache_miss,
@@ -1086,10 +1087,12 @@ async def toggle_feature_flag(
         )
 
     except Exception as e:
-        db.rollback()
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to toggle feature flag: {e!s}",
+        raise unexpected_failure(
+            e,
+            "Feature flag toggle",
+            "Could not toggle the feature flag",
+            db=db,
+            logger=logger,
         )
 
 
@@ -1174,10 +1177,12 @@ async def enable_feature_flag(
         )
 
     except Exception as e:
-        db.rollback()
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to enable feature flag: {e!s}",
+        raise unexpected_failure(
+            e,
+            "Feature flag enable",
+            "Could not enable the feature flag",
+            db=db,
+            logger=logger,
         )
 
 
@@ -1262,8 +1267,10 @@ async def disable_feature_flag(
         )
 
     except Exception as e:
-        db.rollback()
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to disable feature flag: {e!s}",
+        raise unexpected_failure(
+            e,
+            "Feature flag disable",
+            "Could not disable the feature flag",
+            db=db,
+            logger=logger,
         )

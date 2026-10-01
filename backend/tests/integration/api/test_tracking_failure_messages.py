@@ -564,7 +564,7 @@ def test_a_failed_lookup_in_an_error_report_batch_fails_only_that_item(
 # ---------------------------------------------------------------------------
 
 
-def test_an_invalid_event_in_a_batch_keeps_its_own_message(
+def test_an_invalid_event_in_a_batch_names_the_field_only(
     admin_client: TestClient, experiment
 ) -> None:
     user_id = _user()
@@ -594,7 +594,10 @@ def test_an_invalid_event_in_a_batch_keeps_its_own_message(
     )
 
     assert resp.status_code == 200, resp.text
-    assert _first_item_error(resp) == str(refused.value)
+    # The field's name only: pydantic's own text repeats the value sent.
+    assert "input_value" in str(refused.value)
+    assert _first_item_error(resp) == "Invalid event: event_name not valid"
+    assert "n" * 10 not in resp.text
 
 
 # ---------------------------------------------------------------------------

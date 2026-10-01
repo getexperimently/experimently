@@ -23,6 +23,7 @@ from fastapi import HTTPException, status
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
+from backend.app.core.logger import failure_detail
 from backend.app.core.logging import get_logger
 from backend.app.models.feature_flag import FeatureFlag, FeatureFlagStatus
 from backend.app.models.metrics.metric import ErrorLog, MetricType, RawMetric
@@ -669,7 +670,17 @@ class SafetyService:
                 .first()
             )
             if not feature_flag:
-                raise ValueError(f"Feature flag {feature_flag_id} does not exist")
+                # Answered here, not raised into the handler below: that one
+                # reports a fixed sentence, and this one is ours to name.
+                db.rollback()
+                return RollbackResponse(
+                    success=False,
+                    feature_flag_id=feature_flag_id,
+                    message=f"Feature flag {feature_flag_id} does not exist",
+                    trigger_type=trigger_name,
+                    timestamp=datetime.utcnow(),
+                    details={"reason": reason},
+                )
 
             previous_percentage = feature_flag.rollout_percentage
             if previous_percentage <= target_percentage:
@@ -734,11 +745,16 @@ class SafetyService:
 
         except Exception as exc:
             db.rollback()
-            logger.error(f"Error rolling back feature flag {feature_flag_id}: {exc}")
+            logger.error(
+                "Rollback of feature flag %s failed (%s)",
+                feature_flag_id,
+                type(exc).__name__,
+                exc_info=exc,
+            )
             return RollbackResponse(
                 success=False,
                 feature_flag_id=feature_flag_id,
-                message=f"Rollback failed: {exc}",
+                message=failure_detail("Rollback failed"),
                 trigger_type=trigger_name,
                 timestamp=datetime.utcnow(),
                 details={"reason": reason},

@@ -13,10 +13,11 @@ from datetime import datetime, timezone
 from typing import Annotated, Any, Dict, List, Optional
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Path, Query, status
+from pydantic import ValidationError
 from sqlalchemy.orm import Session
 
 from backend.app.api import deps
-from backend.app.core.logger import failure_detail
+from backend.app.core.logger import failure_detail, unexpected_failure
 from backend.app.core.metrics import record_event_tracked, record_experiment_assignment
 from backend.app.models.assignment import Assignment
 from backend.app.models.bandit_state import BanditState
@@ -40,6 +41,18 @@ from backend.app.services.event_service import EventService
 router = APIRouter()
 
 logger = logging.getLogger(__name__)
+
+
+def _invalid_event_detail(exc: ValidationError) -> str:
+    """The 422 for an event the stored-event model refused: the field names
+    only. pydantic's own text repeats the values that were sent."""
+    fields = sorted(
+        {
+            str(error["loc"][0]) if error.get("loc") else "event"
+            for error in exc.errors()
+        }
+    )
+    return f"Invalid event: {', '.join(fields)} not valid"
 
 
 def _event_response(event: Event) -> EventResponse:
@@ -264,6 +277,16 @@ async def assign_user_to_experiment(
             assigned=bool(assignment_data.get("assigned", True)),
             reason=str(assignment_data.get("reason") or "assigned"),
         )
+    except ValidationError as e:
+        # A response that does not build is not the caller's mistake, and
+        # pydantic's text repeats the values: answer as an unexpected failure.
+        raise unexpected_failure(
+            e,
+            "Tracking assign",
+            "Could not assign the user to the experiment",
+            db=db,
+            logger=logger,
+        )
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -377,7 +400,13 @@ async def track_event(
         event = EventService(db).track_event(event_data)
         record_event_tracked(str(event_data.event_type))
         return _event_response(event)
+    except ValidationError as e:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=_invalid_event_detail(e),
+        )
     except ValueError as e:
+        # EventService's own sentences.
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=f"Invalid event: {e!s}",
@@ -417,7 +446,13 @@ async def track_event_by_ids(
         event = EventService(db).track_event(event_data)
         record_event_tracked(str(event_data.event_type))
         return _event_response(event)
+    except ValidationError as e:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=_invalid_event_detail(e),
+        )
     except ValueError as e:
+        # EventService's own sentences.
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=f"Invalid event: {e!s}",
@@ -573,6 +608,16 @@ async def track_events_batch(
             record_event_tracked(str(event_data.event_type))
             success_count += 1
 
+        except ValidationError as e:
+            failure_count += 1
+            errors.append(
+                {
+                    "index": index,
+                    "event_type": event_request.event_type,
+                    "user_id": event_request.user_id,
+                    "error": _invalid_event_detail(e),
+                }
+            )
         except ValueError as e:
             failure_count += 1
             errors.append(

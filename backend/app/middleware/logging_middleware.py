@@ -121,8 +121,9 @@ class LoggingMiddleware(BaseHTTPMiddleware):
                 performance_metrics = metrics_collector.get_metrics()
 
                 # Log exception with metrics
+                # The type only: exc_info=True below logs the full error.
                 error_data = {
-                    "error": str(e),
+                    "error": type(e).__name__,
                     "metrics": {
                         "process_time_ms": performance_metrics.get("duration_ms", 0),
                         "memory_usage_mb": performance_metrics.get(

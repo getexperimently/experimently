@@ -803,7 +803,7 @@ class AssignmentService:
             return {
                 "eligible": False,
                 "rule_id": None,
-                "reason": f"Targeting evaluation error: {e!s}",
+                "reason": "Targeting evaluation error",
                 "validation_passed": False,
             }
 

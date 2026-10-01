@@ -8,6 +8,7 @@ Provides endpoints for:
 - Sending test notifications to verify channel connectivity
 """
 
+import logging
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -15,6 +16,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from backend.app.api import deps
+from backend.app.core.logger import unexpected_failure
 from backend.app.models.notification import (
     NotificationDeliveryLog,
     NotificationPreference,
@@ -30,6 +32,7 @@ from backend.app.schemas.scheduler import NotificationEvent
 from backend.app.services.notification_service import NotificationService
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 @router.get("/preferences", response_model=NotificationPreferenceResponse)
@@ -151,4 +154,9 @@ def send_test_notification(
         }
 
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Notification send failed: {exc}")
+        raise unexpected_failure(
+            exc,
+            "Test notification",
+            "Could not send the test notification",
+            logger=logger,
+        )

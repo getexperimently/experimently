@@ -25,7 +25,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from uuid import UUID
 
 from fastapi import APIRouter, Body, Depends, HTTPException, status
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 from sqlalchemy.orm import Session
 
 from backend.app.api import deps
@@ -361,6 +361,20 @@ async def report_client_errors_batch(
                 )
             )
             success_count += 1
+        except ValidationError as exc:
+            # The field names only: pydantic's text repeats what was sent.
+            fields = sorted(
+                {str(e["loc"][0]) if e.get("loc") else "report" for e in exc.errors()}
+            )
+            failure_count += 1
+            failures.append(
+                {
+                    "index": index,
+                    "error_type": report.error_type,
+                    "user_id": report.user_id,
+                    "error": f"Invalid report: {', '.join(fields)} not valid",
+                }
+            )
         except (LookupError, ValueError) as exc:  # unknown key or invalid report
             failure_count += 1
             failures.append(

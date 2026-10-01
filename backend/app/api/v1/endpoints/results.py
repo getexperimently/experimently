@@ -17,7 +17,7 @@ from sqlalchemy.orm import Session, joinedload
 
 from backend.app.api.deps import get_current_active_user, get_current_superuser, get_db
 from backend.app.core.analysis_status import analysis_notice, analysis_status
-from backend.app.core.logger import failure_detail
+from backend.app.core.logger import unexpected_failure
 from backend.app.core.stats_engine import ENGINE_VERSION
 from backend.app.models.analysis_snapshot import AnalysisKind
 from backend.app.models.experiment import Experiment
@@ -94,25 +94,6 @@ def _compute_srm(experiment_id: UUID, db: Session) -> Optional[SRMResult]:
 # ---------------------------------------------------------------------------
 # Helper: build a CacheService backed by Redis (best-effort)
 # ---------------------------------------------------------------------------
-
-
-def _unexpected_failure(
-    db: Session, exc: BaseException, operation: str, sentence: str
-) -> HTTPException:
-    """The 500 for a failure nobody planned for.
-
-    The session is rolled back, the full error goes to the server log under
-    this request's ID, and the caller gets ``sentence`` with that ID -- never
-    the error's own text.
-    """
-    try:
-        db.rollback()
-    except Exception:  # pragma: no cover - defensive
-        logger.warning("Rollback after a failed %s also failed", operation)
-    # What logger.exception() logs, from outside the except block: ERROR,
-    # with the traceback.
-    logger.error("%s failed (%s)", operation, type(exc).__name__, exc_info=exc)
-    return HTTPException(status_code=500, detail=failure_detail(sentence))
 
 
 def _get_cache_service() -> CacheService:
@@ -454,17 +435,22 @@ def get_experiment_results(
         except ValueError:
             raise HTTPException(status_code=404, detail="Experiment not found")
         except Exception as exc:
-            raise _unexpected_failure(
-                db,
+            raise unexpected_failure(
                 exc,
                 "Experiment results",
                 "Could not compute the experiment's results",
+                db=db,
+                logger=logger,
             )
     except ValueError:
         raise HTTPException(status_code=404, detail="Experiment not found")
     except Exception as exc:
-        raise _unexpected_failure(
-            db, exc, "Experiment results", "Could not compute the experiment's results"
+        raise unexpected_failure(
+            exc,
+            "Experiment results",
+            "Could not compute the experiment's results",
+            db=db,
+            logger=logger,
         )
 
     if result is None:
@@ -516,8 +502,12 @@ def get_experiment_results(
             srm=srm_response,
         )
     except Exception as exc:
-        raise _unexpected_failure(
-            db, exc, "Experiment results", "Could not compute the experiment's results"
+        raise unexpected_failure(
+            exc,
+            "Experiment results",
+            "Could not compute the experiment's results",
+            db=db,
+            logger=logger,
         )
 
     # --- Persist audit snapshots (best-effort; never fails the response) ---
@@ -602,8 +592,12 @@ def get_experiment_daily_results(
     except ValueError:
         raise HTTPException(status_code=404, detail="Experiment not found")
     except Exception as exc:
-        raise _unexpected_failure(
-            db, exc, "Daily results", "Could not compute the daily results"
+        raise unexpected_failure(
+            exc,
+            "Daily results",
+            "Could not compute the daily results",
+            db=db,
+            logger=logger,
         )
 
     # daily_data is a list of:
@@ -762,8 +756,12 @@ def get_sample_size_status(
         except ValueError:
             raise HTTPException(status_code=404, detail="Experiment not found")
         except Exception as exc:
-            raise _unexpected_failure(
-                db, exc, "Sample size", "Could not compute the sample size"
+            raise unexpected_failure(
+                exc,
+                "Sample size",
+                "Could not compute the sample size",
+                db=db,
+                logger=logger,
             )
 
     # --- Inline implementation ---
@@ -835,8 +833,12 @@ def get_sample_size_status(
     except HTTPException:
         raise
     except Exception as exc:
-        raise _unexpected_failure(
-            db, exc, "Sample size", "Could not compute the sample size"
+        raise unexpected_failure(
+            exc,
+            "Sample size",
+            "Could not compute the sample size",
+            db=db,
+            logger=logger,
         )
 
 
@@ -1365,14 +1367,22 @@ def get_cuped_results(
     except ValidationError as exc:
         # A ValueError too, but a response that failed to build is not a
         # missing experiment, and its text would repeat the values.
-        raise _unexpected_failure(
-            db, exc, "CUPED results", "Could not compute the CUPED results"
+        raise unexpected_failure(
+            exc,
+            "CUPED results",
+            "Could not compute the CUPED results",
+            db=db,
+            logger=logger,
         )
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
     except Exception as exc:
-        raise _unexpected_failure(
-            db, exc, "CUPED results", "Could not compute the CUPED results"
+        raise unexpected_failure(
+            exc,
+            "CUPED results",
+            "Could not compute the CUPED results",
+            db=db,
+            logger=logger,
         )
 
     # Audit snapshot (best-effort; CUPED is closed-form, so no seed).
@@ -1428,8 +1438,12 @@ def get_bayesian_results(
     try:
         response = service.compute_bayesian_results(experiment)
     except Exception as exc:
-        raise _unexpected_failure(
-            db, exc, "Bayesian results", "Could not compute the Bayesian results"
+        raise unexpected_failure(
+            exc,
+            "Bayesian results",
+            "Could not compute the Bayesian results",
+            db=db,
+            logger=logger,
         )
 
     try:

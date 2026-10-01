@@ -18,7 +18,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from backend.app.api.deps import get_current_active_user, get_db
-from backend.app.core.logger import failure_detail
+from backend.app.core.logger import unexpected_failure
 from backend.app.models.experiment import Experiment
 from backend.app.models.user import User
 from backend.app.schemas.post_stratification import (
@@ -34,21 +34,6 @@ router = APIRouter()
 logger = logging.getLogger(__name__)
 
 POST_STRAT_FAILED = "Could not compute the post-stratification results"
-
-
-def _unexpected_failure(
-    db: Session, exc: BaseException, operation: str, sentence: str
-) -> HTTPException:
-    """The 500 for a failure nobody planned for: rolled back, logged in full
-    under this request's ID, and answered with ``sentence`` and that ID."""
-    try:
-        db.rollback()
-    except Exception:  # pragma: no cover - defensive
-        logger.warning("Rollback after a failed %s also failed", operation)
-    # What logger.exception() logs, from outside the except block: ERROR,
-    # with the traceback.
-    logger.error("%s failed (%s)", operation, type(exc).__name__, exc_info=exc)
-    return HTTPException(status_code=500, detail=failure_detail(sentence))
 
 
 # ---------------------------------------------------------------------------
@@ -190,7 +175,9 @@ def compute_post_stratification(
     except HTTPException:
         raise
     except Exception as exc:
-        raise _unexpected_failure(db, exc, "Post-stratification", POST_STRAT_FAILED)
+        raise unexpected_failure(
+            exc, "Post-stratification", POST_STRAT_FAILED, db=db, logger=logger
+        )
 
     # Run post-stratification
     service = PostStratificationService()
@@ -205,7 +192,9 @@ def compute_post_stratification(
     except (ValueError, KeyError) as exc:
         raise HTTPException(status_code=422, detail=str(exc))
     except Exception as exc:
-        raise _unexpected_failure(db, exc, "Post-stratification", POST_STRAT_FAILED)
+        raise unexpected_failure(
+            exc, "Post-stratification", POST_STRAT_FAILED, db=db, logger=logger
+        )
 
     return PostStratResultResponse(
         metric_name=result.metric_name,
@@ -271,8 +260,12 @@ def compute_fdr_correction(
             fdr_threshold=request.fdr_threshold,
         )
     except Exception as exc:
-        raise _unexpected_failure(
-            db, exc, "FDR correction", "Could not apply the FDR correction"
+        raise unexpected_failure(
+            exc,
+            "FDR correction",
+            "Could not apply the FDR correction",
+            db=db,
+            logger=logger,
         )
 
     return [

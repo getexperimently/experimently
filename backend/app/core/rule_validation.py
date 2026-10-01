@@ -130,11 +130,13 @@ class RuleValidator:
             is_valid = not has_errors
 
         except Exception as e:
-            logger.error(f"Validation error: {e!s}")
+            # The type only, in the log and the issue: the text can repeat a
+            # submitted value.
+            logger.error("Validation error (%s)", type(e).__name__)
             issues.append(
                 ValidationIssue(
                     severity=ValidationSeverity.ERROR,
-                    message=f"Validation failed: {e!s}",
+                    message=f"Validation failed ({type(e).__name__})",
                 )
             )
             is_valid = False
@@ -487,7 +489,8 @@ class RuleValidator:
             issues.append(
                 ValidationIssue(
                     severity=ValidationSeverity.ERROR,
-                    message=f"Validation error: {e!s}",
+                    # The type only: the text can repeat a submitted value.
+                    message=f"Validation error ({type(e).__name__})",
                     rule_id=rule_id,
                     condition_path=path,
                 )
