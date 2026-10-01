@@ -20,7 +20,9 @@ from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 class SplitUrlVariant(BaseModel):
     """A single URL variant in a split URL experiment."""
 
-    model_config = ConfigDict(from_attributes=True)
+    # The config is stored as JSONB, which cannot hold NaN or an infinity
+    # (and NaN passes the sum-to-100 check below): refuse them with 422 (#559).
+    model_config = ConfigDict(from_attributes=True, allow_inf_nan=False)
 
     name: str
     url: str

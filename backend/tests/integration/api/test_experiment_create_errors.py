@@ -2,7 +2,8 @@
 
 * A key the caller chose that another experiment already has: 409, naming it.
 * Anything else the database refuses (two metrics with one name, a value its
-  column cannot hold, a generated key that happens to collide): 400 with a
+  column cannot hold that the schema let through, a generated key that
+  happens to collide): 400 with a
   fixed message carrying the request ID.
 * Any other failure: 500 with the same fixed message.
 * Every refused create leaves the session usable for the next request.
@@ -17,6 +18,7 @@ import uuid
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import text
+from sqlalchemy.exc import DataError
 from sqlalchemy.orm import Session, sessionmaker
 
 from backend.app.api import deps
@@ -122,17 +124,23 @@ def test_an_unexpected_failure_answers_500_with_the_fixed_message(
 
 
 def test_a_value_its_column_cannot_hold_answers_the_fixed_message(
-    admin_client: TestClient,
+    admin_client: TestClient, monkeypatch
 ) -> None:
-    # A sample size past the INTEGER column's range is refused by the
-    # database, not the schema. (An over-length string no longer gets this
-    # far: the schema answers 422, #551.)
-    body = _payload(_key("long"), minimum_sample_size=2**31)
+    # The schemas now refuse every value the request can carry that a column
+    # cannot hold (over-length strings #551, out-of-range numbers #559), so
+    # the database's own refusal is raised directly to keep this branch pinned.
+    def refuse(self, *args, **kwargs):
+        raise DataError("statement", None, Exception("marker-DE9"))
 
-    resp = admin_client.post(URL, json=body, headers={"X-Request-ID": "prb-e-789"})
+    monkeypatch.setattr(ExperimentService, "create_experiment", refuse)
+
+    resp = admin_client.post(
+        URL, json=_payload(_key("range")), headers={"X-Request-ID": "prb-e-789"}
+    )
 
     assert resp.status_code == 400
     assert resp.json() == {"detail": f"{GENERIC} (request ID: prb-e-789)."}
+    assert "marker-DE9" not in resp.text
 
 
 def test_a_generated_key_collision_is_not_reported_as_the_callers_key(

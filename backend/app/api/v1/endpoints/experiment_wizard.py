@@ -163,9 +163,9 @@ def get_draft(
         "The draft accumulates data across all steps. `data` may only contain "
         "step fields (`experiment_type`, `hypothesis`, `primary_metric_id`, "
         "`guardrail_metric_ids`, `targeting_rules`, `baseline_rate`, `mde`, "
-        "`name`, `description`); any other key answers 422 and the draft is "
-        "unchanged. A draft that does not exist or belongs to another user "
-        "answers 404."
+        "`name`, `description`); any other key, or a step field of the wrong "
+        "type, answers 422 and the draft is unchanged. A draft that does not "
+        "exist or belongs to another user answers 404."
     ),
 )
 def update_draft_step(
@@ -182,7 +182,8 @@ def update_draft_step(
             data=body.data,
         )
     except WizardStepDataError as exc:
-        # A fixed message: it lists the accepted fields, never the submitted keys.
+        # A fixed message: it lists the accepted fields, or names the one step
+        # field of the wrong type; never a submitted key or value.
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
         ) from None

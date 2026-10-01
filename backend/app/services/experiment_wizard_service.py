@@ -11,6 +11,10 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
+from pydantic import TypeAdapter, ValidationError
+
+from backend.app.schemas.experiment_wizard import WizardDraftResponse
+
 logger = logging.getLogger(__name__)
 
 # Wizard type -> ``ExperimentType`` value used by ``ExperimentCreate``.
@@ -86,8 +90,69 @@ class WizardStepDataError(ValueError):
     The message is fixed and never repeats what was submitted.
     """
 
-    def __init__(self) -> None:
-        super().__init__(STEP_DATA_ERROR)
+    def __init__(self, message: str = STEP_DATA_ERROR) -> None:
+        super().__init__(message)
+
+
+# What each step field must hold, in the words of the 422 answer. The types
+# are the ones ``WizardDraftResponse`` declares: a value it cannot hold used to
+# be stored and then fail the response (and every later read of the draft)
+# with a 500.
+STEP_FIELD_EXPECTED: Dict[str, str] = {
+    "experiment_type": "a string or null",
+    "hypothesis": "a string or null",
+    "primary_metric_id": "a string or null",
+    "guardrail_metric_ids": "a list of strings or null",
+    "targeting_rules": "a list of objects or null",
+    "baseline_rate": "a number or null",
+    "mde": "a number or null",
+    "name": "a string or null",
+    "description": "a string or null",
+}
+
+# The draft-to-response conversion answers an empty or missing list field
+# with ``[]`` (``draft.targeting_rules or []``), so a falsy value is held.
+_LIST_STEP_FIELDS = frozenset({"guardrail_metric_ids", "targeting_rules"})
+
+_step_field_adapters: Dict[str, TypeAdapter] = {}
+
+
+def _step_field_adapter(name: str) -> TypeAdapter:
+    """The validator for one step field, built from the response model."""
+    adapter = _step_field_adapters.get(name)
+    if adapter is None:
+        annotation = WizardDraftResponse.model_fields[name].annotation
+        adapter = _step_field_adapters[name] = TypeAdapter(annotation)
+    return adapter
+
+
+def step_field_type_error(name: str) -> str:
+    """The fixed 422 message for a wrong-typed step field.
+
+    It names the field, which is one of :data:`STEP_FIELDS`, and never the
+    submitted value.
+    """
+    return f"Step field '{name}' must be {STEP_FIELD_EXPECTED[name]}."
+
+
+def check_step_field_types(data: Dict[str, Any]) -> None:
+    """Refuse a step value the draft's response model cannot hold.
+
+    Accepts exactly what ``WizardDraftResponse`` accepts for the field, so a
+    value that was answered 200 before is still answered 200.
+
+    Raises:
+        WizardStepDataError: with :func:`step_field_type_error` for the first
+            wrong-typed field, in alphabetical order.
+    """
+    for name in sorted(STEP_FIELDS & set(data)):
+        value = data[name]
+        if name in _LIST_STEP_FIELDS:
+            value = value or []
+        try:
+            _step_field_adapter(name).validate_python(value)
+        except ValidationError:
+            raise WizardStepDataError(step_field_type_error(name)) from None
 
 
 # In-memory draft store (production would use Redis or DB).
@@ -210,7 +275,9 @@ class ExperimentWizardService:
 
         Raises:
             WizardStepDataError: *data* names a key outside
-                :data:`STEP_FIELDS`. The draft is left unchanged.
+                :data:`STEP_FIELDS`, or gives a step field a value of the
+                wrong type (:func:`check_step_field_types`). The draft is left
+                unchanged.
         """
         draft = cls.get_draft(draft_id, user_id)
         if draft is None:
@@ -218,6 +285,7 @@ class ExperimentWizardService:
 
         if not set(data) <= STEP_FIELDS:
             raise WizardStepDataError()
+        check_step_field_types(data)
 
         for key in STEP_FIELDS & set(data):
             setattr(draft, key, data[key])
