@@ -105,6 +105,59 @@ class AnalysisConfigError(ValueError):
         self.message = message
 
 
+#: How each ``metric_type`` a request may send is stored. This is the one
+#: place the request schema's ``MetricType`` meets the model's; a value with
+#: no entry is refused, never stored as something else (#558).
+#: ``test_experiment_metric_types`` holds the keys to the schema's values.
+METRIC_TYPE_STORED_AS: Dict[str, MetricType] = {
+    "conversion": MetricType.CONVERSION,
+    "revenue": MetricType.REVENUE,
+    "count": MetricType.COUNT,
+    "duration": MetricType.DURATION,
+    "custom": MetricType.CUSTOM,
+}
+
+#: The refusal for a metric type with no entry above. Fixed text: it lists
+#: the accepted values and does not repeat the one sent.
+UNKNOWN_METRIC_TYPE_MESSAGE = "metric_type must be one of: " + ", ".join(
+    METRIC_TYPE_STORED_AS
+)
+
+
+def stored_metric_type(value: Any) -> MetricType:
+    """The model ``MetricType`` a metric sent with *value* is stored as.
+
+    *value* is a model member, a schema member, or its value (any case). A
+    missing value is ``conversion``, the schema's default.
+
+    Raises:
+        AnalysisConfigError: *value* has no entry in ``METRIC_TYPE_STORED_AS``.
+            The update route answers it with 422 on ``metrics``.
+    """
+    if value is None:
+        return MetricType.CONVERSION
+    if isinstance(value, MetricType):
+        return value
+    key = str(getattr(value, "value", value)).strip().lower()
+    stored = METRIC_TYPE_STORED_AS.get(key)
+    if stored is None:
+        raise AnalysisConfigError("metrics", UNKNOWN_METRIC_TYPE_MESSAGE)
+    return stored
+
+
+def _with_stored_metric_types(
+    metrics_data: List[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    """*metrics_data* with each ``metric_type`` resolved for storage.
+
+    Create and update call this before they add or change any row.
+    """
+    return [
+        {**metric, "metric_type": stored_metric_type(metric.get("metric_type"))}
+        for metric in metrics_data
+    ]
+
+
 BAYESIAN_CONFIG_CLEAR_MESSAGE = (
     "bayesian_config cannot be cleared while bayesian_enabled is true; "
     "send bayesian_enabled: false to disable"
@@ -410,7 +463,7 @@ class ExperimentService:
 
         # Extract nested objects
         variants_data = obj_data.pop("variants", [])
-        metrics_data = obj_data.pop("metrics", [])
+        metrics_data = _with_stored_metric_types(obj_data.pop("metrics", None) or [])
 
         # Set default values and owner
         # Handle string status values by converting to enum ("draft" or "DRAFT")
@@ -459,22 +512,6 @@ class ExperimentService:
 
         # Create metrics
         for metric_data in metrics_data:
-            # Handle string metric type values by converting to enum
-            if "metric_type" in metric_data and isinstance(
-                metric_data["metric_type"], str
-            ):
-                try:
-                    # Convert string type (e.g., "conversion") to enum (e.g., MetricType.CONVERSION)
-                    # Note: We use lowercase since that's how the enum is defined
-                    metric_data["metric_type"] = MetricType[
-                        metric_data["metric_type"].lower()
-                    ]
-                except (KeyError, ValueError):
-                    # Fallback to default if conversion fails
-                    metric_data["metric_type"] = MetricType.CONVERSION
-            else:
-                metric_data["metric_type"] = MetricType.CONVERSION
-
             metric = Metric(**metric_data, experiment_id=experiment.id)
             self.db.add(metric)
 
@@ -539,6 +576,9 @@ class ExperimentService:
         # Extract nested objects if present
         variants_data = update_data.pop("variants", None)
         metrics_data = update_data.pop("metrics", None)
+        if metrics_data is not None:
+            # Resolved before any attribute or row below is changed.
+            metrics_data = _with_stored_metric_types(metrics_data)
 
         # Update experiment attributes
         for field in update_data:
@@ -550,6 +590,8 @@ class ExperimentService:
             # Remove existing variants
             for variant in experiment.variants:
                 self.db.delete(variant)
+            # Delete before inserting, as for metrics below.
+            self.db.flush()
 
             # Create new variants
             for variant_data in variants_data:
@@ -561,25 +603,13 @@ class ExperimentService:
             # Remove existing metrics
             for metric in experiment.metric_definitions:
                 self.db.delete(metric)
+            # The unit of work inserts before it deletes, so without this a
+            # new metric keeping an old one's name meets the unique index on
+            # (experiment, name) while the old row is still there (#557).
+            self.db.flush()
 
             # Create new metrics
             for metric_data in metrics_data:
-                # Handle string metric type values by converting to enum
-                if "metric_type" in metric_data and isinstance(
-                    metric_data["metric_type"], str
-                ):
-                    try:
-                        # Convert string type (e.g., "conversion") to enum (e.g., MetricType.CONVERSION)
-                        # Note: We use lowercase since that's how the enum is defined
-                        metric_data["metric_type"] = MetricType[
-                            metric_data["metric_type"].lower()
-                        ]
-                    except (KeyError, ValueError):
-                        # Fallback to default if conversion fails
-                        metric_data["metric_type"] = MetricType.CONVERSION
-                else:
-                    metric_data["metric_type"] = MetricType.CONVERSION
-
                 metric = Metric(**metric_data, experiment_id=experiment.id)
                 self.db.add(metric)
 
