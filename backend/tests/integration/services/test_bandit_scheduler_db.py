@@ -194,3 +194,86 @@ class TestBanditSchedulerLearnsFromPostgres:
         assert stats[str(arm_a.id)].pulls == 20
         assert stats[str(arm_a.id)].successes == 0  # exposures are never conversions
         assert stats[str(arm_b.id)].successes == 6
+
+
+@pytest.mark.integration
+@pytest.mark.regression
+def test_postgres_fallback_counts_converting_users_as_results_does(
+    db_session, mab_experiment
+):
+    """
+    #338: the PostgreSQL fallback counts converting users with the definition
+    ``/results`` uses (``event_matching.count_converting_users``).
+
+    A user with three purchases counts once.  A purchase tagged with a
+    variant the user is not assigned to counts for neither variant: before
+    the fix the fallback joined events to assignments on the user alone and
+    credited that purchase to the user's assigned arm.  A purchase from a
+    user with no assignment never counts.
+    """
+    arm_a, arm_b = _variants(mab_experiment)
+    now_iso = datetime.now(timezone.utc).isoformat()
+    tag = uuid.uuid4().hex[:6]
+    # user -> (assigned arm or None, [the arm each purchase is tagged with])
+    plan = {
+        f"a0-{tag}": (arm_a, [arm_a, arm_a, arm_a]),
+        f"a1-{tag}": (arm_a, [arm_a]),
+        f"a2-{tag}": (arm_a, []),
+        f"a3-{tag}": (arm_a, [arm_b]),
+        f"b0-{tag}": (arm_b, [arm_b, arm_b]),
+        f"b1-{tag}": (arm_b, []),
+        f"ghost-{tag}": (None, [arm_b]),
+    }
+    rows = []
+    for user_id, (assigned, purchases) in plan.items():
+        if assigned is not None:
+            rows.append(
+                Assignment(
+                    experiment_id=mab_experiment.id,
+                    variant_id=assigned.id,
+                    user_id=user_id,
+                )
+            )
+        for tagged in purchases:
+            rows.append(
+                Event(
+                    event_type="purchase",
+                    event_name="purchase",
+                    user_id=user_id,
+                    experiment_id=mab_experiment.id,
+                    variant_id=tagged.id,
+                    value=1.0,
+                    created_at=now_iso,
+                )
+            )
+    db_session.add_all(rows)
+    db_session.commit()
+
+    # The expectation, from the plan alone: per arm, the users assigned to it,
+    # and those of them with at least one purchase tagged with that same arm.
+    expected = {
+        str(arm.id): {
+            "pulls": sum(1 for assigned, _ in plan.values() if assigned is arm),
+            "successes": len(
+                {
+                    user_id
+                    for user_id, (assigned, tags) in plan.items()
+                    if assigned is arm and arm in tags
+                }
+            ),
+        }
+        for arm in (arm_a, arm_b)
+    }
+    assert expected == {
+        str(arm_a.id): {"pulls": 4, "successes": 2},
+        str(arm_b.id): {"pulls": 2, "successes": 1},
+    }
+
+    stats = BanditScheduler(db_session)._stats_from_postgres(
+        mab_experiment.id, [str(arm_a.id), str(arm_b.id)], mab_experiment
+    )
+
+    actual = {
+        vid: {"pulls": s.pulls, "successes": s.successes} for vid, s in stats.items()
+    }
+    assert actual == expected

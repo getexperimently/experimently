@@ -14,9 +14,11 @@ Stats sources, in order of preference
    both be ``>=`` its PostgreSQL pulls and successes (#426).  A partial
    DynamoDB count -- one manual increment, a counter that started late --
    never replaces the complete PostgreSQL count.
-2. PostgreSQL: ``count(Assignment)`` per variant for pulls and the number of
-   distinct converting users (events whose ``event_type`` equals the
-   experiment's primary metric ``event_name``) for successes.  Used when
+2. PostgreSQL: ``count(Assignment)`` per variant for pulls and, for
+   successes, the converting users exactly as ``/results`` counts them
+   (``services/event_matching.count_converting_users`` on the primary
+   metric's ``event_name``): users assigned to the variant with at least one
+   matching event tagged with that variant, each counted once.  Used when
    DynamoDB is unavailable, holds no data for the experiment, or has fewer
    pulls or successes than PostgreSQL for any variant.
 3. The previously persisted ``BanditState`` row.
@@ -41,7 +43,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 from uuid import UUID
 
-from sqlalchemy import and_, func
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from backend.app.core.config import settings
@@ -61,7 +63,8 @@ from backend.app.services.bandit_service import (
 )
 from backend.app.services.event_matching import (
     EXPOSURE_EVENT_TYPES,
-    conversion_event_filter,
+    count_assigned_users_matching,
+    count_converting_users,
 )
 
 logger = logging.getLogger(__name__)
@@ -524,9 +527,10 @@ class BanditScheduler:
         Derive pulls/successes from assignments and conversion events.
 
         pulls     = number of Assignment rows per variant
-        successes = distinct converting users per variant, where a converting
-                    user has an Event for the experiment whose ``event_type``
-                    is the primary metric's ``event_name``.
+        successes = converting users per variant, as ``/results`` counts
+                    them (``event_matching.count_converting_users``): users
+                    assigned to the variant with at least one event for the
+                    primary metric's ``event_name`` tagged with that variant.
         """
         try:
             if experiment is None:
@@ -537,7 +541,9 @@ class BanditScheduler:
                 )
             event_name = self._primary_event_name(experiment)
             pulls = self._count_assignments_by_variant(experiment_id)
-            successes = self._count_conversions_by_variant(experiment_id, event_name)
+            successes = self._count_conversions_by_variant(
+                experiment_id, event_name, variant_ids
+            )
         except Exception as exc:
             logger.warning(
                 "BanditScheduler: PostgreSQL stats unavailable for experiment %s (%s); "
@@ -628,35 +634,30 @@ class BanditScheduler:
         return {str(variant_id): int(count) for variant_id, count in rows}
 
     def _count_conversions_by_variant(
-        self, experiment_id: UUID, event_name: Optional[str]
+        self,
+        experiment_id: UUID,
+        event_name: Optional[str],
+        variant_ids: List[str],
     ) -> Dict[str, int]:
         """
-        ``{variant_id: distinct_converting_users}`` for the experiment.
+        ``{variant_id: converting_users}`` for the experiment.
 
-        Conversions are attributed to the variant the user is assigned to.
-        When ``event_name`` is ``None`` every non-exposure event counts.
+        The definition ``/results`` uses (#338): a user counts once, however
+        many conversion events they sent, and only for the variant they are
+        assigned to and the event is tagged with.  When ``event_name`` is
+        ``None`` (no metric configured) every event other than an experiment view
+        counts.
         """
-        query = (
-            self.db.query(
-                Assignment.variant_id, func.count(func.distinct(Event.user_id))
-            )
-            .join(
-                Event,
-                and_(
-                    Event.user_id == Assignment.user_id,
-                    Event.experiment_id == Assignment.experiment_id,
-                ),
-            )
-            .filter(Assignment.experiment_id == experiment_id)
-        )
         if event_name:
-            # Same rule as the results engine: match the metric's event_name,
-            # whatever event_type the producer used (see services/event_matching).
-            query = query.filter(conversion_event_filter(event_name))
-        else:
-            query = query.filter(Event.event_type.notin_(EXPOSURE_EVENT_TYPES))
-        rows = query.group_by(Assignment.variant_id).all()
-        return {str(variant_id): int(count) for variant_id, count in rows}
+            return {
+                vid: count_converting_users(self.db, experiment_id, vid, event_name)
+                for vid in variant_ids
+            }
+        any_event = Event.event_type.notin_(EXPOSURE_EVENT_TYPES)
+        return {
+            vid: count_assigned_users_matching(self.db, experiment_id, vid, any_event)
+            for vid in variant_ids
+        }
 
     # ------------------------------------------------------------------
     # Reporting helpers

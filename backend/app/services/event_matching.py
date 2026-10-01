@@ -121,16 +121,16 @@ def _assigned_pairs(
 
 
 def _converters(
-    db: Session, experiment_id: Any, variant_id: Any, event_name: Optional[str]
+    db: Session, experiment_id: Any, variant_id: Any, criterion: Any
 ) -> List[Tuple[str, Any]]:
-    """``(user_id, first conversion created_at)`` per user with a conversion event
-    tagged with ``variant_id``; read from ``events`` alone."""
+    """``(user_id, first matching created_at)`` per user with an event matching
+    ``criterion`` tagged with ``variant_id``; read from ``events`` alone."""
     rows = (
         db.query(Event.user_id, func.min(Event.created_at))
         .filter(
             Event.experiment_id == experiment_id,
             Event.variant_id == variant_id,
-            conversion_event_filter(event_name),
+            criterion,
         )
         .group_by(Event.user_id)
         .all()
@@ -138,14 +138,41 @@ def _converters(
     return [(str(user_id), first) for user_id, first in rows]
 
 
+def _assigned_matching(
+    db: Session, experiment_id: Any, variant_id: Any, criterion: Any
+) -> List[Tuple[str, Any]]:
+    """The users of ``variant_id`` with an event matching ``criterion`` who are
+    assigned to that variant."""
+    converters = _converters(db, experiment_id, variant_id, criterion)
+    pairs = _assigned_pairs(db, experiment_id, (user_id for user_id, _ in converters))
+    variant = str(variant_id)
+    return [(u, first) for u, first in converters if (variant, u) in pairs]
+
+
 def _assigned_converters(
     db: Session, experiment_id: Any, variant_id: Any, event_name: Optional[str]
 ) -> List[Tuple[str, Any]]:
     """The converters of ``variant_id`` who are assigned to that variant."""
-    converters = _converters(db, experiment_id, variant_id, event_name)
-    pairs = _assigned_pairs(db, experiment_id, (user_id for user_id, _ in converters))
-    variant = str(variant_id)
-    return [(u, first) for u, first in converters if (variant, u) in pairs]
+    return _assigned_matching(
+        db, experiment_id, variant_id, conversion_event_filter(event_name)
+    )
+
+
+def count_assigned_users_matching(
+    db: Session, experiment_id: Any, variant_id: Any, criterion: Any
+) -> int:
+    """
+    Number of users assigned to ``variant_id`` with an event matching ``criterion``.
+
+    ``count_converting_users`` with the event criterion supplied by the
+    caller: the same users-not-events count, the same restriction to users
+    assigned to the variant the event is tagged with, and the same query
+    shape (no SQL join of ``events`` to ``assignments``).  The bandit
+    scheduler uses it for an experiment with no metric configured, where
+    every event other than an experiment view is a success; everything else calls
+    ``count_converting_users``.
+    """
+    return len(_assigned_matching(db, experiment_id, variant_id, criterion))
 
 
 def count_converting_users(
