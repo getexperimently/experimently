@@ -18,6 +18,7 @@ import boto3
 from fastapi import HTTPException, status
 
 from backend.app.core.config import settings
+from backend.app.core.logger import failure_detail
 from modules.backend.app.schemas.etl import (
     ETLJobRequest,
     ETLJobResponse,
@@ -111,10 +112,10 @@ class ETLService:
         try:
             response = self._glue().start_job_run(JobName=job_name, Arguments=arguments)
         except Exception as exc:
-            logger.error(f"Failed to start Glue job '{job_name}': {exc}")
+            logger.error("Glue job start failed (%s)", type(exc).__name__, exc_info=exc)
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Failed to start Glue job: {exc}",
+                detail=failure_detail("Could not start the ETL job"),
             )
 
         job_run_id = response.get("JobRunId", "")
@@ -159,10 +160,12 @@ class ETLService:
                 detail=f"Job run '{job_run_id}' not found for job '{job_name}'",
             )
         except Exception as exc:
-            logger.error(f"Failed to get Glue job run status: {exc}")
+            logger.error(
+                "Glue job status failed (%s)", type(exc).__name__, exc_info=exc
+            )
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Failed to get job status: {exc}",
+                detail=failure_detail("Could not read the ETL job's status"),
             )
 
         run = response.get("JobRun", {})
@@ -315,10 +318,12 @@ class ETLService:
                     status_code=status.HTTP_409_CONFLICT,
                     detail=f"Crawler '{crawler_name}' is already running.",
                 )
-            logger.error(f"Failed to start crawler '{crawler_name}': {exc}")
+            logger.error(
+                "Glue crawler start failed (%s)", type(exc).__name__, exc_info=exc
+            )
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Failed to start crawler: {exc}",
+                detail=failure_detail("Could not start the crawler"),
             )
 
         return self.get_crawler_status(crawler_name)
@@ -350,10 +355,12 @@ class ETLService:
                     status_code=status.HTTP_404_NOT_FOUND,
                     detail=f"Crawler '{crawler_name}' not found.",
                 )
-            logger.error(f"Failed to get crawler status: {exc}")
+            logger.error(
+                "Glue crawler status failed (%s)", type(exc).__name__, exc_info=exc
+            )
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Failed to get crawler status: {exc}",
+                detail=failure_detail("Could not read the crawler's status"),
             )
 
         crawler = response.get("Crawler", {})
