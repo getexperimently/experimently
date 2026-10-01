@@ -235,15 +235,21 @@ class TestGetExperimentPermissions:
 class TestUpdateExperimentAdditional:
     """PUT /api/v1/experiments/{id} — status conversion & restricted fields."""
 
+    @pytest.mark.regression
     def test_update_status_field_valid_value(self, admin_client):
-        """Updating `status` to a valid string triggers the
-        str -> ExperimentStatus enum conversion branch.
+        """A valid but different `status` is refused (#542): status changes
+        only through /start, /pause, /complete and /archive. This test used to
+        pin DRAFT -> PAUSED through PUT as a 200; that was the defect. The
+        experiment stays DRAFT.
         """
         exp = _create_experiment(admin_client, "Update Status Valid")
         response = admin_client.put(
             f"/api/v1/experiments/{exp['id']}", json={"status": "paused"}
         )
-        assert response.status_code == 200, response.text
+        assert response.status_code == 422, response.text
+        assert response.json()["detail"][0]["loc"] == ["body", "status"]
+        after = admin_client.get(f"/api/v1/experiments/{exp['id']}")
+        assert after.json()["status"] == "draft"
 
     def test_update_status_field_invalid_value_returns_422(self, admin_client):
         """`ExperimentUpdate.status` is typed as `Optional[ExperimentStatus]`,

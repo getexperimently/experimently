@@ -275,7 +275,12 @@ class ExperimentCreate(ExperimentBase):
     """Model for creating a new experiment."""
 
     status: ExperimentStatus = Field(
-        ExperimentStatus.DRAFT, description="Initial experiment status"
+        ExperimentStatus.DRAFT,
+        description=(
+            "Always `draft`: a new experiment is created as a draft, and any "
+            "other value is refused with 422. Start it with "
+            "`POST /api/v1/experiments/{id}/start`."
+        ),
     )
     variants: List[VariantBase] = Field(
         ..., min_length=1, description="Experiment variants"
@@ -453,7 +458,15 @@ class ExperimentUpdate(BaseModel):
     hypothesis: Optional[str] = Field(
         None, max_length=2000, description="Experiment hypothesis"
     )
-    status: ExperimentStatus = Field(None, description="Experiment status")
+    status: ExperimentStatus = Field(
+        None,
+        description=(
+            "Not changed by an update. A value equal to the current status is "
+            "accepted and changes nothing; any other value is refused with 422. "
+            "Status changes through `POST /api/v1/experiments/{id}/start`, "
+            "`/pause`, `/complete` or `/archive`."
+        ),
+    )
     experiment_type: ExperimentType = Field(None, description="Type of experiment")
     targeting_rules: Optional[Dict[str, Any]] = Field(
         None, description="Rules for targeting users"
@@ -514,7 +527,6 @@ class ExperimentUpdate(BaseModel):
                 "name": "Updated Button Color Test",
                 "description": "Testing different button colors with updated hypothesis",
                 "hypothesis": "Changing the button color to dark blue will increase conversion rates",
-                "status": "draft",
                 "tags": ["checkout", "ui", "conversion", "updated"],
             }
         }

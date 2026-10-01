@@ -925,6 +925,31 @@ the field, for example `name cannot be null`. `name` is at most 100
 characters, as on create. Other fields, such as `description`, may still be
 sent as `null`.
 
+### An experiment's status
+
+An experiment's status changes only through its lifecycle endpoints, whatever
+the caller's role, superusers included:
+
+- `POST /api/v1/experiments/{experiment_id}/start`: `draft` or `paused` to
+  `active`. It checks for at least two variants, a control variant and at
+  least one metric, and sets `start_date`.
+- `POST /api/v1/experiments/{experiment_id}/pause`: `active` to `paused`.
+- `POST /api/v1/experiments/{experiment_id}/complete`: `active` or `paused` to
+  `completed`, and sets `end_date`.
+- `POST /api/v1/experiments/{experiment_id}/archive`: any status but
+  `archived` to `archived`.
+
+`PUT /api/v1/experiments/{experiment_id}` does not change it. A `status` equal
+to the current one is accepted and changes nothing, so an experiment fetched
+with `GET` can be sent back as it is. Any other value is refused with 422,
+nothing is changed, and the error is on `["body", "status"]` with the message
+`status changes through POST /api/v1/experiments/{id}/start, /pause, /complete
+or /archive; it cannot be set by an update.`
+
+`POST /api/v1/experiments/` always creates a `draft`. `status` may be left out
+or sent as `"draft"`; any other value is refused with 422 and nothing is
+created.
+
 ### Experiment Types
 
 #### 1. A/B Testing
@@ -968,7 +993,6 @@ sent as `null`.
 ```json
 {
   "experiment_type": "FEATURE_FLAG",
-  "status": "ACTIVE",
   "default_value": false,
   "overrides": [
     {
