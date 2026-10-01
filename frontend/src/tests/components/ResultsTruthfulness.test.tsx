@@ -174,6 +174,10 @@ describe('one significance decision: a response with a correction uses the adjus
     const row = screen.getByRole('row', { name: /variant b/i });
     expect(within(row).getByText(/^not significant/i)).toBeInTheDocument();
     expect(within(row).queryByText(/^significant/i)).not.toBeInTheDocument();
+    // The badge shows the number it decided from: the adjusted p, not the raw.
+    expect(within(row).getByRole('status')).toHaveTextContent(
+      'Not Significant (adjusted p=0.080)'
+    );
     expect(within(row).getByText('0.0800')).toBeInTheDocument();
     expect(within(row).getByText(/adjusted \(Bonferroni\)/)).toBeInTheDocument();
     // The raw value stays available, named as raw.
