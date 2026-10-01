@@ -16,8 +16,9 @@ answers the per-variant converting units.  The summary (totals, duration) is
 not part of this computation and is fixed.
 
 When this test fails, the numbers ``/results`` returns changed.  That is only
-acceptable with an ``ENGINE_VERSION`` bump (see ``test_engine_fingerprint.py``);
-never re-pin a hash here to make a refactor pass.
+acceptable with an ``ENGINE_VERSION`` bump (see ``test_engine_fingerprint.py``),
+which adds the new version's hashes to ``CHARACTERISATIONS``; never re-pin a
+hash here to make a refactor pass.
 """
 
 import dataclasses
@@ -30,6 +31,7 @@ from typing import Any, Dict, List, Tuple
 
 import pytest
 
+from backend.app.core.stats_engine import ENGINE_VERSION
 from backend.app.services import analysis_service as analysis_module
 from backend.app.services.analysis_service import AnalysisService
 
@@ -85,16 +87,35 @@ _FIXTURES: Dict[str, _Fixture] = {
     ),
 }
 
-#: sha256 of the canonical ``/results`` output per (fixture, confidence
-#: level, correction method), recorded from the code before #404.
-CHARACTERISATION: Dict[str, str] = {
-    "three_variants-0.95-none": "69488213db4a93d25b2ca00c0ed2f52674c24691fd8607c91ab567d5b07aed01",
-    "three_variants-0.95-bonferroni": "d647c4f2971c0897b04bdb83597f7392ae737a5f723ccf467c888e78d18b647b",
-    "three_variants-0.95-benjamini_hochberg": "bf8ea4c8179c1931fe7804637c701d1deabb54ec5f1e58915bfecd58b026df5b",
-    "three_variants-0.9-benjamini_hochberg": "f0506143e40ae69169850edc39d74df4133607888f58cff64109423c124906e3",
-    "edges-0.95-none": "9a53a0f0de2c4f0c65768c7b07365d989f0e19c395b59462ab26440ae33fa39a",
-    "edges-0.95-bonferroni": "1737bfaf7c8f9692b899134c043e6d13032f45177cd5eb8dbfeff79da9c0326a",
+#: sha256 of the canonical ``/results`` output per ``ENGINE_VERSION`` and per
+#: (fixture, confidence level, correction method).  1.1.0 was recorded from
+#: the code before #404.  1.2.0 is #454: the interval multiplier is
+#: ``norm.ppf(1 - (1 - level) / 2)`` instead of a fixed 1.96 (which also moves
+#: the 95% intervals, in about the sixth significant digit), and the legacy
+#: ``is_significant`` is decided at ``1 - level`` instead of 0.05.  The rules
+#: are the fingerprints': never edit the hashes of a released version.
+CHARACTERISATIONS: Dict[str, Dict[str, str]] = {
+    "1.1.0": {
+        "three_variants-0.95-none": "69488213db4a93d25b2ca00c0ed2f52674c24691fd8607c91ab567d5b07aed01",
+        "three_variants-0.95-bonferroni": "d647c4f2971c0897b04bdb83597f7392ae737a5f723ccf467c888e78d18b647b",
+        "three_variants-0.95-benjamini_hochberg": "bf8ea4c8179c1931fe7804637c701d1deabb54ec5f1e58915bfecd58b026df5b",
+        "three_variants-0.9-benjamini_hochberg": "f0506143e40ae69169850edc39d74df4133607888f58cff64109423c124906e3",
+        "edges-0.95-none": "9a53a0f0de2c4f0c65768c7b07365d989f0e19c395b59462ab26440ae33fa39a",
+        "edges-0.95-bonferroni": "1737bfaf7c8f9692b899134c043e6d13032f45177cd5eb8dbfeff79da9c0326a",
+    },
+    "1.2.0": {
+        "three_variants-0.95-none": "d897bf322f4fe5cca38d5e9acc0a43e42477e2a6282ba57ea31c3b7c3902c76d",
+        "three_variants-0.95-bonferroni": "1485e9cf00349a258ec93da464d6b80b791cf06d7c9e20483eb3b50237c74303",
+        "three_variants-0.95-benjamini_hochberg": "bcb71934fe55430b61665e883f0079f84e2133565c25f4f0003ce37f4be62b25",
+        "three_variants-0.9-benjamini_hochberg": "9dc29fe6a32a100937e291cdb811fb7ab614c73cca809f13e89395655361331f",
+        "edges-0.95-none": "8a393ac383215c05be91713bf0994289b03126f806ee3ff7b4ba27e4c1496e88",
+        "edges-0.95-bonferroni": "d823df91499efad14663e562d09f0ef215926ca87b2746d9148846f1dcb66979",
+    },
 }
+
+#: The cases pinned for the running engine.  The same six keys in every
+#: version, so a version with no entry fails every case rather than none.
+CHARACTERISATION: Dict[str, str] = CHARACTERISATIONS["1.1.0"]
 
 
 def _canonical(value: Any) -> Any:
@@ -235,11 +256,21 @@ def _fingerprint(output: Dict[str, Any]) -> Tuple[str, str]:
     return hashlib.sha256(payload.encode("utf-8")).hexdigest(), payload
 
 
+def test_every_version_pins_the_same_cases():
+    assert all(
+        set(pins) == set(CHARACTERISATION) for pins in CHARACTERISATIONS.values()
+    )
+
+
 @pytest.mark.parametrize("case", sorted(CHARACTERISATION))
 def test_binomial_metric_result_characterisation(case, monkeypatch):
+    assert ENGINE_VERSION in CHARACTERISATIONS, (
+        f"ENGINE_VERSION {ENGINE_VERSION} has no pinned /results "
+        "characterisation; see this module's docstring."
+    )
     fixture_name, confidence, correction = case.split("-")
     output = results_output(fixture_name, float(confidence), correction, monkeypatch)
     actual, payload = _fingerprint(output)
-    assert actual == CHARACTERISATION[case], (
+    assert actual == CHARACTERISATIONS[ENGINE_VERSION][case], (
         f"/results output changed for {case}: {actual}\n{payload}"
     )

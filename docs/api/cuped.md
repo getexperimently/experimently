@@ -133,7 +133,7 @@ effect on the experiment's `Checkout Completion` metric. The full response:
   "computed_at": "2026-09-26T22:54:12.480010+00:00",
   "seed": null,
   "n_samples": null,
-  "engine_version": "1.1.0",
+  "engine_version": "1.2.0",
   "analysis_status": "beta",
   "analysis_notice": "Beta: the covariate is not yet a pre-experiment metric, so variance_reduction_pct is close to 0 and the adjusted estimate is close to the unadjusted one. https://github.com/getexperimently/experimently/issues/217"
 }

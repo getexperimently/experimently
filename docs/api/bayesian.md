@@ -188,7 +188,7 @@ prior. With traffic, the full response looks like this; the numbers are illustra
   ],
   "seed": 1873460932,
   "n_samples": 100000,
-  "engine_version": "1.1.0"
+  "engine_version": "1.2.0"
 }
 ```
 
