@@ -42,13 +42,15 @@ from backend.app.services.sequential_testing_service import SequentialTestingSer
 pytestmark = pytest.mark.unit
 
 #: sha256 of the canonical outputs below, per engine version.  1.0.0 was never
-#: fingerprinted; 1.1.0 is the first version this test pins.  1.2.0 (#454)
-#: moved only the proportion path's interval multiplier and significance
-#: level, which ``test_sufficient_stats_fingerprint.py`` pins; nothing in this
-#: dataset changed, so its hash is 1.1.0's.
+#: fingerprinted; 1.1.0 is the first version this test pins.  1.2.0 carries
+#: two changes released together: #454 moved the proportion path's interval
+#: multiplier and significance level (pinned by
+#: ``test_sufficient_stats_fingerprint.py``, not by this dataset), and #231
+#: replaced the sequential confidence sequence with the inverted mSPRT, which
+#: moves the ``cs`` and ``analysis`` outputs below.
 ENGINE_FINGERPRINTS: Dict[str, str] = {
     "1.1.0": "2feed80e7e305c3c8d0b183e1f2905799e8af73b34aa674cd358fa5948d2f089",
-    "1.2.0": "2feed80e7e305c3c8d0b183e1f2905799e8af73b34aa674cd358fa5948d2f089",
+    "1.2.0": "a1b39b9e82d8a46ab3c3c6ec86e37d0401c66d27a03a3dc8751cc5ca1eca9aba",
 }
 
 # Two ids where the control sorts AFTER the treatment, so an engine that

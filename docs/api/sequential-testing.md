@@ -35,6 +35,24 @@ The `always_valid_p_value` can be interpreted like a standard p-value at any poi
 
 A confidence sequence is a confidence interval that is valid at every sample size simultaneously. The interval shrinks as more data is collected. Use this when you want a continuous view of the effect size range, not just a stop/continue decision.
 
+It is the same mSPRT turned into an interval (the normal-mixture confidence sequence
+of Johari et al. 2017 and Howard et al. 2021), on the difference in conversion rates
+(treatment minus control), with the same alpha and `tau_squared`:
+
+```text
+estimate ± sqrt( V (V + τ²) / τ² · (2 ln(1/α) + ln((V + τ²) / V)) )
+```
+
+where V is the variance of the estimated difference. Because the interval and the
+stop decision share V, τ² and α, they cannot disagree: 0 is outside the interval
+exactly when `can_stop` is `true`. At a 10% conversion rate, α = 0.05 and the default
+τ² = 0.001, the half-width is about 0.041 at 1,000 users per arm, 0.0136 at 10,000
+and 0.00055 at 10 million. Early on it is wider than a fixed-horizon interval: that
+is the price of being valid however often you look. While an arm has no users, or
+the estimated variance is zero (within each arm every user has the same outcome),
+nothing bounds the effect and the interval is `[-1, 1]`, the whole range of a
+difference in rates; `can_stop` is then `false`.
+
 ### Alpha Spending (not computed yet)
 
 A group-sequential design with planned interim analyses (O'Brien-Fleming or Pocock
@@ -139,20 +157,20 @@ asks for α = 0.01, so its boundary is `100.0`. A full response, abridged:
 {
   "method": "msprt",
   "msprt_result": {
-    "lambda_ratio": 5.59,
-    "always_valid_p_value": 0.179,
+    "lambda_ratio": 5.73,
+    "always_valid_p_value": 0.174,
     "can_stop": false,
     "evidence_strength": "inconclusive",
     "boundary": 20.0
   },
   "confidence_sequence": {
-    "lower": -0.0687,
-    "upper": 0.0869,
-    "width": 0.1556,
+    "lower": -0.0015,
+    "upper": 0.0215,
+    "width": 0.0230,
     "sample_size": 30000
   },
   "evidence_trajectory": [
-    {"sample_size": 30000, "lambda_ratio": 5.59, "always_valid_p_value": 0.179, "can_stop": false}
+    {"sample_size": 30000, "lambda_ratio": 5.73, "always_valid_p_value": 0.174, "can_stop": false}
   ],
   "alpha_spending": [],
   "long_running_risk": {
@@ -165,11 +183,12 @@ asks for α = 0.01, so its boundary is `100.0`. A full response, abridged:
   "recommended_action": "continue",
   "at_risk": false,
   "analysis_status": "beta",
-  "analysis_notice": "Beta: the stop/continue decision is mSPRT alone, at the significance level shown by the boundary (1/alpha). alpha_spending is always empty: the planned-looks (alpha-spending) table is not computed yet. The confidence sequence is being corrected (#231)."
+  "analysis_notice": "Beta: the stop/continue decision is mSPRT alone, at the significance level shown by the boundary (1/alpha). alpha_spending is always empty: the planned-looks (alpha-spending) table is not computed yet. https://github.com/getexperimently/experimently/issues/232"
 }
 ```
 
-`analysis_status` is `"beta"` while part of the analysis is still being corrected, and
+`analysis_status` is `"beta"` while part of the analysis is not computed yet (here the
+alpha-spending table), and
 `analysis_notice` then says what; when the status is `"ga"` the notice is `null`. If the
 experiment's method is stored as `always_valid`, the notice adds that it is an alias of
 `msprt`.

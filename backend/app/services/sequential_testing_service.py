@@ -236,8 +236,26 @@ class SequentialTestingService:
         """
         Compute an always-valid confidence interval (confidence sequence).
 
-        Uses the mSPRT mixing parameter to construct a CI that remains
-        valid under continuous monitoring.
+        The interval is the inversion of the same normal-mixture mSPRT that
+        ``compute_msprt`` runs (Johari et al. 2017; Howard et al. 2021): it is
+        every effect delta for which the mixture likelihood ratio of the data
+        against delta stays below 1/alpha.  With the plug-in variance V of the
+        difference in proportions and the mixing variance tau^2 that gives
+
+            delta_hat +/- sqrt( V (V + tau^2) / tau^2
+                                * (2 ln(1/alpha) + ln((V + tau^2) / V)) )
+
+        Because V and tau^2 are the ones ``compute_msprt`` uses, 0 lies
+        outside this interval exactly when Lambda >= 1/alpha, i.e. exactly when
+        ``can_stop`` is true.  The half-width falls like sqrt(V log(1/V)), so
+        the interval keeps narrowing as data arrives.
+
+        When there is no data in an arm (n = 0) or the plug-in variance is 0
+        (within each arm, all 0s or all 1s), nothing bounds the effect: the
+        interval is the whole range a difference in proportions can take,
+        [-1, 1].
+        ``compute_msprt`` reports Lambda = 1 (cannot stop) in the same cases,
+        so the two still agree.
 
         Args:
             control_successes: Number of successes in control group.
@@ -251,14 +269,15 @@ class SequentialTestingService:
             ConfidenceSequence with lower, upper, width, and sample_size.
         """
         sample_size = control_total + treatment_total
+        unbounded = ConfidenceSequence(
+            lower=-1.0,
+            upper=1.0,
+            width=2.0,
+            sample_size=sample_size,
+        )
 
         if control_total == 0 or treatment_total == 0:
-            return ConfidenceSequence(
-                lower=-1.0,
-                upper=1.0,
-                width=2.0,
-                sample_size=sample_size,
-            )
+            return unbounded
 
         p_c = control_successes / control_total
         p_t = treatment_successes / treatment_total
@@ -266,12 +285,11 @@ class SequentialTestingService:
 
         V_n = p_c * (1 - p_c) / control_total + p_t * (1 - p_t) / treatment_total
 
-        # rho = sqrt(V_n + tau^2), the effective standard deviation under the
-        # mixture distribution
-        rho = math.sqrt(V_n + tau_squared)
+        if V_n <= 0:
+            # ln((V + tau^2) / V) is infinite: no finite interval.
+            return unbounded
 
-        # Approximate margin: rho * sqrt(2 * log(1/alpha))
-        margin = rho * math.sqrt(2.0 * math.log(1.0 / alpha))
+        margin = self.confidence_sequence_half_width(V_n, tau_squared, alpha)
 
         lower = delta_hat - margin
         upper = delta_hat + margin
@@ -282,6 +300,22 @@ class SequentialTestingService:
             upper=upper,
             width=width,
             sample_size=sample_size,
+        )
+
+    @staticmethod
+    def confidence_sequence_half_width(
+        variance: float, tau_squared: float, alpha: float
+    ) -> float:
+        """Half-width of the normal-mixture confidence sequence, for V > 0.
+
+        sqrt( V (V + tau^2) / tau^2 * (2 ln(1/alpha) + ln((V + tau^2) / V)) ).
+        """
+        v_plus_tau = variance + tau_squared
+        return math.sqrt(
+            variance
+            * v_plus_tau
+            / tau_squared
+            * (2.0 * math.log(1.0 / alpha) + math.log(v_plus_tau / variance))
         )
 
     def compute_evidence_trajectory(

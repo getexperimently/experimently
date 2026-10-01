@@ -21,6 +21,9 @@ WORKFLOWS = REPO_ROOT / ".github" / "workflows"
 
 UNIT = "backend/tests/unit/infrastructure"
 CDK = "infrastructure/tests"
+#: The statistical gates (#231 and the D36 results-correctness work): a skipped
+#: gate looks exactly like a passing one.
+STATS = "backend/tests/unit/stats_validation"
 
 
 def _report(tmp_path: Path, cases: str) -> Path:
@@ -100,6 +103,7 @@ def _job_steps(workflow: str, job_name: str) -> list[dict]:
     "workflow, job_name, scope",
     [
         ("pr-qa-gate.yml", "Unit Tests", UNIT),
+        ("pr-qa-gate.yml", "Unit Tests", STATS),
         ("infrastructure-tests.yml", "CDK Stack Tests (Python)", CDK),
     ],
 )
