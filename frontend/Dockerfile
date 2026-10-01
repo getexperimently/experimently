@@ -156,6 +156,11 @@ LABEL org.opencontainers.image.title="Experimently Dashboard" \
 ENV API_UPSTREAM=http://api:8000
 
 USER root
+# Take Alpine's security fixes at build time: the base image is rebuilt on its
+# own schedule, and Trivy fails the scan on any HIGH with a fix available
+# (pcre2 10.48-r0 -> 10.49-r0 was the first). The API image does the same with
+# apt-get upgrade.
+RUN apk upgrade --no-cache
 # The unprivileged image ships a default server on 8080; ours replaces it via
 # the template rendered by docker-entrypoint.sh.
 RUN rm -f /etc/nginx/conf.d/default.conf \
