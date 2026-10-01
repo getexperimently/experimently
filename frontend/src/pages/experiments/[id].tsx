@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/router';
 import { PageTitle } from '@/components/PageTitle';
+import { TargetingSection } from '@/components/experiments/TargetingSection';
 import WarehouseAnalysisSection from '@modules/components/warehouse/runs/WarehouseAnalysisSection';
 import { useAuth } from '@/contexts/AuthContext';
 import { isApiError } from '@/services/api';
@@ -462,6 +463,15 @@ export default function ExperimentDetailPage() {
             )}
           </section>
         </div>
+
+        <TargetingSection
+          experiment={experiment}
+          mayChange={mayChange}
+          role={user?.role}
+          onPause={() => onActionClick('pause')}
+          pauseBusy={pendingAction === 'pause'}
+          onSaved={setExperiment}
+        />
 
         {/* Warehouse analysis (beta): the `warehouse` module; renders nothing without it. */}
         <WarehouseAnalysisSection experiment={experiment} />
