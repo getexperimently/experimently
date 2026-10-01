@@ -75,3 +75,25 @@ def test_core_and_full_both_inherit_the_runtime_stage():
     parents = {name: base for base, name in froms}
     assert parents.get("core") == "runtime", parents
     assert parents.get("full") == "runtime", parents
+
+
+WEB_DOCKERFILE = REPO_ROOT / "frontend" / "Dockerfile"
+
+
+@pytest.mark.unit
+@pytest.mark.regression
+def test_web_runtime_stage_upgrades_alpine_packages():
+    """The dashboard image's runtime stage (nginx on Alpine) runs ``apk upgrade``.
+
+    Same reason as the API image: the base lags Alpine's security releases, and
+    the scan fails on any HIGH with a fix available until the image asks for it.
+    """
+    runs = [
+        i
+        for i in _stage_instructions(WEB_DOCKERFILE.read_text(), "runtime")
+        if i.upper().startswith("RUN ")
+    ]
+    assert any("apk upgrade" in r for r in runs), (
+        "the dashboard image's runtime stage must run `apk upgrade --no-cache`, so "
+        "the shipped image carries Alpine's security fixes even when the base lags"
+    )
