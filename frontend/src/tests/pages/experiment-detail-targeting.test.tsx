@@ -16,7 +16,8 @@ import {
 } from '@/components/experiments/TargetingSection';
 import { ApiError, ApiFetchOptions, apiFetch } from '@/services/api';
 import { Experiment } from '@/types/experiments';
-import { isEditableTargeting, isNoRules } from '@/utils/experimentTargeting';
+import { isEditableTargeting, isNoRules, targetingPayload } from '@/utils/experimentTargeting';
+import { jsonToRules } from '@/utils/targeting';
 import { apiError, makeRouter, routedApi } from './helpers/apiMock';
 
 jest.mock('@/services/api', () => ({
@@ -158,6 +159,75 @@ describe('which stored values the builder may edit', () => {
     expect(isNoRules({ logical_operator: 'AND', groups: [] })).toBe(true);
     expect(isNoRules(FLAT_RULES)).toBe(false);
     expect(isNoRules({ rules: [] })).toBe(false);
+  });
+});
+
+describe('an untouched open and save keeps what is stored', () => {
+  const cond = (attribute: string, operator: string, value: unknown) => ({ attribute, operator, value });
+  const one = (condition: Record<string, unknown>, op: string | undefined = 'AND') => {
+    const group: Record<string, unknown> = { conditions: [condition] };
+    const rules: Record<string, unknown> = { groups: [group] };
+    if (op !== undefined) {
+      group.logical_operator = op;
+      rules.logical_operator = op;
+    }
+    return rules;
+  };
+
+  // Every row the gate calls editable must come back exactly as stored.
+  it.each([
+    ['is_null with null', one(cond('user.plan', 'is_null', null))],
+    ['is_not_null with null', one(cond('user.plan', 'is_not_null', null))],
+    ['equals false', one(cond('session.new_user', 'equals', false))],
+    ['equals 0', one(cond('user.age', 'equals', 0))],
+    ['equals an empty string', one(cond('user.plan', 'equals', ''))],
+    ['in a list', one(cond('user.country', 'in', ['US', 'CA']))],
+    ['not_in a list', one(cond('user.country', 'not_in', ['DE']))],
+    ['in a comma-separated string', one(cond('user.country', 'in', 'US, CA'))],
+    ['equals text with commas', one(cond('user.email', 'equals', 'a,b, c'))],
+    ['OR at both levels', one(cond('user.plan', 'equals', 'pro'), 'OR')],
+    [
+      'two groups, AND of OR',
+      {
+        logical_operator: 'AND',
+        groups: [
+          { logical_operator: 'OR', conditions: [cond('user.plan', 'equals', 'pro'), cond('user.age', 'greater_than', 18)] },
+          { logical_operator: 'AND', conditions: [cond('app.version', 'semver_gte', '2.0.0')] },
+        ],
+      },
+    ],
+  ])('%s', (_name, stored) => {
+    expect(isEditableTargeting(stored)).toBe(true);
+    expect(targetingPayload(jsonToRules(stored))).toEqual(stored);
+  });
+
+  // Normalisations the API evaluates identically, each justified:
+  it('an absent logical_operator comes back as AND (the API reads an absent one as AND)', () => {
+    const stored = one(cond('user.plan', 'equals', 'pro'), undefined);
+    expect(isEditableTargeting(stored)).toBe(true);
+    expect(targetingPayload(jsonToRules(stored))).toEqual(one(cond('user.plan', 'equals', 'pro'), 'AND'));
+  });
+
+  it('group and condition ids are dropped (the API reads no id below the top level)', () => {
+    expect(isEditableTargeting(BUILDER_RULES)).toBe(true);
+    expect(targetingPayload(jsonToRules(BUILDER_RULES))).toEqual({
+      logical_operator: 'AND',
+      groups: [{ logical_operator: 'AND', conditions: [cond('user.country', 'in', ['US', 'CA'])] }],
+    });
+  });
+
+  // Values the builder would change are not offered for editing at all.
+  it.each([
+    ['equals with null', one(cond('user.plan', 'equals', null))],
+    ['contains with null', one(cond('user.plan', 'contains', null))],
+    ['starts_with with null', one(cond('user.plan', 'starts_with', null))],
+    ['in with null', one(cond('user.country', 'in', null))],
+    ['is_null with an empty string', one(cond('user.plan', 'is_null', ''))],
+    ['is_null with no value key', one({ attribute: 'user.plan', operator: 'is_null' })],
+    ['lower-case and (the AND/OR toggle cannot show it)', one(cond('user.plan', 'equals', 'pro'), 'and')],
+    ['lower-case or', one(cond('user.plan', 'equals', 'pro'), 'or')],
+  ])('%s is not editable', (_name, stored) => {
+    expect(isEditableTargeting(stored)).toBe(false);
   });
 });
 

@@ -33,9 +33,22 @@ function builderLogicalOperator(value: unknown): boolean {
   return value === undefined || (typeof value === 'string' && BUILDER_LOGICAL_OPERATORS.has(value));
 }
 
-/** A value the builder's text input shows as stored: a scalar, null, or a list of strings. */
-function builderValue(value: unknown): boolean {
-  if (value === null || ['string', 'number', 'boolean'].includes(typeof value)) return true;
+/** The operators that take no value; the builder hides the value input and stores null. */
+const NO_VALUE_OPERATORS = new Set(['is_null', 'is_not_null']);
+
+/**
+ * A value the builder keeps exactly as stored, for this operator.
+ *
+ * `is_null` / `is_not_null`: only null (the builder stores null for them and
+ * `targetingPayload` sends null back). Any other operator: a string, number,
+ * boolean or list of strings, never null, because `jsonToRules` turns null
+ * into "" and the engine does not treat the two alike (`equals` with a
+ * missing attribute matches null and not ""; `contains` and the other text
+ * operators never match null and match everything with "").
+ */
+function builderValue(operator: string, value: unknown): boolean {
+  if (NO_VALUE_OPERATORS.has(operator)) return value === null;
+  if (['string', 'number', 'boolean'].includes(typeof value)) return true;
   return Array.isArray(value) && value.every((item) => typeof item === 'string');
 }
 
@@ -65,7 +78,7 @@ export function isNoRules(value: Stored): boolean {
  * logical_operator, conditions} and condition keys within {id, attribute,
  * operator, value}; where every logical operator is AND or OR (the builder
  * has no NOT), every operator is one the builder offers for that attribute,
- * and every value is one its text input shows as stored.
+ * and every value is one it keeps exactly (see `builderValue`).
  *
  * Not editable, among others: a top-level `rollout_percentage` or `id` (the
  * API accepts them, `jsonToRules` drops them), the native `{"rules": [...]}`
@@ -84,7 +97,7 @@ export function isEditableTargeting(value: Stored): boolean {
       const { attribute, operator, value: conditionValue } = condition;
       if (typeof attribute !== 'string' || typeof operator !== 'string') return false;
       if (!getOperatorsForAttribute(attribute).includes(operator as OperatorType)) return false;
-      return builderValue(conditionValue);
+      return builderValue(operator, conditionValue);
     });
   });
 }
@@ -109,10 +122,26 @@ export function combineWord(logicalOperator: unknown): 'all' | 'any' {
  * What the page sends as `targeting_rules` for the builder's rules: the
  * dashboard shape without the builder's ids, or `{}` when there are no
  * groups (no rules, everyone is eligible).
+ *
+ * `is_null` / `is_not_null` conditions are sent with `value: null`, as stored:
+ * `jsonToRules` reads null as "" for the text input, and this puts it back.
+ * So opening and saving untouched rules sends what was stored, apart from two
+ * normalisations the API reads identically: the builder's group and condition
+ * ids are dropped (nothing below the top level reads an id), and an absent
+ * logical operator is written as AND (the API's default).
  */
 export function targetingPayload(rules: TargetingRules): Record<string, unknown> {
   if (rules.groups.length === 0) return {};
-  return rulesToJson(rules) as unknown as Record<string, unknown>;
+  const json = rulesToJson(rules);
+  return {
+    ...json,
+    groups: json.groups.map((group) => ({
+      ...group,
+      conditions: group.conditions.map((condition) =>
+        NO_VALUE_OPERATORS.has(condition.operator) ? { ...condition, value: null } : condition,
+      ),
+    })),
+  };
 }
 
 /** What a failed save shows: a heading, and one line per targeting problem when the API named them. */
@@ -149,6 +178,9 @@ function targetingProblems(detail: unknown): string[] {
  *   names the state, one for the role names the role, so the page does not
  *   guess which it was.
  * - anything else: the message the API client built.
+ *
+ * Deliberately separate from `describeCreateError`, whose 403 and 409 copy is
+ * about creating an experiment (the role to create, a key already taken).
  */
 export function describeTargetingSaveError(err: unknown): TargetingSaveError {
   if (err instanceof ApiError && err.status === 422) {
