@@ -519,3 +519,78 @@ class TestAuditLogsAPI:
 def test_can_read_all_audit_logs_follows_role_table(role, superuser, expected):
     user = User(id=uuid4(), role=role, is_superuser=superuser)
     assert can_read_all_audit_logs(user) is expected
+
+
+# ---------------------------------------------------------------------------
+# #529: a refused entity/action filter names the accepted values and never
+# repeats what was sent, as the schema validators do since #528.
+# ---------------------------------------------------------------------------
+
+_SENT = "zz-not-a-type-529"
+_ENTITY_VALUES = [e.value for e in EntityType]
+_ACTION_VALUES = [a.value for a in ActionType]
+
+
+@contextmanager
+def _as_admin():
+    user = User(
+        id=uuid4(),
+        username="admin529",
+        email="admin529@example.com",
+        hashed_password="$2b$12$EixZaYVK1fsbw1ZfbX3OXePaWxn96p36WQoeG6Lruj3vjPGga31lW",
+        role=UserRole.ADMIN,
+        is_superuser=False,
+    )
+
+    def get_db():
+        yield Mock(spec=Session)
+
+    app.dependency_overrides[deps.get_current_user] = lambda: user
+    app.dependency_overrides[deps.get_current_active_user] = lambda: user
+    app.dependency_overrides[deps.get_db] = get_db
+    try:
+        yield TestClient(app, raise_server_exceptions=False)
+    finally:
+        app.dependency_overrides = {}
+
+
+@pytest.mark.regression
+@pytest.mark.parametrize(
+    "url, accepted, label",
+    [
+        (f"/api/v1/audit-logs/?entity_type={_SENT}", _ENTITY_VALUES, "entity type"),
+        (f"/api/v1/audit-logs/?action_type={_SENT}", _ACTION_VALUES, "action type"),
+        (f"/api/v1/audit-logs/entity/{_SENT}/{uuid4()}", _ENTITY_VALUES, "entity type"),
+    ],
+    ids=["list-entity_type", "list-action_type", "entity-history-path"],
+)
+def test_refused_audit_filter_names_accepted_values_not_the_sent_one(
+    url, accepted, label
+):
+    with _as_admin() as client:
+        response = client.get(url, headers={"Authorization": "Bearer t"})
+
+    assert response.status_code == 400
+    detail = response.json()["detail"]
+    assert _SENT not in detail
+    assert detail == f"Invalid {label}; expected one of {accepted}"
+
+
+@pytest.mark.regression
+@pytest.mark.parametrize(
+    "raw",
+    ["%ED%A0%80", "%FF%FE", "%00", "x" * 20000],
+    ids=["surrogate-bytes", "invalid-utf8", "nul", "20k-chars"],
+)
+@pytest.mark.parametrize("where", ["entity_type", "action_type", "path"])
+def test_undecodable_or_long_audit_filter_answers_400(raw, where):
+    if where == "path":
+        url = f"/api/v1/audit-logs/entity/{raw}/{uuid4()}"
+    else:
+        url = f"/api/v1/audit-logs/?{where}={raw}"
+    with _as_admin() as client:
+        response = client.get(url, headers={"Authorization": "Bearer t"})
+
+    assert response.status_code == 400, response.text[:300]
+    assert raw not in response.text
+    assert "�" not in response.json()["detail"]
