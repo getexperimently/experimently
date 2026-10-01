@@ -10,6 +10,14 @@ longer applies and release-please can generate this file directly. Until it
 does, entries below 0.2.2 are hand-written and the links in them are the
 reason why.
 
+## [0.16.1](https://github.com/getexperimently/experimently/compare/v0.16.0...v0.16.1) (2026-10-01)
+
+
+### Bug Fixes
+
+* **api:** ETL job and crawler failures answer a fixed message with the request ID ([#563](https://github.com/getexperimently/experimently/issues/563)) ([cb791e2](https://github.com/getexperimently/experimently/commit/cb791e2f8d46f419379df33394272fd0db7e828b))
+* **api:** wizard steps and experiment numbers out of range answer 422 ([#562](https://github.com/getexperimently/experimently/issues/562)) ([00e6dc7](https://github.com/getexperimently/experimently/commit/00e6dc716f4f00893f9e9a7d8282e3b650799d63))
+
 ## [0.16.0](https://github.com/getexperimently/experimently/compare/v0.15.0...v0.16.0) (2026-10-01)
 
 
