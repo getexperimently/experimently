@@ -39,6 +39,11 @@ class BayesianConfig(BaseModel):
         credible_level: HDI credible interval level in (0, 1), default 0.95.
     """
 
+    # Every number must be finite: the config is stored as JSONB, which cannot
+    # hold NaN or an infinity, so those answer 422 rather than reaching the
+    # database (#559).
+    model_config = ConfigDict(allow_inf_nan=False)
+
     prior_family: PriorFamily = PriorFamily.BETA
     alpha: float = Field(1.0, gt=0, description="Prior alpha hyperparameter (> 0)")
     beta: float = Field(1.0, gt=0, description="Prior beta hyperparameter (> 0)")

@@ -131,6 +131,8 @@ NOT_DOCS_TESTS = {
     # docs/api/ snapshots and frontend/src/tests/fixtures/openapi.json. None
     # of those, nor the config, is docs-only (same reason as above).
     "backend/tests/smoke/test_openapi_release_rewrite.py": "docs/api only",
+    # Reads only docs/api/endpoints.md (same reason as above).
+    "backend/tests/unit/api/test_wizard_docs_routes.py": "docs/api only",
     # Reads only docs/api/warehouse-analytics.md (same reason as above).
     "modules/backend/tests/unit/test_warehouse_docs_availability.py": "docs/api only",
     # Names docs/api/stability.md in a docstring (the claim its header test

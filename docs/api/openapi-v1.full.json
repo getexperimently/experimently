@@ -8855,6 +8855,7 @@
           "minimum_sample_size": {
             "default": 100,
             "description": "Minimum sample size for statistical significance",
+            "maximum": 2147483647,
             "minimum": 10,
             "title": "Minimum Sample Size",
             "type": "integer"
@@ -32986,7 +32987,7 @@
     "/api/v1/wizard/drafts/{draft_id}/step": {
       "put": {
         "deprecated": true,
-        "description": "**Deprecated.** The dashboard does not use the wizard API; it may be removed in a later release. Drafts are per user and held in the API process's memory.\n\nSubmit data for the current wizard step and advance to the next step. The draft accumulates data across all steps. `data` may only contain step fields (`experiment_type`, `hypothesis`, `primary_metric_id`, `guardrail_metric_ids`, `targeting_rules`, `baseline_rate`, `mde`, `name`, `description`); any other key answers 422 and the draft is unchanged. A draft that does not exist or belongs to another user answers 404.",
+        "description": "**Deprecated.** The dashboard does not use the wizard API; it may be removed in a later release. Drafts are per user and held in the API process's memory.\n\nSubmit data for the current wizard step and advance to the next step. The draft accumulates data across all steps. `data` may only contain step fields (`experiment_type`, `hypothesis`, `primary_metric_id`, `guardrail_metric_ids`, `targeting_rules`, `baseline_rate`, `mde`, `name`, `description`); any other key, or a step field of the wrong type, answers 422 and the draft is unchanged. A draft that does not exist or belongs to another user answers 404.",
         "operationId": "update_draft_step_api_v1_wizard_drafts__draft_id__step_put",
         "parameters": [
           {

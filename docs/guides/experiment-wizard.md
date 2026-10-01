@@ -163,7 +163,11 @@ Save one step's data in the draft, and move the draft to the next step. The body
 step and its data, as for validation. Fields the step doesn't send are kept. `data` may
 only contain step fields (`experiment_type`, `hypothesis`, `primary_metric_id`,
 `guardrail_metric_ids`, `targeting_rules`, `baseline_rate`, `mde`, `name`, `description`);
-any other key answers `422` and the draft is left unchanged.
+any other key answers `422` and the draft is left unchanged. So does a step field of the
+wrong type: `guardrail_metric_ids` takes a list of strings, `targeting_rules` a list of
+objects, `baseline_rate` and `mde` numbers, and the other fields strings (any of them may
+be `null`). The answer names the field, for example
+`Step field 'hypothesis' must be a string or null.`
 
 **Step 1: type.**
 

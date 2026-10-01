@@ -700,14 +700,35 @@ class TestFeatureFlagEndpoints:
         db_session.delete(api_key)
         db_session.commit()
 
+    @pytest.mark.regression
     def test_list_feature_flags(
         self,
         client: TestClient,
         db_session: Session,
         mock_auth,
-        test_feature_flag: FeatureFlag,
+        test_user: User,
     ):
-        """Test listing feature flags."""
+        """Test listing feature flags.
+
+        Only the flags this test creates are listed, found by a key prefix of
+        its own: other tests leave flags in the shared database, some with keys
+        the list response refuses (#554).
+        """
+        db_session.execute(text("SET search_path TO test_experimentation"))
+        db_session.commit()
+        prefix = f"list-{uuid.uuid4().hex[:10]}-"
+        created = [
+            FeatureFlag(
+                key=f"{prefix}{suffix}",
+                name=f"List {suffix}",
+                status=FeatureFlagStatus.INACTIVE.value,
+                owner_id=test_user.id,
+                rollout_percentage=50,
+            )
+            for suffix in ("a", "b")
+        ]
+        db_session.add_all(created)
+        db_session.commit()
 
         def override_get_db():
             try:
@@ -717,12 +738,16 @@ class TestFeatureFlagEndpoints:
 
         app.dependency_overrides[deps.get_db] = override_get_db
 
+        def own_flags():
+            return db_session.query(FeatureFlag).filter(
+                FeatureFlag.key.startswith(prefix)
+            )
+
         # Setup mock crud functions
         def mock_get_multi(*args, **kwargs):
             # Convert the database models to FeatureFlagReadExtended compatible format
-            flags = db_session.query(FeatureFlag).all()
             formatted_flags = []
-            for flag in flags:
+            for flag in own_flags().order_by(FeatureFlag.key).all():
                 formatted_flags.append(
                     {
                         "id": str(flag.id),
@@ -744,8 +769,7 @@ class TestFeatureFlagEndpoints:
             return formatted_flags
 
         def mock_count(*args, **kwargs):
-            # Return the count of feature flags
-            return db_session.query(FeatureFlag).count()
+            return own_flags().count()
 
         # Patch the crud functions
         original_get_multi = crud_feature_flag.get_multi
@@ -759,26 +783,17 @@ class TestFeatureFlagEndpoints:
         crud_feature_flag.count_by_owner = mock_count
 
         try:
-            # Ensure we're using the test schema
-            db_session.execute(text("SET search_path TO test_experimentation"))
-            db_session.commit()
-
-            # Merge the test feature flag to ensure it exists in this session
-            db_session.merge(test_feature_flag)
-            db_session.commit()
-
             response = client.get(
                 "/api/v1/feature-flags/", headers={"Authorization": "Bearer test-token"}
             )
 
             assert response.status_code == 200, f"Response: {response.text}"
             data = response.json()
-            assert "items" in data
-            assert data["total"] > 0
-            assert len(data["items"]) > 0
-            # Other test modules leave flags in the shared database, so look the
-            # fixture's flag up by key instead of assuming it is listed first.
-            assert test_feature_flag.key in {item["key"] for item in data["items"]}
+            assert data["total"] == 2
+            assert [item["key"] for item in data["items"]] == [
+                f"{prefix}a",
+                f"{prefix}b",
+            ]
         finally:
             # Restore the original functions
             crud_feature_flag.get_multi = original_get_multi
@@ -788,6 +803,9 @@ class TestFeatureFlagEndpoints:
 
             # Clean up
             app.dependency_overrides.pop(deps.get_db, None)
+            db_session.rollback()
+            own_flags().delete(synchronize_session=False)
+            db_session.commit()
 
     def test_list_feature_flags_with_search(
         self,

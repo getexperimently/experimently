@@ -59,6 +59,12 @@ class MetricType(str, Enum):
     CUSTOM = "custom"  # Custom metric
 
 
+#: The largest value a 32-bit ``INTEGER`` column holds. An integer field stored
+#: in one carries ``le=INT32_MAX``, so a larger value answers 422 instead of
+#: reaching the database (#559).
+INT32_MAX = 2**31 - 1
+
+
 class ScheduleConfig(BaseModel):
     """Configuration for experiment scheduling."""
 
@@ -119,7 +125,10 @@ class MetricBase(BaseModel):
         "average", max_length=50, description="How to aggregate the metric"
     )
     minimum_sample_size: int = Field(
-        100, ge=10, description="Minimum sample size for statistical significance"
+        100,
+        ge=10,
+        le=INT32_MAX,
+        description="Minimum sample size for statistical significance",
     )
     expected_effect: Optional[float] = Field(
         None, description="Expected effect size for power calculations"

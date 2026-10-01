@@ -268,6 +268,143 @@ def test_step_fields_are_still_saved(client):
 
 
 # ---------------------------------------------------------------------------
+# A step value of the wrong type answers 422 and is not stored (#531)
+# ---------------------------------------------------------------------------
+
+# A number that appears nowhere else, so the answer can be searched for it.
+_MARK = 987654321
+_MARK_KEY = "mark-7f3c9e"
+
+# For every step field, values the draft's response model cannot hold. On
+# main each was stored, the PUT answered 500, and so did every later GET.
+WRONG_TYPED = [
+    *[
+        (field, value)
+        for field in (
+            "experiment_type",
+            "hypothesis",
+            "primary_metric_id",
+            "name",
+            "description",
+        )
+        for value in (_MARK, [str(_MARK)], {_MARK_KEY: 1}, True)
+    ],
+    ("guardrail_metric_ids", str(_MARK)),
+    ("guardrail_metric_ids", [_MARK]),
+    ("guardrail_metric_ids", {_MARK_KEY: 1}),
+    ("guardrail_metric_ids", _MARK),
+    ("targeting_rules", str(_MARK)),
+    ("targeting_rules", [_MARK]),
+    ("targeting_rules", [str(_MARK)]),
+    ("targeting_rules", {_MARK_KEY: 1}),
+    ("targeting_rules", _MARK),
+    ("baseline_rate", f"x{_MARK}"),
+    ("baseline_rate", [_MARK]),
+    ("baseline_rate", {_MARK_KEY: 1}),
+    ("baseline_rate", 10**400),
+    ("mde", f"x{_MARK}"),
+    ("mde", [_MARK]),
+    ("mde", {_MARK_KEY: 1}),
+    ("mde", 10**400),
+]
+
+# Values that answered 200 on main, and still must: the type check accepts
+# exactly what the response model accepts.
+STILL_ACCEPTED = [
+    ("experiment_type", None),
+    ("hypothesis", None),
+    ("hypothesis", ""),
+    ("guardrail_metric_ids", []),
+    ("guardrail_metric_ids", ["m1", "m2"]),
+    ("guardrail_metric_ids", None),
+    ("guardrail_metric_ids", {}),
+    ("guardrail_metric_ids", 0),
+    ("guardrail_metric_ids", ""),
+    ("targeting_rules", None),
+    ("targeting_rules", {}),
+    ("targeting_rules", [{"attribute": "country", "value": "DE"}]),
+    ("baseline_rate", "0.5"),
+    ("baseline_rate", True),
+    ("baseline_rate", 1),
+    ("baseline_rate", None),
+    ("mde", "0.1"),
+    ("mde", None),
+]
+
+
+def _case_ids(cases: list) -> list[str]:
+    """``<field>-<n>``: the field and the case's position in the list."""
+    return [f"{cases[n][0]}-{n}" for n in range(len(cases))]
+
+
+def _valid_beside(field: str) -> dict:
+    """A valid step value sent with the wrong one; it must not be stored."""
+    return {"mde": 0.2} if field != "mde" else {"baseline_rate": 0.2}
+
+
+@pytest.mark.regression
+def test_every_step_field_is_probed_with_a_wrong_type():
+    from backend.app.services.experiment_wizard_service import STEP_FIELDS
+
+    assert {field for field, _ in WRONG_TYPED} == STEP_FIELDS
+
+
+@pytest.mark.regression
+@pytest.mark.parametrize(
+    "field, value",
+    WRONG_TYPED,
+    ids=_case_ids(WRONG_TYPED),
+)
+def test_a_wrong_typed_step_value_is_refused_and_not_stored(client, field, value):
+    owner = _user()
+    draft_id = _owner_draft(client, owner)
+    before = _owner_view(client, owner, draft_id)
+
+    _as(owner)
+    client_500 = TestClient(app, raise_server_exceptions=False)
+    response = client_500.put(
+        f"/api/v1/wizard/drafts/{draft_id}/step",
+        json={"step": "targeting", "data": {**_valid_beside(field), field: value}},
+    )
+
+    assert response.status_code == 422, response.text
+    assert response.json() == {
+        "detail": f"Step field '{field}' must be "
+        + {
+            "guardrail_metric_ids": "a list of strings or null",
+            "targeting_rules": "a list of objects or null",
+            "baseline_rate": "a number or null",
+            "mde": "a number or null",
+        }.get(field, "a string or null")
+        + "."
+    }
+    assert str(_MARK) not in response.text and _MARK_KEY not in response.text
+    # Nothing was stored: not the field, not the valid value beside it, and the
+    # step did not advance. The draft still reads back.
+    assert _owner_view(client, owner, draft_id) == before
+
+
+@pytest.mark.regression
+@pytest.mark.parametrize(
+    "field, value",
+    STILL_ACCEPTED,
+    ids=_case_ids(STILL_ACCEPTED),
+)
+def test_values_the_response_model_holds_are_still_accepted(client, field, value):
+    owner = _user()
+    draft_id = _owner_draft(client, owner)
+
+    _as(owner)
+    response = client.put(
+        f"/api/v1/wizard/drafts/{draft_id}/step",
+        json={"step": "targeting", "data": {field: value}},
+    )
+
+    assert response.status_code == 200, response.text
+    assert _owner_view(client, owner, draft_id)["current_step"] == "sample_size"
+
+
+# ---------------------------------------------------------------------------
 # Every wizard operation is marked deprecated
 # ---------------------------------------------------------------------------
 
