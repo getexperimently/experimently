@@ -10,6 +10,32 @@ longer applies and release-please can generate this file directly. Until it
 does, entries below 0.2.2 are hand-written and the links in them are the
 reason why.
 
+## [0.16.0](https://github.com/getexperimently/experimently/compare/v0.15.0...v0.16.0) (2026-10-01)
+
+
+### ⚠ BREAKING CHANGES
+
+* **api:** an experiment's status changes only through start, pause, complete and archive ([#553](https://github.com/getexperimently/experimently/issues/553))
+* **api:** experiment targeting rules are validated on create ([#539](https://github.com/getexperimently/experimently/issues/539))
+* **api:** an experiment's targeting can be changed only while it is draft or paused ([#538](https://github.com/getexperimently/experimently/issues/538))
+
+### Features
+
+* **dashboard:** see and change who can join an experiment ([#556](https://github.com/getexperimently/experimently/issues/556)) ([3572180](https://github.com/getexperimently/experimently/commit/3572180f36d74cfaae38819bbbe37f9aa2e10935))
+
+
+### Bug Fixes
+
+* **api:** an experiment update refuses null for required fields ([#550](https://github.com/getexperimently/experimently/issues/550)) ([be77284](https://github.com/getexperimently/experimently/commit/be772847ca09f3c23d6d86c9d86f629a5cce2446))
+* **api:** an experiment's status changes only through start, pause, complete and archive ([#553](https://github.com/getexperimently/experimently/issues/553)) ([d5fdea5](https://github.com/getexperimently/experimently/commit/d5fdea57c63967cc4f4b12183168bafcd09a40ae))
+* **api:** an experiment's targeting can be changed only while it is draft or paused ([#538](https://github.com/getexperimently/experimently/issues/538)) ([63c4184](https://github.com/getexperimently/experimently/commit/63c4184b2cb4467576c5cac8daf4b6fa7bf28cae))
+* **api:** experiment and results errors answer a fixed message with the request ID ([#545](https://github.com/getexperimently/experimently/issues/545)) ([15ab23b](https://github.com/getexperimently/experimently/commit/15ab23b10457fdc0b1c1590351c415c026c46779))
+* **api:** experiment metric fields over their length answer 422 ([#555](https://github.com/getexperimently/experimently/issues/555)) ([0029f17](https://github.com/getexperimently/experimently/commit/0029f17f59c8c0f0bf70938111335621032a71ef))
+* **api:** experiment metrics keep their type and can be replaced by name ([#561](https://github.com/getexperimently/experimently/issues/561)) ([3a33ddd](https://github.com/getexperimently/experimently/commit/3a33dddc1d6adb9e8e80fc14c00dab9b2052fbcb))
+* **api:** experiment targeting rules are validated on create ([#539](https://github.com/getexperimently/experimently/issues/539)) ([33bd440](https://github.com/getexperimently/experimently/commit/33bd440bdf4ef6156622c9f8855baf6df6409a0d))
+* **api:** SDK routes answer 422 for a NUL or unpaired surrogate in the path ([#548](https://github.com/getexperimently/experimently/issues/548)) ([8ab4df6](https://github.com/getexperimently/experimently/commit/8ab4df6266fb54a55398718d753d0bd0379a56b8))
+* **api:** tracking requests with NUL or unpaired surrogate characters answer 422 ([#546](https://github.com/getexperimently/experimently/issues/546)) ([79e728a](https://github.com/getexperimently/experimently/commit/79e728acbc8280bb0e13c29f046425a555175f8a))
+
 ## [0.15.0](https://github.com/getexperimently/experimently/compare/v0.14.0...v0.15.0) (2026-09-30)
 
 
