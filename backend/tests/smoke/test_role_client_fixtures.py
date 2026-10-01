@@ -52,10 +52,13 @@ ROLE_CLIENT_FIXTURES = frozenset(
         "member_as_written",
         # test_tracking_text_refused.py
         "sdk_client",
+        # test_unexpected_errors_fixed_message.py (core); the modules'
+        # test_workspaces_api.py defines a fixture of the same name.
+        "as_user",
     }
 )
-# Defined under modules/backend/tests, which a core build does not have.
-MODULE_ROLE_CLIENT_FIXTURES = frozenset({"as_user"})  # test_workspaces_api.py
+# Defined only under modules/backend/tests, which a core build does not have.
+MODULE_ROLE_CLIENT_FIXTURES: frozenset[str] = frozenset()
 
 # The module trees are absent from a core build; scanning what exists is right.
 SCAN_ROOTS = ("backend/tests", "modules/backend/tests")
