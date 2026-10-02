@@ -7,9 +7,10 @@ that require superuser privileges.
 
 import json
 import uuid
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from backend.app.api import deps
@@ -21,8 +22,11 @@ from backend.app.api.v1.endpoints.users import (
     refuse_if_email_held,
     refuse_if_username_held,
 )
-from backend.app.models.user import User
+from backend.app.core.config import settings
+from backend.app.models.audit_log import ActionType, AuditLog, EntityType
+from backend.app.models.user import User, UserRole
 from backend.app.schemas.user import (
+    AdminUserPatch,
     UserListResponse,
     UserResponse,
     UserUpdate,
@@ -31,31 +35,71 @@ from backend.app.schemas.user import (
 router = APIRouter()
 
 
+#: The columns ``search`` matches, named one by one. Never build this list from
+#: the model's columns: anything added to ``User`` must not become searchable
+#: without someone deciding it should be (#651).
+USER_SEARCH_COLUMNS = (
+    User.username,
+    User.email,
+    User.first_name,
+    User.last_name,
+)
+
+
 @router.get("/users", response_model=UserListResponse)
 async def list_users(
     db: Session = Depends(deps.get_db),
     current_user: User = Depends(deps.get_current_superuser),
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=100),
+    search: Optional[str] = Query(
+        None,
+        max_length=100,
+        description=(
+            "Case-insensitive substring of the username, email, first name or "
+            "last name. Matched literally (`%`, `_` and `\\` are not "
+            "wildcards). Leading and trailing spaces are ignored; an empty or "
+            "all-space value lists every user."
+        ),
+    ),
 ) -> Any:
     """
     List all users.
 
     This endpoint is only accessible by superusers and returns a list of all users
-    in the system with pagination.
+    in the system with pagination, newest first.
+
+    With `search`, only users whose username, email, first name or last name
+    contains the term (case-insensitive, matched literally) are listed, and
+    `total` counts those users. A term containing a NUL character answers 422.
     """
+    if search is not None and "\x00" in search:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="search must not contain a NUL character",
+        )
+    term = (search or "").strip()
+
+    query = db.query(User)
+    if term:
+        query = query.filter(
+            or_(
+                *(
+                    column.icontains(term, autoescape=True)
+                    for column in USER_SEARCH_COLUMNS
+                )
+            )
+        )
+
     # Ordered: a paginated query without ORDER BY can repeat or skip rows
     # between pages, because the database is free to return them in any order.
     # Newest first is what an administrator looking for a just-created account
     # wants on page one.
     users = (
-        db.query(User)
-        .order_by(User.created_at.desc(), User.id)
-        .offset(skip)
-        .limit(limit)
-        .all()
+        query.order_by(User.created_at.desc(), User.id).offset(skip).limit(limit).all()
     )
-    total = db.query(User).count()
+    # Counted from the same filtered query, so "x of total" describes the list.
+    total = query.count()
 
     return UserListResponse(items=users, total=total, skip=skip, limit=limit)
 
@@ -122,6 +166,130 @@ async def update_user(
             setattr(user, field, update_data[field])
 
     commit_user_write(db, new_email, exclude_id=user.id, username=new_username)
+    db.refresh(user)
+
+    return user
+
+
+#: Refusals of ``PATCH /admin/users/{user_id}``. The dashboard shows them as
+#: they are, so they are written for the person at the screen.
+OWN_ROLE_REFUSED = "You can't change your own role. Ask another administrator to do it."
+OWN_DEACTIVATION_REFUSED = "You can't deactivate your own account."
+ROLE_FROM_COGNITO_REFUSED = (
+    "Roles on this deployment come from Cognito groups and are updated on every "
+    "request. Change this user's group in Cognito instead."
+)
+
+
+def _role_name(user: User) -> Any:
+    """The account's role as the API names it (``"ANALYST"``), or ``None``."""
+    return user.role.name if user.role is not None else None
+
+
+def lock_active_superusers(db: Session) -> set:
+    """Lock every active superuser row, in id order, and return their ids.
+
+    Two superusers deactivating each other at the same moment would otherwise
+    both succeed and leave no active superuser. Taking the rows in one order
+    makes the second request wait for the first, and then see its result: a
+    caller the first request deactivated is no longer in the set. Held until
+    the caller's commit or rollback.
+    """
+    rows = (
+        db.query(User.id)
+        .filter(User.is_superuser.is_(True), User.is_active.is_(True))
+        .order_by(User.id)
+        .with_for_update()
+        .all()
+    )
+    return {row.id for row in rows}
+
+
+@router.patch(
+    "/users/{user_id}",
+    response_model=UserResponse,
+    openapi_extra={"x-stability": "beta"},
+)
+async def patch_user(
+    user_in: AdminUserPatch,
+    user_id: uuid.UUID = Path(..., description="The ID of the user to change"),
+    db: Session = Depends(deps.get_db),
+    current_user: User = Depends(deps.get_current_superuser),
+) -> Any:
+    """
+    Change a user's role and/or active status.
+
+    Superusers only. Send only the keys to change. You cannot change your own
+    role or deactivate yourself (400). With Cognito sign-in and role sync on,
+    a role change is refused (409): the next request would overwrite it.
+    Resending the stored values changes nothing and answers 200. Deactivating
+    a user also stops the API keys they created.
+    """
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
+        )
+
+    sent = user_in.model_fields_set
+    role_changes = "role" in sent and user_in.role != _role_name(user)
+    active_changes = "is_active" in sent and user_in.is_active != user.is_active
+
+    if user.id == current_user.id:
+        if role_changes:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, detail=OWN_ROLE_REFUSED
+            )
+        if active_changes:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=OWN_DEACTIVATION_REFUSED,
+            )
+
+    if (
+        role_changes
+        and settings.AUTH_PROVIDER == "cognito"
+        and settings.SYNC_ROLES_ON_LOGIN
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail=ROLE_FROM_COGNITO_REFUSED
+        )
+
+    if not (role_changes or active_changes):
+        return user
+
+    if active_changes and user_in.is_active is False and user.is_superuser:
+        # The caller must still be an active superuser once the rows are
+        # locked; one deactivated a moment ago by another superuser is not.
+        if current_user.id not in lock_active_superusers(db):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, detail="Inactive user"
+            )
+
+    before = {"role": _role_name(user), "is_active": user.is_active}
+    # Only these two columns, by name: nothing else in the request can reach
+    # the row (the schema refuses any other key as well).
+    if role_changes:
+        user.role = UserRole[user_in.role]
+    if active_changes:
+        user.is_active = user_in.is_active
+    after = {"role": _role_name(user), "is_active": user.is_active}
+
+    # The audit row is part of the same transaction: both are written or
+    # neither is. No await between the lock above and this commit.
+    db.add(
+        AuditLog(
+            user_id=current_user.id,
+            user_email=current_user.email or current_user.username,
+            action_type=ActionType.USER_UPDATE.value,
+            entity_type=EntityType.USER.value,
+            entity_id=user.id,
+            entity_name=user.username or str(user.id),
+            old_value=json.dumps(before),
+            new_value=json.dumps(after),
+        )
+    )
+    db.commit()
     db.refresh(user)
 
     return user

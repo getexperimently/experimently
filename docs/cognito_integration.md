@@ -43,7 +43,12 @@ SYNC_ROLES_ON_LOGIN: bool = True
 
 - `COGNITO_GROUP_ROLE_MAPPING`: Maps Cognito group names to application roles
 - `COGNITO_ADMIN_GROUPS`: Lists Cognito groups whose members are automatically given superuser status
-- `SYNC_ROLES_ON_LOGIN`: When `True`, user roles are updated on each login to match Cognito groups
+- `SYNC_ROLES_ON_LOGIN`: When `True` (the default), every authenticated request -- not only
+  sign-in -- sets the user's role and superuser status from their Cognito groups. A role
+  changed in the dashboard would be overwritten on the user's next request, so
+  `PATCH /api/v1/admin/users/{user_id}` refuses a role change with 409 while this is on;
+  change the user's group in Cognito instead. Active status is not synced and can be
+  changed there.
 
 ## User Roles
 

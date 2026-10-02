@@ -32,6 +32,10 @@
         "operationId": "get_user_api_v1_admin_users__user_id__get",
         "summary": "Get User"
       },
+      "patch": {
+        "operationId": "patch_user_api_v1_admin_users__user_id__patch",
+        "summary": "Patch User"
+      },
       "put": {
         "operationId": "update_user_api_v1_admin_users__user_id__put",
         "summary": "Update User"

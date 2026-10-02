@@ -2,7 +2,8 @@
 
 The audit log is an append-only record of who changed what. In this release it records
 **feature-flag status changes**: turning a flag on or off (one at a time or in bulk) and
-archiving it in bulk. Other actions, such as creating an experiment, logging in or
+archiving it in bulk, and an administrator changing a user's role or active status with
+`PATCH /api/v1/admin/users/{user_id}`. Other actions, such as creating an experiment, logging in or
 assigning a role, are not written to it yet
 ([#221](https://github.com/getexperimently/experimently/issues/221)). The Quick Start's
 demo data includes entries of those kinds, written by the seed script, not by the
@@ -190,10 +191,11 @@ It prints `2`. The whole response has the shape
 | `toggle_enable` | A flag is turned on (`/toggle`, `/enable`, or bulk `enable`) |
 | `toggle_disable` | A flag is turned off (`/toggle`, `/disable`, or bulk `disable`) |
 | `feature_flag_update` | A flag is archived by bulk toggle |
+| `user_update` | A superuser changes a user's role or active status (`PATCH /api/v1/admin/users/{user_id}`); `old_value` and `new_value` are JSON with `role` and `is_active` |
 
 `ActionType` also defines `feature_flag_create`, `feature_flag_delete`, `feature_flag_activate`, `feature_flag_deactivate`,
 `experiment_create`, `experiment_update`, `experiment_delete`, `experiment_start`,
-`experiment_pause`, `experiment_complete`, `user_create`, `user_update`, `user_delete`,
+`experiment_pause`, `experiment_complete`, `user_create`, `user_delete`,
 `user_login`, `user_logout`, `permission_grant`, `permission_revoke`, `role_assign`,
 `role_unassign`, `safety_rollback` and `safety_config_update`. You can filter on them, but
 nothing in this release writes them

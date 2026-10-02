@@ -361,8 +361,11 @@ curl -X POST "http://localhost:8000/api/v1/users/" \
         "full_name": "string",
         "is_active": true,
         "is_superuser": false,
+        "role": "VIEWER",
         "created_at": "datetime",
-        "updated_at": "datetime"
+        "updated_at": "datetime",
+        "last_login": "datetime",
+        "preferences": {}
       }
     ],
     "total": 100,
@@ -370,6 +373,9 @@ curl -X POST "http://localhost:8000/api/v1/users/" \
     "limit": 100
   }
   ```
+- **Fields**: `full_name` is the first and last name joined by a space (or
+  whichever one is set), and `null` when neither is. `email`, `role`,
+  `last_login` and `preferences` may be `null`.
 
 ### Create User
 - **Endpoint**: `POST /api/v1/users/`
@@ -666,11 +672,22 @@ public `key`. They share the per-IP `SDK_RATE_LIMIT_PER_MINUTE` ceiling (default
 
 ### List Users (Admin)
 - **Endpoint**: `GET /api/v1/admin/users`
-- **Description**: List all users (superuser only)
+- **Description**: List all users, newest first (superuser only)
 - **Headers**: Authorization: Bearer {token}
 - **Query Parameters**:
   - skip: int (default: 0)
   - limit: int (default: 100, max: 100)
+  - search: string (optional, at most 100 characters). Lists only the users
+    whose username, email, first name or last name contains the term, ignoring
+    letter case. The term is matched literally: `%`, `_` and `\` are ordinary
+    characters, not wildcards. Leading and trailing spaces are ignored, and an
+    empty or all-space term lists every user. `total` counts the matching
+    users, so `skip`/`limit` page through the matches. A term matching nothing
+    answers 200 with `"items": []` and `"total": 0`. Each column is matched
+    on its own, so `Jane Smith` does not match a first name `Jane` and last
+    name `Smith`; search for either part.
+- **Errors**: 422 when `search` is longer than 100 characters or contains a
+  NUL character.
 - **Response**: 200 OK
   ```json
   {
@@ -682,8 +699,11 @@ public `key`. They share the per-IP `SDK_RATE_LIMIT_PER_MINUTE` ceiling (default
         "full_name": "string",
         "is_active": true,
         "is_superuser": false,
+        "role": "VIEWER",
         "created_at": "datetime",
-        "updated_at": "datetime"
+        "updated_at": "datetime",
+        "last_login": "datetime",
+        "preferences": {}
       }
     ],
     "total": 100,
@@ -691,6 +711,9 @@ public `key`. They share the per-IP `SDK_RATE_LIMIT_PER_MINUTE` ceiling (default
     "limit": 100
   }
   ```
+- **Fields**: `full_name` is the first and last name joined by a space (or
+  whichever one is set), and `null` when neither is. `email`, `role`,
+  `last_login` and `preferences` may be `null`.
 
 ### Update User (Admin)
 - **Endpoint**: `PUT /api/v1/admin/users/{user_id}`
@@ -704,6 +727,46 @@ public `key`. They share the per-IP `SDK_RATE_LIMIT_PER_MINUTE` ceiling (default
   accepted, and resending the stored address unchanged is never refused.
   409 "Username already registered" when the request sets a username another
   account has.
+
+### Change a User's Role or Active Status (Admin)
+- **Endpoint**: `PATCH /api/v1/admin/users/{user_id}`
+- **Stability**: beta (`x-stability: beta`); the shape may still change.
+- **Description**: Change another account's role, its active status, or both
+  (superuser only). This is what the dashboard's Edit user dialog calls.
+- **Headers**: Authorization: Bearer {token}
+- **Request Body**: only the keys to change, at least one of them:
+  ```json
+  {
+    "role": "ANALYST",
+    "is_active": false
+  }
+  ```
+  - `role`: `ADMIN`, `DEVELOPER`, `ANALYST` or `VIEWER`, in any letter case.
+  - `is_active`: `false` deactivates the account, `true` reactivates it.
+  - `null` is refused, and so is any other key (`is_superuser`, `username`,
+    `password`, ...): 422. Use `PUT` above for those.
+- **Response**: 200 OK, the user. Sending the values the account already has
+  changes nothing and still answers 200.
+- **Deactivating a user**: they can no longer sign in, requests with a token
+  they already hold are refused, and **the API keys they created stop
+  working, including keys your applications use**. Check which keys a user
+  created before deactivating them.
+- **Errors**:
+  - 400 "You can't change your own role. Ask another administrator to do it."
+  - 400 "You can't deactivate your own account."
+  - 400 "Inactive user" when your own account was deactivated while the
+    request was in flight.
+  - 403 "Not enough permissions" for an account that is not a superuser,
+    whatever its role.
+  - 404 "User not found".
+  - 409 "Roles on this deployment come from Cognito groups and are updated on
+    every request. Change this user's group in Cognito instead." when
+    `AUTH_PROVIDER=cognito` and `SYNC_ROLES_ON_LOGIN` is on (the default) and
+    the request changes `role`. Changing `is_active` is still accepted there.
+  - 422 for a body that is empty, has an unknown key, a `null`, or a role
+    outside the four above.
+- Every change is recorded in the audit log as `user_update`, with the role
+  and active status before and after.
 
 ### Delete User (Admin)
 - **Endpoint**: `DELETE /api/v1/admin/users/{user_id}`

@@ -15,6 +15,7 @@ from pydantic import (
     Field,
     SecretStr,
     field_validator,
+    model_validator,
 )
 
 from backend.app.schemas.auth import RoleName
@@ -130,6 +131,55 @@ class UserUpdate(UserBase):
         if v is not None:
             check_password_strength(v.get_secret_value())
         return v
+
+
+def _no_published_default(schema: Dict[str, Any]) -> None:
+    """Leave ``"default": null`` out of a field's published schema.
+
+    ``AdminUserPatch`` fields default to ``None`` only so that an omitted key
+    means "no change"; ``null`` itself is refused. Publishing the default would
+    tell a client generator that ``null`` is a value of the field.
+    """
+    schema.pop("default", None)
+
+
+class AdminUserPatch(BaseModel):
+    """Change another account's role and/or active status (superuser only).
+
+    Send only the keys to change; at least one is required. ``null`` is
+    refused, as is any other key.
+    """
+
+    # The types are deliberately not ``Optional``: an omitted key is ``None``
+    # (no change), but an explicit ``null`` fails validation, and the
+    # published schema carries a plain enum / boolean with no null branch.
+    role: RoleName = Field(  # type: ignore[assignment]
+        None,
+        description=(
+            "RBAC role name: ADMIN, DEVELOPER, ANALYST or VIEWER (case-insensitive)."
+        ),
+        json_schema_extra=_no_published_default,
+    )
+    is_active: bool = Field(  # type: ignore[assignment]
+        None,
+        description="false stops the account signing in and using its API keys.",
+        json_schema_extra=_no_published_default,
+    )
+
+    model_config = ConfigDict(extra="forbid")
+
+    @field_validator("role", mode="before")
+    @classmethod
+    def normalise_role(cls, v: Any) -> Any:
+        """Accept lower- and upper-case names alike; anything else is left to fail."""
+        return v.upper() if isinstance(v, str) else v
+
+    @model_validator(mode="after")
+    def at_least_one_key(self) -> "AdminUserPatch":
+        """An empty body changes nothing and is refused."""
+        if not self.model_fields_set:
+            raise ValueError("Send at least one of role or is_active")
+        return self
 
 
 class UserInDBBase(UserBase):
