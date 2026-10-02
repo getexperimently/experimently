@@ -27,6 +27,7 @@ import pytest
 import yaml
 
 from backend.tests.unit.infrastructure import _workflow_graph as wg
+from backend.tests.unit.infrastructure.test_ci_classification import CLASSIFIED
 
 pytestmark = [pytest.mark.unit, pytest.mark.regression]
 
@@ -46,6 +47,18 @@ def _needs(job: Dict[str, Any]) -> List[str]:
     return [needs] if isinstance(needs, str) else list(needs)
 
 
+def _is_classified_work(workflow: str, job_id: str) -> bool:
+    """A job that runs after a FAILED classifier so that it does its work.
+
+    ``!cancelled() && (needs.changes.result != 'success' || ...)`` matches
+    RUNS_AFTER_FAILURE but reads no results: it is a work job, not a summary.
+    test_ci_classification.py pins its exact `if:` and its `needs:` to the
+    classifier alone, so it has no other ancestor to miss.
+    """
+    row = CLASSIFIED.get(workflow, {}).get(job_id)
+    return row is not None and row[1] == "changes"
+
+
 def _summaries() -> List[Tuple[str, str, Dict[str, Any], Dict[str, Any]]]:
     required = set(wg.required_checks())
     found = []
@@ -53,6 +66,8 @@ def _summaries() -> List[Tuple[str, str, Dict[str, Any], Dict[str, Any]]]:
         workflow = wg.load(path)
         for job_id, job in (workflow.get("jobs") or {}).items():
             if not _needs(job) or not RUNS_AFTER_FAILURE.search(str(job.get("if", ""))):
+                continue
+            if _is_classified_work(path.name, job_id):
                 continue
             if job.get("name") in required:
                 found.append((path.name, job_id, job, workflow["jobs"]))
