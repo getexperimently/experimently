@@ -256,8 +256,25 @@ curl -s -X PUT localhost:8000/api/v1/feature-flags/$FLAG_ID \
 
 `"is_active": false` turns it off again. `POST /api/v1/feature-flags/$FLAG_ID/activate`
 and `.../deactivate` do the same without a body. A `PUT` changes only the fields it sends;
-a `status` in it must be the flag's current status. An archived flag sent
-`"is_active": false` stays archived.
+a `status` in it must be the flag's current status.
+
+### Archived flags
+
+An archived flag is retired: it is never served, and nothing turns it back on by
+accident. Every request that would turn it on (`PUT` with `"is_active": true`,
+`/activate`, `/enable`, `/toggle`, and bulk `enable`) answers `400` with
+
+```text
+This flag is archived. Unarchive it before turning it on.
+```
+
+and leaves the flag archived. A request that turns it off (`"is_active": false`,
+`/deactivate`, `/disable`, bulk `disable`) succeeds and changes nothing, because an
+archived flag is already off. The way back is
+`POST /api/v1/feature-flags/$FLAG_ID/unarchive` (beta), which makes the flag
+inactive; turn it on afterwards as usual. A flag is archived with
+`POST /api/v1/feature-flags/bulk-toggle` and `"action": "archive"`. The dashboard has no
+archive or unarchive action yet.
 
 ### Create an API key
 

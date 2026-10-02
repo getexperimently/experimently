@@ -357,6 +357,16 @@ To instantly disable a flag:
 
 If you have safety monitoring configured, the platform can auto-rollback if error rates spike.
 
+### Archived Flags
+
+An archived flag is retired and never served. It cannot be turned on until it is
+unarchived: the API refuses every request that would turn it on with "This flag is
+archived. Unarchive it before turning it on." Turning it off succeeds and changes
+nothing. Archiving and unarchiving are API calls for now (bulk toggle with
+`archive`, and `POST /api/v1/feature-flags/{id}/unarchive`, which is beta); an
+unarchived flag comes back inactive. See
+[Archived flags](../feature-flags/create.md#archived-flags).
+
 ---
 
 ## Analytics & Reporting

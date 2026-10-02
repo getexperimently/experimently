@@ -24,7 +24,12 @@ from backend.app.core.permissions import (
     can_read_all_audit_logs,
 )
 from backend.app.models.audit_log import ActionType
-from backend.app.models.feature_flag import FeatureFlag, FeatureFlagStatus
+from backend.app.models.feature_flag import (
+    ARCHIVED_FLAG_DETAIL,
+    ArchivedFlagError,
+    FeatureFlag,
+    flag_status_name,
+)
 from backend.app.models.user import User
 from backend.app.schemas.advanced_toggle import (
     BulkToggleRequest,
@@ -34,8 +39,16 @@ from backend.app.schemas.advanced_toggle import (
     FlagChangeHistoryResponse,
 )
 from backend.app.services.audit_service import AuditService
+from backend.app.services.feature_flag_service import FlagVerb, transition
 
 logger = logging.getLogger(__name__)
+
+#: Each bulk action, as the status verb it asks for and the audit action.
+_ACTIONS = {
+    "enable": (FlagVerb.ON, ActionType.TOGGLE_ENABLE),
+    "disable": (FlagVerb.OFF, ActionType.TOGGLE_DISABLE),
+    "archive": (FlagVerb.ARCHIVE, ActionType.FEATURE_FLAG_UPDATE),
+}
 
 router = APIRouter()
 
@@ -57,6 +70,10 @@ async def bulk_toggle_flags(
     Creates one audit log entry per successfully-processed flag.
     The operation is partial-success by design: if some flags fail,
     the endpoint still returns 200 with per-flag results.
+
+    An archived flag is never turned on: with ``enable`` it is reported with
+    ``success: false`` and left archived, and the other flags are processed.
+    With ``disable`` it succeeds and stays archived.
     """
     results = []
     audit_log_ids = []
@@ -89,20 +106,9 @@ async def bulk_toggle_flags(
                 )
                 continue
 
-            old_status = (
-                flag.status.value if hasattr(flag.status, "value") else str(flag.status)
-            )
+            old_status = flag_status_name(flag.status)
 
-            if request.action == "enable":
-                flag.status = FeatureFlagStatus.ACTIVE
-                action_type = ActionType.TOGGLE_ENABLE
-            elif request.action == "disable":
-                flag.status = FeatureFlagStatus.INACTIVE
-                action_type = ActionType.TOGGLE_DISABLE
-            elif request.action == "archive":
-                flag.status = FeatureFlagStatus.ARCHIVED
-                action_type = ActionType.FEATURE_FLAG_UPDATE
-            else:
+            if request.action not in _ACTIONS:
                 # Should not happen due to Pydantic validation, but guard anyway
                 results.append(
                     BulkToggleResult(
@@ -113,10 +119,26 @@ async def bulk_toggle_flags(
                     )
                 )
                 continue
+            verb, action_type = _ACTIONS[request.action]
 
-            new_status = (
-                flag.status.value if hasattr(flag.status, "value") else str(flag.status)
-            )
+            # Refused here, before the row is touched (#631): the model's own
+            # guard would raise on the assignment instead, and the final commit
+            # below covers every flag.
+            try:
+                new_status = transition(old_status, verb).value
+            except ArchivedFlagError:
+                results.append(
+                    BulkToggleResult(
+                        flag_id=str(flag.id),
+                        flag_key=flag.key,
+                        success=False,
+                        error=ARCHIVED_FLAG_DETAIL,
+                    )
+                )
+                continue
+
+            if new_status != old_status:
+                flag.status = new_status
             db.flush()
 
             # Log to audit (one entry per flag)

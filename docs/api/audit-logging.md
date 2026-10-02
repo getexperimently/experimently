@@ -196,7 +196,7 @@ It prints `2`. The whole response has the shape
 |-------------|--------------|
 | `toggle_enable` | A flag is turned on (`/toggle`, `/enable`, or bulk `enable`) |
 | `toggle_disable` | A flag is turned off (`/toggle`, `/disable`, or bulk `disable`) |
-| `feature_flag_update` | A flag is archived by bulk toggle |
+| `feature_flag_update` | A flag is archived by bulk toggle, or unarchived (`/unarchive`) |
 | `user_update` | A superuser changes a user's role or active status (`PATCH /api/v1/admin/users/{user_id}`); `old_value` and `new_value` are JSON with `role` and `is_active` |
 
 `ActionType` also defines `feature_flag_create`, `feature_flag_delete`, `feature_flag_activate`, `feature_flag_deactivate`,

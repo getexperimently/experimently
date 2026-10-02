@@ -12,11 +12,13 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
+    event,
     false,
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.ext.declarative import declared_attr
 from sqlalchemy.orm import relationship
+from sqlalchemy.orm.base import NEVER_SET, NO_VALUE
 
 from backend.app.core.database_config import get_schema_name
 
@@ -29,6 +31,32 @@ class FeatureFlagStatus(enum.Enum):
     INACTIVE = "INACTIVE"
     ACTIVE = "ACTIVE"
     ARCHIVED = "ARCHIVED"
+
+
+#: The answer to a request that would turn an archived flag on (#631).
+ARCHIVED_FLAG_DETAIL = "This flag is archived. Unarchive it before turning it on."
+
+
+class ArchivedFlagError(Exception):
+    """An archived flag was asked to turn on (#631).
+
+    An archived flag leaves ARCHIVED only through ``/unarchive``, which makes
+    it INACTIVE. The routes refuse first, through
+    ``feature_flag_service.transition``; the listener at the end of this module
+    raises it for any other writer that assigns ``status`` through the ORM.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(ARCHIVED_FLAG_DETAIL)
+
+
+def flag_status_name(value: object) -> str:
+    """The upper-case name of a flag status given as the enum or a string.
+
+    The column loads as :class:`FeatureFlagStatus`, but several writers assign
+    the string value, so every comparison goes through this.
+    """
+    return str(getattr(value, "value", value)).upper()
 
 
 class FeatureFlag(Base, BaseModel):
@@ -126,6 +154,27 @@ class FeatureFlag(Base, BaseModel):
 
     def __repr__(self):
         return f"<FeatureFlag {self.key}>"
+
+
+@event.listens_for(FeatureFlag.status, "set", active_history=True)
+def _an_archived_flag_is_not_turned_on(target, value, oldvalue, initiator):
+    """Refuse ARCHIVED -> ACTIVE for every ORM writer of ``status`` (#631).
+
+    Old and new are compared by name, so the enum and its string value are the
+    same status. A previous value that was never loaded or set (a flag being
+    constructed, as the seed scripts do) is not a change. ``active_history``
+    loads the stored value when the instance has been expired, so a writer that
+    assigns after a commit is still seen.
+
+    A Core ``UPDATE`` or raw SQL never reaches this listener.
+    """
+    if oldvalue is NO_VALUE or oldvalue is NEVER_SET or oldvalue is None:
+        return
+    if (
+        flag_status_name(oldvalue) == FeatureFlagStatus.ARCHIVED.value
+        and flag_status_name(value) == FeatureFlagStatus.ACTIVE.value
+    ):
+        raise ArchivedFlagError()
 
 
 class FeatureFlagOverride(Base, BaseModel):

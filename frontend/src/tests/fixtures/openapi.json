@@ -553,6 +553,12 @@
         "summary": "Toggle feature flag"
       }
     },
+    "/api/v1/feature-flags/{flag_id}/unarchive": {
+      "post": {
+        "operationId": "unarchive_feature_flag_api_v1_feature_flags__flag_id__unarchive_post",
+        "summary": "Unarchive feature flag (beta)"
+      }
+    },
     "/api/v1/hipaa/audit-logs": {
       "get": {
         "operationId": "list_audit_logs_api_v1_hipaa_audit_logs_get",
