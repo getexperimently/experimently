@@ -42,6 +42,8 @@ const UNAVAILABLE_TEXT: Record<SampleSizeUnavailableReason, string> = {
     'Every control user has converted so far, so there is no rate to plan from. Enter the rate you expect.',
   effect_out_of_range:
     'The control rate so far raised by this effect reaches 100% or more. Lower the effect, or enter the rate you expect.',
+  effect_too_small:
+    'The control rate so far raised by this effect changes too little to estimate a sample size. Raise the effect, or enter the rate you expect.',
 };
 
 const GUIDE_ONLY_TEXT: Record<SampleSizeGuideOnlyReason, string> = {

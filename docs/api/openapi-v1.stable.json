@@ -9361,7 +9361,8 @@
                   "no_control_data",
                   "no_control_conversions",
                   "rate_at_boundary",
-                  "effect_out_of_range"
+                  "effect_out_of_range",
+                  "effect_too_small"
                 ],
                 "type": "string"
               },
@@ -9369,7 +9370,7 @@
                 "type": "null"
               }
             ],
-            "description": "Why required_sample_size_per_variant is null: no_metric, no_control_data (no control variant or no control users yet), no_control_conversions, rate_at_boundary (every control user converted), effect_out_of_range (the observed rate raised by the MDE reaches 100%). null when a size was computed.",
+            "description": "Why required_sample_size_per_variant is null: no_metric, no_control_data (no control variant or no control users yet), no_control_conversions, rate_at_boundary (every control user converted), effect_out_of_range (the observed rate raised by the MDE reaches 100%), effect_too_small (the observed rate raised by the MDE changes too little for the size to be a finite number). null when a size was computed.",
             "title": "Unavailable Reason"
           }
         },
@@ -22420,7 +22421,7 @@
     },
     "/api/v1/results/{experiment_id}/sample-size": {
       "get": {
-        "description": "The planned sample size for an experiment, and how far it has got.\n\nPlans a two-sided two-proportion test on the primary metric: the users\neach variant needs to detect a relative lift of ``mde`` over the baseline\nat ``confidence_level`` with ``power_target`` power.  The baseline is\n``baseline_conversion_rate`` when sent, otherwise the control variant's\nconversion rate so far -- counted the way the results count it, but not\nread from the results cache, so for up to its five minutes it can be\nnewer than the rate the results show.\n\nProgress is the smallest variant's assignments.  Nothing is saved.\nWith no data to plan from the answer is 200 with\n``required_sample_size_per_variant: null`` and ``unavailable_reason``.\nA sent baseline that the MDE raises to 100% or more answers 422.",
+        "description": "The planned sample size for an experiment, and how far it has got.\n\nPlans a two-sided two-proportion test on the primary metric: the users\neach variant needs to detect a relative lift of ``mde`` over the baseline\nat ``confidence_level`` with ``power_target`` power.  The baseline is\n``baseline_conversion_rate`` when sent, otherwise the control variant's\nconversion rate so far -- counted the way the results count it, but not\nread from the results cache, so for up to its five minutes it can be\nnewer than the rate the results show.\n\nProgress is the smallest variant's assignments.  Nothing is saved.\nWith no data to plan from the answer is 200 with\n``required_sample_size_per_variant: null`` and ``unavailable_reason``.\nA sent baseline that the MDE raises to 100% or more answers 422, and so\ndoes one too close to its treatment rate for the size to be a finite\nnumber; an observed rate in that position gives ``effect_too_small``.",
         "operationId": "get_sample_size_status_api_v1_results__experiment_id__sample_size_get",
         "parameters": [
           {

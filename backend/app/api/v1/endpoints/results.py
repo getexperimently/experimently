@@ -49,7 +49,9 @@ from backend.app.services.cache import CacheService
 from backend.app.services.cuped_service import CupedService
 from backend.app.services.dimensional_analysis_service import DimensionalAnalysisService
 from backend.app.services.power_calculator_service import (
+    SAMPLE_SIZE_NOT_FINITE_MESSAGE,
     TREATMENT_RATE_CEILING_MESSAGE,
+    SampleSizeNotFiniteError,
     compute_power,
     sample_size_two_proportions,
 )
@@ -814,7 +816,9 @@ def get_sample_size_status(
     Progress is the smallest variant's assignments.  Nothing is saved.
     With no data to plan from the answer is 200 with
     ``required_sample_size_per_variant: null`` and ``unavailable_reason``.
-    A sent baseline that the MDE raises to 100% or more answers 422.
+    A sent baseline that the MDE raises to 100% or more answers 422, and so
+    does one too close to its treatment rate for the size to be a finite
+    number; an observed rate in that position gives ``effect_too_small``.
     """
     if (
         baseline_conversion_rate is not None
@@ -891,12 +895,23 @@ def get_sample_size_status(
         achieved_power: Optional[float] = None
         if baseline is not None and reason is None:
             treatment = baseline * (1.0 + mde)
-            required = sample_size_two_proportions(
-                baseline, treatment, alpha, power_target, two_tailed=True
-            )
-            achieved_power = compute_power(
-                current, baseline, treatment, alpha, two_tailed=True
-            )
+            try:
+                required = sample_size_two_proportions(
+                    baseline, treatment, alpha, power_target, two_tailed=True
+                )
+            except SampleSizeNotFiniteError:
+                # The treatment rate is too close to the baseline for the size
+                # to be a finite number. A sent baseline is the caller's input
+                # (422); an observed one is not, so it is a reason (200).
+                if baseline_source == "request":
+                    raise HTTPException(
+                        status_code=422, detail=SAMPLE_SIZE_NOT_FINITE_MESSAGE
+                    )
+                reason = "effect_too_small"
+            else:
+                achieved_power = compute_power(
+                    current, baseline, treatment, alpha, two_tailed=True
+                )
 
         metric_type = getattr(metric, "metric_type", None) if metric else None
         metric_type = getattr(metric_type, "value", metric_type)
@@ -925,6 +940,8 @@ def get_sample_size_status(
             unavailable_reason=reason,
             guide_only_reasons=_guide_only_reasons(experiment),
         )
+    except HTTPException:
+        raise
     except Exception as exc:
         raise unexpected_failure(
             exc,

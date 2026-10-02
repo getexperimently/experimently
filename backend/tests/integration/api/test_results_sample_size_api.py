@@ -34,8 +34,10 @@ from backend.app.models.experiment import (
 )
 from backend.app.services.analysis_service import AnalysisService
 from backend.app.services.power_calculator_service import (
+    SAMPLE_SIZE_NOT_FINITE_MESSAGE,
     TREATMENT_RATE_CEILING_MESSAGE,
     compute_power,
+    sample_size_two_proportions,
 )
 
 pytestmark = [pytest.mark.integration, pytest.mark.requires_db]
@@ -343,6 +345,51 @@ def test_a_requested_baseline_the_effect_raises_past_100_percent_is_refused(
     }
     # The one sentence the wizard and /utils answer with too.
     assert data["detail"] == TREATMENT_RATE_CEILING_MESSAGE
+
+
+# --- #694: a size that is not a finite number ---------------------------------
+
+
+@pytest.mark.regression
+@pytest.mark.parametrize(
+    ("baseline", "mde"),
+    [
+        (1e-300, 0.05),  # (p2 - p1) ** 2 underflows to zero
+        (0.12, 1e-17),  # the treatment rate rounds to the baseline
+    ],
+)
+def test_a_requested_baseline_with_no_finite_size_is_refused(
+    client, seed, baseline, mde
+):
+    """On main: 500 (OverflowError, or ValueError from the helper)."""
+    exp = seed([("control", True, 50, 0, 0), ("treatment", False, 50, 0, 0)])
+    data = _get(client, exp.id, expect=422, baseline_conversion_rate=baseline, mde=mde)
+    assert data == {"detail": SAMPLE_SIZE_NOT_FINITE_MESSAGE}
+    # The one sentence the wizard and /utils answer with too.
+    assert data["detail"] == (
+        "This baseline raised by this effect changes too little to estimate a "
+        "sample size. Raise the baseline rate or the effect."
+    )
+
+
+@pytest.mark.regression
+def test_an_observed_rate_with_no_finite_size_is_a_reason_not_an_error(client, seed):
+    """On main: 500. The observed rate is not the caller's input, so this is a
+    200 with nulls, like effect_out_of_range, rather than a 422."""
+    exp = seed([("control", True, 50, 50, 6), ("treatment", False, 50, 40, 4)])
+    data = _get(client, exp.id, mde=1e-17)
+    _assert_unavailable(data, "effect_too_small", 40)
+    assert data["baseline_rate"] == 0.12
+    assert data["baseline_source"] == "observed"
+
+
+def test_a_requested_baseline_just_inside_the_limit_is_still_planned(client, seed):
+    exp = seed([("control", True, 50, 0, 0), ("treatment", False, 50, 0, 0)])
+    data = _get(client, exp.id, baseline_conversion_rate=1e-160)
+    assert data["unavailable_reason"] is None
+    assert data["required_sample_size_per_variant"] == sample_size_two_proportions(
+        1e-160, 1e-160 * 1.05, 1.0 - 0.95, 0.8, True
+    )
 
 
 # --- row 2: the guided setup and the results tab give the same number ---------
