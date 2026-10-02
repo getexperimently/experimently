@@ -334,4 +334,4 @@ def autogenerate(
 #: another process generates a revision into them (``alembic revision`` writes
 #: real files, and a developer generating one does exactly that).
 #: ``backend/tests/unit/db/test_alembic_plan.py`` pins it against the files.
-CORE_HEAD = "d12cbd384bbe"
+CORE_HEAD = "a89544fb1075"

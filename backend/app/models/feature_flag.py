@@ -2,6 +2,7 @@
 import enum
 
 from sqlalchemy import (
+    Boolean,
     CheckConstraint,
     Column,
     DateTime,
@@ -11,6 +12,7 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
+    false,
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.ext.declarative import declared_attr
@@ -27,6 +29,15 @@ class FeatureFlagStatus(enum.Enum):
     INACTIVE = "INACTIVE"
     ACTIVE = "ACTIVE"
     ARCHIVED = "ARCHIVED"
+
+
+#: Columns no create or update request writes yet.  The request schemas still
+#: declare ``default_value`` untyped, and the writers keep only the keys that are
+#: columns, so without this a request's value would reach the column: a non-
+#: boolean would fail the INSERT, and ``true`` would be stored.  The
+#: create/update contract (#94) types the field, refuses ``true``, and then
+#: retires this.
+NOT_WRITTEN_BY_REQUESTS = frozenset({"default_value"})
 
 
 class FeatureFlag(Base, BaseModel):
@@ -49,6 +60,13 @@ class FeatureFlag(Base, BaseModel):
     )
     targeting_rules = Column(JSONB)  # Rules for flag enablement
     rollout_percentage = Column(Integer, default=0, nullable=False)  # Gradual rollout
+    # What the flag serves when it is off; only false for now.  Stored, and
+    # nothing reads or writes it yet -- the create/update contract (#94) gives
+    # it meaning.  ``server_default`` is load-bearing: the previous release's
+    # image inserts rows without naming this column, and the database fills it.
+    default_value = Column(
+        Boolean, nullable=False, default=False, server_default=false()
+    )
     variants = Column(JSONB)  # For multivariate flags
     tags = Column(JSONB)  # For categorization
 
