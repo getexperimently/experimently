@@ -52,7 +52,7 @@ interface TargetingSectionProps {
 }
 
 /** A failure, announced and focused so a keyboard or screen-reader user lands on it. */
-function SaveAlert({ error }: { error: TargetingSaveError }) {
+export function SaveAlert({ error }: { error: TargetingSaveError }) {
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
     ref.current?.focus();

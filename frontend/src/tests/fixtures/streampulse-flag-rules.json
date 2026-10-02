@@ -1,0 +1,84 @@
+{
+  "_source": "backend/scripts/seed_streampulse.py AI_SEARCH_RULES and PLAYER_V2_RULES; player_v2_after_story_step_5 is what demo/streampulse/simulator/rollout_story.py step_5 writes",
+  "ai_search": {
+    "logical_operator": "AND",
+    "groups": [
+      {
+        "id": "grp-ios17-us-premium",
+        "logical_operator": "AND",
+        "conditions": [
+          {
+            "id": "cond-os",
+            "attribute": "os",
+            "operator": "equals",
+            "value": "iOS"
+          },
+          {
+            "id": "cond-os-version",
+            "attribute": "os_version",
+            "operator": "semver_gte",
+            "value": "17.0.0"
+          },
+          {
+            "id": "cond-region",
+            "attribute": "region",
+            "operator": "equals",
+            "value": "US"
+          },
+          {
+            "id": "cond-tier",
+            "attribute": "tier",
+            "operator": "equals",
+            "value": "premium"
+          }
+        ]
+      }
+    ]
+  },
+  "player_v2": {
+    "logical_operator": "OR",
+    "groups": [
+      {
+        "id": "grp-employees",
+        "logical_operator": "AND",
+        "conditions": [
+          {
+            "id": "cond-employee",
+            "attribute": "employee",
+            "operator": "equals",
+            "value": true
+          }
+        ]
+      }
+    ]
+  },
+  "player_v2_after_story_step_5": {
+    "logical_operator": "OR",
+    "groups": [
+      {
+        "id": "grp-employees",
+        "logical_operator": "AND",
+        "conditions": [
+          {
+            "id": "cond-employee",
+            "attribute": "employee",
+            "operator": "equals",
+            "value": true
+          }
+        ]
+      },
+      {
+        "id": "grp-fixed-build",
+        "logical_operator": "AND",
+        "conditions": [
+          {
+            "id": "cond-app-version",
+            "attribute": "app_version",
+            "operator": "semver_gte",
+            "value": "3.2.1"
+          }
+        ]
+      }
+    ]
+  }
+}

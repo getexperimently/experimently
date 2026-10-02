@@ -1,6 +1,6 @@
 import React from 'react';
 import { TargetingRuleGroup, TargetingCondition, LogicalOperator } from '@/types/targeting';
-import { createEmptyCondition } from '@/utils/targeting';
+import { createEmptyCondition, OperatorOptions } from '@/utils/targeting';
 import { ConditionRow } from './ConditionRow';
 
 interface RuleGroupCardProps {
@@ -10,6 +10,7 @@ interface RuleGroupCardProps {
   onChange: (updated: TargetingRuleGroup) => void;
   onRemove: () => void;
   readOnly?: boolean;
+  operatorOptions?: OperatorOptions;
 }
 
 export function RuleGroupCard({
@@ -19,6 +20,7 @@ export function RuleGroupCard({
   onChange,
   onRemove,
   readOnly = false,
+  operatorOptions,
 }: RuleGroupCardProps) {
   const handleLogicalOperatorChange = (op: LogicalOperator) => {
     onChange({ ...group, logical_operator: op });
@@ -116,6 +118,7 @@ export function RuleGroupCard({
               onRemove={() => handleRemoveCondition(index)}
               readOnly={readOnly}
               label={`Group ${groupIndex + 1}, condition ${index + 1}`}
+              operatorOptions={operatorOptions}
             />
           </div>
         ))}

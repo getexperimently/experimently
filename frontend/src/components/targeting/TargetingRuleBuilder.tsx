@@ -1,6 +1,6 @@
 import React from 'react';
 import { TargetingRules, TargetingRuleGroup, LogicalOperator } from '@/types/targeting';
-import { createEmptyGroup, createEmptyRules } from '@/utils/targeting';
+import { createEmptyGroup, createEmptyRules, OperatorOptions } from '@/utils/targeting';
 import { RuleGroupCard } from './RuleGroupCard';
 
 interface TargetingRuleBuilderProps {
@@ -8,6 +8,8 @@ interface TargetingRuleBuilderProps {
   onChange: (rules: TargetingRules) => void;
   readOnly?: boolean;
   className?: string;
+  /** Which operators the condition dropdowns offer; see `OperatorOptions`. */
+  operatorOptions?: OperatorOptions;
 }
 
 export function TargetingRuleBuilder({
@@ -15,6 +17,7 @@ export function TargetingRuleBuilder({
   onChange,
   readOnly = false,
   className = '',
+  operatorOptions,
 }: TargetingRuleBuilderProps) {
   const rules = value ?? createEmptyRules();
 
@@ -126,6 +129,7 @@ export function TargetingRuleBuilder({
                 onChange={(updated) => handleGroupChange(index, updated)}
                 onRemove={() => handleRemoveGroup(index)}
                 readOnly={readOnly}
+                operatorOptions={operatorOptions}
               />
             </div>
           ))}

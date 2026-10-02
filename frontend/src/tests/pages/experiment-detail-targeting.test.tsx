@@ -373,6 +373,25 @@ describe('Who can join — the Edit gate', () => {
 });
 
 describe('Who can join — rules the builder cannot show', () => {
+  // The flag page offers version operators on any attribute outside the
+  // suggested ones (#535); the experiment page does not, so the same rules
+  // stay read-only here.
+  it.each([
+    ['os_version semver_gte (StreamPulse AI search)', 'os_version'],
+    ['app_version semver_gte (StreamPulse story step 5)', 'app_version'],
+  ])('keeps %s read-only, offering only Replace rules', async (_name, attribute) => {
+    const stored = {
+      logical_operator: 'AND',
+      groups: [{ logical_operator: 'AND', conditions: [{ attribute, operator: 'semver_gte', value: '17.0.0' }] }],
+    };
+    install({ targeting_rules: stored });
+    render(<ExperimentDetailPage />);
+    const s = await section();
+    expect(within(s).getByTestId('targeting-raw')).toHaveTextContent(OUTSIDE_BUILDER_NOTE);
+    expect(editButton()).toBeNull();
+    expect(within(s).getByRole('button', { name: 'Replace rules' })).toBeInTheDocument();
+  });
+
   it('shows a flat value as JSON with the note and the docs link, never in the builder', async () => {
     signIn('VIEWER');
     install({ targeting_rules: FLAT_RULES });
