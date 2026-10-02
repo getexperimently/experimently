@@ -8,7 +8,28 @@ export const USER_PAGE_SIZE = 50;
 export const USER_SEARCH_MAX_LENGTH = 100;
 const SEARCH_DEBOUNCE_MS = 300;
 
-export function UserTable() {
+export interface UserTableProps {
+  /** Opens the Edit dialog for a row. Without it the row has no Edit button. */
+  onEdit?: (user: AdminUser) => void;
+  /**
+   * Bump to reload the list. The current page and search term are kept, so an
+   * edit does not send the administrator back to the first page.
+   */
+  reloadToken?: number;
+  /**
+   * After the list has (re)loaded, move focus to this user's Edit button, or to
+   * the search box when the row is no longer listed; then `onFocusHandled`.
+   */
+  focusUserId?: string | null;
+  onFocusHandled?: () => void;
+}
+
+export function UserTable({
+  onEdit,
+  reloadToken: externalReloadToken = 0,
+  focusUserId = null,
+  onFocusHandled,
+}: UserTableProps = {}) {
   const [data, setData] = useState<UserListResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -18,12 +39,20 @@ export function UserTable() {
   const [term, setTerm] = useState('');
   const [page, setPage] = useState(0);
   const [reloadToken, setReloadToken] = useState(0);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const searchRef = useRef<HTMLInputElement>(null);
+  const editButtons = useRef(new Map<string, HTMLButtonElement>());
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Each request takes a number; only the latest one may write the table, so
   // a slow answer to an older search can never replace a newer one.
   const latestRequest = useRef(0);
 
-  const fetchUsers = useCallback(async (pageIndex: number, searchTerm: string) => {
+  // The parent's reload token the list on screen was loaded for. Focus is moved
+  // only once it matches, so it lands on the reloaded rows, not on ones about to
+  // be replaced by the loading state.
+  const [loadedFor, setLoadedFor] = useState(externalReloadToken);
+
+  const fetchUsers = useCallback(async (pageIndex: number, searchTerm: string, token: number) => {
     const request = ++latestRequest.current;
     setLoading(true);
     setError(null);
@@ -39,13 +68,27 @@ export function UserTable() {
       if (request !== latestRequest.current) return;
       setError((err as Error).message || 'Failed to load users');
     } finally {
-      if (request === latestRequest.current) setLoading(false);
+      if (request === latestRequest.current) {
+        setLoading(false);
+        setLoadedFor(token);
+      }
     }
   }, []);
 
   useEffect(() => {
-    fetchUsers(page, term);
-  }, [fetchUsers, page, term, reloadToken]);
+    fetchUsers(page, term, externalReloadToken);
+  }, [fetchUsers, page, term, reloadToken, externalReloadToken]);
+
+  useEffect(() => {
+    if (!focusUserId || loading || loadedFor !== externalReloadToken) return;
+    const button = editButtons.current.get(focusUserId);
+    if (button) {
+      button.focus();
+    } else {
+      searchRef.current?.focus();
+    }
+    onFocusHandled?.();
+  }, [focusUserId, loading, loadedFor, externalReloadToken, data, onFocusHandled]);
 
   useEffect(
     () => () => {
@@ -72,10 +115,11 @@ export function UserTable() {
       `Are you sure you want to delete user "${user.username}"? This action cannot be undone.`
     );
     if (!confirmed) return;
+    setDeleteError(null);
     try {
       await AdminService.deleteUser(user.id);
     } catch (err) {
-      alert(`Failed to delete user: ${(err as Error).message}`);
+      setDeleteError(`Couldn't delete ${user.username}: ${(err as Error).message}`);
       return;
     }
     // Deleting the only row on a later page would leave that page empty;
@@ -98,6 +142,7 @@ export function UserTable() {
       <div className="p-4 border-b border-slate-200">
         <input
           data-testid="user-search"
+          ref={searchRef}
           type="text"
           placeholder="Search by username, email, first or last name"
           aria-label="Search users"
@@ -107,6 +152,16 @@ export function UserTable() {
           className="w-full px-3 py-2 border border-slate-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
         />
       </div>
+
+      {deleteError && (
+        <div
+          role="alert"
+          data-testid="delete-error-message"
+          className="mx-4 mt-4 p-3 bg-red-50 border border-red-200 rounded-md text-sm text-red-700"
+        >
+          {deleteError}
+        </div>
+      )}
 
       {/* Loading Skeleton */}
       {loading && (
@@ -150,6 +205,7 @@ export function UserTable() {
                   <th className="px-6 py-3 text-left">Username</th>
                   <th className="px-6 py-3 text-left">Email</th>
                   <th className="px-6 py-3 text-left">Role</th>
+                  <th className="px-6 py-3 text-left">Superuser</th>
                   <th className="px-6 py-3 text-left">Status</th>
                   <th className="px-6 py-3 text-left">Actions</th>
                 </tr>
@@ -162,11 +218,26 @@ export function UserTable() {
                       {user.email ?? <span className="text-slate-400 italic">No email</span>}
                     </td>
                     <td className="px-6 py-4">
-                      <span
-                        className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${ROLE_COLORS[user.role]}`}
-                      >
-                        {USER_ROLE_LABELS[user.role]}
-                      </span>
+                      {user.role ? (
+                        <span
+                          className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${ROLE_COLORS[user.role]}`}
+                        >
+                          {USER_ROLE_LABELS[user.role]}
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border border-dashed border-slate-300 text-slate-600">
+                          No role
+                        </span>
+                      )}
+                    </td>
+                    <td className="px-6 py-4" data-testid={`superuser-${user.id}`}>
+                      {user.is_superuser ? (
+                        <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-900">
+                          Superuser
+                        </span>
+                      ) : (
+                        <span className="text-slate-600">No</span>
+                      )}
                     </td>
                     <td className="px-6 py-4">
                       {user.is_active ? (
@@ -179,9 +250,26 @@ export function UserTable() {
                         </span>
                       )}
                     </td>
-                    <td className="px-6 py-4">
+                    <td className="px-6 py-4 space-x-4 whitespace-nowrap">
+                      {onEdit && (
+                        <button
+                          type="button"
+                          data-testid={`edit-user-${user.id}`}
+                          aria-label={`Edit ${user.username}`}
+                          ref={(el) => {
+                            if (el) editButtons.current.set(user.id, el);
+                            else editButtons.current.delete(user.id);
+                          }}
+                          onClick={() => onEdit(user)}
+                          className="text-blue-700 hover:text-blue-900 text-sm font-medium"
+                        >
+                          Edit
+                        </button>
+                      )}
                       <button
+                        type="button"
                         data-testid={`delete-user-${user.id}`}
+                        aria-label={`Delete ${user.username}`}
                         onClick={() => handleDelete(user)}
                         className="text-red-600 hover:text-red-800 text-sm font-medium"
                       >

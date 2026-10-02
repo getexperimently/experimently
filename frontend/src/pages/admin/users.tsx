@@ -1,35 +1,54 @@
-import React, { useState } from 'react';
+import React, { useCallback, useState } from 'react';
 import { AdminLayout } from '@/components/admin/AdminLayout';
 import { UserTable } from '@/components/admin/users/UserTable';
 import { InviteUserModal } from '@/components/admin/users/InviteUserModal';
-import { EditUserModal } from '@/components/admin/users/EditUserModal';
+import { EditUserCloseOptions, EditUserModal } from '@/components/admin/users/EditUserModal';
 import { EffectivePermissionsModal } from '@/components/admin/users/EffectivePermissionsModal';
-import { AdminUser } from '@/types/admin';
+import { AdminUser, AdminUserPatch } from '@/types/admin';
 import { AdminService } from '@/services/admin';
 import { withAdminGuard } from '@/components/admin/withAdminGuard';
 import { RequiresModule } from '@/contexts/ModulesContext';
+import { useOptionalAuth } from '@/contexts/AuthContext';
 import { MODULES } from '@/services/modules';
 
 export function UserManagementPage() {
   const [inviteOpen, setInviteOpen] = useState(false);
   const [editUser, setEditUser] = useState<AdminUser | null>(null);
   const [permissionsUser, setPermissionsUser] = useState<AdminUser | null>(null);
-  // Key to force re-mount of UserTable after invite/edit
-  const [tableKey, setTableKey] = useState(0);
+  // Bumped to reload the table after an invite or an edit. The table keeps its
+  // page and search term; it is not remounted.
+  const [reloadToken, setReloadToken] = useState(0);
+  // The row whose Edit button gets focus back when the dialog closes.
+  const [focusUserId, setFocusUserId] = useState<string | null>(null);
+  const [status, setStatus] = useState('');
+  const currentUserId = useOptionalAuth()?.user?.id ?? null;
 
   const handleInviteSuccess = () => {
-    setTableKey((k) => k + 1);
+    setReloadToken((n) => n + 1);
   };
 
-  const handleSaveUser = async (userId: string, data: Partial<AdminUser>) => {
-    try {
-      await AdminService.updateUser(userId, data);
-      setEditUser(null);
-      setTableKey((k) => k + 1);
-    } catch (err) {
-      alert(`Failed to update user: ${(err as Error).message}`);
-    }
+  const handleEdit = (user: AdminUser) => {
+    setStatus('');
+    setEditUser(user);
   };
+
+  // Rejects with the request's error, which the dialog shows; it stays open.
+  const handleSaveUser = async (userId: string, changes: AdminUserPatch) => {
+    await AdminService.updateUser(userId, changes);
+    const name = editUser?.username ?? 'the user';
+    setEditUser(null);
+    setFocusUserId(userId);
+    setReloadToken((n) => n + 1);
+    setStatus(`Saved changes to ${name}.`);
+  };
+
+  const handleCloseEdit = (options?: EditUserCloseOptions) => {
+    if (editUser) setFocusUserId(editUser.id);
+    setEditUser(null);
+    if (options?.reload) setReloadToken((n) => n + 1);
+  };
+
+  const handleFocusHandled = useCallback(() => setFocusUserId(null), []);
 
   return (
     <AdminLayout title="User Management" currentPath="/admin/users">
@@ -51,8 +70,23 @@ export function UserManagementPage() {
           </button>
         </div>
 
+        {/* Announces a saved edit to screen readers and shows it on screen. */}
+        <div
+          role="status"
+          aria-live="polite"
+          data-testid="user-save-status"
+          className={status ? 'mb-4 p-3 bg-green-50 border border-green-200 rounded-md text-sm text-green-800' : ''}
+        >
+          {status}
+        </div>
+
         {/* User Table */}
-        <UserTable key={tableKey} />
+        <UserTable
+          onEdit={handleEdit}
+          reloadToken={reloadToken}
+          focusUserId={focusUserId}
+          onFocusHandled={handleFocusHandled}
+        />
 
         {/* Invite Modal */}
         <InviteUserModal
@@ -65,7 +99,8 @@ export function UserManagementPage() {
         <EditUserModal
           isOpen={editUser !== null}
           user={editUser}
-          onClose={() => setEditUser(null)}
+          currentUserId={currentUserId}
+          onClose={handleCloseEdit}
           onSave={handleSaveUser}
         />
 
@@ -85,4 +120,6 @@ export function UserManagementPage() {
   );
 }
 
-export default withAdminGuard(UserManagementPage, { requiredRole: 'ADMIN' });
+// Superuser only, like every /api/v1/admin route this page calls: a superuser
+// whose role is not ADMIN can open it too (see withAdminGuard's docstring).
+export default withAdminGuard(UserManagementPage);
