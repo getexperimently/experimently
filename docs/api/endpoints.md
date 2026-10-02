@@ -468,6 +468,14 @@ curl -X POST "http://localhost:8000/api/v1/users/" \
   `true` to `false`, and nothing in it is written, other fields included.
   Resending the stored values (`true`) is accepted, so a client that reads the
   account and sends it back with an edit is not refused.
+- **During a concurrent change**: a request that turns off another superuser's
+  `is_superuser` or `is_active` first waits for any change in progress to an
+  active superuser's account, then checks that you are still an active
+  superuser. If another administrator has just deactivated or deleted your
+  account, the answer is 400 "Inactive user"; if they have just removed your
+  superuser access, 403 "Not enough permissions". Nothing is written either
+  way. The wait is at most 5 seconds; a request that would wait longer answers
+  500 and writes nothing.
 - **Response**: 200 OK, the user as in Get User
 - **Errors**: 400 "You can't remove your own superuser access. Ask another
   administrator to do it." when a superuser's request would turn off their own
@@ -490,6 +498,13 @@ curl -X POST "http://localhost:8000/api/v1/users/" \
 - **Description**: A superuser deletes any account but their own. Anyone else
   deletes only their own account (another user's is a 403).
 - **Headers**: Authorization: Bearer {token}
+- **During a concurrent change**: deleting an account that is an active
+  superuser first waits for any change in progress to an active superuser's
+  account, then checks that you are still an active superuser. If another
+  administrator has just deactivated or deleted your account, the answer is
+  400 "Inactive user"; if they have just removed your superuser access, 403
+  "Not enough permissions". Nothing is written either way. The wait is at most
+  5 seconds; a request that would wait longer answers 500 and writes nothing.
 - **Response**: 204 No Content
 - **Errors**: 400 "Superusers cannot delete themselves" when a superuser
   deletes their own account. 403 "Not enough permissions" when anyone else
@@ -760,6 +775,14 @@ public `key`. They share the per-IP `SDK_RATE_LIMIT_PER_MINUTE` ceiling (default
   `true` to `false`, and nothing in it is written, other fields included.
   Resending the stored values (`true`) is accepted, so a client that reads the
   account and sends it back with an edit is not refused.
+- **During a concurrent change**: a request that turns off another superuser's
+  `is_superuser` or `is_active` first waits for any change in progress to an
+  active superuser's account, then checks that you are still an active
+  superuser. If another administrator has just deactivated or deleted your
+  account, the answer is 400 "Inactive user"; if they have just removed your
+  superuser access, 403 "Not enough permissions". Nothing is written either
+  way. The wait is at most 5 seconds; a request that would wait longer answers
+  500 and writes nothing.
 - **Response**: 200 OK, the user
 - **Errors**: 400 "You can't remove your own superuser access. Ask another
   administrator to do it." when the request would turn off your own
@@ -795,13 +818,21 @@ public `key`. They share the per-IP `SDK_RATE_LIMIT_PER_MINUTE` ceiling (default
   they already hold are refused, and **the API keys they created stop
   working, including keys your applications use**. Check which keys a user
   created before deactivating them.
+- **During a concurrent change**: deactivating an account that is a superuser
+  first waits for any change in progress to an active superuser's account,
+  then checks that you are still an active superuser. If another administrator
+  has just deactivated or deleted your account, the answer is 400 "Inactive
+  user"; if they have just removed your superuser access, 403 "Not enough
+  permissions". Nothing is written either way. The wait is at most 5 seconds;
+  a request that would wait longer answers 500 and writes nothing.
 - **Errors**:
   - 400 "You can't change your own role. Ask another administrator to do it."
   - 400 "You can't deactivate your own account."
-  - 400 "Inactive user" when your own account was deactivated while the
-    request was in flight.
+  - 400 "Inactive user" when your own account was deactivated or deleted
+    while the request was in flight.
   - 403 "Not enough permissions" for an account that is not a superuser,
-    whatever its role.
+    whatever its role, including one whose superuser access was removed
+    while the request was in flight.
   - 404 "User not found".
   - 409 "Roles on this deployment come from Cognito groups and are updated on
     every request. Change this user's group in Cognito instead." when
@@ -818,6 +849,13 @@ public `key`. They share the per-IP `SDK_RATE_LIMIT_PER_MINUTE` ceiling (default
 - **Headers**: Authorization: Bearer {token}
 - **Path Parameters**:
   - user_id: string (UUID)
+- **During a concurrent change**: deleting an account that is an active
+  superuser first waits for any change in progress to an active superuser's
+  account, then checks that you are still an active superuser. If another
+  administrator has just deactivated or deleted your account, the answer is
+  400 "Inactive user"; if they have just removed your superuser access, 403
+  "Not enough permissions". Nothing is written either way. The wait is at most
+  5 seconds; a request that would wait longer answers 500 and writes nothing.
 - **Response**: 204 No Content
 - **Errors**: 400 "Cannot delete your own user account" when the account is
   your own. 404 "User not found".

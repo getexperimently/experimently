@@ -24,6 +24,8 @@ from backend.app.api.v1.endpoints.users import (
     refuse_if_email_held,
     refuse_if_own_access_removed,
     refuse_if_username_held,
+    removes_an_active_superuser,
+    require_still_active_superuser,
 )
 from backend.app.core.config import settings
 from backend.app.models.audit_log import ActionType, AuditLog, EntityType
@@ -166,6 +168,12 @@ async def update_user(
     new_username = changed_username(user, update_data)
     refuse_if_username_held(db, new_username, exclude_id=user.id)
 
+    # Demoting or deactivating another superuser: the caller must still be an
+    # active superuser once those rows are locked (#652). No await between
+    # this and the commit.
+    if removes_an_active_superuser(user, update_data):
+        require_still_active_superuser(db, current_user)
+
     # Update user attributes
     for field in update_data:
         if hasattr(user, field):
@@ -190,25 +198,6 @@ ROLE_FROM_COGNITO_REFUSED = (
 def _role_name(user: User) -> Any:
     """The account's role as the API names it (``"ANALYST"``), or ``None``."""
     return user.role.name if user.role is not None else None
-
-
-def lock_active_superusers(db: Session) -> set:
-    """Lock every active superuser row, in id order, and return their ids.
-
-    Two superusers deactivating each other at the same moment would otherwise
-    both succeed and leave no active superuser. Taking the rows in one order
-    makes the second request wait for the first, and then see its result: a
-    caller the first request deactivated is no longer in the set. Held until
-    the caller's commit or rollback.
-    """
-    rows = (
-        db.query(User.id)
-        .filter(User.is_superuser.is_(True), User.is_active.is_(True))
-        .order_by(User.id)
-        .with_for_update()
-        .all()
-    )
-    return {row.id for row in rows}
 
 
 @router.patch(
@@ -266,11 +255,9 @@ async def patch_user(
 
     if active_changes and user_in.is_active is False and user.is_superuser:
         # The caller must still be an active superuser once the rows are
-        # locked; one deactivated a moment ago by another superuser is not.
-        if current_user.id not in lock_active_superusers(db):
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST, detail="Inactive user"
-            )
+        # locked; one deactivated or demoted a moment ago by another
+        # superuser is not (400 "Inactive user" / 403).
+        require_still_active_superuser(db, current_user)
 
     before = {"role": _role_name(user), "is_active": user.is_active}
     # Only these two columns, by name: nothing else in the request can reach
@@ -326,6 +313,11 @@ async def delete_user(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Cannot delete your own user account",
         )
+
+    # Deleting an active superuser: the caller must still be one once those
+    # rows are locked (#652). No await between this and the commit.
+    if user.is_superuser and user.is_active:
+        require_still_active_superuser(db, current_user)
 
     # Delete the user
     db.delete(user)

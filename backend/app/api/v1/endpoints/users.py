@@ -10,7 +10,7 @@ from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from pydantic import EmailStr, TypeAdapter, ValidationError
-from sqlalchemy import func
+from sqlalchemy import func, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -189,6 +189,82 @@ def refuse_if_own_access_removed(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail=OWN_DEACTIVATION_REFUSED
         )
+
+
+#: How long a request waits for another request's lock on the superuser rows
+#: (``lock_active_superusers``) before it gives up with an error (a 500). The
+#: API runs these handlers on one worker, so a wait holds every other request
+#: for as long as it lasts; this bounds it.
+SUPERUSER_LOCK_TIMEOUT = "5s"
+
+
+def lock_active_superusers(db: Session) -> set:
+    """Lock every active superuser row, in id order, and return their ids.
+
+    Two superusers deactivating each other at the same moment would otherwise
+    both succeed and leave no active superuser. Taking the rows in one order
+    makes the second request wait for the first, and then see its result: a
+    caller the first request deactivated is no longer in the set. Held until
+    the caller's commit or rollback. A wait longer than
+    ``SUPERUSER_LOCK_TIMEOUT`` ends the request with a database error.
+    """
+    # The value is the module constant above, never request data.
+    db.execute(text(f"SET LOCAL lock_timeout = '{SUPERUSER_LOCK_TIMEOUT}'"))  # nosemgrep: python.sqlalchemy.security.audit.avoid-sqlalchemy-text.avoid-sqlalchemy-text  # fmt: skip
+    rows = (
+        db.query(User.id)
+        .filter(User.is_superuser.is_(True), User.is_active.is_(True))
+        .order_by(User.id)
+        .with_for_update()
+        .all()
+    )
+    return {row.id for row in rows}
+
+
+def require_still_active_superuser(db: Session, current_user: User) -> None:
+    """Lock the active superuser rows and refuse a caller no longer among them.
+
+    Called before a write that takes an active superuser out of that set
+    (demoting, deactivating or deleting one), with no ``await`` between this
+    call and the commit. Two superusers doing that to each other at once then
+    run one after the other, and the second sees the first one's result, so
+    they cannot leave no active superuser between them (#652).
+
+    A caller who is not in the set is read again, after the lock, with a
+    column query: the request's session already holds the caller's object
+    from sign-in, and ``db.get`` or ``query(User).first()`` would return that
+    stale object. The texts are the ones sign-in uses: 400 "Inactive user"
+    for a deactivated caller, and also (a choice) for a caller whose row is
+    gone; 403 "Not enough permissions" for a caller who is active but no
+    longer a superuser.
+    """
+    if current_user.id in lock_active_superusers(db):
+        return
+    row = (
+        db.query(User.is_active, User.is_superuser)
+        .filter(User.id == current_user.id)
+        .one_or_none()
+    )
+    if row is None or not row.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Inactive user"
+        )
+    # Active but not in the locked set: no longer a superuser. (Promoted
+    # again after the lock is answered the same way: the row is not locked.)
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN, detail="Not enough permissions"
+    )
+
+
+def removes_an_active_superuser(target: User, update_data: Dict[str, Any]) -> bool:
+    """Whether a PUT's *update_data* takes *target* out of the active
+    superusers: *target* is one, and the write clears ``is_superuser`` or
+    ``is_active``."""
+    if not (target.is_superuser and target.is_active):
+        return False
+    return any(
+        key in update_data and not update_data[key]
+        for key in ("is_superuser", "is_active")
+    )
 
 
 def email_held_by_another(
@@ -699,6 +775,12 @@ async def update_user(
     new_username = changed_username(user, update_data)
     refuse_if_username_held(db, new_username, exclude_id=user.id)
 
+    # Demoting or deactivating another superuser: the caller must still be an
+    # active superuser once those rows are locked (#652). No await between
+    # this and the commit.
+    if removes_an_active_superuser(user, update_data):
+        require_still_active_superuser(db, current_user)
+
     # Update user attributes
     for field in update_data:
         if hasattr(user, field):
@@ -775,6 +857,11 @@ async def delete_user(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Not enough permissions",
         )
+
+    # Deleting an active superuser: the caller must still be one once those
+    # rows are locked (#652). No await between this and the commit.
+    if user.is_superuser and user.is_active:
+        require_still_active_superuser(db, current_user)
 
     db.delete(user)
     db.commit()
