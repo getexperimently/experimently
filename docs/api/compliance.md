@@ -9,7 +9,7 @@
     for what each profile includes and how to run the full one.
 
 The compliance audit trail is an append-only table of changes to experiments, feature flags
-and (in the full profile) warehouse connections and sources. It is evidence for a
+and (in the full profile) warehouse connections, sources and analysis runs. It is evidence for a
 customer's SOC 2 or ISO 27001 program; the platform itself holds no certification.
 
 It is a separate record from the [audit log](audit-logging.md) at `/api/v1/audit-logs`,
@@ -34,6 +34,7 @@ that write one in this release:
 | `CREATE`, `UPDATE`, `DELETE` | `warehouse_connection` | creating, changing or deleting a warehouse connection | full |
 | `KEY_CREATE` | `warehouse_connection` | a new key is generated (`/regenerate-key`), or a pending key becomes current after a passing connection test | full |
 | `CREATE`, `UPDATE`, `DELETE` | `warehouse_source` | creating, changing, validating or deleting a warehouse source | full |
+| `CREATE` | `warehouse_analysis_run` | `POST /api/v1/warehouse/analysis/experiments/{experiment_id}/runs` starts a warehouse analysis | full |
 
 Each event carries the actor's id, the resource id, and a snapshot of a few fields in
 `old_value` and `new_value`: for a flag update, its key, name, status and rollout percentage;
@@ -48,8 +49,9 @@ completion, and reading, reporting on or exporting this trail. `AuditAction` def
 `LOGIN`, `LOGOUT`, `LOGIN_FAILED`, `ROLE_GRANT`, `ROLE_REVOKE`, `KEY_REVOKE`, `EXPORT` and
 `REPORT_GENERATED`, and you can filter on them, but nothing in this release writes them.
 
-For flags and experiments, a failure to write the event does not fail the request that made
-the change: the change is kept and the failure is logged as a warning.
+For flags, experiments and warehouse analysis runs, a failure to write the event does not
+fail the request that made the change: the change is kept and the failure is logged as a
+warning.
 
 **Base path**: `/api/v1/compliance`. Every route needs a Bearer token; without one it
 answers `401`.
