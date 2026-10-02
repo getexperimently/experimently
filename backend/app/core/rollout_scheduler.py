@@ -31,6 +31,24 @@ logger = get_logger(__name__)
 SCHEDULER_NAME = "rollout"
 
 
+class ScheduleNoLongerActive(Exception):
+    """The schedule left ACTIVE after this tick read it.
+
+    Raised once the tick holds the flag and schedule locks and finds, on a
+    fresh read, that the schedule was paused, cancelled or deleted while the
+    tick was waiting. Nothing failed: the tick rolls that schedule back and
+    counts it as skipped.
+    """
+
+    def __init__(self, schedule_id: Any, status: Optional[str]):
+        self.schedule_id = schedule_id
+        self.status = status
+        super().__init__(
+            f"Rollout schedule {schedule_id} is no longer active "
+            f"({status or 'deleted'})"
+        )
+
+
 def _as_utc(value: datetime) -> datetime:
     """
     Return ``value`` as a timezone-aware UTC datetime.
@@ -123,6 +141,7 @@ class RolloutScheduler:
 
         schedules_updated = 0
         stages_processed = 0
+        skipped_count = 0
         failed_count = 0
 
         # Use a new database session for this task
@@ -172,6 +191,19 @@ class RolloutScheduler:
                             notifications,
                         ) = await self._process_schedule(db, schedule, current_time)
                     db.commit()
+                except ScheduleNoLongerActive as exc:
+                    # Paused or cancelled while this tick waited for the
+                    # flag lock. Leaving the savepoint has undone this
+                    # schedule's changes; ending the transaction releases
+                    # the locks. A skip, not a failure (#629).
+                    db.rollback()
+                    skipped_count += 1
+                    logger.info(
+                        "Rollout schedule %s is no longer active (%s); skipped",
+                        schedule_id,
+                        exc.status or "deleted",
+                    )
+                    continue
                 except Exception:
                     db.rollback()
                     failed_count += 1
@@ -207,7 +239,10 @@ class RolloutScheduler:
         return {
             "items_processed": schedules_updated,
             "items_failed": failed_count,
-            "metadata": {"stage_transitions": stages_processed},
+            "metadata": {
+                "stage_transitions": stages_processed,
+                "schedules_skipped": skipped_count,
+            },
         }
 
     async def _process_schedule(
@@ -308,7 +343,11 @@ class RolloutScheduler:
                     "is not yet eligible for activation; leaving it pending"
                 )
         else:
-            # This was the last stage, mark the schedule as completed
+            # This was the last stage, mark the schedule as completed. The
+            # same locks as a stage start (flag, then schedule) and the same
+            # fresh read: a schedule paused while this tick was waiting is
+            # not overwritten with COMPLETED.
+            self._lock_active_schedule(db, schedule)
             schedule.status = RolloutScheduleStatus.COMPLETED
             schedule.updated_at = current_time
             db.add(schedule)
@@ -407,6 +446,46 @@ class RolloutScheduler:
 
         return False
 
+    @staticmethod
+    def _lock_active_schedule(
+        db: Session, schedule: RolloutSchedule
+    ) -> Optional[FeatureFlag]:
+        """
+        Lock the schedule's flag, then re-read and lock the schedule itself.
+
+        The tick read the schedule as ACTIVE at its start, without a lock. A
+        writer may have paused it since and committed, possibly while holding
+        the flag lock this call waits for. So the status is read again from
+        the database once the flag lock is held: ``populate_existing``
+        replaces the copy in the session's identity map rather than trusting
+        it. ``FOR UPDATE`` on the schedule row holds off a later pause until
+        this transaction ends. The order, flag then schedule, matches the
+        other writers in this codebase, none of which locks a schedule and
+        then a flag.
+
+        Returns the locked flag, or ``None`` when it no longer exists.
+
+        Raises:
+            ScheduleNoLongerActive: the schedule is no longer ACTIVE.
+        """
+        feature_flag = (
+            db.query(FeatureFlag)
+            .filter(FeatureFlag.id == schedule.feature_flag_id)
+            .with_for_update()
+            .first()
+        )
+        current = (
+            db.query(RolloutSchedule)
+            .filter(RolloutSchedule.id == schedule.id)
+            .populate_existing()
+            .with_for_update()
+            .one_or_none()
+        )
+        if current is None or current.status != RolloutScheduleStatus.ACTIVE:
+            status = current.status.value if current is not None else None
+            raise ScheduleNoLongerActive(schedule.id, status)
+        return feature_flag
+
     async def _activate_stage(
         self,
         db: Session,
@@ -430,26 +509,25 @@ class RolloutScheduler:
             True once the stage and the flag are updated.
 
         Raises:
+            ScheduleNoLongerActive: the schedule left ACTIVE while this tick
+                waited for the flag lock. The caller rolls the schedule back
+                and counts it as skipped.
             LookupError: the schedule's feature flag does not exist. The
                 caller rolls the schedule back, so the stage stays PENDING.
         """
+        feature_flag = self._lock_active_schedule(db, schedule)
+
+        if not feature_flag:
+            raise LookupError(
+                f"Feature flag {schedule.feature_flag_id} not found for rollout schedule {schedule.id}"
+            )
+
         # Mark the stage as in progress
         stage.status = RolloutStageStatus.IN_PROGRESS
         stage.updated_at = current_time
         db.add(stage)
 
         # Update the feature flag's rollout percentage
-        feature_flag = (
-            db.query(FeatureFlag)
-            .filter(FeatureFlag.id == schedule.feature_flag_id)
-            .with_for_update()
-            .first()
-        )
-
-        if not feature_flag:
-            raise LookupError(
-                f"Feature flag {schedule.feature_flag_id} not found for rollout schedule {schedule.id}"
-            )
 
         feature_flag.rollout_percentage = stage.target_percentage
         feature_flag.updated_at = current_time

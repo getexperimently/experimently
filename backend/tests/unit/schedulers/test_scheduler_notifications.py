@@ -371,6 +371,7 @@ class TestRolloutSchedulerNotifications:
         from backend.app.models.feature_flag import FeatureFlag
         from backend.app.models.rollout_schedule import (
             RolloutSchedule,
+            RolloutScheduleStatus,
             RolloutStage,
             RolloutStageStatus,
             TriggerType,
@@ -388,6 +389,7 @@ class TestRolloutSchedulerNotifications:
         mock_schedule = MagicMock()
         mock_schedule.id = "schedule-uuid-1"
         mock_schedule.feature_flag_id = flag_id
+        mock_schedule.status = RolloutScheduleStatus.ACTIVE
 
         mock_flag = MagicMock()
         mock_flag.id = flag_id
@@ -398,6 +400,10 @@ class TestRolloutSchedulerNotifications:
         schedules_query.filter.return_value = schedules_query
         schedules_query.order_by.return_value = schedules_query
         schedules_query.all.return_value = [mock_schedule]
+        # The re-read of the schedule under the flag lock (#629).
+        schedules_query.populate_existing.return_value = schedules_query
+        schedules_query.with_for_update.return_value = schedules_query
+        schedules_query.one_or_none.return_value = mock_schedule
         active_query = MagicMock()
         active_query.filter.return_value = active_query
         active_query.first.return_value = None

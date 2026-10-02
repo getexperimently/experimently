@@ -297,12 +297,22 @@ class TestRolloutScheduler:
         mock_schedules_query.filter.return_value = mock_schedules_query
         mock_schedules_query.order_by.return_value = mock_schedules_query
         mock_schedules_query.all.return_value = [mock_schedule]
+        # The last-stage branch locks the flag and re-reads the schedule
+        # (#629).
+        mock_schedules_query.populate_existing.return_value = mock_schedules_query
+        mock_schedules_query.with_for_update.return_value = mock_schedules_query
+        mock_schedules_query.one_or_none.return_value = mock_schedule
+        mock_flag_query = MagicMock()
+        mock_flag_query.filter.return_value = mock_flag_query
+        mock_flag_query.with_for_update.return_value = mock_flag_query
 
         mock_active_stage_query = MagicMock()
         mock_pending_stage_query = MagicMock()
 
         # Set up query chain for active and pending stages
         def mock_query_side_effect(arg):
+            if arg == FeatureFlag:
+                return mock_flag_query
             if arg == RolloutSchedule:
                 return mock_schedules_query
             elif arg == RolloutStage:
@@ -455,6 +465,11 @@ class TestRolloutScheduler:
         mock_flag_query.filter.return_value = mock_flag_query
         mock_flag_query.with_for_update.return_value = mock_flag_query
         mock_flag_query.first.return_value = mock_feature_flag
+        # The schedule, re-read under the flag lock, is still ACTIVE (#629).
+        mock_flag_query.populate_existing.return_value = mock_flag_query
+        mock_flag_query.one_or_none.return_value = MagicMock(
+            status=RolloutScheduleStatus.ACTIVE
+        )
 
         # Activate the stage
         scheduler = RolloutScheduler(interval_minutes=1)
@@ -498,9 +513,14 @@ class TestRolloutScheduler:
         mock_flag_query.filter.return_value = mock_flag_query
         mock_flag_query.with_for_update.return_value = mock_flag_query
         mock_flag_query.first.return_value = None
+        mock_flag_query.populate_existing.return_value = mock_flag_query
+        mock_flag_query.one_or_none.return_value = MagicMock(
+            status=RolloutScheduleStatus.ACTIVE
+        )
 
         # Activate the stage: a missing flag raises, so the caller rolls the
         # schedule back and the stage stays PENDING in the database (#593).
+        # The flag is looked up before the stage is touched (#629).
         scheduler = RolloutScheduler(interval_minutes=1)
         current_time = datetime.now(timezone.utc)
         with pytest.raises(LookupError):
@@ -508,7 +528,7 @@ class TestRolloutScheduler:
                 mock_session, mock_schedule, mock_stage, current_time
             )
 
-        mock_session.add.assert_called_once_with(mock_stage)
+        mock_session.add.assert_not_called()
         mock_session.flush.assert_not_called()
         mock_session.commit.assert_not_called()
 
