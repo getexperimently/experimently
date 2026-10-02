@@ -11,11 +11,17 @@ import pytest
 
 from backend.app.api.deps import get_current_user
 from backend.app.core.cognito import map_cognito_groups_to_role, should_be_superuser
+from backend.app.core.config import settings
 from backend.app.models.user import User, UserRole
 
 
 class TestCognitoIntegration:
     """Test class for Cognito integration features."""
+
+    @pytest.fixture(autouse=True)
+    def _cognito_provider(self, monkeypatch):
+        """``get_current_user``'s Cognito branch; the suite default is local."""
+        monkeypatch.setattr(settings, "AUTH_PROVIDER", "cognito")
 
     @pytest.fixture
     def mock_db_session(self):
@@ -37,7 +43,7 @@ class TestCognitoIntegration:
     @pytest.fixture
     def mock_settings(self):
         """Mock settings for testing."""
-        with patch("backend.app.api.deps.settings") as mock_settings:
+        with patch("backend.app.services.cognito_accounts.settings") as mock_settings:
             mock_settings.COGNITO_GROUP_ROLE_MAPPING = {
                 "Admins": "admin",
                 "Developers": "developer",
@@ -134,6 +140,7 @@ class TestCognitoIntegration:
         mock_auth_service.get_user_with_groups.return_value = {
             "username": "newuser",
             "attributes": {
+                "sub": "sub-newuser",
                 "email": "newuser@example.com",
                 "given_name": "New",
                 "family_name": "User",
@@ -142,10 +149,14 @@ class TestCognitoIntegration:
         }
 
         # Setup patching the required components
-        with patch("backend.app.api.deps.settings", mock_settings):
-            with patch("backend.app.api.deps.map_cognito_groups_to_role") as mock_map:
+        with patch("backend.app.services.cognito_accounts.settings", mock_settings):
+            with patch(
+                "backend.app.services.cognito_accounts.map_cognito_groups_to_role"
+            ) as mock_map:
                 mock_map.return_value = UserRole.DEVELOPER
-                with patch("backend.app.api.deps.should_be_superuser") as mock_super:
+                with patch(
+                    "backend.app.services.cognito_accounts.should_be_superuser"
+                ) as mock_super:
                     mock_super.return_value = False
 
                     # Call the function
@@ -155,6 +166,8 @@ class TestCognitoIntegration:
                     assert mock_db_session.add.called
                     assert mock_db_session.commit.called
                     assert user.username == "newuser"
+                    assert user.external_id == "cognito:sub-newuser"
+                    assert user.hashed_password is None
                     assert user.email == "newuser@example.com"
                     assert user.full_name == "New User"
                     assert user.role == UserRole.DEVELOPER
@@ -167,6 +180,7 @@ class TestCognitoIntegration:
         # Create existing user with different role
         existing_user = User(
             username="existinguser",
+            external_id="cognito:sub-existinguser",
             email="existing@example.com",
             full_name="Existing User",
             role=UserRole.VIEWER,
@@ -177,15 +191,19 @@ class TestCognitoIntegration:
         # Mock Cognito response with different role
         mock_auth_service.get_user_with_groups.return_value = {
             "username": "existinguser",
-            "attributes": {"email": "existing@example.com"},
+            "attributes": {"sub": "sub-existinguser", "email": "existing@example.com"},
             "groups": ["Developers"],  # Different role than currently assigned
         }
 
         # Setup patching
-        with patch("backend.app.api.deps.settings", mock_settings):
-            with patch("backend.app.api.deps.map_cognito_groups_to_role") as mock_map:
+        with patch("backend.app.services.cognito_accounts.settings", mock_settings):
+            with patch(
+                "backend.app.services.cognito_accounts.map_cognito_groups_to_role"
+            ) as mock_map:
                 mock_map.return_value = UserRole.DEVELOPER
-                with patch("backend.app.api.deps.should_be_superuser") as mock_super:
+                with patch(
+                    "backend.app.services.cognito_accounts.should_be_superuser"
+                ) as mock_super:
                     mock_super.return_value = False
 
                     # Call the function
@@ -203,6 +221,7 @@ class TestCognitoIntegration:
         # Create existing regular user
         existing_user = User(
             username="regularuser",
+            external_id="cognito:sub-regularuser",
             email="regular@example.com",
             full_name="Regular User",
             role=UserRole.DEVELOPER,
@@ -213,15 +232,19 @@ class TestCognitoIntegration:
         # Mock Cognito response with admin group
         mock_auth_service.get_user_with_groups.return_value = {
             "username": "regularuser",
-            "attributes": {"email": "regular@example.com"},
+            "attributes": {"sub": "sub-regularuser", "email": "regular@example.com"},
             "groups": ["Admins"],  # Admin group should make them superuser
         }
 
         # Setup patching
-        with patch("backend.app.api.deps.settings", mock_settings):
-            with patch("backend.app.api.deps.map_cognito_groups_to_role") as mock_map:
+        with patch("backend.app.services.cognito_accounts.settings", mock_settings):
+            with patch(
+                "backend.app.services.cognito_accounts.map_cognito_groups_to_role"
+            ) as mock_map:
                 mock_map.return_value = UserRole.ADMIN
-                with patch("backend.app.api.deps.should_be_superuser") as mock_super:
+                with patch(
+                    "backend.app.services.cognito_accounts.should_be_superuser"
+                ) as mock_super:
                     mock_super.return_value = True
 
                     # Call the function
@@ -239,6 +262,7 @@ class TestCognitoIntegration:
         # Create existing user
         existing_user = User(
             username="nochange",
+            external_id="cognito:sub-nochange",
             email="nochange@example.com",
             full_name="No Change",
             role=UserRole.VIEWER,  # Will remain this even though Cognito has Developer
@@ -249,7 +273,7 @@ class TestCognitoIntegration:
         # Mock Cognito response with different role
         mock_auth_service.get_user_with_groups.return_value = {
             "username": "nochange",
-            "attributes": {"email": "nochange@example.com"},
+            "attributes": {"sub": "sub-nochange", "email": "nochange@example.com"},
             "groups": ["Developers"],  # Different from current VIEWER role
         }
 
@@ -257,10 +281,14 @@ class TestCognitoIntegration:
         mock_settings.SYNC_ROLES_ON_LOGIN = False
 
         # Setup patching
-        with patch("backend.app.api.deps.settings", mock_settings):
-            with patch("backend.app.api.deps.map_cognito_groups_to_role") as mock_map:
+        with patch("backend.app.services.cognito_accounts.settings", mock_settings):
+            with patch(
+                "backend.app.services.cognito_accounts.map_cognito_groups_to_role"
+            ) as mock_map:
                 mock_map.return_value = UserRole.DEVELOPER
-                with patch("backend.app.api.deps.should_be_superuser") as mock_super:
+                with patch(
+                    "backend.app.services.cognito_accounts.should_be_superuser"
+                ) as mock_super:
                     mock_super.return_value = False
 
                     # Call the function
@@ -279,6 +307,7 @@ class TestCognitoIntegration:
         # Create existing user
         existing_user = User(
             username="superuser",
+            external_id="cognito:sub-superuser",
             email="super@example.com",
             full_name="Super User",
             role=UserRole.DEVELOPER,  # Current role
@@ -289,7 +318,7 @@ class TestCognitoIntegration:
         # Mock Cognito response with SuperUsers group (admin group but mapped as developer)
         mock_auth_service.get_user_with_groups.return_value = {
             "username": "superuser",
-            "attributes": {"email": "super@example.com"},
+            "attributes": {"sub": "sub-superuser", "email": "super@example.com"},
             "groups": ["SuperUsers"],  # In COGNITO_ADMIN_GROUPS but mapped as developer
         }
 
@@ -297,7 +326,7 @@ class TestCognitoIntegration:
         mock_settings.COGNITO_GROUP_ROLE_MAPPING["SuperUsers"] = "developer"
 
         # Execute with real map_cognito_groups_to_role and should_be_superuser
-        with patch("backend.app.api.deps.settings", mock_settings):
+        with patch("backend.app.services.cognito_accounts.settings", mock_settings):
             # Call the function with the actual implementations
             user = get_current_user("test_token", mock_db_session)
 

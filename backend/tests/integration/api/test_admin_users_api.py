@@ -432,12 +432,16 @@ class TestPatchUnderCognitoRoleSync:
         user's groups by their next authenticated request. If this stops being
         true, the 409 and its text have to change with it."""
         user = _account(db_session, role=UserRole.ANALYST)
+        # A Cognito sign-in reaches the account linked to its user ID.
+        sub = str(uuid.uuid4())
+        user.external_id = f"cognito:{sub}"
+        db_session.commit()
         monkeypatch.setattr(
             deps.auth_service,
             "get_user_with_groups",
             lambda token: {
                 "username": user.username,
-                "attributes": {"email": user.email},
+                "attributes": {"sub": sub, "email": user.email},
                 "groups": ["Viewers"],
             },
         )

@@ -34,7 +34,8 @@ The user pool that `COGNITO_USER_POOL_ID` names must require an email address:
   the provider's email claim to the pool's `email` attribute.
 
 The platform creates a user's account the first time they sign in, and takes the account's
-email address from the pool's `email` attribute, so every identity that can sign in needs one.
+email address from the pool's `email` attribute. A first sign-in from a user with no email
+address is refused, and no account is created.
 Cognito does not let you change a pool's required attributes after the pool is created, so
 set this when you create it. The reference pool in
 `infrastructure/cdk/stacks/authentication_stack.py` already requires `email`.
