@@ -146,7 +146,7 @@ test.describe("Journey: experiment lifecycle", () => {
       description: "Automated E2E lifecycle experiment",
       metricEventName: "purchase",
       // The pinned answer (backend test_sample_size_pinned_answer.py), end to end.
-      estimate: { baselinePct: "12", mdePct: "5", perVariant: "47,034 users per variant" },
+      estimate: { baselinePct: "12", mdePct: "5", perVariant: "47,036 users per variant" },
     });
     expect(experimentId).toMatch(/^[0-9a-f-]{36}$/);
 

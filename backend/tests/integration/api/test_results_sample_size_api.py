@@ -33,7 +33,10 @@ from backend.app.models.experiment import (
     Variant,
 )
 from backend.app.services.analysis_service import AnalysisService
-from backend.app.services.power_calculator_service import PowerCalculatorService
+from backend.app.services.power_calculator_service import (
+    TREATMENT_RATE_CEILING_MESSAGE,
+    compute_power,
+)
 
 pytestmark = [pytest.mark.integration, pytest.mark.requires_db]
 
@@ -168,9 +171,7 @@ def test_plans_from_the_observed_control_rate_and_counts_the_smallest_arm(client
     assert data["required_sample_size_per_variant"] == 47036
     assert data["baseline_source"] == "observed"
     assert data["baseline_users"] == 50
-    assert data["achieved_power"] == PowerCalculatorService.compute_power(
-        20, 0.12, 0.126, 0.05
-    )
+    assert data["achieved_power"] == compute_power(20, 0.12, 0.126, 0.05, True)
     assert data["is_adequate"] is False
     assert data["unavailable_reason"] is None
     assert data["mde"] == 0.05
@@ -340,6 +341,52 @@ def test_a_requested_baseline_the_effect_raises_past_100_percent_is_refused(
             "Lower the baseline rate or the effect."
         )
     }
+    # The one sentence the wizard and /utils answer with too.
+    assert data["detail"] == TREATMENT_RATE_CEILING_MESSAGE
+
+
+# --- row 2: the guided setup and the results tab give the same number ---------
+
+
+@pytest.mark.regression
+@pytest.mark.parametrize("alpha", (0.01, 0.05, 0.10))
+@pytest.mark.parametrize("power", (0.80, 0.90, 0.95))
+@pytest.mark.parametrize("variants", (2, 3))
+def test_the_tab_and_the_guided_setup_agree(client, seed, alpha, power, variants):
+    """
+    Every significance and power the guided setup offers, at two and three
+    variants, with ``==``. Neither applies a correction by default.
+    test_sample_size_one_formula.py pins the guided setup and /utils to the
+    same helper; this adds the results tab, which needs a database.
+    """
+    arms = [("control", True, 50, 0, 0)] + [
+        (f"treatment_{i}", False, 50, 0, 0) for i in range(variants - 1)
+    ]
+    exp = seed(arms)
+    tab = _get(
+        client,
+        exp.id,
+        baseline_conversion_rate=0.12,
+        mde=0.05,
+        confidence_level=round(1 - alpha, 2),
+        power_target=power,
+    )
+    response = client.get(
+        "/api/v1/experiments/analysis/sample-size",
+        params={
+            "baseline_rate": 0.12,
+            "minimum_detectable_effect": 0.05,
+            "significance_level": alpha,
+            "statistical_power": power,
+            "variant_count": variants,
+        },
+    )
+    assert response.status_code == 200, response.text
+    wizard = response.json()["samples_per_variant"]
+    assert tab["required_sample_size_per_variant"] == wizard
+    assert tab["comparisons"] == variants - 1
+    if (alpha, power) == (0.05, 0.80):
+        assert wizard == 47036
 
 
 @pytest.mark.parametrize(

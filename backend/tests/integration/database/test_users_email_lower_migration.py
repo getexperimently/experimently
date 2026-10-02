@@ -71,6 +71,8 @@ pytestmark = [pytest.mark.integration]
 REVISION = "d12cbd384bbe"
 PREVIOUS_CORE_HEAD = "271f03a31742"
 EARLIER_CORE_HEAD = "8fd44fb483a2"
+#: The core head of this tree, which ``upgrade heads`` runs on to.
+CORE_HEAD = "a89544fb1075"
 #: The modules branch's head, in the previous release and in this one alike.
 MODULES_HEAD = "modules_0002_warehouse_analysis"
 
@@ -83,8 +85,8 @@ EARLIER_ROWS = {
     FULL: {EARLIER_CORE_HEAD, MODULES_HEAD},
 }
 ROWS = {
-    CORE: {REVISION},
-    FULL: {REVISION, MODULES_HEAD},
+    CORE: {CORE_HEAD},
+    FULL: {CORE_HEAD, MODULES_HEAD},
 }
 
 INDEX = "ix_users_email_lower"

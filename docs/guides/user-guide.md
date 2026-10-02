@@ -109,7 +109,7 @@ condition the server cannot apply is reported there too.
 
 Enter your baseline conversion rate and the smallest change worth detecting — a
 *relative* change, so 5% on a 12% baseline means 12% → 12.6% — and press **Calculate
-estimate**. At 80% power and 5% significance that example needs 47,034 users per variant.
+estimate**. At 80% power and 5% significance that example needs 47,036 users per variant.
 Add your daily users to see roughly how many days that takes. The estimate is advisory:
 nothing here is saved with the experiment.
 

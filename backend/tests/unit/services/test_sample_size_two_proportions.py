@@ -1,7 +1,8 @@
 """The two-proportion sample size and its inverse, the power (#666).
 
-``PowerCalculatorService.sample_size_two_proportions`` is what the results
-Sample Size tab plans with, and ``compute_power`` is its exact inverse, so the
+``sample_size_two_proportions`` (power_calculator_service.py) is what the
+results Sample Size tab, the guided setup and ``/utils`` plan with, and
+``compute_power`` is its exact inverse, so the
 tab's "planned sample reached" and its achieved power never disagree.
 
 * Row 1a: every case against the formula written out here from
@@ -24,12 +25,20 @@ from scipy.stats import norm
 from statsmodels.stats.power import NormalIndPower
 from statsmodels.stats.proportion import proportion_effectsize
 
-from backend.app.services.power_calculator_service import PowerCalculatorService
+from backend.app.services.power_calculator_service import (
+    compute_power,
+    sample_size_two_proportions,
+)
 
 pytestmark = [pytest.mark.unit]
 
-size = PowerCalculatorService.sample_size_two_proportions
-power_at = PowerCalculatorService.compute_power
+
+def size(p1, p2, alpha, power, two_tailed=True):
+    return sample_size_two_proportions(p1, p2, alpha, power, two_tailed)
+
+
+def power_at(n, p1, p2, alpha, two_tailed=True):
+    return compute_power(n, p1, p2, alpha, two_tailed)
 
 
 def _reference(p1: float, mde: float, alpha: float, power: float) -> int:

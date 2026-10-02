@@ -61,6 +61,10 @@ from backend.app.services.experiment_service import (
     ExperimentService,
     is_experiment_key_conflict,
 )
+from backend.app.services.power_calculator_service import (
+    TREATMENT_RATE_CEILING_MESSAGE,
+    sample_size_two_proportions,
+)
 
 #: The states in which ``PUT /experiments/{id}`` accepts ``targeting_rules``
 #: (#523). PAUSED only when targeting is the one field sent; see the route.
@@ -1885,31 +1889,25 @@ async def calculate_experiment_sample_size(
     """
     import math
 
-    from scipy.stats import norm
+    # The treatment rate has to be a probability. Past 100% the formula takes
+    # the square root of a negative variance.
+    treatment_rate = baseline_rate + baseline_rate * minimum_detectable_effect
+    if baseline_rate * (1 + minimum_detectable_effect) >= 1 or treatment_rate >= 1:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=TREATMENT_RATE_CEILING_MESSAGE,
+        )
 
-    # Critical values from the exact inverse normal CDF. A one-sided test puts
-    # all of alpha in one tail; a two-sided test splits it. At power 0.5,
-    # z_beta is 0.
-    if is_one_sided:
-        z_alpha = float(norm.ppf(1 - significance_level))
-    else:
-        z_alpha = float(norm.ppf(1 - significance_level / 2))
-
-    z_beta = float(norm.ppf(statistical_power))
-
-    # Calculate expected rate for treatment
-    treatment_rate = baseline_rate * (1 + minimum_detectable_effect)
-
-    # Calculate pooled standard error
-    pooled_variance = baseline_rate * (1 - baseline_rate) + treatment_rate * (
-        1 - treatment_rate
+    # Two arms through the same formula as the results page's Sample Size tab
+    # (pooled variance under H0, unpooled under H1), with no multiple-comparison
+    # correction; every variant needs this many users.
+    samples_per_variant = sample_size_two_proportions(
+        p1=baseline_rate,
+        p2=treatment_rate,
+        alpha=significance_level,
+        power=statistical_power,
+        two_tailed=not is_one_sided,
     )
-
-    # Calculate required sample size per variant
-    numerator = (z_alpha + z_beta) ** 2 * pooled_variance
-    denominator = (treatment_rate - baseline_rate) ** 2
-
-    samples_per_variant = math.ceil(numerator / denominator)
 
     # Calculate total sample size
     total_samples = samples_per_variant * variant_count

@@ -48,6 +48,11 @@ from backend.app.services.analysis_snapshot_service import record_snapshot
 from backend.app.services.cache import CacheService
 from backend.app.services.cuped_service import CupedService
 from backend.app.services.dimensional_analysis_service import DimensionalAnalysisService
+from backend.app.services.power_calculator_service import (
+    TREATMENT_RATE_CEILING_MESSAGE,
+    compute_power,
+    sample_size_two_proportions,
+)
 from backend.app.services.sequential_testing_service import SequentialTestingService
 from backend.app.services.srm_service import compute_srm_for_experiment
 
@@ -815,13 +820,7 @@ def get_sample_size_status(
         baseline_conversion_rate is not None
         and baseline_conversion_rate * (1.0 + mde) >= 1.0
     ):
-        raise HTTPException(
-            status_code=422,
-            detail=(
-                "This baseline raised by this effect reaches 100% or more. "
-                "Lower the baseline rate or the effect."
-            ),
-        )
+        raise HTTPException(status_code=422, detail=TREATMENT_RATE_CEILING_MESSAGE)
 
     experiment = (
         db.query(Experiment)
@@ -840,9 +839,6 @@ def get_sample_size_status(
 
         from backend.app.models.assignment import Assignment
         from backend.app.services.event_matching import count_converting_users
-        from backend.app.services.power_calculator_service import (
-            PowerCalculatorService,
-        )
 
         variants = list(experiment.variants or [])
         comparisons = max(1, len(variants) - 1)
@@ -895,10 +891,10 @@ def get_sample_size_status(
         achieved_power: Optional[float] = None
         if baseline is not None and reason is None:
             treatment = baseline * (1.0 + mde)
-            required = PowerCalculatorService.sample_size_two_proportions(
+            required = sample_size_two_proportions(
                 baseline, treatment, alpha, power_target, two_tailed=True
             )
-            achieved_power = PowerCalculatorService.compute_power(
+            achieved_power = compute_power(
                 current, baseline, treatment, alpha, two_tailed=True
             )
 

@@ -101,6 +101,116 @@ _DEFAULT_EFFECT_SIZES = [
 
 
 # ---------------------------------------------------------------------------
+# Two-proportion sample size (shared)
+# ---------------------------------------------------------------------------
+
+# What the sample-size routes answer, with a 422, when the treatment rate
+# baseline x (1 + MDE) is 100% or more. The same sentence the dashboard's
+# guided setup shows before it sends the request.
+TREATMENT_RATE_CEILING_MESSAGE = (
+    "This baseline raised by this effect reaches 100% or more. "
+    "Lower the baseline rate or the effect."
+)
+
+
+def sample_size_two_proportions(
+    p1: float,
+    p2: float,
+    alpha: float,
+    power: float,
+    two_tailed: bool,
+) -> int:
+    """
+    Required sample size per group for a two-proportions z-test.
+
+    The variance under the null hypothesis is pooled (both groups at the
+    mean rate ``p_bar``); the variance under the alternative is unpooled
+    (each group at its own rate). Formula (Fleiss, 2003):
+
+        n = [z_alpha * sqrt(2 * p_bar * (1 - p_bar))
+             + z_power * sqrt(p1*(1-p1) + p2*(1-p2))]^2
+            / (p2 - p1)^2
+
+        p_bar   = (p1 + p2) / 2
+        z_alpha = norm.ppf(1 - alpha / 2)   two-tailed
+                  norm.ppf(1 - alpha)       one-tailed
+        z_power = norm.ppf(power)
+
+    The guided setup's estimate (``GET /experiments/analysis/sample-size``)
+    and ``POST /utils/utils/sample-size`` call this with two arms; it is the
+    same function the results page's Sample Size tab calls. It applies no
+    multiple-comparison correction: a caller that wants one passes an
+    already-corrected ``alpha``.
+
+    Parameters
+    ----------
+    p1 : baseline proportion, in (0, 1)
+    p2 : treatment proportion, in (0, 1) and different from ``p1``
+    alpha : type I error rate (already Bonferroni-corrected if needed)
+    power : desired power
+    two_tailed : whether to split ``alpha`` across both tails
+
+    Returns
+    -------
+    int : sample size per group (ceiling)
+
+    Raises
+    ------
+    ValueError : ``p1 == p2``, or a rate outside [0, 1] (``math.sqrt`` of a
+        negative variance).
+    """
+    z_alpha = norm.ppf(1 - alpha / (2 if two_tailed else 1))
+    z_power = norm.ppf(power)
+    pooled = (p1 + p2) / 2
+    delta = abs(p2 - p1)
+
+    if delta == 0:
+        raise ValueError("p1 and p2 must differ (delta cannot be zero)")
+
+    n = (
+        z_alpha * math.sqrt(2 * pooled * (1 - pooled))
+        + z_power * math.sqrt(p1 * (1 - p1) + p2 * (1 - p2))
+    ) ** 2 / delta**2
+
+    return math.ceil(n)
+
+
+def compute_power(
+    n_per_group: int,
+    p1: float,
+    p2: float,
+    alpha: float,
+    two_tailed: bool,
+) -> float:
+    """
+    Power of the test ``sample_size_two_proportions`` plans, at ``n_per_group``.
+
+    The exact inverse of that formula. Solving it for ``z_power`` gives::
+
+        z_power = (sqrt(n) * |p2 - p1| - z_alpha * sqrt(2 * p_bar * (1 - p_bar)))
+                  / sqrt(p1*(1-p1) + p2*(1-p2))
+
+    and the power is ``Phi(z_power)``. So for the ``n`` that
+    ``sample_size_two_proportions`` returns at a target power, the power here
+    is at least that target, and at ``n - 1`` it is below it. The results
+    page's Sample Size tab uses it for the achieved power.
+
+    Returns 0.0 for ``n_per_group <= 0``.
+    """
+    if n_per_group <= 0:
+        return 0.0
+    delta = abs(p2 - p1)
+    if delta == 0:
+        raise ValueError("p1 and p2 must differ (delta cannot be zero)")
+    z_alpha = norm.ppf(1 - alpha / (2 if two_tailed else 1))
+    pooled = (p1 + p2) / 2
+    z_power = (
+        math.sqrt(n_per_group) * delta - z_alpha * math.sqrt(2 * pooled * (1 - pooled))
+    ) / math.sqrt(p1 * (1 - p1) + p2 * (1 - p2))
+    return float(norm.cdf(z_power))
+
+
+# ---------------------------------------------------------------------------
 # PowerCalculatorService
 # ---------------------------------------------------------------------------
 
@@ -184,7 +294,7 @@ class PowerCalculatorService:
         p2 = baseline_rate + mde_absolute
 
         if metric_type == "proportion":
-            n_per_variant = self.sample_size_two_proportions(
+            n_per_variant = self._sample_size_proportions(
                 p1=p1,
                 p2=p2,
                 alpha=corrected_alpha,
@@ -280,7 +390,7 @@ class PowerCalculatorService:
             if p2 >= 1.0:
                 high = mid
                 continue
-            n_needed = self.sample_size_two_proportions(
+            n_needed = self._sample_size_proportions(
                 p1=baseline_rate,
                 p2=p2,
                 alpha=corrected_alpha,
@@ -410,7 +520,7 @@ class PowerCalculatorService:
             if p2 >= 1.0 or mde_abs <= 0:
                 continue  # skip invalid points
             try:
-                n = self.sample_size_two_proportions(
+                n = self._sample_size_proportions(
                     p1=baseline_rate,
                     p2=p2,
                     alpha=alpha,
@@ -432,96 +542,22 @@ class PowerCalculatorService:
         return points
 
     # ------------------------------------------------------------------
-    # Two-proportion formula (public: the results Sample Size tab uses it)
+    # Private helpers
     # ------------------------------------------------------------------
 
     @staticmethod
-    def sample_size_two_proportions(
+    def _sample_size_proportions(
         p1: float,
         p2: float,
         alpha: float,
         power: float,
-        two_tailed: bool = True,
+        two_tailed: bool,
     ) -> int:
-        """
-        Users needed per group for a two-proportion z-test between two arms.
-
-        The variance is pooled under the null hypothesis and unpooled under
-        the alternative (Fleiss, 2003)::
-
-            n = [z_alpha * sqrt(2 * p_bar * (1 - p_bar))
-                 + z_power * sqrt(p1*(1-p1) + p2*(1-p2))]^2
-                / (p2 - p1)^2
-
-        with ``p_bar = (p1 + p2) / 2``.  It applies no correction of its own:
-        ``alpha`` is the level of the one comparison, already divided by the
-        caller if it corrects for several.
-
-        Parameters
-        ----------
-        p1 : baseline proportion, in (0, 1)
-        p2 : treatment proportion, in (0, 1) and different from p1
-        alpha : type I error rate of this comparison
-        power : desired power
-        two_tailed : whether to split alpha across both tails
-
-        Returns
-        -------
-        int : sample size per group (ceiling)
-        """
-        z_alpha = norm.ppf(1 - alpha / (2 if two_tailed else 1))
-        z_power = norm.ppf(power)
-        pooled = (p1 + p2) / 2
-        delta = abs(p2 - p1)
-
-        if delta == 0:
-            raise ValueError("p1 and p2 must differ (delta cannot be zero)")
-
-        n = (
-            z_alpha * math.sqrt(2 * pooled * (1 - pooled))
-            + z_power * math.sqrt(p1 * (1 - p1) + p2 * (1 - p2))
-        ) ** 2 / delta**2
-
-        return math.ceil(n)
-
-    @staticmethod
-    def compute_power(
-        n_per_group: int,
-        p1: float,
-        p2: float,
-        alpha: float,
-        two_tailed: bool = True,
-    ) -> float:
-        """
-        Power of the test ``sample_size_two_proportions`` plans, at ``n_per_group``.
-
-        The exact inverse of that formula: solving it for ``z_power`` gives::
-
-            z_power = (sqrt(n) * |p2 - p1| - z_alpha * sqrt(2 * p_bar * (1 - p_bar)))
-                      / sqrt(p1*(1-p1) + p2*(1-p2))
-
-        and the power is ``Phi(z_power)``.  So for the ``n`` that
-        ``sample_size_two_proportions`` returns at a target power, the power
-        here is at least that target, and at ``n - 1`` it is below it.
-
-        Returns 0.0 for ``n_per_group <= 0``.
-        """
-        if n_per_group <= 0:
-            return 0.0
-        delta = abs(p2 - p1)
-        if delta == 0:
-            raise ValueError("p1 and p2 must differ (delta cannot be zero)")
-        z_alpha = norm.ppf(1 - alpha / (2 if two_tailed else 1))
-        pooled = (p1 + p2) / 2
-        z_power = (
-            math.sqrt(n_per_group) * delta
-            - z_alpha * math.sqrt(2 * pooled * (1 - pooled))
-        ) / math.sqrt(p1 * (1 - p1) + p2 * (1 - p2))
-        return float(norm.cdf(z_power))
-
-    # ------------------------------------------------------------------
-    # Private helpers
-    # ------------------------------------------------------------------
+        """Per-group sample size for two proportions; see
+        :func:`sample_size_two_proportions`, which this calls."""
+        return sample_size_two_proportions(
+            p1=p1, p2=p2, alpha=alpha, power=power, two_tailed=two_tailed
+        )
 
     @staticmethod
     def _sample_size_means(
