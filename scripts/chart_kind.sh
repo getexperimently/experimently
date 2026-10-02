@@ -25,11 +25,12 @@
 #              `migrate` logs `Running upgrade`, and every old pod stays Ready
 #              and answers /health/ready until it is being deleted
 #   previous   resolve N-1, the newest release at or below VERSION (or
-#              PREVIOUS_VERSION); writes run=/version= to $GITHUB_OUTPUT. On a
-#              pull request from a fork it prints the not-run line instead
+#              PREVIOUS_VERSION); writes version= to $GITHUB_OUTPUT. It runs
+#              the same way on every event, pull requests from forks included
 #   upgrade-previous
-#              N-1 -> N: the N-1 release's chart and images (from GHCR)
-#              upgraded to this PR's chart and images; the same Ready
+#              N-1 -> N: the N-1 release's chart and images (pulled from GHCR
+#              anonymously, with no credentials) upgraded to this PR's chart
+#              and images; the same Ready
 #              assertion, and it prints whether the delta has a migration
 #   summary    the per-phase timings (also to $GITHUB_STEP_SUMMARY)
 #   diagnose   pods, events and API logs, for a failed run
@@ -38,9 +39,8 @@
 # Inputs (environment): PROFILE (core|full); API_IMAGE and WEB_IMAGE, the local
 # images to load; INGRESS_NGINX_MANIFEST_URL and INGRESS_NGINX_MANIFEST_SHA256;
 # KIND_NODE_IMAGE; optional KIND_CLUSTER, KIND_HOST (must resolve to
-# 127.0.0.1), CHART_KIND_WORK. For `previous`: HEAD_REPO (the pull request's
-# head repository, empty otherwise), GITHUB_REPOSITORY, optional
-# PREVIOUS_VERSION. For `upgrade-previous`: PREVIOUS_VERSION.
+# 127.0.0.1), CHART_KIND_WORK. For `previous`: optional PREVIOUS_VERSION. For
+# `upgrade-previous`: PREVIOUS_VERSION.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -646,25 +646,16 @@ EOF
 }
 
 # ---------------------------------------------------------------------------
-# N-1: the newest release at or below VERSION, whose images are on GHCR.
+# N-1: the newest release at or below VERSION, whose images are public on
+# GHCR.
 #
-# On a pull request from a fork the images cannot be pulled (the packages are
-# private until D19), so the leg does not run there and says so. Everywhere
-# else -- this repository's pull requests, main, the nightly run, a manual
-# run -- an N-1 that cannot be resolved or pulled fails the job; it is never
-# skipped.
-NOT_RUN_LINE="N-1 -> N upgrade: not run: images private until D19"
-
+# The leg runs on every event -- pull requests from forks, this repository's
+# pull requests, main, the nightly run, a manual run -- and is never skipped.
+# An N-1 that cannot be resolved, or whose images cannot be pulled
+# anonymously, fails the job.
 do_previous() {
-    local repo=${GITHUB_REPOSITORY:?} head=${HEAD_REPO:-} version prev tags
+    local version prev tags
     version=$(cat VERSION)
-    if [ -n "$head" ] && [ "$head" != "$repo" ]; then
-        say "$NOT_RUN_LINE (pull request from $head)"
-        [ -z "${GITHUB_STEP_SUMMARY:-}" ] ||
-            printf '### chart-kind (%s)\n\n%s\n\n' "$PROFILE" "$NOT_RUN_LINE" >>"$GITHUB_STEP_SUMMARY"
-        [ -z "${GITHUB_OUTPUT:-}" ] || printf 'run=false\n' >>"$GITHUB_OUTPUT"
-        return 0
-    fi
     tags=$(git ls-remote --tags --refs origin 'v*' | sed -n 's#.*refs/tags/v\([0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\)$#\1#p')
     [ -n "$tags" ] || fail "N-1 cannot be resolved: no vX.Y.Z tags on origin"
     if [ -n "${PREVIOUS_VERSION:-}" ]; then
@@ -681,7 +672,24 @@ do_previous() {
         [ -n "$prev" ] || fail "N-1 cannot be resolved: no release tag at or below VERSION $version"
     fi
     say "N-1 = $prev (VERSION $version)"
-    [ -z "${GITHUB_OUTPUT:-}" ] || printf 'run=true\nversion=%s\n' "$prev" >>"$GITHUB_OUTPUT"
+    [ -z "${GITHUB_OUTPUT:-}" ] || printf 'version=%s\n' "$prev" >>"$GITHUB_OUTPUT"
+}
+
+# pull_anonymously REF: docker pull REF with an empty client configuration, so
+# no stored credential is sent. The images are public, and a pull request from
+# a fork has no token to send: a pull that works here works there. A package
+# that stops being public fails this on every event, never only on forks.
+PULL_FAILED="The previous release image could not be pulled anonymously: is the package still public?"
+
+pull_anonymously() {
+    local ref=$1 anon
+    anon=$(mktemp -d "${TMPDIR:-/tmp}/chart-kind-anon.XXXXXX")
+    printf '{}\n' >"$anon/config.json"
+    if ! DOCKER_CONFIG=$anon docker pull "$ref"; then
+        rm -rf "$anon"
+        fail "$PULL_FAILED (docker pull $ref failed)"
+    fi
+    rm -rf "$anon"
 }
 
 do_upgrade_previous() {
@@ -701,8 +709,7 @@ do_upgrade_previous() {
     # chart's tag rule accepts it.
     ltag="$ptag-previous"
     for ref in "$API_REPO" "$WEB_REPO"; do
-        docker pull "$ref:$ptag" ||
-            fail "N-1 cannot be resolved: docker pull $ref:$ptag failed (the job needs packages: read, and the package must grant this repository read access)"
+        pull_anonymously "$ref:$ptag"
         docker tag "$ref:$ptag" "$ref:$ltag"
     done
     kind load docker-image --name "$CLUSTER" "$API_REPO:$ltag" "$WEB_REPO:$ltag"

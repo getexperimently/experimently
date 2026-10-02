@@ -11,11 +11,11 @@ name: Chart (kind)
 #   N -> N'   this PR's images plus one more core revision made in the job:
 #             exactly one `migrate` applies it, the old pods keep serving.
 #             Runs everywhere, forks included (it needs no registry).
-#   N-1 -> N  the previous release's chart and images, pulled from GHCR, then
-#             upgraded to this PR's. The images are private until D19, so on a
-#             pull request from a fork it does not run and the job summary
-#             says "not run: images private until D19"; everywhere else an N-1
-#             that cannot be resolved or pulled fails the job.
+#   N-1 -> N  the previous release's chart and images, pulled from GHCR
+#             anonymously (the packages are public), then upgraded to this
+#             PR's. Runs everywhere, forks included, and is never skipped: an
+#             N-1 that cannot be resolved or pulled without credentials fails
+#             the job, whatever the event.
 #
 # Profiles: both, on every run, as parallel jobs. Measured on the first runs
 # (2026-09-27): core about 4 minutes, full about 5.5, most of the difference
@@ -95,11 +95,10 @@ jobs:
     name: chart-kind (${{ matrix.profile }})
     runs-on: ubuntu-latest
     timeout-minutes: 40
-    # packages: read pulls N-1's images from GHCR for the upgrade leg; they
-    # are private until D19.
+    # No packages: read. The upgrade leg pulls N-1's public images with no
+    # credentials, as a pull request from a fork must.
     permissions:
       contents: read
-      packages: read
     strategy:
       fail-fast: false
       matrix:
@@ -115,13 +114,11 @@ jobs:
         run: echo "BUILD_START=$(date +%s)" >> "$GITHUB_ENV"
 
       # N-1 for the upgrade leg, resolved before anything is built so that an
-      # unresolvable one fails in seconds. On a pull request from a fork it
-      # prints the not-run line and the leg is skipped (T41); anywhere else it
-      # fails rather than skips.
+      # unresolvable one fails in seconds. The same on every event, forks
+      # included: it fails rather than skips.
       - name: Resolve the previous release (N-1)
         id: previous
         env:
-          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
           PREVIOUS_VERSION: ${{ inputs.previous_version }}
         run: bash scripts/chart_kind.sh previous
 
@@ -223,18 +220,10 @@ jobs:
       - name: Upgrade to a newer revision (N to N')
         run: bash scripts/chart_kind.sh upgrade-next
 
-      # `!= 'false'`, not `== 'true'`: an output that went missing runs the
-      # leg, which then fails, instead of skipping it.
-      - name: Log in to GHCR
-        if: steps.previous.outputs.run != 'false'
-        uses: docker/login-action@v4
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
+      # No `if:` and no registry login: the leg runs on every event, and its
+      # pull is anonymous (scripts/chart_kind.sh pull_anonymously), so a
+      # package that is no longer public fails it here, not only on forks.
       - name: Upgrade from the previous release (N-1 to N)
-        if: steps.previous.outputs.run != 'false'
         env:
           PREVIOUS_VERSION: ${{ steps.previous.outputs.version }}
         run: bash scripts/chart_kind.sh upgrade-previous
