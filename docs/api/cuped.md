@@ -190,5 +190,5 @@ experiment's state, not by who created it. ANALYST and VIEWER cannot change any 
 the `PUT` above answers `403` with `"You don't have permission to update experiments"`.
 ADMIN and DEVELOPER may change experiments, but only a superuser may change one that is no
 longer a draft, and the demo experiment is running: for a DEVELOPER (or an ADMIN who is not
-a superuser) the `PUT` above answers `403` with `"Cannot update experiments in active
+a superuser) the `PUT` above answers `400` with `"Cannot update experiments in active
 status"`. The demo's `admin@demo.com` is a superuser, which is why it gets `200`.
