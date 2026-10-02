@@ -10,6 +10,8 @@ from unittest.mock import AsyncMock, MagicMock, call, patch
 
 import pytest
 
+from backend.app.models.feature_flag import FeatureFlagStatus
+
 # ---------------------------------------------------------------------------
 # Safety Scheduler Tests
 # ---------------------------------------------------------------------------
@@ -29,6 +31,7 @@ class TestSafetySchedulerNotifications:
         mock_flag.id = "flag-uuid-1"
         mock_flag.key = "my-feature-flag"
         mock_flag.rollout_percentage = 50
+        mock_flag.status = FeatureFlagStatus.ACTIVE
 
         mock_metric = MagicMock()
         mock_metric.is_healthy = False
@@ -98,6 +101,7 @@ class TestSafetySchedulerNotifications:
         mock_flag.id = "flag-uuid-2"
         mock_flag.key = "another-flag"
         mock_flag.rollout_percentage = 30
+        mock_flag.status = FeatureFlagStatus.ACTIVE
 
         mock_metric = MagicMock()
         mock_metric.is_healthy = False
@@ -165,6 +169,7 @@ class TestSafetySchedulerNotifications:
         mock_flag.id = "flag-uuid-3"
         mock_flag.key = "healthy-flag"
         mock_flag.rollout_percentage = 20
+        mock_flag.status = FeatureFlagStatus.ACTIVE
 
         mock_safety_check = MagicMock()
         mock_safety_check.is_healthy = True
@@ -218,6 +223,7 @@ class TestSafetySchedulerNotifications:
         mock_flag.id = "flag-uuid-4"
         mock_flag.key = "checkout-v2"
         mock_flag.rollout_percentage = 10
+        mock_flag.status = FeatureFlagStatus.ACTIVE
 
         mock_metric = MagicMock()
         mock_metric.is_healthy = False
@@ -287,6 +293,7 @@ class TestSafetySchedulerNotifications:
         mock_flag.id = "flag-uuid-5"
         mock_flag.key = "payments-flag"
         mock_flag.rollout_percentage = 40
+        mock_flag.status = FeatureFlagStatus.ACTIVE
 
         mock_metric = MagicMock()
         mock_metric.is_healthy = False
@@ -395,6 +402,7 @@ class TestRolloutSchedulerNotifications:
         mock_flag.id = flag_id
         mock_flag.key = "my-rollout-flag"
         mock_flag.rollout_percentage = 0
+        mock_flag.status = FeatureFlagStatus.ACTIVE
 
         schedules_query = MagicMock()
         schedules_query.filter.return_value = schedules_query

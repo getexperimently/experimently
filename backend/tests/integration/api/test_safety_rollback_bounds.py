@@ -215,6 +215,9 @@ def test_stored_negative_rollback_percentage_rolls_the_flag_back_to_zero(
 
     assert result["items_failed"] == 0, result
     assert _percentage(session_factory, flag) == 0
+    db_session.expire_all()
+    stored = db_session.query(FeatureFlag).filter(FeatureFlag.id == flag.id).one()
+    assert stored.status == FeatureFlagStatus.INACTIVE  # a rollback to 0 turns it off
     records = (
         db_session.query(SafetyRollbackRecord)
         .filter(SafetyRollbackRecord.feature_flag_id == flag.id)

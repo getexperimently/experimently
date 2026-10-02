@@ -8,8 +8,6 @@ monitoring feature flags for safety issues and triggering rollbacks.
 import asyncio
 from typing import Any, Dict, Optional
 
-from sqlalchemy import and_
-
 from backend.app.core.config import settings as app_settings
 from backend.app.core.logging import get_logger
 from backend.app.core.scheduler_tick import run_locked_tick
@@ -17,7 +15,7 @@ from backend.app.db.session import SessionLocal
 from backend.app.models.feature_flag import FeatureFlag, FeatureFlagStatus
 from backend.app.models.safety import RollbackTriggerType
 from backend.app.services.notification_service import NotificationService
-from backend.app.services.safety_service import SafetyService
+from backend.app.services.safety_service import SafetyService, rollback_change
 
 logger = get_logger(__name__)
 
@@ -117,10 +115,12 @@ class SafetyScheduler:
         Check all active feature flags for safety issues.
 
         This checks:
-        1. All active feature flags with rollout percentage > 0
+        1. Every ACTIVE feature flag, whatever its global rollout percentage:
+           a flag at 0% whose targeting rules serve users is checked too (#629)
         2. For each flag, check if safety monitoring is enabled
         3. If enabled, check safety metrics
         4. If auto-rollback is enabled and safety check fails, trigger rollback
+           -- unless ``rollback_change`` says the rollback would change nothing
 
         Returns ``{"items_processed": n, "items_failed": m}`` for the run record
         (``items_processed`` counts flags checked, ``metadata.rollbacks`` the
@@ -135,20 +135,16 @@ class SafetyScheduler:
         # Use a new database session for this task
         db = SessionLocal()
         try:
-            # Get all active feature flags with rollout percentage > 0
+            # Every ACTIVE flag: one at 0% may still serve the users its
+            # targeting rules match, and a rollback to 0 turns it off (#629).
             active_flags = (
                 db.query(FeatureFlag)
-                .filter(
-                    and_(
-                        FeatureFlag.status == FeatureFlagStatus.ACTIVE,
-                        FeatureFlag.rollout_percentage > 0,
-                    )
-                )
+                .filter(FeatureFlag.status == FeatureFlagStatus.ACTIVE)
                 .all()
             )
 
             if not active_flags:
-                logger.info("No active feature flags with rollout percentage > 0 found")
+                logger.info("No active feature flags found")
                 return {"items_processed": 0, "items_failed": 0}
 
             safety_service = SafetyService(db)
@@ -203,7 +199,7 @@ class SafetyScheduler:
                         # (e.g. back to the internal 5% stage), not always to 0.
                         target_percentage = _rollback_target_percentage(config)
 
-                        if feature_flag.rollout_percentage <= target_percentage:
+                        if rollback_change(feature_flag, target_percentage) is None:
                             # Already rolled back; the error window is still hot
                             # from before the rollback. Do not write another
                             # record or send another notification every cycle.

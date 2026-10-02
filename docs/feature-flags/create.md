@@ -308,7 +308,8 @@ digit. Anything else is refused with `422`. To keep your flag inventory readable
 A flag is on or off for each user. Its `default_value`, what it serves when it is off,
 is `false` for every flag for now. Evaluation returns `enabled: false` when:
 
-- the flag is off (`reason: "inactive"`);
+- the flag is off (`reason: "inactive"`), which includes a flag that a safety rollback to
+  0% turned off (see [Safety Monitoring](safety.md#what-a-rollback-changes));
 - the user matches no targeting rule and falls outside the rollout percentage
   (`reason: "rollout"`);
 - the user matches a rule but falls outside that rule's own rollout percentage

@@ -12,8 +12,9 @@ Implementation: `backend/app/services/safety_service.py` (checks and rollbacks),
 ## What Safety Monitoring Does
 
 The safety monitor runs every 5 minutes (`SAFETY_CHECK_INTERVAL_MINUTES`; the rollout scheduler's cadence is
-`ROLLOUT_CHECK_INTERVAL_MINUTES`, default 15 — demos set both to 1). For every `ACTIVE` flag whose
-`rollout_percentage` is above 0 it:
+`ROLLOUT_CHECK_INTERVAL_MINUTES`, default 15 — demos set both to 1). For every `ACTIVE` flag,
+whatever its `rollout_percentage` (a flag at 0% still serves the users its targeting rules match),
+it:
 
 1. Loads the flag's safety configuration (or the platform default when the flag has none) and skips the flag
    if monitoring is not `enabled`.
@@ -21,9 +22,14 @@ The safety monitor runs every 5 minutes (`SAFETY_CHECK_INTERVAL_MINUTES`; the ro
    `error_logs` (relative to the flag's evaluations in `raw_metrics`), latency metrics from `raw_metrics`.
 3. Compares each value with the metric's `critical_threshold` using its `comparison_type`. A breach marks the
    flag unhealthy; a `warning_threshold` breach is only reported.
-4. If the flag is unhealthy **and** the global setting `enable_automatic_rollbacks` is on, rolls the flag back:
-   sets `rollout_percentage` to the configuration's `rollback_percentage` (default `0`; the flag stays `ACTIVE`, so its configuration is preserved), records a
-   `SafetyRollbackRecord`, and sends the configured Slack/email notification.
+4. If the flag is unhealthy **and** the global setting `enable_automatic_rollbacks` is on, rolls the flag back
+   to the configuration's `rollback_percentage`. A target of `0` (the default) turns the flag off
+   (`status: inactive`) and sets its percentage to 0; any other target lowers only the global percentage
+   (see [What a rollback changes](#what-a-rollback-changes)). It also pauses the flag's active rollout
+   schedule, records a `SafetyRollbackRecord`, and sends the configured Slack/email notification.
+
+Automatic rollback acts on the error reports that clients send with an API key, as well as on
+server-side evaluation failures, so enable it knowingly.
 
 You can run the same check on demand with `GET /api/v1/safety/feature-flags/{flag_id}/check`.
 
@@ -143,7 +149,7 @@ It prints the stored thresholds:
 |-------|------|----------|-------------|
 | `enabled` | boolean | No | Whether the monitor checks this flag (default `true`) |
 | `metrics` | object | No | Map of metric name → threshold (see above). An empty map means nothing is checked |
-| `rollback_percentage` | int | No | Global rollout percentage the automatic rollback sets the flag to, 0–100 (default `0`); any other value answers 422. A value stored before that bound is clamped to 0–100 when the monitor uses it. Set it to e.g. `5` to keep a small slice of users on the flag. Users matched by a targeting rule are not affected (see [What a rollback changes](#what-a-rollback-changes)); manual rollbacks take the percentage as a query parameter |
+| `rollback_percentage` | int | No | Target of the automatic rollback, 0–100 (default `0`); any other value answers 422. A value stored before that bound is clamped to 0–100 when the monitor uses it. `0` turns the flag off for every user, including users matched by a targeting rule. A value from 1 to 100 lowers the global rollout, for example `5` to keep a small slice of users on the flag; users matched by a targeting rule keep their rule's percentage (see [What a rollback changes](#what-a-rollback-changes)). Manual rollbacks take the percentage as a query parameter |
 
 The response (the same shape as `GET .../config`) also carries the configuration's `id`,
 `feature_flag_id`, `enabled`, `rollback_percentage`, `created_at` and `updated_at`.
@@ -268,7 +274,8 @@ metric and the whole response read `"is_healthy": false`.
 
 When the monitor finds a flag unhealthy and `enable_automatic_rollbacks` is on, it:
 
-1. Locks the flag row and sets `rollout_percentage` to the flag's configured `rollback_percentage` (default `0`; status stays `ACTIVE`)
+1. Locks the flag row and rolls the flag back to its configured `rollback_percentage` (default `0`, which
+   turns the flag off), pausing the flag's active rollout schedule in the same transaction
 2. Records a `SafetyRollbackRecord` with trigger type `automatic`, the
    metric value and threshold, the previous and target percentages, and the reason
 3. Dispatches a notification to the configured Slack channels and email addresses
@@ -277,22 +284,29 @@ Investigate the root cause before re-enabling.
 
 ### What a rollback changes
 
-A rollback, automatic or manual, changes only the flag's global `rollout_percentage`. It does
-not change the flag's status or its targeting rules. After a rollback:
+A rollback, automatic or manual, does one of two things, depending on its target:
 
-- a user who matches no targeting rule is bucketed by the new global percentage, so at `0%`
-  that user gets `enabled: false` with `reason: "rollout"`;
-- a user who matches a targeting rule is bucketed by that rule's own `rollout_percentage`
-  (100 unless the rule sets one), so the rollback does not change whether that user gets
-  the flag. With the default rule percentage, a rule-matched user keeps the flag, with
-  `reason: "targeting_rule"`.
+- **A rollback to `0%` turns the flag off.** Its status becomes `inactive` and its global
+  `rollout_percentage` becomes 0. Every user, including users matched by a targeting rule, gets
+  `enabled: false` with `reason: "inactive"`, exactly as when the flag is turned off by hand (see
+  [Creating Feature Flags](create.md#when-a-flag-evaluates-to-off)). The targeting rules are left
+  as written.
+- **A rollback to 1–100% lowers only the global `rollout_percentage`.** A user who matches no
+  targeting rule is bucketed by the new percentage. A user who matches a rule is bucketed by that
+  rule's own `rollout_percentage` (100 unless the rule sets one), so the rollback does not change
+  whether that user gets the flag.
 
-To stop a flag for every user, rule-matched or not, turn it off:
-`POST /api/v1/feature-flags/$FLAG_ID/deactivate`, or `"is_active": false` in a `PUT` (see
-[Creating Feature Flags](create.md#when-a-flag-evaluates-to-off)). An inactive flag evaluates
-to `enabled: false` with `reason: "inactive"` for everyone. Whether a rollback to `0%` should
-also do this is tracked in
-[#629](https://github.com/getexperimently/experimently/issues/629).
+Either way, the flag's active rollout schedules are paused, so a later stage cannot raise the
+percentage again; they stay paused until you resume them.
+
+So the flag's default value is served to every user after a rollback to `0%`, and after a partial
+rollback to the users it removes, while users matched by a targeting rule keep their rule's
+percentage.
+
+A partial rollback does not help when the harm is only among users matched by a targeting rule,
+and a flag that serves only rule-matched users (global `0%`) is never rolled back to a partial
+target; use a target of `0` for such a flag
+([#718](https://github.com/getexperimently/experimently/issues/718)).
 
 Error metrics count both server-side evaluation failures and errors reported by clients through
 `POST /api/v1/tracking/errors` (see [Creating Feature Flags](create.md#reporting-client-side-errors)), so a crash
@@ -316,7 +330,9 @@ rollback while sustained elevated metrics will.
 Every rollback (automatic or manual) is stored in the `safety_rollback_records` table
 (`feature_flag_id`, `safety_config_id`, `trigger_type`, `trigger_reason`, `previous_percentage`,
 `target_percentage`, `success`, `executed_by_user_id`, `created_at`). The rollback response includes the
-record's id as `rollback_record_id`. There is no list endpoint yet; query the table or use the dashboard.
+record's id as `rollback_record_id`. There is no list endpoint yet
+([#719](https://github.com/getexperimently/experimently/issues/719)), and the dashboard lists only the
+manual rollbacks made in the current browser session, so query the table for automatic ones.
 
 ---
 
@@ -329,34 +345,65 @@ reason is a query parameter, so its spaces are written `%20`:
 ```{.bash exec}
 curl -s -X POST "localhost:8000/api/v1/safety/feature-flags/$FLAG_ID/rollback?percentage=0&reason=Checkout%20errors%20observed%20in%20Datadog" \
   -H "Authorization: Bearer $TOKEN" \
-  | jq '{success, message, previous_percentage, new_percentage}'
+  | jq '{success, message, previous_percentage, new_percentage, deactivated: .details.deactivated}'
 ```
 <!-- expect: "success": true -->
-<!-- expect: "message": "Feature flag 'new-checkout-flow' rolled back from 50% to 0%" -->
+<!-- expect: "message": "Feature flag 'new-checkout-flow' turned off and rolled back from 50% to 0%" -->
+<!-- expect: "deactivated": true -->
 
 ```json
 {
   "success": true,
-  "message": "Feature flag 'new-checkout-flow' rolled back from 50% to 0%",
+  "message": "Feature flag 'new-checkout-flow' turned off and rolled back from 50% to 0%",
   "previous_percentage": 50,
-  "new_percentage": 0
+  "new_percentage": 0,
+  "deactivated": true
 }
 ```
 
 The response also carries `feature_flag_id`, `trigger_type` (`manual`), `rollback_record_id`,
-`timestamp` and `details` (the reason). A flag that is not `ACTIVE`, or is already at `0%`,
-returns `success: false` with an explanatory message.
+`timestamp` and `details`: the reason, `deactivated`, and `paused_schedules` (the ids of the
+rollout schedules the rollback paused). A rollback that would change nothing returns
+`success: false`, writes nothing, and says why: the flag is archived, the flag is already off,
+or, for a target above 0, its global percentage is already at or below the target.
 
-A manual rollback changes the same thing as an automatic one: the global rollout percentage.
-Users matched by a targeting rule keep the rule's percentage (see
-[What a rollback changes](#what-a-rollback-changes)). To stop the flag for everyone, deactivate it.
+A manual rollback changes the same thing as an automatic one (see
+[What a rollback changes](#what-a-rollback-changes)). This one was to `0%`, so the flag is now off:
+
+```{.bash exec}
+curl -s localhost:8000/api/v1/feature-flags/$FLAG_ID \
+  -H "Authorization: Bearer $TOKEN" | jq '{status, rollout_percentage}'
+```
+<!-- expect: "status": "inactive" -->
+<!-- expect: "rollout_percentage": 0 -->
+
+It prints `"status": "inactive"` and `"rollout_percentage": 0`.
 
 ---
 
 ## Re-Enabling After Rollback
 
-After investigating and resolving the root cause, raise the rollout again. The flag is still
-`ACTIVE`, so only the percentage changes:
+After investigating and resolving the root cause, bring the flag back in this order.
+
+The percentage the flag had before the rollback is the rollback response's `previous_percentage`
+(50 above). For an automatic rollback, read `previous_percentage` from the flag's latest row in the
+`safety_rollback_records` table, until rollback records can be listed through the API
+([#719](https://github.com/getexperimently/experimently/issues/719)).
+
+**After a rollback to `0%`, turn the flag on first.** It comes back at 0%, so at first only users
+matched by a targeting rule are served:
+
+```{.bash exec}
+curl -s -X POST localhost:8000/api/v1/feature-flags/$FLAG_ID/activate \
+  -H "Authorization: Bearer $TOKEN" | jq '{status, rollout_percentage}'
+```
+<!-- expect: "status": "active" -->
+<!-- expect: "rollout_percentage": 0 -->
+
+It prints `"status": "active"` and `"rollout_percentage": 0`.
+
+**Then raise the rollout**, back to `previous_percentage` or, more cautiously, below it. After a
+partial rollback (1–100%) the flag is still on, so this is where you start:
 
 ```{.bash exec}
 curl -s -X PUT localhost:8000/api/v1/feature-flags/$FLAG_ID \
@@ -368,6 +415,11 @@ curl -s -X PUT localhost:8000/api/v1/feature-flags/$FLAG_ID \
 <!-- expect: "rollout_percentage": 5 -->
 
 It prints `"status": "active"` and `"rollout_percentage": 5`.
+
+**Finally, resume the rollout schedule.** The rollback paused the flag's active schedule, and it
+stays paused until you resume it explicitly with `POST /api/v1/rollout-schedules/{schedule_id}/activate`
+(see [Rollout Schedules](rollouts.md#pausing-a-schedule)). The ids are in the rollback response's
+`details.paused_schedules`.
 
 Watch the safety check for at least one full 15-minute window before expanding further. If the root cause was
 not fixed, the monitor will roll the flag back again on its next pass.
@@ -400,4 +452,4 @@ contain than one affecting 100%. See [Rollout Schedules](rollouts.md).
 ### Test the rollback path
 
 Before a major launch, trigger a manual rollback in staging to confirm that notifications are delivered and
-the flag drops to 0% as expected.
+the flag turns off as expected.

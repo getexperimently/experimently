@@ -253,15 +253,15 @@ def test_unarchive_an_unknown_flag_is_404(developer_client):
     assert response.status_code == 404, response.text
 
 
-# --- the percentage writers are not refused ----------------------------------
+# --- the percentage writers on an archived flag --------------------------------
 #
-# Rule S is about status. The writers that move only the rollout percentage
-# (safety rollback, rollout stage advance) are unchanged on an archived flag
-# (#629 decides whether they should skip it); the model guard must not refuse
-# them.
+# Rule S is about status. A safety rollback never writes a flag that is not
+# ACTIVE (#629): an archived flag already serves no one, so the rollback
+# changes nothing and says why. The rollout stage advance is unchanged on an
+# archived flag (#720); the model guard must not refuse it.
 
 
-def test_a_safety_rollback_of_an_archived_flag_is_not_refused(
+def test_a_safety_rollback_of_an_archived_flag_changes_nothing(
     db_session, make_feature_flag
 ):
     flag = make_feature_flag(status=ARCHIVED, rollout_percentage=50)
@@ -270,9 +270,10 @@ def test_a_safety_rollback_of_an_archived_flag_is_not_refused(
         db_session, flag.id, reason="631", target_percentage=0
     )
 
-    assert result.success is True, result
+    assert result.success is False, result
+    assert "is archived; nothing to roll back" in result.message
     stored = _row(db_session, flag.id)
-    assert (stored.status, stored.rollout_percentage) == (ARCHIVED, 0)
+    assert (stored.status, stored.rollout_percentage) == (ARCHIVED, 50)
 
 
 def test_a_stage_advance_on_an_archived_flag_is_not_refused(

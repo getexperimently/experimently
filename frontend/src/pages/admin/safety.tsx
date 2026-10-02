@@ -258,7 +258,12 @@ export function SafetyDashboard() {
               >
                 {rollbackModal.flagName}
               </span>
-              . Its rollout percentage will be set to 0% immediately; the flag stays active.
+              .
+            </p>
+            <p data-testid="rollback-modal-effect" className="text-sm text-slate-600">
+              The flag will be turned off for every user, including users matched by a targeting
+              rule. They get the flag&apos;s default value. Its rollout schedule is paused. To serve
+              it again, turn it on from the flag&apos;s page.
             </p>
 
             {!rollbackSuccess && (
@@ -295,7 +300,8 @@ export function SafetyDashboard() {
                 data-testid="rollback-success-message"
                 className="bg-green-50 border border-green-200 rounded p-3 text-green-700 text-sm"
               >
-                Rollback for <strong>{rollbackModal.flagName}</strong> completed successfully.
+                <strong>{rollbackModal.flagName}</strong> is off. Turn it on from its page when the
+                cause is fixed.
               </div>
             )}
 

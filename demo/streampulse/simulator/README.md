@@ -87,9 +87,9 @@ Other options: `--api-url`, `--api-key` (for the step-3 traffic), `--dashboard-u
 | 1 | Prints the flag (5%, `employee equals true` → 100%), the 4-stage schedule, safety config and check | `GET /feature-flags/`, `/rollout-schedules/?feature_flag_id=`, `/safety/...` |
 | 2 | Completes stage 1 → stage 2 in progress → flag 25% | `PUT /rollout-schedules/stages/{id}` (trigger → manual), `POST .../stages/{id}/advance` |
 | 3 | Runs `traffic.py --incident android12 --rate 6 --duration 90` as a subprocess, then the safety check | `GET /safety/feature-flags/{id}/check` |
-| 4 | Automatic rollbacks ON → polls the flag (up to 6 min) until the safety scheduler sets it to 5%; OFF (or timeout) → manual rollback | `GET /safety/settings`, `POST /safety/feature-flags/{id}/rollback?percentage=5&reason=` |
+| 4 | Automatic rollbacks ON → polls the flag (up to 6 min) until the safety scheduler sets it to 5%; OFF (or timeout) → manual rollback. Either way the rollback pauses the flag's rollout schedule | `GET /safety/settings`, `POST /safety/feature-flags/{id}/rollback?percentage=5&reason=` |
 | 5 | Adds `app_version semver_gte 3.2.1` (→ 100%) next to the employee group, dashboard shape, OR | `PUT /feature-flags/{id}` `{targeting_rules}` |
-| 6 | Waits until the check is healthy again (the 15-minute error window), then stage 3 → 50% | as step 2 |
+| 6 | Waits until the check is healthy again (the 15-minute error window), resumes the schedule the rollback paused, then stage 3 → 50% | `POST /rollout-schedules/{id}/activate`, then as step 2 |
 | 7 | Stage 4 → 100%, completes the schedule, removes the rules | as step 2 + `PUT /feature-flags/{id}` |
 
 Every step is idempotent — re-running it prints the current state and writes nothing. Notes:
@@ -98,8 +98,9 @@ Every step is idempotent — re-running it prints the current state and writes n
   stage's trigger to manual right before advancing it (and says so).
 - Step 4 relies on the backend's safety scheduler: run it with `SAFETY_CHECK_INTERVAL_MINUTES=1` for the demo
   (default 5). The seed enables automatic rollbacks in the global safety settings; the flag's safety config rolls
-  back to 5% (`rollback_percentage`). A rollback lowers only the global rollout percentage, so devices matched
-  by the `employee equals true` rule keep Player v2 through it (see
+  back to 5% (`rollback_percentage`). A rollback to 5% lowers only the global rollout percentage, so devices
+  matched by the `employee equals true` rule keep Player v2 through it, and it pauses the rollout schedule,
+  which step 6 resumes (a rollback to 0% would turn the flag off for everyone; see
   [What a rollback changes](../../../docs/feature-flags/safety.md#what-a-rollback-changes)).
 - After the incident the flag stays critical until the 15-minute window slides past the crash reports; step 6
   waits for that (pass `--no-wait` to skip, at the cost of the scheduler rolling the flag back again).

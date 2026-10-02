@@ -72,9 +72,22 @@ class FakeStoryClient:
     def get_flag(self, flag_id):
         self.calls.append(("get_flag", flag_id))
         self.polls += 1
-        if self.scheduler_after_polls is not None and self.polls > self.scheduler_after_polls:
-            self.flag["rollout_percentage"] = self.config["rollback_percentage"]
+        if (
+            self.scheduler_after_polls is not None
+            and self.polls > self.scheduler_after_polls
+            and self.flag["rollout_percentage"] > self.config["rollback_percentage"]
+        ):
+            self._roll_back(self.config["rollback_percentage"])
         return copy.deepcopy(self.flag)
+
+    def _roll_back(self, percentage):
+        """What SafetyService.execute_rollback does (#629): a target of 0 turns the flag off,
+        any other target lowers the global %; either way the active schedule is paused."""
+        if percentage == 0:
+            self.flag["status"] = "inactive"
+        self.flag["rollout_percentage"] = percentage
+        if self.schedule["status"] == "active":
+            self.schedule["status"] = "paused"
 
     def update_flag(self, flag_id, body):
         self.calls.append(("update_flag", flag_id))
@@ -98,6 +111,15 @@ class FakeStoryClient:
         self.stage_updates.append((stage_id, dict(body)))
         self._stage(stage_id).update(body)
         return copy.deepcopy(self._stage(stage_id))
+
+    def activate_schedule(self, schedule_id):
+        """Mirrors RolloutService.activate_rollout_schedule: DRAFT or PAUSED -> ACTIVE."""
+        self.calls.append(("activate_schedule", schedule_id))
+        assert schedule_id == self.schedule["id"]
+        if self.schedule["status"] not in ("draft", "paused"):
+            raise story.ApiError(400, f"Cannot activate schedule in {self.schedule['status']} status")
+        self.schedule["status"] = "active"
+        return copy.deepcopy(self.schedule)
 
     def advance_stage(self, stage_id):
         self.calls.append(("advance_stage", stage_id))
@@ -151,7 +173,7 @@ class FakeStoryClient:
         self.calls.append(("rollback", flag_id, str(percentage)))
         self.rollbacks.append((percentage, reason))
         previous = self.flag["rollout_percentage"]
-        self.flag["rollout_percentage"] = percentage
+        self._roll_back(percentage)
         return {"success": True, "feature_flag_id": flag_id, "message": f"rolled back from {previous}% to {percentage}%"}
 
     # --- helpers for assertions ---
@@ -159,7 +181,7 @@ class FakeStoryClient:
         return next(s["status"] for s in self.schedule["stages"] if s["stage_order"] == order)
 
     def writes(self):
-        return [c for c in self.calls if c[0] in ("update_flag", "update_stage", "advance_stage", "rollback")]
+        return [c for c in self.calls if c[0] in ("update_flag", "update_stage", "advance_stage", "activate_schedule", "rollback")]
 
 
 def make_story(client: FakeStoryClient, **kw) -> tuple[story.Story, io.StringIO]:
@@ -259,7 +281,8 @@ def test_step_4_waits_for_the_safety_scheduler_when_automatic_rollbacks_are_on()
     assert client.rollbacks == [], "the scheduler did it; no manual rollback"
     assert s.sleeps, "polled with sleeps in between"
     text = out.getvalue()
-    assert "Automatic rollbacks are ON" in text and "Rollout 25% → 5%" in text and "rollback record" in text
+    assert "Automatic rollbacks are ON" in text and "Rollout 25% → 5%" in text
+    assert "paused the rollout schedule" in text and client.schedule["status"] == "paused"
 
 
 def test_step_4_rolls_back_by_hand_when_automatic_rollbacks_are_off():
@@ -319,20 +342,27 @@ def test_step_5_adds_the_fixed_build_rule_next_to_the_employee_group():
     assert "already there" in out.getvalue()
 
 
-def test_step_6_waits_until_healthy_then_advances_to_50():
+def test_step_6_waits_until_healthy_resumes_the_paused_schedule_then_advances_to_50():
     client = FakeStoryClient()
-    # state after steps 2-5: stage 2 in progress, flag rolled back to 5%, still critical for a while
+    # state after steps 2-5: stage 2 in progress, flag rolled back to 5% and the schedule
+    # paused by the rollback (#629), still critical for a while
     client.schedule["stages"][0].update({"status": "completed", "trigger_type": "manual"})
     client.schedule["stages"][1]["status"] = "in_progress"
     client.flag["rollout_percentage"] = 5
+    client.schedule["status"] = "paused"
     client.error_rate = 0.12
     client.healthy_after_checks = 2
     s, out = make_story(client, healthy_wait=120)
     assert s.step_6() is True
     assert client.flag["rollout_percentage"] == 50
+    assert client.schedule["status"] == "active"
     assert client.stage_status(2) == "completed" and client.stage_status(3) == "in_progress"
+    resumed = client.calls.index(("activate_schedule", "sched-1"))
+    first_advance = client.calls.index(next(c for c in client.calls if c[0] == "advance_stage"))
+    assert resumed < first_advance, "the schedule is resumed before any stage is advanced"
     text = out.getvalue()
     assert "error rate still 12.0%" in text and "HEALTHY" in text and "Rollout 5% → 50%" in text
+    assert "Resumed the rollout schedule" in text
     assert len(s.sleeps) >= 1
 
     assert s.step_6() is True
@@ -388,6 +418,7 @@ def test_auto_runs_all_seven_steps_in_order_through_main():
     assert text.index("Step 1/7") < text.index("Step 4/7") < text.index("Step 7/7")
     assert client.flag["rollout_percentage"] == 100 and client.schedule["status"] == "completed"
     assert client.rollbacks and client.rollbacks[0][0] == 5
+    assert ("activate_schedule", "sched-1") in client.calls, "step 6 resumed the schedule the rollback paused"
     assert client.flag["targeting_rules"] == {}
 
 
@@ -448,6 +479,8 @@ def test_story_client_uses_bearer_auth_and_the_documented_endpoints(monkeypatch)
     assert captured[-1]["url"].endswith("/rollout-schedules/stages/st-2") and captured[-1]["method"] == "PUT"
     client.rollback("f-1", 5, "crash spike")
     assert captured[-1]["url"] == "http://localhost:8000/api/v1/safety/feature-flags/f-1/rollback?percentage=5&reason=crash+spike"
+    client.activate_schedule("s-1")
+    assert captured[-1]["url"] == "http://localhost:8000/api/v1/rollout-schedules/s-1/activate" and captured[-1]["method"] == "POST"
     client.safety_check("f-1")
     assert captured[-1]["url"].endswith("/safety/feature-flags/f-1/check")
     client.update_flag("f-1", {"targeting_rules": {}})
