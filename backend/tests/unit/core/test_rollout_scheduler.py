@@ -70,6 +70,7 @@ class TestRolloutScheduler:
         mock_query = MagicMock()
         mock_session.query.return_value = mock_query
         mock_query.filter.return_value = mock_query
+        mock_query.order_by.return_value = mock_query
         mock_query.all.return_value = []
 
         # Create scheduler and process
@@ -109,6 +110,7 @@ class TestRolloutScheduler:
         mock_schedules_query = MagicMock()
         mock_session.query.return_value = mock_schedules_query
         mock_schedules_query.filter.return_value = mock_schedules_query
+        mock_schedules_query.order_by.return_value = mock_schedules_query
         mock_schedules_query.all.return_value = [mock_schedule]
 
         mock_active_stage_query = MagicMock()
@@ -202,6 +204,7 @@ class TestRolloutScheduler:
         mock_schedules_query = MagicMock()
         mock_session.query.return_value = mock_schedules_query
         mock_schedules_query.filter.return_value = mock_schedules_query
+        mock_schedules_query.order_by.return_value = mock_schedules_query
         mock_schedules_query.all.return_value = [mock_schedule]
 
         mock_active_stage_query = MagicMock()
@@ -292,6 +295,7 @@ class TestRolloutScheduler:
         mock_schedules_query = MagicMock()
         mock_session.query.return_value = mock_schedules_query
         mock_schedules_query.filter.return_value = mock_schedules_query
+        mock_schedules_query.order_by.return_value = mock_schedules_query
         mock_schedules_query.all.return_value = [mock_schedule]
 
         mock_active_stage_query = MagicMock()
@@ -468,7 +472,9 @@ class TestRolloutScheduler:
 
         # Verify method calls
         mock_session.add.assert_has_calls([call(mock_stage), call(mock_feature_flag)])
-        mock_session.commit.assert_called_once()
+        # The caller owns the transaction (#593): flushed, never committed.
+        mock_session.flush.assert_called_once()
+        mock_session.commit.assert_not_called()
 
     @pytest.mark.asyncio
     @patch("backend.app.core.rollout_scheduler.SessionLocal")
@@ -493,18 +499,18 @@ class TestRolloutScheduler:
         mock_flag_query.with_for_update.return_value = mock_flag_query
         mock_flag_query.first.return_value = None
 
-        # Activate the stage
+        # Activate the stage: a missing flag raises, so the caller rolls the
+        # schedule back and the stage stays PENDING in the database (#593).
         scheduler = RolloutScheduler(interval_minutes=1)
         current_time = datetime.now(timezone.utc)
-        result = await scheduler._activate_stage(
-            mock_session, mock_schedule, mock_stage, current_time
-        )
+        with pytest.raises(LookupError):
+            await scheduler._activate_stage(
+                mock_session, mock_schedule, mock_stage, current_time
+            )
 
-        # Verify results
-        assert result is False
-        assert mock_stage.status == RolloutStageStatus.IN_PROGRESS  # Still updated
         mock_session.add.assert_called_once_with(mock_stage)
-        mock_session.commit.assert_not_called()  # Shouldn't commit if flag not found
+        mock_session.flush.assert_not_called()
+        mock_session.commit.assert_not_called()
 
     @pytest.mark.asyncio
     @patch("backend.app.core.rollout_scheduler.SessionLocal")
@@ -525,16 +531,17 @@ class TestRolloutScheduler:
         # Setup mock query to raise an exception
         mock_session.query.side_effect = Exception("Test error")
 
-        # Activate the stage
+        # The error reaches the caller, which rolls the schedule back; the
+        # stage activation itself neither commits nor rolls back (#593).
         scheduler = RolloutScheduler(interval_minutes=1)
         current_time = datetime.now(timezone.utc)
-        result = await scheduler._activate_stage(
-            mock_session, mock_schedule, mock_stage, current_time
-        )
+        with pytest.raises(Exception, match="Test error"):
+            await scheduler._activate_stage(
+                mock_session, mock_schedule, mock_stage, current_time
+            )
 
-        # Verify results
-        assert result is False
-        mock_session.rollback.assert_called_once()
+        mock_session.commit.assert_not_called()
+        mock_session.rollback.assert_not_called()
 
     @pytest.mark.asyncio
     @patch("backend.app.core.scheduler_tick._persist_run")

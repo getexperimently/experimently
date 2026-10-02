@@ -7,7 +7,7 @@ progressing feature flag rollout schedules based on defined triggers.
 
 import asyncio
 from datetime import datetime, timedelta, timezone
-from typing import Dict, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session
@@ -142,6 +142,11 @@ class RolloutScheduler:
                         ),
                     )
                 )
+                # A fixed processing order, oldest schedule first: the logs of
+                # one tick read the same way every time, and a schedule's turn
+                # does not depend on the table's physical row order.
+                # created_at has a server default; id breaks ties.
+                .order_by(RolloutSchedule.created_at, RolloutSchedule.id)
                 .all()
             )
 
@@ -151,117 +156,40 @@ class RolloutScheduler:
 
             logger.info(f"Found {len(active_schedules)} active rollout schedules")
 
-            # Process each active schedule
-            for schedule in active_schedules:
+            # Process each active schedule. Each one runs inside its own
+            # savepoint and is committed on its own, and a failure rolls the
+            # session back before the next schedule: one schedule the
+            # database refuses no longer leaves the session failed for every
+            # schedule after it, and no pending change of one schedule is
+            # committed by another (#593).
+            # The ids are read now: a rollback expires every loaded instance.
+            for schedule_id, schedule in [(s.id, s) for s in active_schedules]:
                 try:
-                    # Find the current active stage and any pending stages
-                    current_active_stage = (
-                        db.query(RolloutStage)
-                        .filter(
-                            and_(
-                                RolloutStage.rollout_schedule_id == schedule.id,
-                                RolloutStage.status == RolloutStageStatus.IN_PROGRESS,
-                            )
-                        )
-                        .first()
-                    )
-
-                    next_pending_stages = (
-                        db.query(RolloutStage)
-                        .filter(
-                            and_(
-                                RolloutStage.rollout_schedule_id == schedule.id,
-                                RolloutStage.status == RolloutStageStatus.PENDING,
-                            )
-                        )
-                        .order_by(RolloutStage.stage_order)
-                        .all()
-                    )
-
-                    # If there's no active stage, activate the first pending stage if it's eligible
-                    if not current_active_stage and next_pending_stages:
-                        next_stage = next_pending_stages[0]
-                        if self._is_stage_eligible_for_activation(
-                            next_stage, current_time
-                        ):
-                            # Activate the stage
-                            was_updated = await self._activate_stage(
-                                db, schedule, next_stage, current_time
-                            )
-                            if was_updated:
-                                stages_processed += 1
-                                schedules_updated += 1
-
-                    # If there is an active stage, check if it's complete and can progress to the next stage
-                    elif current_active_stage:
-                        # Check if the stage should be marked complete
-                        next_stage_index = 0
-                        for i, stage in enumerate(next_pending_stages):
-                            if stage.stage_order > current_active_stage.stage_order:
-                                next_stage_index = i
-                                break
-
-                        if self._is_stage_eligible_for_completion(
-                            current_active_stage, current_time
-                        ):
-                            # Complete the current stage
-                            current_active_stage.status = RolloutStageStatus.COMPLETED
-                            current_active_stage.completed_date = current_time
-                            current_active_stage.updated_at = current_time
-                            db.add(current_active_stage)
-
-                            # If there are more stages, activate the next one if eligible
-                            if next_pending_stages and next_stage_index < len(
-                                next_pending_stages
-                            ):
-                                next_stage = next_pending_stages[next_stage_index]
-
-                                # Check minimum duration between stages
-                                min_duration_hours = schedule.min_stage_duration or 0
-                                if min_duration_hours > 0:
-                                    min_duration = timedelta(hours=min_duration_hours)
-                                    stage_updated_at = _as_utc(
-                                        current_active_stage.updated_at
-                                    )
-                                    if current_time - stage_updated_at < min_duration:
-                                        logger.info(
-                                            f"Minimum duration not met for next stage in schedule {schedule.id}. "
-                                            f"Will wait until {stage_updated_at + min_duration}"
-                                        )
-                                        continue
-
-                                # Activate the next stage — but only once its own trigger
-                                # allows it (a TIME_BASED stage with a future start_date
-                                # stays PENDING and is picked up by a later run).
-                                if self._is_stage_eligible_for_activation(
-                                    next_stage, current_time
-                                ):
-                                    was_updated = await self._activate_stage(
-                                        db, schedule, next_stage, current_time
-                                    )
-                                    if was_updated:
-                                        stages_processed += 1
-                                else:
-                                    logger.info(
-                                        f"Stage {next_stage.id} ({next_stage.name}) in schedule {schedule.id} "
-                                        "is not yet eligible for activation; leaving it pending"
-                                    )
-                            else:
-                                # This was the last stage, mark the schedule as completed
-                                schedule.status = RolloutScheduleStatus.COMPLETED
-                                schedule.updated_at = current_time
-                                db.add(schedule)
-                                logger.info(f"Rollout schedule {schedule.id} completed")
-
-                            db.commit()
-                            schedules_updated += 1
-
-                except Exception as e:
+                    with db.begin_nested():
+                        (
+                            updated,
+                            transitions,
+                            notifications,
+                        ) = await self._process_schedule(db, schedule, current_time)
+                    db.commit()
+                except Exception:
+                    db.rollback()
                     failed_count += 1
-                    logger.error(
-                        f"Error processing rollout schedule {schedule.id}: {e!s}"
+                    logger.exception(
+                        "Error processing rollout schedule %s", schedule_id
                     )
-                    # Continue with next schedule
+                    continue
+
+                if updated:
+                    schedules_updated += 1
+                stages_processed += transitions
+                for notification in notifications:
+                    try:
+                        self._notification_service.notify_rollout_advanced(
+                            **notification
+                        )
+                    except Exception as exc:
+                        logger.warning("Notification failed (non-critical): %s", exc)
 
             if schedules_updated > 0:
                 logger.info(
@@ -280,6 +208,122 @@ class RolloutScheduler:
             "items_processed": schedules_updated,
             "items_failed": failed_count,
             "metadata": {"stage_transitions": stages_processed},
+        }
+
+    async def _process_schedule(
+        self, db: Session, schedule: RolloutSchedule, current_time: datetime
+    ) -> Tuple[bool, int, List[Dict[str, Any]]]:
+        """
+        Advance one schedule as far as its triggers allow in this tick.
+
+        Changes are added to ``db`` and flushed, never committed: the caller
+        owns the transaction. Returns whether the schedule changed, how many
+        stages were started, and the notifications to send once the change is
+        committed.
+        """
+        notifications: List[Dict[str, Any]] = []
+
+        current_active_stage = (
+            db.query(RolloutStage)
+            .filter(
+                and_(
+                    RolloutStage.rollout_schedule_id == schedule.id,
+                    RolloutStage.status == RolloutStageStatus.IN_PROGRESS,
+                )
+            )
+            .first()
+        )
+
+        next_pending_stages = (
+            db.query(RolloutStage)
+            .filter(
+                and_(
+                    RolloutStage.rollout_schedule_id == schedule.id,
+                    RolloutStage.status == RolloutStageStatus.PENDING,
+                )
+            )
+            .order_by(RolloutStage.stage_order)
+            .all()
+        )
+
+        # No active stage: start the first pending stage if it is eligible.
+        if not current_active_stage:
+            if not next_pending_stages:
+                return False, 0, notifications
+            next_stage = next_pending_stages[0]
+            if not self._is_stage_eligible_for_activation(next_stage, current_time):
+                return False, 0, notifications
+            await self._activate_stage(db, schedule, next_stage, current_time)
+            notifications.append(self._advance_notification(schedule, next_stage))
+            return True, 1, notifications
+
+        # An active stage: complete it once it is due, then start the next.
+        if not self._is_stage_eligible_for_completion(
+            current_active_stage, current_time
+        ):
+            return False, 0, notifications
+
+        next_stage = None
+        if next_pending_stages:
+            next_stage = next(
+                (
+                    stage
+                    for stage in next_pending_stages
+                    if stage.stage_order > current_active_stage.stage_order
+                ),
+                next_pending_stages[0],
+            )
+
+        # Minimum duration between stages, measured from the start of the
+        # active stage. It is checked before anything is changed, so a
+        # schedule that has to wait leaves nothing pending in the session.
+        min_duration_hours = schedule.min_stage_duration or 0
+        if next_stage is not None and min_duration_hours > 0:
+            min_duration = timedelta(hours=min_duration_hours)
+            stage_started_at = _as_utc(current_active_stage.updated_at)
+            if current_time - stage_started_at < min_duration:
+                logger.info(
+                    f"Minimum duration not met for next stage in schedule {schedule.id}. "
+                    f"Will wait until {stage_started_at + min_duration}"
+                )
+                return False, 0, notifications
+
+        current_active_stage.status = RolloutStageStatus.COMPLETED
+        current_active_stage.completed_date = current_time
+        current_active_stage.updated_at = current_time
+        db.add(current_active_stage)
+
+        transitions = 0
+        if next_stage is not None:
+            # Start the next stage only once its own trigger allows it (a
+            # TIME_BASED stage with a future start_date stays PENDING and is
+            # picked up by a later run).
+            if self._is_stage_eligible_for_activation(next_stage, current_time):
+                await self._activate_stage(db, schedule, next_stage, current_time)
+                notifications.append(self._advance_notification(schedule, next_stage))
+                transitions = 1
+            else:
+                logger.info(
+                    f"Stage {next_stage.id} ({next_stage.name}) in schedule {schedule.id} "
+                    "is not yet eligible for activation; leaving it pending"
+                )
+        else:
+            # This was the last stage, mark the schedule as completed
+            schedule.status = RolloutScheduleStatus.COMPLETED
+            schedule.updated_at = current_time
+            db.add(schedule)
+            logger.info(f"Rollout schedule {schedule.id} completed")
+
+        return True, transitions, notifications
+
+    @staticmethod
+    def _advance_notification(
+        schedule: RolloutSchedule, stage: RolloutStage
+    ) -> Dict[str, Any]:
+        return {
+            "feature_flag_id": str(schedule.feature_flag_id),
+            "stage_name": stage.name,
+            "new_percentage": stage.target_percentage,
         }
 
     def _is_stage_eligible_for_activation(
@@ -373,6 +417,9 @@ class RolloutScheduler:
         """
         Activate a rollout stage and update the feature flag.
 
+        The changes are flushed, not committed: the caller owns the
+        transaction and sends the notification after its commit.
+
         Args:
             db: Database session
             schedule: The rollout schedule
@@ -380,53 +427,40 @@ class RolloutScheduler:
             current_time: The current time
 
         Returns:
-            True if the stage was activated, False otherwise
+            True once the stage and the flag are updated.
+
+        Raises:
+            LookupError: the schedule's feature flag does not exist. The
+                caller rolls the schedule back, so the stage stays PENDING.
         """
-        try:
-            # Mark the stage as in progress
-            stage.status = RolloutStageStatus.IN_PROGRESS
-            stage.updated_at = current_time
-            db.add(stage)
+        # Mark the stage as in progress
+        stage.status = RolloutStageStatus.IN_PROGRESS
+        stage.updated_at = current_time
+        db.add(stage)
 
-            # Update the feature flag's rollout percentage
-            feature_flag = (
-                db.query(FeatureFlag)
-                .filter(FeatureFlag.id == schedule.feature_flag_id)
-                .with_for_update()
-                .first()
+        # Update the feature flag's rollout percentage
+        feature_flag = (
+            db.query(FeatureFlag)
+            .filter(FeatureFlag.id == schedule.feature_flag_id)
+            .with_for_update()
+            .first()
+        )
+
+        if not feature_flag:
+            raise LookupError(
+                f"Feature flag {schedule.feature_flag_id} not found for rollout schedule {schedule.id}"
             )
 
-            if not feature_flag:
-                logger.error(
-                    f"Feature flag {schedule.feature_flag_id} not found for rollout schedule {schedule.id}"
-                )
-                return False
+        feature_flag.rollout_percentage = stage.target_percentage
+        feature_flag.updated_at = current_time
+        db.add(feature_flag)
+        db.flush()
 
-            feature_flag.rollout_percentage = stage.target_percentage
-            feature_flag.updated_at = current_time
-            db.add(feature_flag)
-
-            # Commit the changes
-            db.commit()
-
-            logger.info(
-                f"Activated stage {stage.id} ({stage.name}) in schedule {schedule.id} - "
-                f"Updated feature flag {feature_flag.key} to {stage.target_percentage}% rollout"
-            )
-            try:
-                self._notification_service.notify_rollout_advanced(
-                    feature_flag_id=str(schedule.feature_flag_id),
-                    stage_name=stage.name,
-                    new_percentage=stage.target_percentage,
-                )
-            except Exception as exc:
-                logger.warning("Notification failed (non-critical): %s", exc)
-            return True
-
-        except Exception as e:
-            db.rollback()
-            logger.error(f"Error activating stage {stage.id}: {e!s}")
-            return False
+        logger.info(
+            f"Activated stage {stage.id} ({stage.name}) in schedule {schedule.id} - "
+            f"Updated feature flag {feature_flag.key} to {stage.target_percentage}% rollout"
+        )
+        return True
 
 
 # Create a singleton instance of the scheduler
