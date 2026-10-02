@@ -1836,8 +1836,10 @@ size is only a guide here: `adaptive_allocation`, `unequal_allocation`, `sequent
 With nothing to plan from, the answer is still **200**: `required_sample_size_per_variant`,
 `achieved_power` and `baseline_rate` are `null`, and `unavailable_reason` is one of
 `no_metric`, `no_control_data`, `no_control_conversions`, `rate_at_boundary` (every control user
-converted) or `effect_out_of_range` (the observed rate raised by `mde` reaches 100%).
-A `baseline_conversion_rate` that `mde` raises to 100% or more answers **422**; an unknown
+converted), `effect_out_of_range` (the observed rate raised by `mde` reaches 100%) or
+`effect_too_small` (the observed rate raised by `mde` changes too little for the size to be a
+finite number). A `baseline_conversion_rate` that `mde` raises to 100% or more answers **422**,
+and so does one that `mde` changes too little for the size to be a finite number; an unknown
 experiment answers **404**.
 
 ---

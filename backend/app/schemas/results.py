@@ -637,6 +637,7 @@ SampleSizeUnavailableReason = Literal[
     "no_control_conversions",
     "rate_at_boundary",
     "effect_out_of_range",
+    "effect_too_small",
 ]
 
 #: Why a fixed sample size is only a guide for this experiment.
@@ -786,7 +787,9 @@ class SampleSizeResult(BaseModel):
             "no_control_data (no control variant or no control users yet), "
             "no_control_conversions, rate_at_boundary (every control user "
             "converted), effect_out_of_range (the observed rate raised by the "
-            "MDE reaches 100%). null when a size was computed."
+            "MDE reaches 100%), effect_too_small (the observed rate raised by "
+            "the MDE changes too little for the size to be a finite number). "
+            "null when a size was computed."
         ),
     )
     guide_only_reasons: List[SampleSizeGuideOnlyReason] = Field(

@@ -161,6 +161,7 @@ describe('SampleSizeMeter', () => {
       ['no_control_conversions', 'No control user has converted yet'],
       ['rate_at_boundary', 'Every control user has converted so far'],
       ['effect_out_of_range', 'raised by this effect reaches 100% or more'],
+      ['effect_too_small', 'raised by this effect changes too little to estimate a sample size'],
       ['no_metric', 'This experiment has no metric'],
     ] as const)('explains %s', (reason, text) => {
       render(

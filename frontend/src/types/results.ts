@@ -125,7 +125,8 @@ export type SampleSizeUnavailableReason =
   | 'no_control_data'
   | 'no_control_conversions'
   | 'rate_at_boundary'
-  | 'effect_out_of_range';
+  | 'effect_out_of_range'
+  | 'effect_too_small';
 
 /** Why a fixed sample size is only a guide for this experiment. */
 export type SampleSizeGuideOnlyReason =
