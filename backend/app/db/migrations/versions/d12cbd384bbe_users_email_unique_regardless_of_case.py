@@ -146,9 +146,9 @@ def _duplicate_groups() -> list[list[str]]:
     ids leave the database.
     """
     rows = op.get_bind().execute(
-        sa.text(
+        sa.text(  # nosemgrep: python.sqlalchemy.security.audit.avoid-sqlalchemy-text.avoid-sqlalchemy-text
             "SELECT array_agg(id::text ORDER BY created_at, id::text) "
-            f"FROM {_qualified_table()} "
+            f"FROM {_qualified_table()} "  # nosec B608 - table name is the dialect-quoted module constant, not user input
             "WHERE email IS NOT NULL "
             "GROUP BY lower(email) HAVING count(*) > 1 "
             "ORDER BY min(created_at), min(id::text)"
@@ -199,9 +199,9 @@ def upgrade() -> None:
             return
         raise RuntimeError(_wrong_index_refusal())
 
-    bind.execute(sa.text(f"SET LOCAL lock_timeout = '{_LOCK_TIMEOUT}'"))
+    bind.execute(sa.text(f"SET LOCAL lock_timeout = '{_LOCK_TIMEOUT}'"))  # nosemgrep: python.sqlalchemy.security.audit.avoid-sqlalchemy-text.avoid-sqlalchemy-text
     try:
-        bind.execute(sa.text(f"LOCK TABLE {_qualified_table()} IN SHARE MODE"))
+        bind.execute(sa.text(f"LOCK TABLE {_qualified_table()} IN SHARE MODE"))  # nosemgrep: python.sqlalchemy.security.audit.avoid-sqlalchemy-text.avoid-sqlalchemy-text
     except sa.exc.OperationalError as exc:
         if _pgcode(exc) == _LOCK_NOT_AVAILABLE:
             raise RuntimeError(_lock_refusal()) from None
