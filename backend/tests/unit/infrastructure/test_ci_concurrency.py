@@ -315,3 +315,6 @@ def test_b3_refuses_a_job_level_group():
         for job_id, job in workflow["jobs"].items()
     }
     assert b3_problems({**workflow, "jobs": jobs}, "pull_request")
+
+
+# G4 scratch commit A (not for merge)
