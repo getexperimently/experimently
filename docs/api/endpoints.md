@@ -60,14 +60,18 @@ The API uses two types of authentication:
 ### 1. User Registration and Authentication
 
 !!! note "Cognito only"
-    The sign-up, confirmation, password-reset and token-refresh endpoints
-    (`POST /api/v1/auth/signup`, `/confirm`, `/forgot-password`, `/reset-password`
-    and `/refresh`) are available only when `AUTH_PROVIDER=cognito`. With any other
-    provider, including the default `local`, they answer 404. With `local`, sign in
-    with `POST /api/v1/auth/login`; an administrator creates accounts and resets
-    passwords.
+    The password-reset and token-refresh endpoints (`POST /api/v1/auth/forgot-password`,
+    `/reset-password` and `/refresh`) are available only when `AUTH_PROVIDER=cognito`.
+    The sign-up and confirmation endpoints (`POST /api/v1/auth/signup` and `/confirm`)
+    also need `COGNITO_SELF_SIGNUP_ENABLED=true`; without it they answer 404 and an
+    administrator creates users ([Adding a user](../cognito_integration.md#adding-a-user)).
+    With any other provider, including the default `local`, all five answer 404. With
+    `local`, sign in with `POST /api/v1/auth/login`; an administrator creates accounts
+    and resets passwords.
 
 Step 1: Register a new user:
+
+Only with `COGNITO_SELF_SIGNUP_ENABLED=true` and a user pool that allows self sign-up; otherwise see [Adding a user](../cognito_integration.md#adding-a-user).
 
 ```bash
 curl -X POST "http://localhost:8000/api/v1/auth/signup" \
@@ -267,12 +271,14 @@ curl -X POST "http://localhost:8000/api/v1/users/" \
 ## Authentication Endpoints
 
 !!! note "Cognito only"
-    The sign-up, confirmation, password-reset and token-refresh endpoints
-    (`POST /api/v1/auth/signup`, `/confirm`, `/forgot-password`, `/reset-password`
-    and `/refresh`) are available only when `AUTH_PROVIDER=cognito`. With any other
-    provider, including the default `local`, they answer 404. With `local`, sign in
-    with `POST /api/v1/auth/login`; an administrator creates accounts and resets
-    passwords.
+    The password-reset and token-refresh endpoints (`POST /api/v1/auth/forgot-password`,
+    `/reset-password` and `/refresh`) are available only when `AUTH_PROVIDER=cognito`.
+    The sign-up and confirmation endpoints (`POST /api/v1/auth/signup` and `/confirm`)
+    also need `COGNITO_SELF_SIGNUP_ENABLED=true`; without it they answer 404 and an
+    administrator creates users ([Adding a user](../cognito_integration.md#adding-a-user)).
+    With any other provider, including the default `local`, all five answer 404. With
+    `local`, sign in with `POST /api/v1/auth/login`; an administrator creates accounts
+    and resets passwords.
 
 ### Sign Up
 - **Endpoint**: `POST /api/v1/auth/signup`
@@ -290,9 +296,9 @@ curl -X POST "http://localhost:8000/api/v1/users/" \
 - **Response**: 201 Created
   ```json
   {
-    "username": "string",
     "user_id": "string",
-    "confirmation_required": true
+    "confirmed": false,
+    "message": "string"
   }
   ```
 
@@ -309,7 +315,8 @@ curl -X POST "http://localhost:8000/api/v1/users/" \
 - **Response**: 200 OK
   ```json
   {
-    "message": "User confirmed successfully"
+    "message": "Account confirmed successfully. You can now sign in.",
+    "confirmed": true
   }
   ```
 
