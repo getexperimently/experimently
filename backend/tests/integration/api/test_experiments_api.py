@@ -405,24 +405,54 @@ class TestDeleteExperiment:
         )
         assert response.status_code == 400, response.text
 
-    def test_delete_active_experiment_returns_403(self, admin_client):
-        """Deleting a non-DRAFT experiment returns 403.
+    @pytest.mark.regression
+    @pytest.mark.parametrize(
+        "target",
+        [s for s in ExperimentStatus if s is not ExperimentStatus.DRAFT],
+        ids=lambda s: s.value,
+    )
+    def test_delete_non_draft_experiment_returns_400(self, admin_client, target):
+        """Deleting an experiment that is not a DRAFT answers 400 (#465).
 
-        We start the experiment via the API to put it in ACTIVE status,
-        then attempt to delete it.
+        It used to answer 403, the status of a permission refusal, while the
+        docstring and the OpenAPI operation said 400. Each status is reached
+        through the API, as a dashboard user would reach it. A status added to
+        ``ExperimentStatus`` without a path here fails with a KeyError rather
+        than going untested.
         """
-        exp = _create_experiment(admin_client, "Active Delete Attempt")
+        exp = _create_experiment(admin_client, f"Non-draft delete {target.value}")
         exp_id = exp["id"]
 
-        # Start the experiment via API to put it in ACTIVE status
-        start_response = admin_client.post(f"/api/v1/experiments/{exp_id}/start")
-        assert start_response.status_code == 200, start_response.text
+        for action in _NON_DRAFT_PATHS[target]:
+            response = admin_client.post(f"/api/v1/experiments/{exp_id}/{action}")
+            assert response.status_code == 200, (action, response.text)
+        got = admin_client.get(f"/api/v1/experiments/{exp_id}")
+        assert got.status_code == 200, got.text
+        assert got.json()["status"] == target.value
 
         delete_response = admin_client.delete(
             f"/api/v1/experiments/{exp_id}",
             params={"experiment_key": exp_id},
         )
-        assert delete_response.status_code == 403, delete_response.text
+        assert delete_response.status_code == 400, delete_response.text
+        assert (
+            delete_response.json()["detail"]
+            == "Cannot delete experiments that are not in DRAFT status"
+        )
+
+        # The refusal removed nothing.
+        after = admin_client.get(f"/api/v1/experiments/{exp_id}")
+        assert after.status_code == 200, after.text
+        assert after.json()["status"] == target.value
+
+
+#: The API calls, in order, that take a new DRAFT experiment to each status.
+_NON_DRAFT_PATHS = {
+    ExperimentStatus.ACTIVE: ["start"],
+    ExperimentStatus.PAUSED: ["start", "pause"],
+    ExperimentStatus.COMPLETED: ["start", "complete"],
+    ExperimentStatus.ARCHIVED: ["start", "complete", "archive"],
+}
 
 
 # ---------------------------------------------------------------------------
