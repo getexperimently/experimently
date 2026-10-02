@@ -164,8 +164,7 @@ def _duplicates_refusal(groups: list[list[str]]) -> str:
         f"Refusing to upgrade schema {_SCHEMA}: {count} {noun} of accounts {verb} "
         "email addresses that differ only in letter case, and from this "
         "release an email address belongs to one account whatever its case.",
-        "Accounts that share an address (user ids, one group per line, oldest "
-        "first):",
+        "Accounts that share an address (user ids, one group per line, oldest first):",
     ]
     lines += ["  " + " ".join(ids) for ids in groups[:_MAX_GROUPS]]
     if count > _MAX_GROUPS:
