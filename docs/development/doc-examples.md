@@ -143,8 +143,9 @@ a `404` or a `422`, so an example that doesn't check its output passes when it's
   `PATH`, `HOME`, `USER`, `TMPDIR` and Docker's own settings.
 - **No `#` comments in a shell block**, `skip` blocks included (see
   [Rewriting a comment](#rewriting-a-comment)).
-- **Trailing slashes are real.** `POST /api/v1/feature-flags/` needs the slash; without it
-  the API answers `307`, `curl` doesn't follow it, and nothing is printed.
+- **Trailing slashes are real.** `POST /api/v1/rollout-schedules/` needs the slash; without
+  it the API answers `307`, `curl` doesn't follow it, and nothing is printed. (The
+  feature-flag collection answers either form; a single flag's URL takes no slash.)
 - **Refused because they hide a failure:** `export X=$(command)` (and `declare`, `local`,
   `readonly`), which reports success even when the command fails — assign first, then
   export; and a last line ending in `\`, which would swallow what follows.

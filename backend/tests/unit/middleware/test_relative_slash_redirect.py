@@ -1,6 +1,6 @@
 """The trailing-slash redirect must not move the client to another origin (#86).
 
-Ten collection routes are declared with a trailing slash and clients routinely
+Collection routes are declared with a trailing slash and clients routinely
 omit it, so Starlette answers 307 -- with an **absolute** URL built from the
 request scope, i.e. from the `Host` header and whatever scheme the app saw:
 

@@ -30,9 +30,8 @@ It prints `"ADMIN"`.
 Toggle several feature flags in one call. Each flag succeeds or fails on its own: the
 call answers `200` with a result per flag, even when some of them fail.
 
-These two flags give the call something to change. The collection URL ends with a slash,
-`/api/v1/feature-flags/`; without it the API answers `307`, which `curl` doesn't follow.
-This saves their ids in `$DARK_ID` and `$CHECKOUT_ID`:
+These two flags give the call something to change. This saves their ids in `$DARK_ID`
+and `$CHECKOUT_ID`:
 
 ```{.bash exec}
 DARK_ID=$(curl -s -X POST localhost:8000/api/v1/feature-flags/ \

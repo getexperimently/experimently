@@ -1,9 +1,11 @@
 """A redirect that points back at us keeps the client's own origin (#86).
 
-Ten collection routes are declared with a trailing slash
-(`/api/v1/experiments/`, `/api/v1/feature-flags/`, ...) and clients routinely
-omit it, so Starlette's `redirect_slashes` answers 307 -- building the target
-as an **absolute** URL from the request scope:
+Collection routes are declared with a trailing slash
+(`/api/v1/experiments/`, `/api/v1/rollout-schedules/`, ...) and clients
+routinely omit it, so Starlette's `redirect_slashes` answers 307 -- building
+the target as an **absolute** URL from the request scope. (The feature-flag
+collection also answers `/api/v1/feature-flags` directly since #94, so it no
+longer redirects; single-flag URLs with a trailing slash still do.)
 
     redirect_url = URL(scope=redirect_scope)
     response = RedirectResponse(url=str(redirect_url))
