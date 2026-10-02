@@ -19,4 +19,4 @@ from .provider import PROVIDER_NAME, ExperimentationProvider
 from .types import ProviderConfig
 
 __all__ = ["ExperimentationProvider", "PROVIDER_NAME", "ProviderConfig", "hash_user"]
-__version__ = "1.0.0"
+__version__ = "0.1.0"

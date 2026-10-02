@@ -1,6 +1,6 @@
 {
   "name": "@getexperimently/openfeature-provider",
-  "version": "0.2.0",
+  "version": "0.1.0",
   "description": "OpenFeature provider for Experimently (delegates to @getexperimently/js-sdk)",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
