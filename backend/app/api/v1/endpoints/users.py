@@ -174,12 +174,20 @@ def refuse_if_email_held(
 def changed_email(user: User, update_data: Dict[str, Any]) -> Optional[str]:
     """The email address an update sets, or None if it leaves it as stored.
 
-    An address resent exactly as stored is not a change, so it is not checked:
-    an account whose address another account already shares (rows created by
-    an administrator, SQL or a restore) can still be edited.
+    The request's email has been through EmailStr, which lower-cases the
+    domain, so it is compared with the stored value put through the same
+    parser (as ``_identity_unchanged`` does), not with the raw column. An
+    address resent as stored is not a change: it is not checked, and it is
+    removed from *update_data* so the row keeps its bytes. So an account whose
+    address another account already shares (rows created by an
+    administrator, SQL or a restore) can still be edited, whatever the case
+    of its stored domain.
     """
     email = update_data.get("email")
-    if email is None or email == user.email:
+    if email is None:
+        return None
+    if email == _parsed_email(user.email):
+        update_data.pop("email")
         return None
     return email
 
