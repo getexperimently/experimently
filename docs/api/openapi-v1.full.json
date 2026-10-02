@@ -6531,7 +6531,7 @@
         "type": "object"
       },
       "FeatureFlagRead": {
-        "description": "A feature flag, as every flag route returns it.\n\nAny of these bodies can be sent back with an update unchanged, unless its\n`targeting_rules` are ones PUT now refuses (422); omitting the field\nstill works.",
+        "description": "A feature flag, as every flag route returns it.\n\nAny of these bodies can be sent back with an update unchanged unless its\n`targeting_rules` are ones PUT now refuses (422); omitting the field\nstill works.",
         "properties": {
           "created_at": {
             "format": "date-time",

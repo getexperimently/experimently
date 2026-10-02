@@ -225,7 +225,7 @@ class FeatureFlagEvaluation(BaseModel):
 class FeatureFlagRead(BaseModel):
     """A feature flag, as every flag route returns it.
 
-    Any of these bodies can be sent back with an update unchanged, unless its
+    Any of these bodies can be sent back with an update unchanged unless its
     `targeting_rules` are ones PUT now refuses (422); omitting the field
     still works.
     """
