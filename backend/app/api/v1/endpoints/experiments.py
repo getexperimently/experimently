@@ -1512,7 +1512,8 @@ async def clone_experiment(
 
     This endpoint creates a new experiment that is a copy of an existing experiment.
     The cloned experiment will:
-    - Have a name prefixed with "Copy of"
+    - Have a name prefixed with "Copy of", shortened to fit the 100-character
+      name limit when the source's name is long
     - Be in DRAFT status
     - Have the same variants, metrics, and configuration as the original
     - Have the current user as the owner

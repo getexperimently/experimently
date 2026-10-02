@@ -42,6 +42,11 @@ _UNIQUE_VIOLATION = "23505"
 #: vanishingly rare; the bound keeps a broken generator from looping (#388).
 KEY_GENERATION_ATTEMPTS = 3
 
+#: The longest name an experiment can store, read from the column so the two
+#: cannot drift. A clone's "Copy of <name>" is cut to it: the caller never sent
+#: that name, so refusing it would refuse a value they cannot change (#627).
+NAME_MAX = Experiment.__table__.c.name.type.length
+
 
 def is_experiment_key_conflict(exc: BaseException) -> bool:
     """True when *exc* is the database refusing a second experiment with a key.
@@ -1098,7 +1103,7 @@ class ExperimentService:
         """
         # Create new experiment object with copied data
         new_experiment = Experiment(
-            name=f"Copy of {experiment.name}",
+            name=f"Copy of {experiment.name}"[:NAME_MAX],
             description=experiment.description,
             hypothesis=experiment.hypothesis,
             experiment_type=experiment.experiment_type,

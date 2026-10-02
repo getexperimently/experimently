@@ -15851,7 +15851,7 @@
     },
     "/api/v1/experiments/{experiment_id}/clone": {
       "post": {
-        "description": "Clone an experiment.\n\nThis endpoint creates a new experiment that is a copy of an existing experiment.\nThe cloned experiment will:\n- Have a name prefixed with \"Copy of\"\n- Be in DRAFT status\n- Have the same variants, metrics, and configuration as the original\n- Have the current user as the owner\n\nThis is useful for creating variations of existing experiments or repeating\nsuccessful experiments with minor modifications.\n\nReturns:\n    ExperimentResponse: The newly created cloned experiment\n\nRaises:\n    HTTPException 403: If the caller's role does not hold READ and CREATE on experiments\n    HTTPException 404: If the source experiment doesn't exist",
+        "description": "Clone an experiment.\n\nThis endpoint creates a new experiment that is a copy of an existing experiment.\nThe cloned experiment will:\n- Have a name prefixed with \"Copy of\", shortened to fit the 100-character\n  name limit when the source's name is long\n- Be in DRAFT status\n- Have the same variants, metrics, and configuration as the original\n- Have the current user as the owner\n\nThis is useful for creating variations of existing experiments or repeating\nsuccessful experiments with minor modifications.\n\nReturns:\n    ExperimentResponse: The newly created cloned experiment\n\nRaises:\n    HTTPException 403: If the caller's role does not hold READ and CREATE on experiments\n    HTTPException 404: If the source experiment doesn't exist",
         "operationId": "clone_experiment_api_v1_experiments__experiment_id__clone_post",
         "parameters": [
           {
