@@ -193,7 +193,8 @@ def login_local(body: LoginRequest, db: Session = Depends(deps.get_db)) -> Any:
     the endpoint cannot be used to enumerate users.  After
     ``LOCAL_AUTH_MAX_FAILED_ATTEMPTS`` failures within
     ``LOCAL_AUTH_LOCKOUT_MINUTES`` the address answers 423 until the window
-    expires.
+    expires.  The email address is matched whatever its letter case (A–Z),
+    and every casing of it counts toward the same failed attempts.
     """
     _require_local_provider()
     return _issue_local_login(db, body.email, body.password)

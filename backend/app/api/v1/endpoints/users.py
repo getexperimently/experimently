@@ -576,7 +576,7 @@ def change_own_password(
         else None
     )
     try:
-        local_auth_service.verify_current_password(current_user, current)
+        local_auth_service.verify_current_password(db, current_user, current)
     except AccountLockedError as exc:
         raise HTTPException(
             status_code=status.HTTP_423_LOCKED,

@@ -338,8 +338,9 @@ curl -X POST "http://localhost:8000/api/v1/users/" \
 - **Endpoint**: `POST /api/v1/auth/token`
 - **Description**: OAuth2 compatible token login
 - **Request Body**: Form data
-  - username: string
+  - username: string (with `AUTH_PROVIDER=local`, the user's email address)
   - password: string
+- With `AUTH_PROVIDER=local`: The email address is matched whatever its letter case (A–Z), and every casing of it counts toward the same failed attempts.
 - **Response**: 200 OK
   ```json
   {

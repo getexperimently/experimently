@@ -18876,7 +18876,7 @@
     },
     "/api/v1/auth/login": {
       "post": {
-        "description": "Sign in with e-mail and password (``AUTH_PROVIDER=local``).\n\nReturns a bearer token plus the user's profile.  The same 401 message is\nused for an unknown address, a wrong password and an inactive account so\nthe endpoint cannot be used to enumerate users.  After\n``LOCAL_AUTH_MAX_FAILED_ATTEMPTS`` failures within\n``LOCAL_AUTH_LOCKOUT_MINUTES`` the address answers 423 until the window\nexpires.",
+        "description": "Sign in with e-mail and password (``AUTH_PROVIDER=local``).\n\nReturns a bearer token plus the user's profile.  The same 401 message is\nused for an unknown address, a wrong password and an inactive account so\nthe endpoint cannot be used to enumerate users.  After\n``LOCAL_AUTH_MAX_FAILED_ATTEMPTS`` failures within\n``LOCAL_AUTH_LOCKOUT_MINUTES`` the address answers 423 until the window\nexpires.  The email address is matched whatever its letter case (A–Z),\nand every casing of it counts toward the same failed attempts.",
         "operationId": "login_local_api_v1_auth_login_post",
         "requestBody": {
           "content": {

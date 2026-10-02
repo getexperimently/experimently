@@ -360,10 +360,11 @@ def test_another_users_password_sign_in_is_unaffected_by_a_refused_email_change(
 ):
     """A mixed-case address and its lower-case copy cannot both be stored.
 
-    Password sign-in looks the lower-cased address up first, so a second row
-    holding the lower-case copy would answer for the first one's address.
-    The self-service change that would create that row is refused, and the
-    first account signs in as before.
+    Password sign-in matches the address whatever its letter case, so a
+    second row holding the lower-case copy would make the address match two
+    accounts, and sign-in refuses an address that matches two.  The
+    self-service change that would create that row is refused, and the first
+    account signs in as before.
     """
     other = _make_user(
         db_session,
