@@ -98,7 +98,9 @@ Every step is idempotent — re-running it prints the current state and writes n
   stage's trigger to manual right before advancing it (and says so).
 - Step 4 relies on the backend's safety scheduler: run it with `SAFETY_CHECK_INTERVAL_MINUTES=1` for the demo
   (default 5). The seed enables automatic rollbacks in the global safety settings; the flag's safety config rolls
-  back to 5% (`rollback_percentage`).
+  back to 5% (`rollback_percentage`). A rollback lowers only the global rollout percentage, so devices matched
+  by the `employee equals true` rule keep Player v2 through it (see
+  [What a rollback changes](../../../docs/feature-flags/safety.md#what-a-rollback-changes)).
 - After the incident the flag stays critical until the 15-minute window slides past the crash reports; step 6
   waits for that (pass `--no-wait` to skip, at the cost of the scheduler rolling the flag back again).
 - Reset the whole story with `python backend/scripts/seed_streampulse.py --reset` followed by a reseed.
