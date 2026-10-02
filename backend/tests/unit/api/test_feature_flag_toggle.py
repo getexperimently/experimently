@@ -349,63 +349,6 @@ class TestFeatureFlagToggleEndpoints:
         data = response.json()
         assert data["status"] == FeatureFlagStatus.ACTIVE.value
 
-    def test_toggle_with_cache_invalidation(self):
-        """Test that toggle invalidates cache when enabled."""
-        # Setup mocks
-        mock_user = self.setup_test_user()
-        mock_db = Mock(spec=Session)
-        # The dependency hands out redis.asyncio: its calls are awaited, and a
-        # synchronous Mock here hid the missing awaits (#100).
-        mock_redis = Mock()
-        mock_redis.delete = AsyncMock()
-        list_key = f"feature_flags:{uuid4()}:0:100:None:None"
-
-        async def scan_iter(match):
-            assert match == "feature_flags:*"
-            yield list_key
-
-        mock_redis.scan_iter = Mock(side_effect=scan_iter)
-
-        # Setup feature flag
-        feature_flag = self.setup_test_feature_flag(
-            owner_id=mock_user.id, status=FeatureFlagStatus.INACTIVE
-        )
-
-        # Mock database query
-        mock_db.query.return_value.filter.return_value.first.return_value = feature_flag
-        mock_db.commit = Mock()
-        mock_db.refresh = Mock()
-
-        # Create async mock for audit service
-        async def mock_log_action(*args, **kwargs):
-            return uuid4()
-
-        # Override dependencies with cache enabled
-        # Use SimpleNamespace so attribute access (cache_control.enabled) works
-        import types
-
-        mock_cache = types.SimpleNamespace(enabled=True, redis=mock_redis)
-        app.dependency_overrides[deps.get_current_active_user] = lambda: mock_user
-        app.dependency_overrides[deps.get_db] = lambda: mock_db
-        app.dependency_overrides[deps.get_cache_control] = lambda: mock_cache
-
-        # Mock audit service
-        with patch(
-            "backend.app.services.audit_service.AuditService.log_action",
-            side_effect=mock_log_action,
-        ):
-            client = TestClient(app)
-            response = client.post(
-                f"/api/v1/feature-flags/{feature_flag.id}/toggle",
-                json={"reason": "Test cache invalidation"},
-            )
-
-        assert response.status_code == 200
-
-        # The flag's detail and every cached list were dropped, awaited.
-        mock_redis.delete.assert_any_await(f"feature_flag:{feature_flag.id}")
-        mock_redis.delete.assert_any_await(list_key)
-
     def test_toggle_without_reason(self):
         """Test toggling feature flag without providing a reason."""
         # Setup mocks

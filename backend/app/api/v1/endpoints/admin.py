@@ -240,16 +240,16 @@ async def get_system_stats(
 
 # Namespaces the application writes to Redis. There is no single key prefix:
 # every cache key in `backend/app/api/v1/endpoints/` starts with one of these
-# (`admin:system_stats`, `feature_flag:{id}`, `results:{id}`, ...). Add a
+# (`admin:system_stats`, `experiment:{id}`, `results:{id}`, ...). Add a
 # namespace here when you add one there, or "clear cache" will quietly leave it.
+# The flag routes no longer cache (#630), so there is no flag namespace; keys
+# an older release left behind are read by nothing and expire within an hour.
 CACHE_NAMESPACES: tuple = (
     "admin",
     "experiment",
     "experiments",
     "experiment_daily_results",
     "experiment_segmented_results",
-    "feature_flag",
-    "feature_flags",
     "results",
 )
 

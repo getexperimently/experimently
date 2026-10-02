@@ -259,7 +259,8 @@ curl -X POST "http://localhost:8000/api/v1/users/" \
 - All list endpoints support pagination using `skip` and `limit` parameters
 
 ### Caching
-- Experiment and feature flag data is cached for 1 hour
+- Experiment data is cached for 1 hour when `CACHE_ENABLED` is on (it is off by default)
+- Feature flags are not cached: the flag list and a flag's detail are read from the database on every request, whatever `CACHE_ENABLED` says
 - Results data is cached for 5 minutes
 - Cache-Control headers are included in responses
 

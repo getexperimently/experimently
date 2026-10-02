@@ -1109,9 +1109,9 @@ class ProdSettings(Settings):
     ENVIRONMENT: EnvironmentName = "production"
     PROJECT_NAME: str = "Experimently"
     PROJECT_DESCRIPTION: str = "A platform for managing experiments and feature flags"
-    # Off by default, as in development and test. The feature-flag routes work
-    # with CACHE_ENABLED=true and a reachable Redis (#100); CACHE_CONTROL is
-    # read by no route. The experiment routes' cache is not covered by #100.
+    # Off by default, as in development and test. It affects the experiment
+    # and admin routes only: the feature-flag routes always read the database
+    # (#630). CACHE_CONTROL is read by no route.
     CACHE_ENABLED: bool = False
     CACHE_CONTROL: Dict[str, Any] = {"enabled": False, "redis": None, "ttl": 3600}
 
