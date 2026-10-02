@@ -262,7 +262,9 @@ export function ssoErrorMessage(params: SsoErrorParams, ctx: SsoCopyContext): st
         'If you expected access, contact your administrator.'
       );
     case 'sso_email':
-      return `${Provider} did not send a usable email address for your account. Ask your administrator.`;
+      return id
+        ? `${Provider} did not send a usable email address for your account. Ask your administrator, and give them this Request ID: ${id}.`
+        : `${Provider} did not send a usable email address for your account. Ask your administrator.`;
     case 'sso_unverified':
       return (
         `${Provider} has not verified the email address on your account. Verify it with ` +

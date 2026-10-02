@@ -153,6 +153,10 @@ describe('ssoErrorMessage: the copy for every code (spec-v3 §10)', () => {
       'Google did not send a usable email address for your account. Ask your administrator.',
     ],
     [
+      { sso_error: 'sso_email', provider: 'google', request_id: 'req-5' },
+      'Google did not send a usable email address for your account. Ask your administrator, and give them this Request ID: req-5.',
+    ],
+    [
       { sso_error: 'sso_unverified', provider: 'github' },
       'GitHub has not verified the email address on your account. Verify it with GitHub, or ask your administrator.',
     ],
