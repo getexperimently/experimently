@@ -128,5 +128,8 @@ async def rollback_feature_flag(
     """
     safety_service = SafetyService(db)
     return await safety_service.async_rollback_feature_flag(
-        feature_flag_id=feature_flag_id, percentage=percentage, reason=reason
+        feature_flag_id=feature_flag_id,
+        percentage=percentage,
+        reason=reason,
+        executed_by_user_id=current_user.id,
     )
