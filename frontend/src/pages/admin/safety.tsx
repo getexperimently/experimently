@@ -115,8 +115,12 @@ export function SafetyDashboard() {
   const handleRollback = (flagId: string) => {
     const flag = flags.find((f) => f.flag_id === flagId);
     if (!flag) return;
+    // Safari, and Firefox on macOS, do not focus a button on a mouse click, so
+    // activeElement can be <body>. Only something inside a flag card counts as
+    // the trigger; otherwise close falls back to the card below.
+    const active = document.activeElement;
     rollbackTriggerRef.current =
-      document.activeElement instanceof HTMLElement ? document.activeElement : null;
+      active instanceof HTMLElement && active.closest('[data-flag-id]') ? active : null;
     setRollbackModal({ flagId, flagName: flag.flag_name });
     setRollbackReason('');
     setRollbackSuccess(false);
@@ -163,16 +167,19 @@ export function SafetyDashboard() {
     setRollbackReason('');
     setRollbackSuccess(false);
     setRollbackError(null);
-    // Back to the button that opened the dialog. After a rollback the card shows
-    // "Off" in its place, so fall back to the card itself.
+    // Back to the button that opened the dialog. When it was not captured, or
+    // the card now shows "Off" in its place, use the card's Roll back button if
+    // it is still there, else the card itself.
     const trigger = rollbackTriggerRef.current;
     rollbackTriggerRef.current = null;
     if (trigger && trigger.isConnected) {
       trigger.focus();
     } else if (flagId) {
-      Array.from(document.querySelectorAll<HTMLElement>('[data-flag-id]'))
-        .find((el) => el.dataset.flagId === flagId)
-        ?.focus();
+      const card = Array.from(document.querySelectorAll<HTMLElement>('[data-flag-id]')).find(
+        (el) => el.dataset.flagId === flagId,
+      );
+      const button = card?.querySelector<HTMLElement>('[data-testid="rollback-button"]');
+      (button ?? card)?.focus();
     }
   };
 

@@ -394,6 +394,44 @@ describe('SafetyDashboard rollback dialog: keyboard and screen reader (#629)', (
     expect(card).toHaveFocus();
   });
 
+  // Safari, and Firefox on macOS, do not focus a button on a mouse click, so
+  // document.activeElement is <body> when the dialog opens.
+  async function openWithoutFocusingTrigger() {
+    render(<SafetyDashboard />);
+    await waitFor(() => {
+      expect(screen.getAllByTestId('safety-status-card')).toHaveLength(2);
+    });
+    (document.activeElement as HTMLElement | null)?.blur();
+    expect(document.activeElement).toBe(document.body);
+    fireEvent.click(screen.getAllByTestId('rollback-button')[1]);
+    await screen.findByTestId('rollback-modal');
+  }
+
+  it('returns focus to the Roll back button when the click did not focus it', async () => {
+    await openWithoutFocusingTrigger();
+    fireEvent.keyDown(document.activeElement as Element, { key: 'Escape' });
+    expect(screen.queryByTestId('rollback-modal')).not.toBeInTheDocument();
+    expect(screen.getAllByTestId('rollback-button')[1]).toHaveFocus();
+  });
+
+  it('lands focus on the card after a rollback when the click did not focus the button', async () => {
+    await openWithoutFocusingTrigger();
+    mockListFlags.mockResolvedValue({
+      items: [flags[0], { ...flags[1], status: 'inactive' }],
+      total: 2,
+      skip: 0,
+      limit: 100,
+    });
+    fireEvent.click(screen.getByTestId('rollback-confirm-button'));
+    await screen.findByTestId('rollback-success-message');
+    await screen.findByTestId('flag-off-indicator');
+    fireEvent.click(screen.getByTestId('rollback-cancel-button'));
+    const card = screen
+      .getAllByTestId('safety-status-card')
+      .find((c) => c.getAttribute('data-flag-id') === 'flag-2');
+    expect(card).toHaveFocus();
+  });
+
   it('passes the inactive status through to the card (#629)', async () => {
     mockListFlags.mockResolvedValue({
       items: [flags[0], { ...flags[1], status: 'inactive' }],
