@@ -1215,18 +1215,21 @@ async def update_experiment_schedule(
 
     - **start_date**: When the experiment should automatically activate
     - **end_date**: When the experiment should automatically complete
-    - **time_zone**: Time zone for interpreting the dates (default: UTC)
+    - **time_zone**: IANA time zone name (default: UTC) for a date given
+      without a UTC offset; a date with an offset keeps it. Dates are stored
+      in UTC. A name that is not an IANA zone answers 422.
 
-    A field the request omits is cleared. end_date must be at least an hour
-    after start_date.
+    On either status, a field the request omits is left unchanged and an
+    explicit null clears it. On a draft, end_date must be at least an hour
+    after start_date (the stored one when the request omits it).
 
     On a **PAUSED** experiment, start_date is the time to resume it at. It is
     stored as ``resume_at``; the experiment's own start_date is never moved. A
-    null start_date cancels a scheduled resume, and a field the request omits
-    is left unchanged. end_date must be later than the experiment's start date
-    and, with a resume scheduled, at least an hour after the resume time. A
-    paused experiment is resumed automatically only by a resume scheduled after
-    it was paused; any change of status cancels a scheduled resume.
+    null start_date cancels a scheduled resume. end_date must be later than
+    the experiment's start date and, with a resume scheduled, at least an hour
+    after the resume time. A paused experiment is resumed automatically only
+    by a resume scheduled after it was paused; any change of status cancels a
+    scheduled resume.
 
     start_date may not be more than ten minutes in the past.
 
@@ -1238,6 +1241,8 @@ async def update_experiment_schedule(
         HTTPException 403: If the caller's role does not hold READ and UPDATE
             on experiments
         HTTPException 404: If experiment not found
+        HTTPException 422: If a date is malformed or time_zone is not an IANA
+            time zone name
     """
     try:
         # Get experiment by ID

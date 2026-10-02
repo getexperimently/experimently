@@ -844,19 +844,24 @@ class ExperimentService:
         """
         Update experiment scheduling configuration.
 
-        On a DRAFT experiment, ``start_date`` and ``end_date`` are written as
-        given, and a field the request omitted is cleared.
+        A field the request omitted is left unchanged, on either status
+        (#482); an explicit null clears it.
+
+        On a DRAFT experiment, ``start_date`` and ``end_date`` are the times
+        to activate and complete it at; a null one is no longer scheduled.
 
         On a PAUSED experiment, ``start_date`` is the time to resume at and is
         stored as ``resume_at``; the experiment's own ``start_date`` is never
-        moved. A null ``start_date`` cancels a scheduled resume. A field the
-        request omitted is left unchanged.
+        moved. A null ``start_date`` cancels a scheduled resume.
+
+        ``time_zone`` is not read here: ``ScheduleConfig`` has already read
+        any date without an offset in that zone and validated the name (#483).
 
         Args:
             experiment: Experiment model to update
             schedule: Scheduling configuration containing start_date, end_date, and time_zone
             fields_set: The fields the request actually carried. Defaults to
-                the keys of ``schedule``. Only the PAUSED path reads it.
+                the keys of ``schedule``.
 
         Returns:
             Dictionary containing the updated experiment data
@@ -871,35 +876,11 @@ class ExperimentService:
                 f"Experiment must be in DRAFT or PAUSED status."
             )
 
+        fields = set(schedule) if fields_set is None else set(fields_set)
         if experiment.status == ExperimentStatus.PAUSED:
-            self._schedule_resume(
-                experiment,
-                schedule,
-                set(schedule) if fields_set is None else set(fields_set),
-            )
+            self._schedule_resume(experiment, schedule, fields)
         else:
-            # Update experiment schedule
-            if "start_date" in schedule:
-                experiment.start_date = schedule["start_date"]
-
-            if "end_date" in schedule:
-                experiment.end_date = schedule["end_date"]
-
-            # Validate date relationships
-            if experiment.start_date and experiment.end_date:
-                if experiment.end_date <= experiment.start_date:
-                    raise ValueError("End date must be after start date")
-
-                # Minimum duration check
-                min_duration = timedelta(hours=1)
-                if experiment.end_date - experiment.start_date < min_duration:
-                    raise ValueError(f"Experiment must run for at least {min_duration}")
-
-        # Add timezone metadata if not using UTC
-        if "time_zone" in schedule and schedule["time_zone"] != "UTC":
-            if not hasattr(experiment, "metadata") or not experiment.metadata:
-                experiment.metadata = {}
-            experiment.metadata["time_zone"] = schedule["time_zone"]
+            self._schedule_draft(experiment, schedule, fields)
 
         experiment.updated_at = datetime.now(timezone.utc)
 
@@ -913,6 +894,48 @@ class ExperimentService:
         )
 
         return self._experiment_to_dict(experiment)
+
+    @staticmethod
+    def _schedule_draft(
+        experiment: Experiment,
+        schedule: Dict[str, Any],
+        fields_set: Set[str],
+    ) -> None:
+        """Apply PUT /schedule to a DRAFT experiment (#482).
+
+        ``start_date`` and ``end_date`` present are written (null clears the
+        scheduled activation or completion); omitted, the stored value is
+        kept. The values the experiment would end up with -- the request's
+        where it carries them, the stored ones otherwise -- are checked before
+        anything is written, so a refusal leaves the row as it was:
+
+        * ``end_date`` must be later than ``start_date``;
+        * and at least one hour later.
+        """
+        start_date = (
+            _as_utc(schedule.get("start_date"))
+            if "start_date" in fields_set
+            else _as_utc(experiment.start_date)
+        )
+        end_date = (
+            _as_utc(schedule.get("end_date"))
+            if "end_date" in fields_set
+            else _as_utc(experiment.end_date)
+        )
+
+        if start_date is not None and end_date is not None:
+            if end_date <= start_date:
+                raise ValueError("End date must be after start date")
+
+            # Minimum duration check
+            min_duration = timedelta(hours=1)
+            if end_date - start_date < min_duration:
+                raise ValueError(f"Experiment must run for at least {min_duration}")
+
+        if "start_date" in fields_set:
+            experiment.start_date = schedule.get("start_date")
+        if "end_date" in fields_set:
+            experiment.end_date = schedule.get("end_date")
 
     @staticmethod
     def _schedule_resume(

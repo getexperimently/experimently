@@ -19,12 +19,14 @@ Now a resume on a PAUSED experiment is its own column, ``resume_at``:
       writer that has a route, the two service-only methods, and an instance
       expired by a commit;
 * P6  a due DRAFT still activates, with "started automatically";
-* P7  ``PUT /schedule`` on a DRAFT experiment is unchanged: no ``resume_at``,
-      and a field the request omits is cleared;
+* P7  ``PUT /schedule`` on a DRAFT experiment sets no ``resume_at``, and a
+      field the request omits is left unchanged (#482);
 
 plus the refusals ``PUT /schedule`` on PAUSED makes from the values the
 experiment would end up with (400, never a constraint error), what happens to
-each field the request omits, the 400 text for an ACTIVE experiment, and the
+each field the request omits (on DRAFT too, #482), how ``time_zone`` reads a
+date without an offset and refuses a name that is not an IANA zone (#483),
+the 400 text for an ACTIVE experiment, and the
 hazard the rollback note describes: without the listener, ``POST /start`` on a
 paused experiment with a pending resume is a 500.
 
@@ -44,6 +46,7 @@ import logging
 import uuid
 from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock, patch
+from zoneinfo import ZoneInfo
 
 import pytest
 from fastapi.testclient import TestClient
@@ -59,6 +62,7 @@ from backend.app.main import app
 from backend.app.models import experiment as experiment_models
 from backend.app.models.experiment import Experiment, ExperimentStatus
 from backend.app.models.user import User, UserRole
+from backend.app.schemas.experiment import TIME_ZONE_ERROR
 from backend.app.services.experiment_service import ExperimentService
 from backend.app.services.notification_service import NotificationService
 
@@ -510,9 +514,11 @@ def test_p6_due_draft_activates(client, db_session, people):
     assert _parse(after["start_date"]) == start
 
 
-def test_p7_draft_schedule_writes_start_date_and_clears_what_is_omitted(
+def test_p7_draft_schedule_writes_start_date_and_keeps_what_is_omitted(
     client, db_session, people
 ):
+    """#482: on a DRAFT a field the request omits is left unchanged, as on
+    PAUSED. Before the fix the omitted end_date was written as null."""
     experiment_id = _create(client, people)
     start = _now() + timedelta(days=1)
     end = start + timedelta(days=7)
@@ -531,9 +537,233 @@ def test_p7_draft_schedule_writes_start_date_and_clears_what_is_omitted(
     assert body["status"] == "draft"
     assert body["resume_at"] is None
     assert _parse(body["start_date"]) == later
-    assert body["end_date"] is None  # omitted on DRAFT: cleared, as before (#482)
-    status, resume_at, _, _ = _row(db_session, experiment_id)
+    assert _parse(body["end_date"]) == end  # omitted on DRAFT: kept (#482)
+    status, resume_at, _, end_date = _row(db_session, experiment_id)
     assert (status, resume_at) == (ExperimentStatus.DRAFT, None)
+    assert end_date.replace(tzinfo=timezone.utc) == end
+
+
+# --- PUT /schedule on DRAFT: each field (#482) -------------------------------------
+
+
+def _draft_with_schedule(client, people):
+    experiment_id = _create(client, people)
+    start = _now() + timedelta(days=1)
+    end = start + timedelta(days=7)
+    _ok(
+        _schedule(
+            client,
+            people,
+            experiment_id,
+            {"start_date": _iso(start), "end_date": _iso(end)},
+        )
+    )
+    return experiment_id, start, end
+
+
+def test_draft_omitted_start_date_is_kept(client, db_session, people):
+    experiment_id, start, _ = _draft_with_schedule(client, people)
+    end = start + timedelta(days=3)
+
+    body = _ok(_schedule(client, people, experiment_id, {"end_date": _iso(end)}))
+
+    assert _parse(body["start_date"]) == start
+    assert _parse(body["end_date"]) == end
+
+
+def test_draft_time_zone_alone_changes_no_date(client, db_session, people):
+    experiment_id, start, end = _draft_with_schedule(client, people)
+
+    body = _ok(_schedule(client, people, experiment_id, {"time_zone": "Asia/Tokyo"}))
+
+    assert _parse(body["start_date"]) == start
+    assert _parse(body["end_date"]) == end
+
+
+@pytest.mark.parametrize("field", ["start_date", "end_date"])
+def test_draft_explicit_null_clears_only_that_field(client, db_session, people, field):
+    experiment_id, start, end = _draft_with_schedule(client, people)
+    other = "end_date" if field == "start_date" else "start_date"
+    kept = end if other == "end_date" else start
+
+    body = _ok(_schedule(client, people, experiment_id, {field: None}))
+
+    assert body[field] is None
+    assert _parse(body[other]) == kept
+
+
+def test_draft_refusal_from_the_stored_start_date_writes_nothing(
+    client, db_session, people
+):
+    """The request omits start_date; its end_date is less than an hour after
+    the stored one. The refusal is checked before anything is written."""
+    experiment_id, start, end = _draft_with_schedule(client, people)
+
+    response = _schedule(
+        client,
+        people,
+        experiment_id,
+        {"end_date": _iso(start + timedelta(minutes=30))},
+    )
+
+    assert response.status_code == 400, response.text
+    assert response.json()["detail"] == "Experiment must run for at least 1:00:00"
+    _, _, start_date, end_date = _row(db_session, experiment_id)
+    assert start_date.replace(tzinfo=timezone.utc) == start
+    assert end_date.replace(tzinfo=timezone.utc) == end
+
+
+def test_draft_end_before_the_stored_start_is_400(client, db_session, people):
+    experiment_id, start, end = _draft_with_schedule(client, people)
+
+    response = _schedule(
+        client,
+        people,
+        experiment_id,
+        {"end_date": _iso(start - timedelta(hours=2))},
+    )
+
+    assert response.status_code == 400, response.text
+    assert response.json()["detail"] == "End date must be after start date"
+    assert _row(db_session, experiment_id)[3].replace(tzinfo=timezone.utc) == end
+
+
+# --- PUT /schedule: time_zone (#483) ----------------------------------------------
+
+
+def _wall_clock(days):
+    """A whole-minute wall-clock time *days* ahead, with no offset."""
+    return (_now() + timedelta(days=days)).replace(tzinfo=None, second=0, microsecond=0)
+
+
+@pytest.mark.parametrize("zone", ["America/Los_Angeles", "Asia/Kolkata", "UTC"])
+def test_draft_date_without_offset_is_read_in_the_time_zone(
+    client, db_session, people, zone
+):
+    """Before the fix any zone but UTC was a 500 ('MetaData' object does not
+    support item assignment), and a date without an offset was a 500 with
+    any zone."""
+    experiment_id = _create(client, people)
+    start, end = _wall_clock(2), _wall_clock(9)
+
+    body = _ok(
+        _schedule(
+            client,
+            people,
+            experiment_id,
+            {
+                "start_date": start.isoformat(),
+                "end_date": end.isoformat(),
+                "time_zone": zone,
+            },
+        )
+    )
+
+    tz = ZoneInfo(zone)
+    want_start = start.replace(tzinfo=tz).astimezone(timezone.utc)
+    want_end = end.replace(tzinfo=tz).astimezone(timezone.utc)
+    assert _parse(body["start_date"]) == want_start
+    assert _parse(body["end_date"]) == want_end
+    _, _, start_date, end_date = _row(db_session, experiment_id)
+    assert start_date.replace(tzinfo=timezone.utc) == want_start
+    assert end_date.replace(tzinfo=timezone.utc) == want_end
+
+
+def test_date_with_an_offset_keeps_it_whatever_the_time_zone(
+    client, db_session, people
+):
+    experiment_id = _create(client, people)
+    start = _now() + timedelta(days=2)
+    end = start + timedelta(days=7)
+
+    body = _ok(
+        _schedule(
+            client,
+            people,
+            experiment_id,
+            {
+                "start_date": _iso(start),
+                "end_date": _iso(end),
+                "time_zone": "Europe/London",
+            },
+        )
+    )
+
+    assert _parse(body["start_date"]) == start
+    assert _parse(body["end_date"]) == end
+
+
+def test_paused_resume_without_offset_is_read_in_the_time_zone(
+    client, db_session, people
+):
+    experiment_id = _paused(client, people)
+    resume = _wall_clock(1)
+
+    body = _ok(
+        _schedule(
+            client,
+            people,
+            experiment_id,
+            {"start_date": resume.isoformat(), "time_zone": "America/Los_Angeles"},
+        )
+    )
+
+    want = resume.replace(tzinfo=ZoneInfo("America/Los_Angeles")).astimezone(
+        timezone.utc
+    )
+    assert _parse(body["resume_at"]) == want
+    assert _row(db_session, experiment_id)[1] == want
+
+
+def test_past_date_without_offset_is_still_refused(client, db_session, people):
+    experiment_id = _create(client, people)
+
+    response = _schedule(
+        client,
+        people,
+        experiment_id,
+        {"start_date": _wall_clock(-1).isoformat(), "time_zone": "Asia/Tokyo"},
+    )
+
+    assert response.status_code == 422, response.text
+    assert "Start date must be in the future" in response.text
+
+
+@pytest.mark.parametrize(
+    "zone",
+    ["Not/AZone", "+05:30", "America", "utc", "../zone", "", "Z" * 65],
+)
+@pytest.mark.parametrize("paused", [False, True])
+def test_unknown_time_zone_is_422_naming_the_field(
+    client, db_session, people, zone, paused
+):
+    """A name that is not an IANA zone answers 422 with a fixed message that
+    names time_zone and does not repeat the value, and writes nothing.
+
+    ``utc`` is refused although ``ZoneInfo("utc")`` loads on a case-insensitive
+    file system: the check is membership, so it answers the same everywhere."""
+    experiment_id = _paused(client, people) if paused else _create(client, people)
+    before = _row(db_session, experiment_id)
+
+    response = _schedule(
+        client,
+        people,
+        experiment_id,
+        {
+            "start_date": _iso(_now() + timedelta(days=2)),
+            "end_date": _iso(_now() + timedelta(days=9)),
+            "time_zone": zone,
+        },
+    )
+
+    assert response.status_code == 422, response.text
+    errors = response.json()["detail"]
+    assert [e["loc"] for e in errors] == [["body", "time_zone"]]
+    if len(zone) <= 64:
+        assert errors[0]["msg"] == f"Value error, {TIME_ZONE_ERROR}"
+    if zone and zone not in TIME_ZONE_ERROR:  # "America" is in the example
+        assert zone not in response.text
+    assert _row(db_session, experiment_id) == before
 
 
 # --- PUT /schedule on PAUSED: each field -----------------------------------------
@@ -674,6 +904,52 @@ def test_paused_valid_resume_and_end_date(client, db_session, people):
     assert _parse(body["resume_at"]) == resume
     assert _parse(body["end_date"]) == end
     assert body["start_date"] == before["start_date"]
+
+
+def _full_row(db_session, experiment_id):
+    session = _factory(db_session)()
+    try:
+        row = session.get(Experiment, uuid.UUID(experiment_id))
+        return (
+            row.name,
+            row.description,
+            row.start_date,
+            row.end_date,
+            row.updated_at,
+        )
+    finally:
+        session.close()
+
+
+def test_experiment_update_refuses_an_unknown_time_zone_in_schedule(
+    client, db_session, people
+):
+    """``ScheduleConfig`` is also the ``schedule`` field of
+    ``PUT /experiments/{id}``. That field is not applied, but the request is
+    validated against it, so an unknown zone there is now a 422 at
+    ``["body", "schedule", "time_zone"]`` and the row is not touched (#483)."""
+    experiment_id = _create(client, people)
+    before = _full_row(db_session, experiment_id)
+
+    response = client.put(
+        f"{BASE}/{experiment_id}",
+        json={"schedule": {"time_zone": "Not/AZone"}},
+        headers=_auth(people["developer"]),
+    )
+
+    assert response.status_code == 422, response.text
+    locs = [e["loc"] for e in response.json()["detail"]]
+    assert ["body", "schedule", "time_zone"] in locs, locs
+    assert "Not/AZone" not in response.text
+    assert _full_row(db_session, experiment_id) == before
+
+    for zone in ("UTC", "America/Los_Angeles"):
+        accepted = client.put(
+            f"{BASE}/{experiment_id}",
+            json={"schedule": {"time_zone": zone}},
+            headers=_auth(people["developer"]),
+        )
+        assert accepted.status_code == 200, (zone, accepted.text)
 
 
 # --- the 400 for an ACTIVE experiment ----------------------------------------------
