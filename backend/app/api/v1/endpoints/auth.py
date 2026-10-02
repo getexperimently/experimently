@@ -8,14 +8,19 @@ Two providers share this router (selected by ``settings.AUTH_PROVIDER``):
   ``POST /login``, ``GET /me``, ``POST /logout`` and the OAuth2 form
   ``POST /token`` (``username`` = e-mail) so Swagger's *Authorize* works.
 * ``cognito`` — AWS Cognito.  The legacy endpoints (signup, confirm, token,
-  forgot/reset password, refresh, me) are unchanged; ``/login`` and
+  forgot/reset password, refresh, me) forward to the user pool; ``/login`` and
   ``/logout`` answer 404 because Cognito has its own flows.
 
 Five endpoints exist only for Cognito: ``POST /signup``, ``/confirm``,
 ``/forgot-password``, ``/reset-password`` and ``/refresh``.  Under any other
 provider they answer 404 with ``COGNITO_ONLY_DETAIL`` before the request body
-is validated and before any Cognito client is created.  Under ``cognito`` their
-behaviour is unchanged.
+is validated and before any Cognito client is created.
+
+Under ``cognito``, ``/signup`` and ``/confirm`` (self sign-up) also need
+``COGNITO_SELF_SIGNUP_ENABLED=true``; without it they answer 404 with
+``SELF_SIGNUP_DISABLED_DETAIL``, at the same point and with no Cognito call,
+and an administrator creates users in the user pool.  The other three are
+unaffected by that setting.
 """
 
 from typing import Any, Optional, Union
@@ -65,6 +70,12 @@ COGNITO_ONLY_DETAIL = (
     "an administrator creates accounts and resets passwords."
 )
 
+SELF_SIGNUP_DISABLED_DETAIL = (
+    "Endpoint not available: self sign-up is turned off "
+    "(COGNITO_SELF_SIGNUP_ENABLED is not true). "
+    "An administrator creates users in the Cognito user pool."
+)
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -95,6 +106,25 @@ def _require_cognito_provider() -> None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=COGNITO_ONLY_DETAIL,
+        )
+
+
+def _require_cognito_self_signup(
+    _provider: None = Depends(_require_cognito_provider),
+) -> None:
+    """404 for self sign-up (``/signup``, ``/confirm``) unless it is turned on.
+
+    The provider check runs first as a sub-dependency, so under any provider
+    other than ``cognito`` the answer is ``COGNITO_ONLY_DETAIL`` exactly as
+    for the other Cognito-only routes.  Under ``cognito`` the route is refused
+    unless ``COGNITO_SELF_SIGNUP_ENABLED`` is true.  Like the provider check it
+    runs before the body is validated and before any ``CognitoAuthService``
+    is created.
+    """
+    if not settings.COGNITO_SELF_SIGNUP_ENABLED:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=SELF_SIGNUP_DISABLED_DETAIL,
         )
 
 
@@ -190,11 +220,23 @@ def logout_local() -> Response:
     "/signup",
     response_model=SignUpResponse,
     status_code=status.HTTP_201_CREATED,
-    dependencies=[Depends(_require_cognito_provider)],
+    dependencies=[Depends(_require_cognito_self_signup)],
+    responses={
+        404: {
+            "description": (
+                "Self sign-up is not available: AUTH_PROVIDER is not "
+                "'cognito', or COGNITO_SELF_SIGNUP_ENABLED is not true"
+            )
+        }
+    },
 )
 def signup(signup_data: SignUpRequest) -> Any:
     """
-    Register a new user.
+    Register a new user in the Cognito user pool.
+
+    Answers 404 unless ``AUTH_PROVIDER=cognito`` and
+    ``COGNITO_SELF_SIGNUP_ENABLED=true``; the user pool must also allow self
+    sign-up.  When it is off, an administrator creates users in the user pool.
     """
     auth_service = CognitoAuthService()
     try:
@@ -216,11 +258,22 @@ def signup(signup_data: SignUpRequest) -> Any:
 @router.post(
     "/confirm",
     response_model=ConfirmSignUpResponse,
-    dependencies=[Depends(_require_cognito_provider)],
+    dependencies=[Depends(_require_cognito_self_signup)],
+    responses={
+        404: {
+            "description": (
+                "Self sign-up is not available: AUTH_PROVIDER is not "
+                "'cognito', or COGNITO_SELF_SIGNUP_ENABLED is not true"
+            )
+        }
+    },
 )
 def confirm_signup(confirm_data: ConfirmSignUpRequest) -> Any:
     """
-    Confirm user registration with the verification code.
+    Confirm a self sign-up with the verification code Cognito sent.
+
+    Answers 404 unless ``AUTH_PROVIDER=cognito`` and
+    ``COGNITO_SELF_SIGNUP_ENABLED=true``.
     """
     auth_service = CognitoAuthService()
     try:

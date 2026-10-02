@@ -189,10 +189,23 @@ def test_any_other_provider_answers_fixed_404(
     assert RecordingCognitoService.constructed == []
 
 
+#: Self sign-up also needs COGNITO_SELF_SIGNUP_ENABLED (T94); the gate and its
+#: full matrix are pinned in test_cognito_self_signup_gate.py.
+SELF_SIGNUP = {f"{PREFIX}/signup", f"{PREFIX}/confirm"}
+SELF_SIGNUP_OFF = (
+    "Endpoint not available: self sign-up is turned off "
+    "(COGNITO_SELF_SIGNUP_ENABLED is not true). "
+    "An administrator creates users in the Cognito user pool."
+)
+
+
 @pytest.mark.parametrize("path", sorted(VALID_BODIES), ids=_route_name)
 def test_cognito_provider_reaches_the_service(path, client, recorders, monkeypatch):
-    """Under ``cognito`` the request reaches the service as before."""
+    """Under ``cognito`` the request reaches the service (self sign-up with
+    the setting turned on)."""
     monkeypatch.setattr(settings, "AUTH_PROVIDER", "cognito")
+    if path in SELF_SIGNUP:
+        monkeypatch.setattr(settings, "COGNITO_SELF_SIGNUP_ENABLED", True)
     method, _, expected_status = STUB_CALLS[path]
 
     response = _post(client, path, "valid")
@@ -201,6 +214,24 @@ def test_cognito_provider_reaches_the_service(path, client, recorders, monkeypat
     assert response.json().get("detail") != FIXED
     assert RecordingCognitoService.constructed == [None]
     assert [name for name, _ in RecordingCognitoService.calls] == [method]
+    assert recorders == []
+
+
+@pytest.mark.parametrize("path", sorted(SELF_SIGNUP), ids=_route_name)
+def test_cognito_provider_with_self_signup_off_answers_404(
+    path, client, recorders, monkeypatch
+):
+    """Under ``cognito`` with the setting false, self sign-up is refused
+    before the service is built."""
+    monkeypatch.setattr(settings, "AUTH_PROVIDER", "cognito")
+    monkeypatch.setattr(settings, "COGNITO_SELF_SIGNUP_ENABLED", False)
+
+    response = _post(client, path, "valid")
+
+    assert response.status_code == 404, response.text
+    assert response.json() == {"detail": SELF_SIGNUP_OFF}
+    assert RecordingCognitoService.constructed == []
+    assert RecordingCognitoService.calls == []
     assert recorders == []
 
 

@@ -16,6 +16,10 @@ from backend.tests.integration.auth.spec_cognito_integration import (
 
 SPEC = COGNITO_ENDPOINT_SPECS["signup"]
 
+#: These tests exercise self sign-up, which is off unless
+#: COGNITO_SELF_SIGNUP_ENABLED is true; the module opts in explicitly.
+pytestmark = pytest.mark.usefixtures("self_signup_enabled")
+
 
 class TestSignupSuccess:
     def test_signup_returns_201(self, auth_client):

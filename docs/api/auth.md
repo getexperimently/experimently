@@ -24,7 +24,8 @@ Where the login is checked depends on `AUTH_PROVIDER`:
   (`LOCAL_AUTH_TOKEN_TTL_MINUTES`, default `720`). After 10 failed attempts within 15
   minutes, the address answers `423` until the 15 minutes are up.
 - **`cognito`**: the credentials are passed to an AWS Cognito user pool, which issues an
-  access token and a refresh token.
+  access token and a refresh token. Users are created by an administrator
+  ([Adding a user](../cognito_integration.md#adding-a-user)).
 
 ### Obtaining a Token
 
