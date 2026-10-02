@@ -229,6 +229,121 @@ migration logs how many rows it removed:
 modules_0002: removing 3 legacy warehouse connection rows
 ```
 
+### `1ab99332f0ba` rewrites stored event times to UTC
+
+`events.created_at` is stored as text, so time windows, ordering and "the
+earliest conversion" over events compare text. Events stored before this
+release kept the time exactly as the client sent it: with its own offset
+(`2026-10-01T01:00:00+02:00`), with `Z`, or with no offset at all. As text,
+those sort among each other by the digits, not by the moment, so an event could
+fall outside a time window it belongs in, and the wrong event could count as a
+user's first conversion. Events written by this release are already stored in
+one form, in UTC.
+
+This revision rewrites every stored value that is not in that form to the same
+instant in it: `2026-10-01T01:00:00+02:00` becomes `2026-09-30T23:00:00+00:00`
+(`.ffffff` is kept when there are microseconds). A value with no offset is read
+as UTC, as the API reads it, and gets `+00:00`. Values already in the form are
+not touched, and no other column changes. A value that cannot be read as a time
+(an empty string, text that is not a date, or a date out of range) is left
+exactly as stored and counted.
+
+What readers of results see: a converting user's first-conversion day in the
+daily results can move by one day. Totals, rates and significance do not
+change.
+
+**The downgrade cannot bring back the offsets clients sent.** Each row keeps
+its instant; the offset it arrived with is not recorded anywhere. If you need
+the original text, take a snapshot of the database before upgrading, and
+restore that snapshot to go back. A previous release runs against the rewritten
+rows unchanged: the column type is the same and the values are in the form it
+writes for its own timestamps.
+
+The migration prints one line when it finishes. It names event ids, never the
+stored values:
+
+```text
+1ab99332f0ba: rewrote 1520 events.created_at values to UTC; 2 unreadable values left as stored (event ids: 0b5c6c2e-6f0e-4a1b-9c55-2f4f1f0f3a10, 7d1e2f30-1a2b-4c3d-8e9f-0a1b2c3d4e5f); 4.3 s
+```
+
+**Before upgrading, under Docker Compose or Helm: how many rows will it
+rewrite?** Run this read-only count with `psql` (see
+[Resolve each group](#resolve-each-group) for how to open it). It is the
+migration's own selection, copied exactly. The statements here use the schema
+`experimentation`; if your `POSTGRES_SCHEMA` is different, replace it.
+
+```sql
+-- Count the event times the upgrade will rewrite
+SELECT count(*) FROM experimentation.events
+ WHERE created_at !~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]{6})?\+00:00$'
+   OR created_at LIKE '%.000000+00:00';
+```
+
+If it returns 0, the migration changes nothing. Otherwise it scans the table
+once and rewrites the rows it counted. On a developer laptop that took about
+60 to 80 µs per rewritten row, plus the scan. That is a laptop number: your
+database will be slower or faster, so the first real measure is your own
+staging run's log line.
+
+**After upgrading, under Docker Compose or Helm:** this lists what is left. Expect
+exactly the unreadable values the log line counted, which the migration leaves
+as they were:
+
+```sql
+-- List the event times left after the upgrade
+SELECT id FROM experimentation.events
+ WHERE created_at !~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]{6})?\+00:00$'
+   OR created_at LIKE '%.000000+00:00';
+```
+
+**A long run is not a failed run. Do not kill it.** The rewrite commits batch
+by batch, so a run that is stopped keeps every batch it finished, and the next
+upgrade finishes the rest. Killing it only makes you wait twice.
+
+- **Docker Compose.** The API container runs the migration on start and serves
+  once it has finished. If the migration runs longer than about 10 minutes,
+  `docker compose up` reports the API unhealthy and fails while the migration is
+  still running in the container. Do not restart it: wait for the line above in
+  `docker compose logs api`.
+- **Helm.** The `migrate` init container runs it while the old pods keep
+  serving. `helm upgrade --wait --timeout 10m` can report a failure while the
+  init container is still running. Do not delete the pod: wait for the line in
+  `kubectl logs <pod> -c migrate`.
+- **AWS.** The Deploy workflow's migration task runs it before traffic shifts,
+  and the previous release keeps serving meanwhile. The AWS deployment gives you
+  no `psql`, so use the migration's log line instead of the queries above, and
+  read the staging deploy's line (rewritten, unreadable, seconds) before you
+  deploy production. The Deploy workflow waits 30 minutes for the migration, and
+  no setting changes that for one deploy. A longer run fails the deploy with
+  **Migration still running**, and nothing shifts. Do not start another deploy
+  yet: wait until the task named in that error has stopped (the error names its
+  log group and stream; the ECS console shows the task's status as `STOPPED`),
+  then run the Deploy workflow again for the same tag. Its migration finishes
+  the rest.
+
+**Events written while the upgrade ran.** Under Helm and on AWS the previous
+release keeps serving, and keeps storing times as clients send them, until the
+new release takes all the traffic. Rows it writes after the migration's scan
+stay as they were. Once the new release serves all traffic, run the migration
+again: downgrade to the revision before it (that downgrade changes no data; it
+only moves the version row back) and upgrade. The second log line says how many
+values it rewrote.
+
+```bash
+python -m alembic -c backend/app/db/alembic.ini downgrade a89544fb1075
+python -m alembic -c backend/app/db/alembic.ini upgrade heads
+```
+
+On AWS these are two runs of the Database Migration workflow: direction
+`downgrade` with target `a89544fb1075`, then direction `upgrade` with target
+`heads`.
+
+**Name `a89544fb1075`; do not use `-1`.** On a full install `downgrade -1` can
+step back the modules branch instead, and that downgrade drops the warehouse
+tables `modules_0002_warehouse_analysis` created. The Database Migration
+workflow's own help for its target still suggests `-1`; do not follow it here
+([#726](https://github.com/getexperimently/experimently/issues/726)).
+
 Roll back to a specific revision:
 
 ```bash
@@ -241,7 +356,7 @@ Roll back all migrations (to the empty database state):
 python -m alembic -c backend/app/db/alembic.ini downgrade base
 ```
 
-**Note**: Not all migrations are safely reversible. If a migration deletes a column, the downgrade drops data. Review the `downgrade()` function in each migration file before rolling back in production.
+**Note**: Not all migrations are safely reversible. If a migration deletes a column, the downgrade drops data. Review the `downgrade()` function in each migration file before rolling back in production. A migration that rewrites data may not be able to undo it at all: see [`1ab99332f0ba` rewrites stored event times to UTC](#1ab99332f0ba-rewrites-stored-event-times-to-utc).
 
 ---
 
@@ -488,7 +603,10 @@ What this means for you:
   ([rollback runbook](../deployment/rollback-runbook.md#database-rollback-procedure)).
   Some data cannot come back any other way: `modules_0002_warehouse_analysis`,
   which shipped in 0.11.0, drops the earlier `warehouse_connections` table with
-  its rows, and neither a rollback nor a downgrade restores them.
+  its rows, and neither a rollback nor a downgrade restores them. And
+  [`1ab99332f0ba`](#1ab99332f0ba-rewrites-stored-event-times-to-utc) rewrites
+  stored event times to UTC: a rollback runs against those rows unchanged, but
+  the offsets clients sent come back only from that snapshot.
 - **Docker Compose and the Helm chart are deliberately unchanged.** Compose runs
   one API container, which is the only writer and keeps `RUN_MIGRATIONS=true`.
   The chart already keeps the bootstrap out of the serving container: it runs

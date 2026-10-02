@@ -42,7 +42,7 @@ SCHEMA = "rollback_probe"
 #: head, it is a full database whose core chain is behind this build's.
 BRANCH_POINT = "a7b8c9d0e1f2"
 #: The core chain's head.
-CORE_HEAD = "a89544fb1075"
+CORE_HEAD = "1ab99332f0ba"
 #: The modules branch's first revision and its head.  A full database records
 #: whichever one the full release that migrated it had -- 0.9.x and earlier
 #: record the first, later releases the head -- and a core build must read
