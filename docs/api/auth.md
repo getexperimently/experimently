@@ -23,6 +23,7 @@ Where the login is checked depends on `AUTH_PROVIDER`:
   address and password against its own users. Its tokens last 12 hours
   (`LOCAL_AUTH_TOKEN_TTL_MINUTES`, default `720`). After 10 failed attempts within 15
   minutes, the address answers `423` until the 15 minutes are up.
+  The email address is matched whatever its letter case (A–Z), and every casing of it counts toward the same failed attempts.
 - **`cognito`**: the credentials are passed to an AWS Cognito user pool, which issues an
   access token and a refresh token. Users are created by an administrator
   ([Adding a user](../cognito_integration.md#adding-a-user)).

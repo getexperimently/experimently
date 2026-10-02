@@ -16,6 +16,7 @@ import jwt
 import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
+from sqlalchemy import func, select
 
 from backend.app.api import deps
 from backend.app.core import security
@@ -31,6 +32,7 @@ from backend.app.core.security import (
 from backend.app.main import app
 from backend.app.models.user import User, UserRole
 from backend.app.schemas.auth import LoginResponse, UserMe
+from backend.app.services import local_auth_service as local_auth_module
 from backend.app.services.local_auth_service import (
     AccountLockedError,
     InvalidCredentialsError,
@@ -238,85 +240,159 @@ class TestLoginAttemptTracker:
         assert t.status("live@x.com", 60.0).failures == 2
 
 
+def _key_from_statement(statement) -> str:
+    """Stand-in for ``SELECT lower(:typed)``: a distinct ``str`` per input.
+
+    ``authenticate`` asks the database for the counter key; a bare MagicMock
+    would hand back one shared child mock for every address, so every address
+    would collapse onto one counter and the lockout tests would pass for the
+    wrong reason.
+    """
+    (value,) = statement.compile().params.values()
+    return f"key:{value.lower()}"
+
+
+def _mock_db(rows):
+    """A MagicMock session whose lookup returns *rows* (a list, or a callable)."""
+    db = MagicMock()
+    db.scalar.side_effect = _key_from_statement
+    lookup = db.query.return_value.filter.return_value.limit.return_value.all
+    if callable(rows):
+        lookup.side_effect = rows
+    else:
+        lookup.return_value = rows
+    return db
+
+
+@pytest.fixture
+def bcrypt_calls(monkeypatch):
+    """Record the hash every ``verify_password`` call checks, then really check it."""
+    import backend.app.services.local_auth_service as mod
+
+    calls = []
+    real = mod.verify_password
+
+    def recording(password, hashed):
+        calls.append(hashed)
+        return real(password, hashed)
+
+    monkeypatch.setattr(mod, "verify_password", recording)
+    return calls
+
+
+DUMMY_HASH = local_auth_module._DUMMY_PASSWORD_HASH
+
+
 class TestLocalAuthService:
     def _db_with(self, user):
-        db = MagicMock()
-        db.query.return_value.filter.return_value.first.return_value = user
-        return db
+        return _mock_db([user] if user is not None else [])
 
-    def test_success_returns_user_and_resets_counter(self):
+    def test_success_returns_user_and_resets_counter(self, bcrypt_calls):
         user = _user()
         tracker = LoginAttemptTracker(3, 60)
         svc = LocalAuthService(tracker)
-        tracker.record_failure(user.email)
-        assert svc.authenticate(self._db_with(user), user.email, PASSWORD) is user
-        assert tracker.status(user.email).failures == 0
-
-    def test_email_is_case_insensitive(self):
-        user = _user()
-        svc = LocalAuthService(LoginAttemptTracker(3, 60))
         db = self._db_with(user)
-        assert svc.authenticate(db, "  ALICE@example.com ", PASSWORD) is user
+        key = _key_from_statement(select(func.lower(user.email)))
+        tracker.record_failure(key)
+        assert svc.authenticate(db, user.email, PASSWORD) is user
+        assert tracker.status(key).failures == 0
+        assert bcrypt_calls == [user.hashed_password]
+        # One lookup, asking for at most two rows.
+        db.query.return_value.filter.return_value.limit.assert_called_once_with(2)
 
-    def test_wrong_password(self):
+    def test_counter_key_is_the_database_lower_of_the_trimmed_address(self):
         user = _user()
+        tracker = LoginAttemptTracker(3, 60)
+        svc = LocalAuthService(tracker)
+        db = self._db_with(user)
+        with pytest.raises(InvalidCredentialsError):
+            svc.authenticate(db, "  Alice@Example.com ", "wrong")
+        (statement,), _ = db.scalar.call_args
+        assert list(statement.compile().params.values()) == ["Alice@Example.com"]
+        assert tracker.status("key:alice@example.com").failures == 1
+
+    def test_a_key_that_is_not_a_string_fails_loudly(self):
+        db = self._db_with(_user())
+        db.scalar.side_effect = None  # a bare MagicMock again
         svc = LocalAuthService(LoginAttemptTracker(3, 60))
+        with pytest.raises(AssertionError):
+            svc.authenticate(db, "alice@example.com", PASSWORD)
+
+    def test_wrong_password(self, bcrypt_calls):
+        user = _user()
+        tracker = LoginAttemptTracker(3, 60)
+        svc = LocalAuthService(tracker)
         with pytest.raises(InvalidCredentialsError):
             svc.authenticate(self._db_with(user), user.email, "nope")
+        assert bcrypt_calls == [user.hashed_password]
+        assert tracker.status(f"key:{user.email}").failures == 1
 
-    def test_unknown_user(self):
+    def test_unknown_user(self, bcrypt_calls):
         svc = LocalAuthService(LoginAttemptTracker(3, 60))
         with pytest.raises(InvalidCredentialsError):
             svc.authenticate(self._db_with(None), "ghost@example.com", PASSWORD)
+        assert bcrypt_calls == [DUMMY_HASH]
 
-    def test_inactive_user_is_invalid_credentials(self):
+    def test_inactive_user_is_invalid_credentials(self, bcrypt_calls):
         user = _user(is_active=False)
         svc = LocalAuthService(LoginAttemptTracker(3, 60))
         with pytest.raises(InvalidCredentialsError):
             svc.authenticate(self._db_with(user), user.email, PASSWORD)
+        assert bcrypt_calls == [user.hashed_password]
 
-    def test_user_without_password_hash_cannot_log_in(self):
+    def test_user_without_password_hash_cannot_log_in(self, bcrypt_calls):
         user = _user(hashed_password=None)
         svc = LocalAuthService(LoginAttemptTracker(3, 60))
         with pytest.raises(InvalidCredentialsError):
             svc.authenticate(self._db_with(user), user.email, PASSWORD)
+        assert bcrypt_calls == [DUMMY_HASH]
 
-    def test_lockout_after_threshold_even_with_correct_password(self):
+    def test_an_address_matching_two_accounts_is_refused(self, bcrypt_calls):
+        one, two = _user(email="Dup@example.com"), _user(email="dup@example.com")
+        svc = LocalAuthService(LoginAttemptTracker(3, 60))
+        with pytest.raises(InvalidCredentialsError):
+            svc.authenticate(_mock_db([one, two]), "DUP@example.com", PASSWORD)
+        assert bcrypt_calls == [DUMMY_HASH]
+
+    def test_lockout_after_threshold_even_with_correct_password(self, bcrypt_calls):
         user = _user()
         svc = LocalAuthService(LoginAttemptTracker(max_attempts=2, window_seconds=60))
         db = self._db_with(user)
         for _ in range(2):
             with pytest.raises(InvalidCredentialsError):
                 svc.authenticate(db, user.email, "wrong")
+        assert bcrypt_calls == [user.hashed_password] * 2
+        bcrypt_calls.clear()
         with pytest.raises(AccountLockedError) as exc:
             svc.authenticate(db, user.email, PASSWORD)
         assert exc.value.retry_after_seconds >= 1
+        # A locked address is answered before any password is checked.
+        assert bcrypt_calls == []
 
-    def test_unknown_email_costs_a_password_verification(self, monkeypatch):
-        """Response time must not reveal whether the address exists (timing oracle)."""
-        import backend.app.services.local_auth_service as mod
-
-        calls = []
-        monkeypatch.setattr(
-            mod, "verify_password", lambda pw, h: calls.append(h) or False
+    def test_lockouts_of_different_addresses_are_independent(self):
+        alice, bob = _user(), _user(email="bob@example.com")
+        svc = LocalAuthService(LoginAttemptTracker(max_attempts=1, window_seconds=60))
+        db = _mock_db(list)
+        with pytest.raises(InvalidCredentialsError):
+            svc.authenticate(db, alice.email, "wrong")
+        db.query.return_value.filter.return_value.limit.return_value.all.side_effect = (
+            lambda: [bob]
         )
+        assert svc.authenticate(db, bob.email, PASSWORD) is bob
+
+    def test_unknown_email_costs_a_password_verification(self, bcrypt_calls):
+        """Response time must not reveal whether the address exists (timing oracle)."""
         svc = LocalAuthService(LoginAttemptTracker(3, 60))
         with pytest.raises(InvalidCredentialsError):
             svc.authenticate(self._db_with(None), "ghost@example.com", "x")
-        assert calls == [mod._DUMMY_PASSWORD_HASH]
+        assert bcrypt_calls == [DUMMY_HASH]
 
-    def test_passwordless_user_costs_a_password_verification(self, monkeypatch):
-        import backend.app.services.local_auth_service as mod
-
-        calls = []
-        monkeypatch.setattr(
-            mod, "verify_password", lambda pw, h: calls.append(h) or False
-        )
+    def test_passwordless_user_costs_a_password_verification(self, bcrypt_calls):
         user = _user(hashed_password=None)
         svc = LocalAuthService(LoginAttemptTracker(3, 60))
         with pytest.raises(InvalidCredentialsError):
             svc.authenticate(self._db_with(user), user.email, "x")
-        assert calls == [mod._DUMMY_PASSWORD_HASH]
+        assert bcrypt_calls == [DUMMY_HASH]
 
     def test_unknown_email_also_counts_toward_lockout(self):
         svc = LocalAuthService(LoginAttemptTracker(max_attempts=1, window_seconds=60))
@@ -325,6 +401,67 @@ class TestLocalAuthService:
             svc.authenticate(db, "ghost@example.com", "x")
         with pytest.raises(AccountLockedError):
             svc.authenticate(db, "ghost@example.com", "x")
+
+    @pytest.mark.parametrize(
+        "typed",
+        [
+            pytest.param("", id="empty"),
+            pytest.param("   ", id="whitespace"),
+            pytest.param("alice\x00@example.com", id="nul"),
+            pytest.param("\x00", id="nul-only"),
+            pytest.param("a" * 321, id="321-chars"),
+            pytest.param("a" * 1_000_000, id="1m-chars"),
+        ],
+    )
+    def test_an_address_no_account_can_hold_is_refused_without_a_lookup(
+        self, bcrypt_calls, typed
+    ):
+        tracker = LoginAttemptTracker(max_attempts=1, window_seconds=60)
+        svc = LocalAuthService(tracker)
+        db = self._db_with(_user())
+        for _ in range(3):
+            with pytest.raises(InvalidCredentialsError):
+                svc.authenticate(db, typed, PASSWORD)
+        # Never locked, never looked up, never counted; same bcrypt cost.
+        db.scalar.assert_not_called()
+        db.query.assert_not_called()
+        assert len(tracker) == 0
+        assert bcrypt_calls == [DUMMY_HASH] * 3
+
+    def test_a_320_character_address_is_looked_up(self):
+        db = self._db_with(None)
+        svc = LocalAuthService(LoginAttemptTracker(3, 60))
+        with pytest.raises(InvalidCredentialsError):
+            svc.authenticate(db, "a" * 320, PASSWORD)
+        db.scalar.assert_called_once()
+
+    def test_password_change_keys_on_the_database_lower_of_the_address(self):
+        user = _user(email="Alice@example.com")
+        tracker = LoginAttemptTracker(max_attempts=1, window_seconds=60)
+        svc = LocalAuthService(tracker)
+        db = _mock_db([])
+        with pytest.raises(InvalidCredentialsError):
+            svc.verify_current_password(db, user, "wrong")
+        assert tracker.status("key:alice@example.com").failures == 1
+
+    def test_password_change_without_an_email_has_a_key_sign_in_cannot_reach(self):
+        user = _user(email=None)
+        tracker = LoginAttemptTracker(max_attempts=1, window_seconds=60)
+        svc = LocalAuthService(tracker)
+        db = _mock_db([])
+        with pytest.raises(InvalidCredentialsError):
+            svc.verify_current_password(db, user, "wrong")
+        db.scalar.assert_not_called()
+        (key,) = tracker._failures
+        assert key.startswith("\x00")
+        assert str(user.id) in key
+        # Sign-in cannot reach that counter: the key itself contains NUL and
+        # is refused before any key is built, and the same text without the
+        # NUL is a different key.  Neither answers 423.
+        for typed in (key, f"id:{user.id}"):
+            with pytest.raises(InvalidCredentialsError):
+                svc.authenticate(db, typed, PASSWORD)
+        assert tracker.status(key).failures == 1
 
 
 # ---------------------------------------------------------------------------
@@ -486,9 +623,13 @@ class TestUserMeSchema:
 
 @pytest.fixture
 def http(local_provider):
-    """TestClient whose ``get_db`` yields a MagicMock; ``_user_lookup`` sets the row."""
+    """TestClient whose ``get_db`` yields a MagicMock; ``client.state.user`` is the row."""
     state = SimpleNamespace(user=None)
-    db = MagicMock()
+
+    def _rows():
+        return [state.user] if state.user is not None else []
+
+    db = _mock_db(_rows)
 
     def _first():
         return state.user

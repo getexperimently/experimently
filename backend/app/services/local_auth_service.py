@@ -5,9 +5,22 @@ Local (email + password) authentication -- the default provider.
 ``users.hashed_password`` (bcrypt, see ``core.security``) and issues HS256
 JWTs.  No AWS dependency.
 
+Matching the address
+--------------------
+The typed address is trimmed and compared with ``lower()`` on both sides, in
+the database: ``lower(users.email) = lower(:typed)``.  An account stored as
+``Bob@acme.com`` therefore signs in as ``bob@acme.com`` or ``BOB@ACME.COM``,
+and the unique index on ``lower(email)`` (``ix_users_email_lower``) both
+serves that lookup and keeps two accounts from differing only in case.  An
+address that is empty after trimming, contains a NUL character or is longer
+than ``MAX_EMAIL_LENGTH`` cannot belong to any account; it is refused with the
+same 401 without a database call and is not counted.
+
 Brute-force protection
 ----------------------
-Failed logins are counted per e-mail address.  After
+Failed logins are counted per e-mail address, keyed on the same database
+``lower()`` the lookup uses, so every spelling that reaches one account
+draws on one budget.  After
 ``LOCAL_AUTH_MAX_FAILED_ATTEMPTS`` failures inside a rolling window of
 ``LOCAL_AUTH_LOCKOUT_MINUTES`` the address is locked for the remainder of
 that window and ``/auth/login`` answers ``423 Locked``.  A successful login
@@ -32,13 +45,15 @@ tracked addresses, so unauthenticated traffic cannot grow it without bound.
 
 from __future__ import annotations
 
+import logging
 import secrets
 import threading
 import time
 from collections import deque
 from dataclasses import dataclass
-from typing import Deque, Dict, Optional
+from typing import Deque, Dict, List, Optional
 
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from backend.app.core.config import settings
@@ -52,6 +67,13 @@ MAX_TRACKED_ADDRESSES = 10_000
 
 # How often (seconds) record_failure sweeps expired windows for every key.
 SWEEP_INTERVAL_SECONDS = 60.0
+
+# The longest typed address that is looked up (RFC 5321's 64 + 1 + 255, as
+# ``LoginRequest.email`` allows).  Anything longer cannot match a stored
+# address and is refused before it reaches the database or the tracker.
+MAX_EMAIL_LENGTH = 320
+
+logger = logging.getLogger(__name__)
 
 
 class AccountLockedError(Exception):
@@ -212,24 +234,48 @@ class LocalAuthService:
         """
         Return the active ``User`` matching *email*/*password*.
 
+        *email* is trimmed and matched whatever its letter case, as the
+        database's ``lower()`` matches (see the module docstring).
+
         Raises:
             AccountLockedError: the address is currently locked out.
             InvalidCredentialsError: unknown address, wrong password or the
                 account is inactive.  The caller must not distinguish these.
         """
-        email_key = _normalise_email(email)
+        typed = (email or "").strip()
+        if not typed or "\x00" in typed or len(typed) > MAX_EMAIL_LENGTH:
+            # No account can hold this address, so there is no budget to
+            # protect: nothing is looked up and nothing is counted.  The
+            # bcrypt run keeps the cost the same as any other refusal.
+            verify_password(password or "", _DUMMY_PASSWORD_HASH)
+            raise InvalidCredentialsError("Invalid email or password")
+
+        # The counter key is the database's own lower() of the typed address:
+        # the same function the lookup applies, so every spelling that can
+        # match one account lands on one key.
+        email_key = db.scalar(select(func.lower(typed)))
+        assert isinstance(email_key, str)
         status = self.tracker.status(email_key)
         if status.locked:
             raise AccountLockedError(status.retry_after_seconds)
 
-        user = (
-            db.query(User).filter(User.email == email_key).first()
-            if email_key
-            else None
+        rows: List[User] = (
+            db.query(User)
+            .filter(func.lower(User.email) == func.lower(typed))
+            .limit(2)
+            .all()
         )
-        if user is None and email and email != email_key:
-            # Legacy rows may have been stored with the original casing.
-            user = db.query(User).filter(User.email == email.strip()).first()
+        user: Optional[User] = None
+        if len(rows) == 1:
+            user = rows[0]
+        elif len(rows) > 1:
+            # ix_users_email_lower makes this impossible; if the index has
+            # gone, refuse rather than pick one of the accounts.
+            logger.warning(
+                "Local sign-in refused: accounts %s share one address "
+                "regardless of case; is ix_users_email_lower missing?",
+                ", ".join(str(row.id) for row in rows),
+            )
 
         if user is not None and user.hashed_password:
             password_ok = verify_password(password or "", user.hashed_password)
@@ -249,7 +295,9 @@ class LocalAuthService:
         self.tracker.reset(email_key)
         return user
 
-    def verify_current_password(self, user: User, password: Optional[str]) -> None:
+    def verify_current_password(
+        self, db: Session, user: User, password: Optional[str]
+    ) -> None:
         """
         Check that *password* is *user*'s current password, or raise.
 
@@ -270,13 +318,20 @@ class LocalAuthService:
            ``InvalidCredentialsError``;
         5. it matches: the counter is cleared.
 
-        The counter is keyed on the account's e-mail address, normalised the
-        way ``authenticate`` normalises it (trimmed, lower-cased). Two
-        consequences, both accepted: a superuser who changes the account's
-        address starts it on a fresh counter, and legacy rows whose addresses
-        differ only in case share one counter.
+        The counter is keyed on the database's ``lower()`` of the account's
+        e-mail address -- the key ``authenticate`` uses for any spelling of
+        that address -- so sign-in and this check share one budget. A
+        superuser who changes the account's address starts it on a fresh
+        counter (accepted). An account with no e-mail address gets a key of
+        its own, built from its id with a NUL prefix: ``authenticate``
+        refuses every typed address containing NUL before it builds a key,
+        so no sign-in attempt can reach that counter.
         """
-        email_key = _normalise_email(user.email)
+        if user.email is None:
+            email_key = "\x00id:" + str(user.id)
+        else:
+            email_key = db.scalar(select(func.lower(user.email)))
+            assert isinstance(email_key, str)
         status = self.tracker.status(email_key)
         if status.locked:
             raise AccountLockedError(status.retry_after_seconds)
