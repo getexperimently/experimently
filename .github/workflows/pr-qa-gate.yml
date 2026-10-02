@@ -5,7 +5,9 @@ on:
     branches: [main]
 
 concurrency:
-  group: pr-qa-${{ github.head_ref }}
+  # Keyed on the pull request NUMBER, not head_ref: two forks' `patch-1`
+  # branches share a head_ref and would cancel each other's runs (#75).
+  group: pr-qa-${{ github.event.pull_request.number }}
   cancel-in-progress: true
 
 jobs:
