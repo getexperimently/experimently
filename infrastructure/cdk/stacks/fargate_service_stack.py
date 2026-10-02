@@ -32,6 +32,7 @@ from stacks.names import (
     counters_table_name,
     glue_names,
 )
+from stacks.secret_arns import require_secret_arns
 
 #: The API 5xx alarms' metric math (#148). `e` is HTTPCode_Target_5XX_Count
 #: and `r` is RequestCount, one-minute sums on one target group. The value is
@@ -116,6 +117,7 @@ class FargateServiceStack(Stack):
         certificate_arn: str = None,
         public_base_url: str = None,
         include_modules: bool = False,
+        secret_arns=None,
         api_desired_count: int = 3,
         dashboard_desired_count: int = 1,
         db_host: str = None,
@@ -128,6 +130,9 @@ class FargateServiceStack(Stack):
     ) -> None:
         super().__init__(scope, construct_id, **kwargs)
         require_database("FargateServiceStack", db_host, db_credentials)
+        secret_arns = require_secret_arns(
+            "FargateServiceStack", secret_arns, include_modules
+        )
         if alarm_topic is None:
             raise ValueError(
                 "FargateServiceStack requires alarm_topic: the monitoring "
@@ -192,8 +197,13 @@ class FargateServiceStack(Stack):
         # hand and nothing ever set on the cluster, so the task would have
         # presented a password Aurora had never heard of. The credentials now
         # come from `db_credentials`, the secret Aurora was created with.
-        jwt_secret = secretsmanager.Secret.from_secret_name_v2(
-            self, "JwtSecret", f"/{env_name}/experimentation/jwt-secret"
+        #
+        # Each is imported by its COMPLETE ARN, the synth input app.py validates
+        # (stacks/secret_arns.py, #636). Importing by name rendered a
+        # partial ARN into valueFrom, which Secrets Manager does not resolve,
+        # so no task would have started.
+        jwt_secret = secretsmanager.Secret.from_secret_complete_arn(
+            self, "JwtSecret", secret_arns["JWT_SECRET_ARN"]
         )
         # Every secret below is one the container REFUSES TO START without in a
         # hardened environment, and the task definition is the only thing that
@@ -204,10 +214,10 @@ class FargateServiceStack(Stack):
         # `Settings.validate_superuser_password` rejects in staging/production
         # -- so `import backend.app.core.config` raised ValidationError and
         # uvicorn never bound, on BOTH profiles.
-        superuser_secret = secretsmanager.Secret.from_secret_name_v2(
+        superuser_secret = secretsmanager.Secret.from_secret_complete_arn(
             self,
             "SuperuserPasswordSecret",
-            f"/{env_name}/experimentation/first-superuser-password",
+            secret_arns["FIRST_SUPERUSER_PASSWORD_SECRET_ARN"],
         )
         # There is no Redis secret (#147). The one this used to inject held a
         # connection URL in a variable nothing in the application reads. The
@@ -227,10 +237,10 @@ class FargateServiceStack(Stack):
         # secret that does not exist stops ECS from starting the task at all.
         audit_secret = None
         if include_modules:
-            audit_secret = secretsmanager.Secret.from_secret_name_v2(
+            audit_secret = secretsmanager.Secret.from_secret_complete_arn(
                 self,
                 "AuditHmacSecret",
-                f"/{env_name}/experimentation/audit-hmac-key",
+                secret_arns["AUDIT_HMAC_KEY_SECRET_ARN"],
             )
             required_secrets.append(audit_secret)
 

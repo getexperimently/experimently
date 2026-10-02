@@ -109,13 +109,31 @@ Fargate and migrations stacks: ECS will not start a task whose definition
 names a missing secret. The database and Redis need nothing from you -- the
 stacks wire them.
 
+The task definitions name each secret by its **complete ARN** (it ends in a
+six-character suffix Secrets Manager chose), and the CDK takes the three ARNs
+from your shell. Read them by name, then check each one by the ARN itself:
+that is the string ECS will look up, and a check by name passes even when the
+ARN is wrong. The third secret is for `full` only; on `core`, leave
+`AUDIT_HMAC_KEY_SECRET_ARN` unset and the loop skips it.
+
 ```bash
 ENV=staging
-for s in jwt-secret first-superuser-password audit-hmac-key; do
-  aws secretsmanager describe-secret --secret-id "/$ENV/experimentation/$s" \
-    --query Name --output text
+export JWT_SECRET_ARN=$(aws secretsmanager describe-secret \
+  --secret-id "/$ENV/experimentation/jwt-secret" --query ARN --output text)
+export FIRST_SUPERUSER_PASSWORD_SECRET_ARN=$(aws secretsmanager describe-secret \
+  --secret-id "/$ENV/experimentation/first-superuser-password" --query ARN --output text)
+export AUDIT_HMAC_KEY_SECRET_ARN=$(aws secretsmanager describe-secret \
+  --secret-id "/$ENV/experimentation/audit-hmac-key" --query ARN --output text)
+for arn in "$JWT_SECRET_ARN" "$FIRST_SUPERUSER_PASSWORD_SECRET_ARN" ${AUDIT_HMAC_KEY_SECRET_ARN:+"$AUDIT_HMAC_KEY_SECRET_ARN"}; do
+  aws secretsmanager describe-secret --secret-id "$arn" --query Name --output text
 done
 ```
+
+Each check prints the secret's name; nothing prints an ARN. Keep the three
+exported for every `cdk synth`, `cdk diff`, `cdk deploy` and `cdk destroy`
+(section 1.6), and keep them out of issues, pull requests and chat: an ARN
+carries the account ID. **Recreating a secret changes its ARN**: update the
+input and run `cdk deploy` again ([Secrets Management](secrets-management.md#give-the-cdk-each-secrets-complete-arn)).
 
 ### 1.5 GitHub (repository administrator)
 
@@ -151,6 +169,12 @@ export CERTIFICATE_ARN=... PUBLIC_BASE_URL=https://app.<domain>
 export ALARM_EMAIL=ops@your-domain.com
 cdk deploy --all --require-approval never
 ```
+
+`JWT_SECRET_ARN`, `FIRST_SUPERUSER_PASSWORD_SECRET_ARN` and (on `full`)
+`AUDIT_HMAC_KEY_SECRET_ARN` are **required in every environment**: the
+complete ARN of each secret, exported in this same shell as section 1.4 shows. Synth refuses one that is
+missing, partial (no suffix), for a different environment (`/prod/...` in
+staging), region or account, or in the wrong variable, and says how to read the right value.
 
 `ALARM_EMAIL` is **required** for `staging` and `prod`: the one address every
 alarm emails, including the two API 5xx alarms that roll a deployment back by

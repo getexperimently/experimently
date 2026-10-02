@@ -334,6 +334,13 @@ See [secrets-management.md](secrets-management.md) for creation commands.
 | `/<env>/experimentation/first-superuser-password` | `FIRST_SUPERUSER_PASSWORD` | Password for the first administrator; the default `admin` is refused in staging and production |
 | `/<env>/experimentation/audit-hmac-key` | `AUDIT_HMAC_KEY` | **`profile: full` only** — signs the compliance audit log; the modules refuse to register without it |
 
+The task definitions name each of these by its **complete ARN**, which `cdk`
+takes from `JWT_SECRET_ARN`, `FIRST_SUPERUSER_PASSWORD_SECRET_ARN` and, on
+`full`, `AUDIT_HMAC_KEY_SECRET_ARN`, in every environment. Read each with
+`aws secretsmanager describe-secret --secret-id /<env>/experimentation/<name> --query ARN --output text`;
+recreating a secret changes its ARN, so update the input and run `cdk deploy`
+again ([Secrets Management](secrets-management.md#give-the-cdk-each-secrets-complete-arn)).
+
 The database credentials are not in this table: `POSTGRES_USER` and
 `POSTGRES_PASSWORD` come from the secret the database stack generates for
 Aurora (`experimentation-database-<env>-aurora-credentials`), and

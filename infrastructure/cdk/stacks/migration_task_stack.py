@@ -13,6 +13,7 @@ from constructs import Construct
 from stacks.database_access import require_database
 from stacks.environments import data_removal_policy
 from stacks.names import BACKEND_ECR_REPOSITORY, migration_task_family
+from stacks.secret_arns import require_secret_arns
 
 # --- The command the task runs -------------------------------------------
 # backend/Dockerfile sets WORKDIR /app and copies the repository layout under
@@ -151,12 +152,16 @@ class MigrationTaskStack(Stack):
         db_host: str = None,
         public_base_url: str = None,
         include_modules: bool = False,
+        secret_arns=None,
         db_credentials=None,
         ecs_security_group=None,
         **kwargs,
     ) -> None:
         super().__init__(scope, construct_id, **kwargs)
         require_database("MigrationTaskStack", db_host, db_credentials)
+        secret_arns = require_secret_arns(
+            "MigrationTaskStack", secret_arns, include_modules
+        )
         if ecs_security_group is None:
             raise ValueError(
                 "MigrationTaskStack requires ecs_security_group: the group the "
@@ -193,24 +198,28 @@ class MigrationTaskStack(Stack):
         #
         # The database credentials are not looked up by name here: they come
         # from `db_credentials`, the secret Aurora was created with (#78).
-        jwt_secret = secretsmanager.Secret.from_secret_name_v2(
+        #
+        # By COMPLETE ARN, the synth inputs app.py validates (stacks/
+        # secret_arns.py, #636): the partial ARN a by-name import rendered
+        # is one Secrets Manager does not resolve.
+        jwt_secret = secretsmanager.Secret.from_secret_complete_arn(
             self,
             "JwtSecret",
-            f"/{env_name}/experimentation/jwt-secret",
+            secret_arns["JWT_SECRET_ARN"],
         )
-        superuser_secret = secretsmanager.Secret.from_secret_name_v2(
+        superuser_secret = secretsmanager.Secret.from_secret_complete_arn(
             self,
             "SuperuserPasswordSecret",
-            f"/{env_name}/experimentation/first-superuser-password",
+            secret_arns["FIRST_SUPERUSER_PASSWORD_SECRET_ARN"],
         )
         required_secrets = [jwt_secret, superuser_secret]
 
         audit_secret = None
         if include_modules:
-            audit_secret = secretsmanager.Secret.from_secret_name_v2(
+            audit_secret = secretsmanager.Secret.from_secret_complete_arn(
                 self,
                 "AuditHmacSecret",
-                f"/{env_name}/experimentation/audit-hmac-key",
+                secret_arns["AUDIT_HMAC_KEY_SECRET_ARN"],
             )
             required_secrets.append(audit_secret)
 
