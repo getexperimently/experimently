@@ -25,10 +25,19 @@ help: ## Show this help
 # ---------------------------------------------------------------------------
 
 .PHONY: venv
-venv: ## Create the virtualenv and install backend dependencies
+venv: ## Create the virtualenv and install backend dependencies (and the modules' in a full checkout)
 	python3.11 -m venv $(VENV)
 	$(PY) -m pip install --upgrade pip
 	$(PY) -m pip install -r backend/requirements.txt
+	@# One recipe line for guard and command (see test-modules): a core checkout
+	@# has no modules/ and must still succeed. Without these, the warehouse and
+	@# SSO tests cannot import sqlglot or duckdb and run only in CI.
+	@if [ -f modules/requirements.txt ]; then \
+		echo '$(PY) -m pip install -r modules/requirements.txt -r modules/requirements-test.txt'; \
+		$(PY) -m pip install -r modules/requirements.txt -r modules/requirements-test.txt; \
+	else \
+		echo "no modules/requirements.txt -- this is a core checkout"; \
+	fi
 
 .PHONY: install
 install: venv ## Install backend and frontend dependencies
