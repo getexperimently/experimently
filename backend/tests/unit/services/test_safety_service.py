@@ -258,6 +258,7 @@ class TestSafetyService:
         mock_feature_flag = MagicMock(spec=FeatureFlag)
         mock_feature_flag.id = self.feature_flag_id
         mock_feature_flag.rollout_percentage = 50
+        mock_feature_flag.status = FeatureFlagStatus.ACTIVE
         mock_feature_flag.key = "test-flag"
         self.db.query.return_value.filter.return_value.first.return_value = (
             mock_feature_flag

@@ -351,11 +351,13 @@ advance it. The dashboard has no button for that yet, so it is an API call:
 
 ### Disabling / Rolling Back
 
-To instantly disable a flag:
-1. Set the rollout percentage to 0 and press **Save Changes**
-2. Or turn the flag off with the switch at the top of its page; it then shows **Not serving**
+To instantly disable a flag, turn it off with the switch at the top of its page; it then
+shows **Not serving**. Setting the rollout percentage to 0 is not the same: users matched by a
+targeting rule keep the flag.
 
-If you have safety monitoring configured, the platform can auto-rollback if error rates spike.
+If you have safety monitoring configured, the platform can roll the flag back automatically if
+error rates spike. A rollback to 0% turns the flag off for every user and pauses its rollout
+schedule (see [Safety Monitoring](../feature-flags/safety.md#what-a-rollback-changes)).
 
 ### Archived Flags
 

@@ -255,6 +255,16 @@ describe('SafetyDashboard', () => {
     expect(screen.getByTestId('rollback-modal-flag-name')).toHaveTextContent('Payments redesign');
   });
 
+  it('says the rollback turns the flag off for every user and pauses its schedule (#629)', async () => {
+    await openRollbackModalForSecondFlag();
+    expect(screen.getByTestId('rollback-modal-effect')).toHaveTextContent(
+      'The flag will be turned off for every user, including users matched by a targeting ' +
+        "rule. They get the flag's default value. Its rollout schedule is paused. To serve " +
+        "it again, turn it on from the flag's page.",
+    );
+    expect(screen.getByTestId('rollback-modal')).not.toHaveTextContent(/stays active/i);
+  });
+
   it('confirming rollback calls AdminService.rollbackFlag with the id and reason', async () => {
     await openRollbackModalForSecondFlag();
     fireEvent.change(screen.getByTestId('rollback-reason-input'), {
@@ -273,6 +283,9 @@ describe('SafetyDashboard', () => {
     await waitFor(() => {
       expect(screen.getByTestId('rollback-success-message')).toBeInTheDocument();
     });
+    expect(screen.getByTestId('rollback-success-message')).toHaveTextContent(
+      'Payments redesign is off. Turn it on from its page when the cause is fixed.',
+    );
     expect(screen.getByTestId('rollback-history-row')).toHaveTextContent(
       'Payments redesign: Rolled back from 25% to 0%',
     );

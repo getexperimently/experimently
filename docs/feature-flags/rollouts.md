@@ -252,7 +252,8 @@ curl -s -X POST localhost:8000/api/v1/rollout-schedules/$SCHEDULE_ID/pause \
 <!-- expect: "paused" -->
 
 It prints `"paused"`. Pausing does not change the flag's current rollout percentage; it only
-stops future stage transitions. When you have investigated and resolved the issue, resume the
+stops future stage transitions. A [safety rollback](safety.md#what-a-rollback-changes) pauses
+the flag's active schedule the same way, and it stays paused until you resume it. When you have investigated and resolved the issue, resume the
 schedule by activating it again:
 
 ```{.bash exec}
@@ -303,7 +304,9 @@ curl -s -X POST localhost:8000/api/v1/rollout-schedules/$SCHEDULE_ID/cancel \
 <!-- expect: "cancelled" -->
 
 It prints `"cancelled"`. The flag's current rollout percentage is not changed. To roll back,
-change the flag itself (see [Creating Feature Flags](create.md)).
+change the flag itself (see [Creating Feature Flags](create.md)), or use a
+[safety rollback](safety.md#manual-rollback): a rollback to 0% turns the flag off and pauses
+its schedule.
 
 ---
 

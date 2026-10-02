@@ -7,8 +7,9 @@ Responsibilities:
 * per-flag safety configuration (``feature_flag_safety_configs``),
 * evaluating the configured metric thresholds against the metrics the
   platform actually records (``raw_metrics`` / ``error_logs``),
-* rolling a flag back to a safe rollout percentage and recording it in
-  ``safety_rollback_records``.
+* rolling a flag back -- a target of 0 turns it off, any other target lowers
+  its global rollout percentage -- pausing its active rollout schedules and
+  recording it in ``safety_rollback_records`` (#629).
 
 The async methods are the API used by the endpoints and the
 ``SafetyScheduler``; the static ``*_record`` helpers are the thin CRUD layer
@@ -16,7 +17,7 @@ underneath them and are also handy in tests.
 """
 
 from datetime import datetime, timedelta
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Literal, Optional, Tuple
 from uuid import UUID
 
 from fastapi import HTTPException, status
@@ -25,8 +26,13 @@ from sqlalchemy.orm import Session
 
 from backend.app.core.logger import failure_detail
 from backend.app.core.logging import get_logger
-from backend.app.models.feature_flag import FeatureFlag, FeatureFlagStatus
+from backend.app.models.feature_flag import (
+    FeatureFlag,
+    FeatureFlagStatus,
+    flag_status_name,
+)
 from backend.app.models.metrics.metric import ErrorLog, MetricType, RawMetric
+from backend.app.models.rollout_schedule import RolloutSchedule, RolloutScheduleStatus
 from backend.app.models.safety import (
     FeatureFlagSafetyConfig,
     RollbackTriggerType,
@@ -46,6 +52,7 @@ from backend.app.schemas.safety import (
     SafetySettingsResponse,
     SafetySettingsUpdate,
 )
+from backend.app.services.feature_flag_service import FlagVerb, transition
 
 logger = get_logger(__name__)
 
@@ -66,6 +73,54 @@ _LATENCY_METRICS = {
     "max_latency",
     "min_latency",
 }
+
+
+#: What a rollback does to a flag: turn it off, or lower its global rollout.
+RollbackChange = Literal["deactivate", "lower"]
+
+
+def rollback_change(flag: Any, target: int) -> Optional[RollbackChange]:
+    """What a rollback to *target* percent would do to *flag*, or ``None``.
+
+    The one rule the rollback itself, the safety monitor and
+    ``should_rollback`` share (#629):
+
+    * a flag that is not ACTIVE (INACTIVE or ARCHIVED, enum or string) --
+      ``None``: it already serves no one, and an archived flag is never
+      written (#631);
+    * a target of 0 -- ``"deactivate"``, whatever the global percentage, so a
+      flag that serves only users matched by a targeting rule (global 0%) can
+      still be rolled back;
+    * a target above 0 -- ``"lower"`` when the global percentage is above it,
+      otherwise ``None``.
+    """
+    if flag_status_name(flag.status) != FeatureFlagStatus.ACTIVE.value:
+        return None
+    if target == 0:
+        return "deactivate"
+    if (flag.rollout_percentage or 0) > target:
+        return "lower"
+    return None
+
+
+def _clamped_percentage(value: Any) -> int:
+    """*value* as a percentage within 0-100; anything not a number is 0."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return 0
+    return max(0, min(100, int(value)))
+
+
+def _no_rollback_message(flag: Any, target: int) -> str:
+    """Why a rollback to *target* changes nothing, naming the reason."""
+    status_name = flag_status_name(flag.status)
+    if status_name == FeatureFlagStatus.ARCHIVED.value:
+        return f"Feature flag '{flag.key}' is archived; nothing to roll back"
+    if status_name != FeatureFlagStatus.ACTIVE.value:
+        return f"Feature flag '{flag.key}' is already off; nothing to roll back"
+    return (
+        f"Feature flag '{flag.key}' is already at {flag.rollout_percentage}% "
+        f"(target {target}%); no rollback needed"
+    )
 
 
 def _metric_to_trigger(metric_name: str) -> RollbackTriggerType:
@@ -212,7 +267,7 @@ class SafetyService:
     def get_or_create_safety_config(
         db: Session, feature_flag_id: UUID
     ) -> FeatureFlagSafetyConfig:
-        """Return the flag's config, creating a default one if missing."""
+        """Return the flag's config, creating (and committing) a default one if missing."""
         config = SafetyService.get_feature_flag_safety_config_record(
             db, feature_flag_id
         )
@@ -226,6 +281,27 @@ class SafetyService:
         db.add(config)
         db.commit()
         db.refresh(config)
+        return config
+
+    @staticmethod
+    def _get_or_add_safety_config(
+        db: Session, feature_flag_id: UUID
+    ) -> FeatureFlagSafetyConfig:
+        """The flag's config, adding a default one with ``flush()`` if missing.
+
+        ``execute_rollback`` uses this instead of ``get_or_create_safety_config``:
+        a commit here would release the flag's row lock before the rollback's
+        writes, splitting one rollback into two transactions (#629). The caller
+        has already locked the flag, so it is not looked up again.
+        """
+        config = SafetyService.get_feature_flag_safety_config_record(
+            db, feature_flag_id
+        )
+        if config:
+            return config
+        config = FeatureFlagSafetyConfig(feature_flag_id=feature_flag_id, metrics={})
+        db.add(config)
+        db.flush()
         return config
 
     @staticmethod
@@ -584,22 +660,22 @@ class SafetyService:
         """
         Decide whether an automatic rollback is warranted.
 
-        Requires: an ACTIVE flag with rollout > 0, monitoring enabled for the
-        flag, automatic rollbacks enabled globally, and a failing safety check.
+        Requires: a flag a rollback to its configured percentage would change
+        (``rollback_change``), monitoring enabled for the flag, automatic
+        rollbacks enabled globally, and a failing safety check.
         """
         feature_flag = (
-            db.query(FeatureFlag)
-            .filter(
-                FeatureFlag.id == feature_flag_id,
-                FeatureFlag.status == FeatureFlagStatus.ACTIVE,
-            )
-            .first()
+            db.query(FeatureFlag).filter(FeatureFlag.id == feature_flag_id).first()
         )
-        if not feature_flag or feature_flag.rollout_percentage == 0:
+        if not feature_flag:
             return False, None, None
 
         config = await self.get_feature_flag_safety_config(feature_flag_id)
         if not config.enabled:
+            return False, None, None
+
+        target = _clamped_percentage(config.rollback_percentage)
+        if rollback_change(feature_flag, target) is None:
             return False, None, None
 
         settings = await self.get_safety_settings()
@@ -657,9 +733,29 @@ class SafetyService:
         executed_by_user_id: Optional[UUID] = None,
     ) -> RollbackResponse:
         """
-        Set the flag's rollout to ``target_percentage`` (default 0, flag stays
-        ACTIVE) and record the rollback. Never raises: failures are reported
-        with ``success=False`` and the transaction is rolled back.
+        Roll the flag back and record it, in one transaction (#629).
+
+        What changes is ``rollback_change(flag, target_percentage)``:
+
+        * ``"deactivate"`` (target 0): the flag turns off --
+          ``transition(status, OFF)``, so INACTIVE -- and its global
+          percentage goes to 0. Every user then gets ``enabled: false`` with
+          ``reason: "inactive"``, users matched by a targeting rule included;
+        * ``"lower"`` (target 1-100): the global percentage drops to the
+          target; users matched by a targeting rule keep their rule's
+          percentage;
+        * ``None``: nothing is written and ``success`` is false, with a
+          message naming the reason (archived, already off, already at or
+          below the target).
+
+        Both changes pause every ACTIVE rollout schedule of the flag, so a
+        stage cannot raise the percentage again; the ids are in
+        ``details["paused_schedules"]``. The flag row is locked first and
+        nothing commits until the end -- a missing safety config is added with
+        ``flush()`` -- so the lock is held until the one commit.
+
+        Never raises: failures are reported with ``success=False`` and the
+        transaction is rolled back.
         """
         trigger_name = str(getattr(trigger_type, "value", trigger_type))
         try:
@@ -683,27 +779,49 @@ class SafetyService:
                 )
 
             previous_percentage = feature_flag.rollout_percentage
-            if previous_percentage <= target_percentage:
-                # Already at (or below) the safe percentage: nothing to roll
-                # back. Without this guard the safety monitor writes a new
-                # rollback record every cycle while the error window is hot.
+            change = rollback_change(feature_flag, target_percentage)
+            if change is None:
+                # Nothing to roll back. Without this guard the safety monitor
+                # writes a new rollback record every cycle while the error
+                # window is hot.
+                message = _no_rollback_message(feature_flag, target_percentage)
                 db.rollback()
                 return RollbackResponse(
                     success=False,
                     feature_flag_id=feature_flag_id,
-                    message=(
-                        f"Feature flag '{feature_flag.key}' is already at "
-                        f"{previous_percentage}% (target {target_percentage}%); no rollback needed"
-                    ),
+                    message=message,
                     trigger_type=trigger_name,
                     previous_percentage=previous_percentage,
                     new_percentage=previous_percentage,
                 )
-            safety_config = self.get_or_create_safety_config(db, feature_flag_id)
 
-            feature_flag.rollout_percentage = target_percentage
+            safety_config = self._get_or_add_safety_config(db, feature_flag_id)
+
+            deactivated = change == "deactivate"
+            if deactivated:
+                feature_flag.status = transition(feature_flag.status, FlagVerb.OFF)
+                feature_flag.rollout_percentage = 0
+            else:
+                feature_flag.rollout_percentage = target_percentage
             feature_flag.updated_at = datetime.utcnow()
             db.add(feature_flag)
+
+            # The flag row is locked above; the schedules are locked after it,
+            # the order every other writer takes them in.
+            schedules = (
+                db.query(RolloutSchedule)
+                .filter(
+                    RolloutSchedule.feature_flag_id == feature_flag_id,
+                    RolloutSchedule.status == RolloutScheduleStatus.ACTIVE,
+                )
+                .order_by(RolloutSchedule.id)
+                .with_for_update()
+                .all()
+            )
+            for schedule in schedules:
+                schedule.status = RolloutScheduleStatus.PAUSED
+                db.add(schedule)
+            paused_schedules = [str(schedule.id) for schedule in schedules]
 
             record = SafetyRollbackRecord(
                 feature_flag_id=feature_flag_id,
@@ -721,15 +839,23 @@ class SafetyService:
 
             logger.info(
                 f"Rolled back feature flag {feature_flag_id} from {previous_percentage}% "
-                f"to {target_percentage}% due to {reason} (trigger: {trigger_name})"
+                f"to {target_percentage}% (turned off: {deactivated}, schedules paused: "
+                f"{len(paused_schedules)}) due to {reason} (trigger: {trigger_name})"
             )
+            if deactivated:
+                message = (
+                    f"Feature flag '{feature_flag.key}' turned off and rolled back "
+                    f"from {previous_percentage}% to 0%"
+                )
+            else:
+                message = (
+                    f"Feature flag '{feature_flag.key}' rolled back from "
+                    f"{previous_percentage}% to {target_percentage}%"
+                )
             return RollbackResponse(
                 success=True,
                 feature_flag_id=feature_flag_id,
-                message=(
-                    f"Feature flag '{feature_flag.key}' rolled back from "
-                    f"{previous_percentage}% to {target_percentage}%"
-                ),
+                message=message,
                 trigger_type=trigger_name,
                 previous_percentage=previous_percentage,
                 new_percentage=target_percentage,
@@ -740,6 +866,8 @@ class SafetyService:
                     "trigger_value": trigger_value,
                     "threshold_value": threshold_value,
                     "metrics_data": metrics_data,
+                    "deactivated": deactivated,
+                    "paused_schedules": paused_schedules,
                 },
             )
 

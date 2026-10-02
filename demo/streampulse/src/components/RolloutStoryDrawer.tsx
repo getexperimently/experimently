@@ -38,12 +38,12 @@ export const STORY_STEPS: StoryStep[] = [
   },
   {
     title: 'Safety monitor rolls back to 5 %',
-    action: 'Automatic rollback (rollback_percentage 5) — or the script calls POST /safety/feature-flags/{id}/rollback?percentage=5 — takes the flag back to 5 %. A rollback record is written.',
-    lookAt: 'Flag rollout is 5 % again; Safety shows the rollback record and reason. Within 5 s the app\'s Player v2 readout below flips for most devices.',
+    action: 'Automatic rollback (rollback_percentage 5) — or the script calls POST /safety/feature-flags/{id}/rollback?percentage=5 — takes the flag back to 5 % and pauses its rollout schedule, so no stage can raise it again. Employees keep Player v2 through their targeting rule. A rollback record is written.',
+    lookAt: 'Flag rollout is 5 % again and its rollout schedule shows Paused. Within 5 s the app\'s Player v2 readout below flips for most devices.',
   },
   {
     title: 'Fix shipped in v3.2.1, resume rollout',
-    action: 'A new rule app_version semver_gte 3.2.1 → 100 % is added (the employee rule stays); stage 3 advances the base rollout to 50 %.',
+    action: 'A new rule app_version semver_gte 3.2.1 → 100 % is added (the employee rule stays). The script resumes the paused schedule (POST /rollout-schedules/{id}/activate), then stage 3 advances the base rollout to 50 %.',
     lookAt: 'Compare "iPhone 15 (app 3.2.1)" with "Galaxy S10 (app 3.1.0)": the fixed build gets Player v2 by rule, the old build only by the 50 % rollout.',
   },
   {

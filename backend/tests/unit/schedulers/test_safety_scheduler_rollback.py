@@ -14,6 +14,7 @@ from backend.app.core.safety_scheduler import (
     SafetyScheduler,
     _rollback_target_percentage,
 )
+from backend.app.models.feature_flag import FeatureFlagStatus
 from backend.app.models.safety import RollbackTriggerType
 
 
@@ -25,6 +26,7 @@ def _unhealthy_scheduler_env(
     flag.id = "flag-uuid-1"
     flag.key = "streampulse_player_v2"
     flag.rollout_percentage = 25
+    flag.status = FeatureFlagStatus.ACTIVE
 
     metric = MagicMock()
     metric.is_healthy = is_healthy

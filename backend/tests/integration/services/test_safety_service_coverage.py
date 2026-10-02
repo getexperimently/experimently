@@ -1237,8 +1237,55 @@ class TestShouldRollback:
         assert await service.should_rollback(db_session, flag.id) == (False, None, None)
 
     @pytest.mark.asyncio
-    async def test_zero_rollout_returns_false(self, db_session, make_feature_flag):
+    @pytest.mark.regression
+    async def test_zero_rollout_flag_recommends_a_rollback_to_zero(
+        self, db_session, make_feature_flag, safety_settings_guard
+    ):
+        """Flipped for #629: a flag at 0% may still serve the users its targeting
+        rules match, and a rollback to 0 turns it off, so it is a candidate."""
         flag = make_feature_flag(status=FeatureFlagStatus.ACTIVE, rollout_percentage=0)
+        _add_error_log(db_session, flag)
+        _add_evaluations(db_session, flag, n=2)  # error_rate == 0.5
+        db_session.add(
+            FeatureFlagSafetyConfig(
+                feature_flag_id=flag.id,
+                enabled=True,
+                metrics={"error_rate": {"critical_threshold": 0.1}},
+                rollback_percentage=0,
+            )
+        )
+        _wipe_safety_settings(db_session)
+        db_session.add(
+            SafetySettings(enable_automatic_rollbacks=True, default_metrics=None)
+        )
+        db_session.commit()
+
+        service = SafetyService(db_session)
+        should, _, _ = await service.should_rollback(db_session, flag.id)
+        assert should is True
+
+    @pytest.mark.asyncio
+    async def test_zero_rollout_with_a_partial_target_returns_false(
+        self, db_session, make_feature_flag, safety_settings_guard
+    ):
+        """A rollback to 5% cannot lower a flag already at 0%."""
+        flag = make_feature_flag(status=FeatureFlagStatus.ACTIVE, rollout_percentage=0)
+        _add_error_log(db_session, flag)
+        _add_evaluations(db_session, flag, n=2)  # error_rate == 0.5
+        db_session.add(
+            FeatureFlagSafetyConfig(
+                feature_flag_id=flag.id,
+                enabled=True,
+                metrics={"error_rate": {"critical_threshold": 0.1}},
+                rollback_percentage=5,
+            )
+        )
+        _wipe_safety_settings(db_session)
+        db_session.add(
+            SafetySettings(enable_automatic_rollbacks=True, default_metrics=None)
+        )
+        db_session.commit()
+
         service = SafetyService(db_session)
         assert await service.should_rollback(db_session, flag.id) == (False, None, None)
 
@@ -1487,11 +1534,15 @@ class TestExecuteRollback:
             "trigger_value": 9.9,
             "threshold_value": 5.0,
             "metrics_data": None,
+            # A rollback to 0 turns the flag off and pauses its schedules (#629).
+            "deactivated": True,
+            "paused_schedules": [],
         }
         assert result.rollback_record_id is not None
 
         db_session.refresh(flag)
         assert flag.rollout_percentage == 0
+        assert flag.status == FeatureFlagStatus.INACTIVE
 
         record = (
             db_session.query(SafetyRollbackRecord)
@@ -1544,7 +1595,9 @@ class TestExecuteRollback:
         result = service.execute_rollback(db_session, flag.id)
 
         assert result.trigger_type == "manual"
-        assert result.message == f"Feature flag '{flag.key}' rolled back from 10% to 0%"
+        assert result.message == (
+            f"Feature flag '{flag.key}' turned off and rolled back from 10% to 0%"
+        )
 
 
 class TestRollbackFeatureFlagAsync:
@@ -1584,11 +1637,13 @@ class TestRollbackFeatureFlagAsync:
     async def test_rollback_feature_flag_default_percentage_is_zero(
         self, db_session, make_feature_flag
     ):
-        flag = make_feature_flag(rollout_percentage=50)
+        # ACTIVE: a flag that is already off has nothing to roll back (#629).
+        flag = make_feature_flag(status=FeatureFlagStatus.ACTIVE, rollout_percentage=50)
         service = SafetyService(db_session)
 
         result = await service.rollback_feature_flag(flag.id)
 
+        assert result.success is True, result.message
         assert result.new_percentage == 0
         assert result.trigger_type == "manual"
 
@@ -1603,7 +1658,8 @@ class TestRollbackFeatureFlagAsync:
     async def test_rollback_feature_flag_passes_through_trigger_type_and_executor(
         self, db_session, make_feature_flag, admin_user
     ):
-        flag = make_feature_flag(rollout_percentage=40)
+        # ACTIVE: a flag that is already off has nothing to roll back (#629).
+        flag = make_feature_flag(status=FeatureFlagStatus.ACTIVE, rollout_percentage=40)
         service = SafetyService(db_session)
         executor_id = admin_user.id
 

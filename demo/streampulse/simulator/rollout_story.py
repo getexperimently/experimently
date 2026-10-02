@@ -11,9 +11,10 @@ backend as ``setup-local.sh`` starts it.  ``--token`` uses a bearer token you al
   2  25%                advance the rollout schedule to stage 2 → flag at 25%
   3  Incident           run traffic.py --incident android12 for 90 s, then the safety check
   4  Rollback           wait for the safety scheduler to roll back to 5% (or roll back by hand
-                        when automatic rollbacks are off)
+                        when automatic rollbacks are off); the rollback pauses the schedule
   5  Fix shipped        add ``app_version semver_gte 3.2.1 → 100%`` next to the employee rule
-  6  50%                advance to stage 3 (after the 15-minute error window has cleared)
+  6  50%                resume the paused schedule and advance to stage 3 (after the
+                        15-minute error window has cleared)
   7  100%               advance to stage 4, complete the schedule, remove the rules
 
 Steps are idempotent: re-running a step that already happened is a no-op that prints the
@@ -63,7 +64,7 @@ STEP_TITLES = {
     3: "Crash rate spikes on Android 12 — the incident",
     4: "Safety monitoring rolls Player v2 back to 5%",
     5: f"Fix shipped in {FIX_APP_VERSION} — target the fixed build",
-    6: "Resume the rollout — 50%",
+    6: "Resume the paused rollout — 50%",
     7: "Full rollout — 100%, schedule complete, rules removed",
 }
 
@@ -175,6 +176,10 @@ class StoryClient:
 
     def advance_stage(self, stage_id: str) -> dict[str, Any]:
         return self.request("POST", f"/rollout-schedules/stages/{stage_id}/advance") or {}
+
+    def activate_schedule(self, schedule_id: str) -> dict[str, Any]:
+        """Resume a paused schedule (a safety rollback pauses it)."""
+        return self.request("POST", f"/rollout-schedules/{schedule_id}/activate") or {}
 
     # --- safety ---
     def safety_settings(self) -> dict[str, Any]:
@@ -452,7 +457,7 @@ class Story:
         if pct == target:
             self.say(f"  Player v2 is already rolled back to {target}% (nothing to do).")
             self.print_safety()
-            self.look_at(f"dashboard flag page: {self.flag_page()} (rollout {target}%, rollback record on the safety page)")
+            self.look_at(f"dashboard flag page: {self.flag_page()} (rollout {target}%, rollout schedule paused)")
             return True
         check = self.print_safety()
         if check.get("is_healthy"):
@@ -472,9 +477,11 @@ class Story:
             self.say(f"  {result.get('message') or result}")
         flag = self.flag()
         self.say(f"  Rollout {pct}% → {flag.get('rollout_percentage')}%  (employees keep Player v2 through the targeting rule)")
+        self.say("  The rollback also paused the rollout schedule, so no stage can raise the rollout again; step 6 resumes it.")
         self.look_at(
-            f"dashboard safety page: {self.dashboard_url}/admin/safety (rollback record: {pct}% → {target}%, trigger automatic/manual)",
-            f"dashboard flag page: {self.flag_page()} (rollout {target}%)",
+            f"dashboard safety page: {self.dashboard_url}/admin/safety (a rollback made from that page is listed there; "
+            "an automatic one is not listed yet)",
+            f"dashboard flag page: {self.flag_page()} (rollout {target}%, rollout schedule paused)",
             f"app {self.app_url}: 'Galaxy S10 · Android 12' preset → Player v2 off again; 'Internal tester' still ON (targeting_rule)",
         )
         return True
@@ -530,6 +537,9 @@ class Story:
             self.say("  WARNING: still critical after waiting — advancing anyway; expect the scheduler to roll back again.")
         else:
             self.say("  Safety check: HEALTHY")
+        if str(schedule.get("status", "")).lower() == "paused":
+            self.client.activate_schedule(str(schedule["id"]))
+            self.say("  Resumed the rollout schedule (the rollback in step 4 paused it).")
         before = int(self.flag().get("rollout_percentage") or 0)
         schedule = self.advance_schedule_to(3)
         after = int(self.flag().get("rollout_percentage") or 0)
