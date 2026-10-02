@@ -216,8 +216,9 @@ export AUDIT_HMAC_KEY_SECRET_ARN=$(aws secretsmanager describe-secret \
 ```
 
 Synth refuses a value that is missing, that stops at the name (a *partial*
-ARN, which ECS cannot resolve), that names another environment's secret,
-another region or account than the stack's, or another of the three secrets.
+ARN, which ECS cannot resolve), that is for a different environment
+(`/prod/...` in staging), that is in a region or account other than the
+stack's, or that names another of the three secrets.
 The refusal names the variable and prints the command above; it never prints
 the value, because an ARN carries the account ID. For the same reason, keep
 these values out of issues, pull requests and chat.
