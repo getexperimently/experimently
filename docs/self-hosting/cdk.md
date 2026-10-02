@@ -142,8 +142,9 @@ export AUDIT_HMAC_KEY_SECRET_ARN=$(aws secretsmanager describe-secret \
 - **Each must be the complete ARN**,
   `arn:aws:secretsmanager:<region>:<account>:secret:/<env>/experimentation/<name>-<suffix>`,
   in the stack's own account and region. Synth refuses a missing value, a
-  partial ARN (one that stops at the name: ECS cannot resolve it), another
-  environment's secret, or one variable's secret given in another. The refusal
+  partial ARN (one that stops at the name: ECS cannot resolve it), an ARN for a
+  different environment (`/prod/...` in staging), or one variable's secret given
+  in another. The refusal
   names the variable and the command above, and never prints the value.
 - **Recreating a secret changes its ARN.** Update the input and run
   `cdk deploy` again, or the next task start fails. Changing a secret's value

@@ -173,8 +173,8 @@ cdk deploy --all --require-approval never
 `JWT_SECRET_ARN`, `FIRST_SUPERUSER_PASSWORD_SECRET_ARN` and (on `full`)
 `AUDIT_HMAC_KEY_SECRET_ARN` are **required in every environment**: the
 complete ARN of each secret, exported in this same shell as section 1.4 shows. Synth refuses one that is
-missing, partial (no suffix), for another environment, region or account, or
-in the wrong variable, and says how to read the right value.
+missing, partial (no suffix), for a different environment (`/prod/...` in
+staging), region or account, or in the wrong variable, and says how to read the right value.
 
 `ALARM_EMAIL` is **required** for `staging` and `prod`: the one address every
 alarm emails, including the two API 5xx alarms that roll a deployment back by
