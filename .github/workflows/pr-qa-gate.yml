@@ -72,6 +72,7 @@ jobs:
           HEAD: ${{ github.event.pull_request.head.sha }}
         run: |
           set -euo pipefail
+          exit 1
           files="$(git diff --no-renames --name-only "$BASE" "$HEAD")"
           lane="$(printf '%s\n' "$files" | python3 scripts/classify_changes.py)"
           case "$lane" in
