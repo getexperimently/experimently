@@ -327,6 +327,14 @@ Optionally restrict to specific users:
 - Only for users on the "enterprise" plan
 - Only for users who signed up before a certain date
 
+Every condition needs an attribute, an operator and (for most operators) a value. If one is
+missing, **Create Feature Flag** or **Save Changes** stops and the problem is shown beside the
+targeting rules; a condition the server cannot apply is reported there too.
+
+Rules written through the API in a shape the rule builder cannot show are displayed
+read-only. Saving other changes, such as the rollout percentage, leaves them as they are;
+**Replace rules** starts again with the builder.
+
 ### Scheduled Rollouts
 
 For gradual rollouts on a schedule:

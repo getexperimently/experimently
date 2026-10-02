@@ -86,8 +86,28 @@ def _flag_requests():
 
 
 def test_the_page_has_its_examples():
-    assert len(_shell()) == 9
-    assert len(list(_flag_requests())) == 3  # create, rules, turn on
+    assert len(_shell()) == 11
+    # create, rules, rules refused (#535), turn on
+    assert len(list(_flag_requests())) == 4
+
+
+def test_the_refused_rules_example_is_what_the_api_answers():
+    """#535: the page's 422 example promises a message; the update schema
+    gives exactly that message for the body the example sends."""
+    from pydantic import ValidationError
+
+    text = PAGE.read_text(encoding="utf-8")
+    promised = re.search(r'<!-- expect: "msg":"(Value error, [^"]+)" -->', text)
+    assert promised, "the 422 example's expectation is missing"
+    refused = [
+        json.loads(body)
+        for _, method, _, body in _flag_requests()
+        if method == "PUT" and '"equal"' in body
+    ]
+    assert len(refused) == 1
+    with pytest.raises(ValidationError) as caught:
+        FeatureFlagUpdate(**refused[0])
+    assert caught.value.errors()[0]["msg"] == promised.group(1)
 
 
 def test_every_json_sample_parses():

@@ -157,10 +157,12 @@ unsupported field is never dropped silently. `null` is refused for `key`, `name`
 `409`, and a key with capitals or spaces answers `422`.
 
 The fields a response carries but no request writes (`id`, `owner_id`, `created_at`,
-`updated_at` and `status`) are accepted and ignored, so you can send back a flag exactly as
-`GET` returned it. A `status` must match: `"inactive"` (in any case) on a create without
-`is_active: true`, and the flag's current status on an update. Any other value answers
-`422` with `"type": "read_only"`; turn a flag on or off with `is_active`.
+`updated_at` and `status`) are accepted and ignored, so a GET body can be sent back
+unchanged unless its `targeting_rules` are ones PUT now refuses (422); omitting the field
+still works (see [Add targeting rules](#add-targeting-rules)). A `status` must match:
+`"inactive"` (in any case) on a create without `is_active: true`, and the flag's current
+status on an update. Any other value answers `422` with `"type": "read_only"`; turn a flag
+on or off with `is_active`.
 
 ### Add targeting rules
 
@@ -197,6 +199,68 @@ curl -s -o /dev/null -w '%{http_code}\n' -X PUT localhost:8000/api/v1/feature-fl
 
 It prints `200`.
 
+**Rules the flag evaluator would not apply as written answer `422`**, on a create and on an
+update, and nothing is saved. That is:
+
+- a list of rules (the legacy `[{"type": ...}]` shape), and a value that is not an object
+  (a string, a number, `true`);
+- a flat object such as `{"country": ["US"]}`, and any other key the shape does not have,
+  at the top level, on a group or on a condition;
+- `groups` together with `rules`, `logical_operator` without `groups`, and a top-level
+  `name`;
+- native rules without `rules` (a `default_rule` on its own);
+- a group with no conditions, a condition with no attribute, and an attribute with
+  anything other than letters, digits, `_` and `.`;
+- an unknown operator or logical operator (`and`, `or` or `not`, in any case);
+- a value the operator cannot use (`"abc"` for `greater_than`, `"not-a-version"` for
+  `semver_gte`), a `regex` pattern RE2 refuses, and a list operator with more than 1,000
+  values;
+- a top-level `rollout_percentage` outside 0–100, or an `id` that is not text of 1 to 100
+  characters.
+
+The message names the place and the reason, never the value you sent. Only the first
+problem found is reported. This request misspells `equals`:
+
+```{.bash exec}
+curl -s -X PUT localhost:8000/api/v1/feature-flags/$FLAG_ID \
+  -H "Authorization: Bearer $TOKEN" \
+  -H 'content-type: application/json' \
+  -d '{
+    "targeting_rules": {
+      "logical_operator": "AND",
+      "groups": [
+        {"conditions": [{"attribute": "user.plan", "operator": "equal", "value": "enterprise"}]}
+      ]
+    }
+  }' | jq -c '{loc: .detail[0].loc, msg: .detail[0].msg}'
+```
+<!-- expect: "loc":["body","targeting_rules"] -->
+<!-- expect: "msg":"Value error, groups[0].conditions[0].operator: unknown operator" -->
+
+```json
+{"loc":["body","targeting_rules"],"msg":"Value error, groups[0].conditions[0].operator: unknown operator"}
+```
+
+`groups[0].conditions[0]` is the first condition of the first group. A problem with the
+rules as a whole has no place, and reads `targeting rules: <reason>`, for example
+`targeting rules: unknown key`.
+
+**Rules stored before this check are not re-checked.** They are evaluated as before, and
+an update that leaves `targeting_rules` out succeeds whatever is stored. An update that
+sends stored rules back unchanged, as a `GET` returned them, answers `422` if they are
+rules the API now refuses: fix them, or leave the field out. To list the flags whose
+stored rules are refused, run this from the repository root, against the same database
+settings as the API:
+
+```{.bash skip reason="checkout: runs from a repository checkout, against the API database"}
+python -m backend.scripts.check_targeting_rules
+```
+
+It prints one line per flag, `feature_flag <id> <key> <place> <reason>`, writes nothing, and
+exits 0 whether or not it lists anything (2 when it cannot read the database). A flag whose
+legacy (list-shaped) rules hold a condition with an operator other than `eq`, `ne`, `gt`,
+`lt`, `contains` or `in` has its own line: that rule matches no user.
+
 Operators: `equals`, `not_equals`, `contains`, `not_contains`, `starts_with`, `ends_with`,
 `greater_than`, `less_than`, `greater_than_or_equal`, `less_than_or_equal`, `in`, `not_in`,
 `regex`, `is_null`, `is_not_null`, `semver_eq`, `semver_gt`, `semver_lt`, `semver_gte`,
@@ -207,15 +271,19 @@ for `in`/`not_in`, `"17.4"` is padded to `17.4.0` for `semver_*`).
 
 `regex` patterns use [RE2 syntax](https://github.com/google/re2/wiki/Syntax): `\w`, `\d`,
 `\s` are ASCII-only, `$` matches only at the very end of the value, lookaround and
-backreferences are refused, and values longer than 256 characters are not evaluated. A flag
-whose rules hold a refused pattern, or whose context value cannot be evaluated, evaluates
-disabled with reason `error` rather than falling through to the rollout; see the
-[rules engine reference](../Enhanced_Rules_Engine_Reference.md#match_regex-match_regex).
+backreferences are refused, and values longer than 256 characters are not evaluated. A
+pattern RE2 refuses answers `422` when it is saved (`groups[0].conditions[0]: pattern is
+not valid`). A flag whose rules were stored with such a pattern before this check, or whose
+context value cannot be evaluated, evaluates disabled with reason `error` rather than falling
+through to the rollout; `python -m backend.scripts.check_targeting_rules` lists those flags.
+See the [rules engine reference](../Enhanced_Rules_Engine_Reference.md#match_regex-match_regex).
 
 Users who match a rule are bucketed with the rule's `rollout_percentage` (100 unless set on
 the rules object); users who match no rule fall through to the flag's global
 `rollout_percentage`. The native Enhanced Rules Engine shape (`{"rules": [...]}`) is accepted
-as well.
+as well; it must carry `rules`. `null`, `{}` and `{"groups": []}` mean no rules. A list of
+rules (the legacy shape) is refused when saved; a flag stored with one before is still
+evaluated.
 
 #### Targeting context and attribute aliases
 

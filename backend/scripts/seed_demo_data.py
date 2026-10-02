@@ -688,10 +688,8 @@ def seed_feature_flags(db, admin_user) -> dict:
             status=FeatureFlagStatus.ACTIVE,
             owner_id=admin_user.id,
             rollout_percentage=50,
-            targeting_rules={
-                "operator": "and",
-                "rules": [],
-            },
+            # No rules: the global rollout decides.
+            targeting_rules={},
             tags=["ui", "dashboard", "redesign"],
         )
         db.add(flag1)

@@ -4598,6 +4598,7 @@
                 "type": "null"
               }
             ],
+            "description": "Who gets the flag: the dashboard rule builder's shape ({\"logical_operator\", \"groups\": [{\"logical_operator\", \"conditions\": [{\"attribute\", \"operator\", \"value\"}]}]}) or the native rules shape ({\"rules\": [...]}). null, {} and {\"groups\": []} mean no rules. Rules the flag evaluator would not apply as written answer 422, with the place and the reason in the message, for example \"groups[0].conditions[1].operator: unknown operator\". A list of rules is refused. Stored as sent.",
             "title": "Targeting Rules"
           },
           "updated_at": {
@@ -4706,7 +4707,7 @@
         "type": "object"
       },
       "FeatureFlagRead": {
-        "description": "A feature flag, as every flag route returns it.\n\nAny of these bodies can be sent back with an update unchanged.",
+        "description": "A feature flag, as every flag route returns it.\n\nAny of these bodies can be sent back with an update unchanged, unless its\n`targeting_rules` are ones PUT now refuses (422); omitting the field\nstill works.",
         "properties": {
           "created_at": {
             "format": "date-time",
@@ -5006,6 +5007,7 @@
                 "type": "null"
               }
             ],
+            "description": "Who gets the flag: the dashboard rule builder's shape ({\"logical_operator\", \"groups\": [{\"logical_operator\", \"conditions\": [{\"attribute\", \"operator\", \"value\"}]}]}) or the native rules shape ({\"rules\": [...]}). null, {} and {\"groups\": []} mean no rules. Rules the flag evaluator would not apply as written answer 422, with the place and the reason in the message, for example \"groups[0].conditions[1].operator: unknown operator\". A list of rules is refused. Stored as sent.",
             "title": "Targeting Rules"
           },
           "updated_at": {
@@ -17761,7 +17763,7 @@
         ]
       },
       "post": {
-        "description": "Create a new feature flag.\n\nThis endpoint allows users to create a new feature flag. The current user\nis automatically set as the owner of the feature flag.\n\nThe request must include:\n- A unique key for the feature flag\n- A name for the feature flag\n- Optional description\n- Optional targeting rules for specific user segments\n- Optional rollout percentage\n\nThe flag is created off (INACTIVE) unless the request sends\n`is_active: true`. A field the API does not read answers 422. The read-only\nfields of a flag response (`id`, `owner_id`, `created_at`, `updated_at`,\n`status`) are accepted and ignored, except that a `status` must be the one\nthe flag is created with.\n\nReturns:\n    FeatureFlagRead: The newly created feature flag\n\nRaises:\n    HTTPException 409: Another flag already has this key\n    HTTPException 422: The body is not a valid flag",
+        "description": "Create a new feature flag.\n\nThis endpoint allows users to create a new feature flag. The current user\nis automatically set as the owner of the feature flag.\n\nThe request must include:\n- A unique key for the feature flag\n- A name for the feature flag\n- Optional description\n- Optional targeting rules for specific user segments\n- Optional rollout percentage\n\nThe flag is created off (INACTIVE) unless the request sends\n`is_active: true`. A field the API does not read answers 422. The read-only\nfields of a flag response (`id`, `owner_id`, `created_at`, `updated_at`,\n`status`) are accepted and ignored, except that a `status` must be the one\nthe flag is created with. `targeting_rules` the flag evaluator would not\napply as written answer 422, with the place and the reason in the message.\n\nReturns:\n    FeatureFlagRead: The newly created feature flag\n\nRaises:\n    HTTPException 409: Another flag already has this key\n    HTTPException 422: The body is not a valid flag",
         "operationId": "create_feature_flag_api_v1_feature_flags__post",
         "parameters": [
           {
@@ -18449,7 +18451,7 @@
         ]
       },
       "put": {
-        "description": "Update a feature flag.\n\nThis endpoint allows users to update an existing feature flag.\nThe user must have access to the feature flag (be the owner or have permission).\n\nOnly the fields sent change. They include:\n- Key, name and description\n- `is_active`, which turns the flag on or off. An archived flag sent\n  `is_active: false` stays archived; sent `is_active: true` it answers\n  400, and nothing is changed: unarchive it first\n- Targeting rules\n- Rollout percentage\n\nA field the API does not read answers 422, and so does an explicit null on\n`key`, `name`, `is_active`, `rollout_percentage` or `default_value`. The\nread-only fields of a flag response (`id`, `owner_id`, `created_at`,\n`updated_at`, `status`) are accepted and ignored, so a GET body can be sent\nback; a `status` must equal the flag's.\n\nReturns:\n    FeatureFlagRead: The updated feature flag\n\nRaises:\n    HTTPException 400: `is_active: true` on an archived flag\n    HTTPException 403: If the user doesn't have permission to update this feature flag\n    HTTPException 409: Another flag already has the key\n    HTTPException 422: The body is not a valid update",
+        "description": "Update a feature flag.\n\nThis endpoint allows users to update an existing feature flag.\nThe user must have access to the feature flag (be the owner or have permission).\n\nOnly the fields sent change. They include:\n- Key, name and description\n- `is_active`, which turns the flag on or off. An archived flag sent\n  `is_active: false` stays archived; sent `is_active: true` it answers\n  400, and nothing is changed: unarchive it first\n- Targeting rules\n- Rollout percentage\n\nA field the API does not read answers 422, and so does an explicit null on\n`key`, `name`, `is_active`, `rollout_percentage` or `default_value`. The\nread-only fields of a flag response (`id`, `owner_id`, `created_at`,\n`updated_at`, `status`) are accepted and ignored, so a GET body can be sent\nback unchanged unless its `targeting_rules` are ones PUT now refuses (422);\nomitting the field still works. A `status` must equal the flag's.\n\n`targeting_rules` the flag evaluator would not apply as written answer 422,\nwith the place and the reason in the message. Stored rules are not\nre-checked unless they are sent.\n\nReturns:\n    FeatureFlagRead: The updated feature flag\n\nRaises:\n    HTTPException 400: `is_active: true` on an archived flag\n    HTTPException 403: If the user doesn't have permission to update this feature flag\n    HTTPException 409: Another flag already has the key\n    HTTPException 422: The body is not a valid update",
         "operationId": "update_feature_flag_api_v1_feature_flags__flag_id__put",
         "parameters": [
           {

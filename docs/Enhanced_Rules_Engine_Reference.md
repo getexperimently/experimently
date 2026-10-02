@@ -265,6 +265,9 @@ not applied for that evaluation: a flag evaluates disabled with reason
 `error`, a user is not eligible for the experiment (control), and a user is
 not a member of the segment. `python -m backend.scripts.check_regex_rules`
 lists stored patterns that are refused or use the ASCII-only classes or `$`.
+A pattern RE2 refuses answers 422 when experiment or feature-flag targeting
+rules are saved; `python -m backend.scripts.check_targeting_rules` lists the
+flags whose stored rules a save would now refuse, including such patterns.
 
 ```python
 Condition(

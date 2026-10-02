@@ -6,12 +6,8 @@ accepted, stopped in the browser before sending, or refused by the server with
 a path and a reason that the page shows beside the rules. The browser half
 (``frontend/src/tests/targeting/flag-builder-outputs.test.ts``) checks the
 rows and the browser verdicts against the page's code; this file checks the
-server verdicts against the API's targeting validator.
-
-Flag rules are not validated on save yet. Until they are, the validator these
-rows are judged by is the experiment one: for the dashboard shape (every row
-here) it is what the flag validator is planned to be. When the flag validator
-lands it replaces ``validate_experiment_targeting`` below.
+server verdicts against ``validate_flag_targeting``, which the flag create
+and update run on ``targeting_rules`` (#535).
 
 The same file pins ``frontend/src/tests/fixtures/streampulse-flag-rules.json``
 to the StreamPulse seed, so the dashboard tests that open those flags read the
@@ -29,7 +25,7 @@ import pytest
 
 from backend.app.core.targeting_adapter import (
     TargetingRulesError,
-    validate_experiment_targeting,
+    validate_flag_targeting,
 )
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[4]
@@ -40,7 +36,7 @@ ROWS = OUTPUTS["rows"]
 
 def _server_verdict(sends: object) -> tuple[str, str | None, str | None]:
     try:
-        validate_experiment_targeting(sends)
+        validate_flag_targeting(sends)
     except TargetingRulesError as err:
         return "refused_by_server", err.path, err.code
     return "accepted", None, None
