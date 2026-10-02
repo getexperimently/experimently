@@ -6,10 +6,10 @@ the group lookup -- against moto's Cognito emulator, with the users table in
 real Postgres. Nothing here stubs ``get_user`` or ``get_user_with_groups``:
 a stub would skip exactly the code under test.
 
-Two user pools exist in every test. ``ours`` is the one this deployment is
-configured with (``COGNITO_USER_POOL_ID`` / ``COGNITO_CLIENT_ID``); ``other``
-is a second pool in the same region that holds a user with the same username
-as an administrator in ``ours``.
+A token issued to a user pool or app client other than the configured ones
+is refused. Two user pools exist in every test: ``ours`` is the one this
+deployment is configured with (``COGNITO_USER_POOL_ID`` /
+``COGNITO_CLIENT_ID``), and ``other`` is not configured.
 
 Every refusal asserts the exact reason on the stdlib record of the
 ``backend.app.auth.cognito_sign_in`` logger, so a token that GetUser rejected
@@ -168,9 +168,9 @@ def pools(db_session, monkeypatch) -> Iterator[Pools]:
         app.dependency_overrides.update(saved)
 
 
-def _admin_in_ours_and_namesake_in_other(pools: Pools):
-    """An administrator of ``ours`` who has never signed in, and a user of
-    ``other`` with the same username and an address of its own."""
+def _token_from_the_unconfigured_pool(pools: Pools):
+    """A username present in both pools (in the ``Admins`` group of ``ours``),
+    and an access token for it issued by ``other``."""
     username = f"ops{uuid.uuid4().hex[:8]}"
     _create_user(pools.idp, pools.ours, username, f"{username}@ours.test", ["Admins"])
     _create_user(pools.idp, pools.other, username, f"{username}@other.test")
@@ -192,7 +192,7 @@ def test_the_refusal_record_is_captured(caplog):
 def test_sign_in_with_a_token_not_from_the_configured_pool_is_refused(
     pools, db_session, caplog
 ):
-    username, token = _admin_in_ours_and_namesake_in_other(pools)
+    username, token = _token_from_the_unconfigured_pool(pools)
 
     with caplog.at_level(logging.WARNING, logger=SIGN_IN_LOGGER):
         response = pools.client.get("/api/v1/users/me", headers=_bearer(token))
@@ -203,7 +203,7 @@ def test_sign_in_with_a_token_not_from_the_configured_pool_is_refused(
 
 
 def test_auth_me_with_a_token_not_from_the_configured_pool_is_refused(pools, caplog):
-    _, token = _admin_in_ours_and_namesake_in_other(pools)
+    _, token = _token_from_the_unconfigured_pool(pools)
 
     with caplog.at_level(logging.WARNING, logger=SIGN_IN_LOGGER):
         response = pools.client.get("/api/v1/auth/me", headers=_bearer(token))
