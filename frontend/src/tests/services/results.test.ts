@@ -38,11 +38,12 @@ describe('ResultsService.getResults', () => {
     expect(mockFetch).toHaveBeenCalledWith(`${BASE}/api/v1/results/abc`, expect.any(Object));
   });
 
-  it('appends metric_id param when provided', async () => {
+  // GET /results/{id} reads no metric_id; the client no longer sends one (#664).
+  it('sends no metric_id', async () => {
     mockOk({});
-    await ResultsService.getResults('abc', { metric_id: 'm1' });
+    await ResultsService.getResults('abc', { breakdown: 'country' });
     const url = mockFetch.mock.calls[0][0] as string;
-    expect(url).toContain('metric_id=m1');
+    expect(url).not.toContain('metric_id');
   });
 
   it('appends breakdown param when provided', async () => {
@@ -106,12 +107,14 @@ describe('ResultsService.getSampleSize', () => {
     );
   });
 
-  it('appends mde and power params', async () => {
+  // The API reads `power_target`; a `power` key was dropped unread (#663).
+  it('sends mde and power_target, and no bare power key', async () => {
     mockOk({});
-    await ResultsService.getSampleSize('abc', { mde: 0.05, power: 0.8 });
-    const url = mockFetch.mock.calls[0][0] as string;
-    expect(url).toContain('mde=0.05');
-    expect(url).toContain('power=0.8');
+    await ResultsService.getSampleSize('abc', { mde: 0.05, power_target: 0.9 });
+    const params = new URL(mockFetch.mock.calls[0][0] as string, 'http://x').searchParams;
+    expect(params.get('mde')).toBe('0.05');
+    expect(params.get('power_target')).toBe('0.9');
+    expect(params.has('power')).toBe(false);
   });
 });
 

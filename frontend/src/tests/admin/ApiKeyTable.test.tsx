@@ -122,6 +122,13 @@ describe('ApiKeyTable', () => {
         calledUrls(fetchMock).some((u) => u.includes('all=true') && u.includes('include_inactive=true')),
       ).toBe(true),
     );
+
+    // The exact query strings, unchanged by the move to `query:`: a false
+    // toggle is absent rather than `=false`.
+    const queries = calledUrls(fetchMock)
+      .filter((u) => /\/api\/v1\/api-keys(\?|$)/.test(u))
+      .map((u) => u.split('?')[1] ?? '');
+    expect(queries).toEqual(['', 'all=true', 'all=true&include_inactive=true']);
   });
 
   it('delete asks for inline confirmation, then calls DELETE /api/v1/api-keys/{id}', async () => {

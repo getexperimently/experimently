@@ -2,34 +2,57 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { AdminService } from '@/services/admin';
 import { AdminUser, ROLE_COLORS, USER_ROLE_LABELS, UserListResponse } from '@/types/admin';
 
+/** Rows per page. The API's `limit` maximum is 100. */
+export const USER_PAGE_SIZE = 50;
+/** The API refuses a longer `search` with a 422. */
+export const USER_SEARCH_MAX_LENGTH = 100;
+const SEARCH_DEBOUNCE_MS = 300;
+
 export function UserTable() {
   const [data, setData] = useState<UserListResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // `search` is what is in the box; `term` is what the list was asked for,
+  // set once typing pauses.
   const [search, setSearch] = useState('');
+  const [term, setTerm] = useState('');
+  const [page, setPage] = useState(0);
+  const [reloadToken, setReloadToken] = useState(0);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Each request takes a number; only the latest one may write the table, so
+  // a slow answer to an older search can never replace a newer one.
+  const latestRequest = useRef(0);
 
-  const fetchUsers = useCallback(async (searchTerm?: string) => {
+  const fetchUsers = useCallback(async (pageIndex: number, searchTerm: string) => {
+    const request = ++latestRequest.current;
     setLoading(true);
     setError(null);
     try {
       const result = await AdminService.listUsers({
-        page: 1,
-        limit: 50,
-        ...(searchTerm ? { search: searchTerm } : {}),
+        skip: pageIndex * USER_PAGE_SIZE,
+        limit: USER_PAGE_SIZE,
+        search: searchTerm || undefined,
       });
+      if (request !== latestRequest.current) return;
       setData(result);
     } catch (err) {
+      if (request !== latestRequest.current) return;
       setError((err as Error).message || 'Failed to load users');
     } finally {
-      setLoading(false);
+      if (request === latestRequest.current) setLoading(false);
     }
   }, []);
 
-  // Initial load
   useEffect(() => {
-    fetchUsers();
-  }, [fetchUsers]);
+    fetchUsers(page, term);
+  }, [fetchUsers, page, term, reloadToken]);
+
+  useEffect(
+    () => () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+    },
+    [],
+  );
 
   const handleSearchChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const value = e.target.value;
@@ -38,8 +61,10 @@ export function UserTable() {
       clearTimeout(debounceRef.current);
     }
     debounceRef.current = setTimeout(() => {
-      fetchUsers(value || undefined);
-    }, 300);
+      // A new search starts again from the first page.
+      setPage(0);
+      setTerm(value.trim());
+    }, SEARCH_DEBOUNCE_MS);
   };
 
   const handleDelete = async (user: AdminUser) => {
@@ -49,12 +74,23 @@ export function UserTable() {
     if (!confirmed) return;
     try {
       await AdminService.deleteUser(user.id);
-      // Refetch after deletion
-      await fetchUsers(search || undefined);
     } catch (err) {
       alert(`Failed to delete user: ${(err as Error).message}`);
+      return;
+    }
+    // Deleting the only row on a later page would leave that page empty;
+    // step back to the one before it instead.
+    if (page > 0 && data && data.items.length === 1) {
+      setPage(page - 1);
+    } else {
+      setReloadToken((n) => n + 1);
     }
   };
+
+  const shownFrom = data ? data.skip + 1 : 0;
+  const shownTo = data ? data.skip + data.items.length : 0;
+  const hasPrevious = page > 0;
+  const hasNext = data ? shownTo < data.total : false;
 
   return (
     <div data-testid="user-table" className="bg-white rounded-lg border border-slate-200 overflow-hidden">
@@ -63,7 +99,9 @@ export function UserTable() {
         <input
           data-testid="user-search"
           type="text"
-          placeholder="Search by name or email..."
+          placeholder="Search by username, email, first or last name"
+          aria-label="Search users"
+          maxLength={USER_SEARCH_MAX_LENGTH}
           value={search}
           onChange={handleSearchChange}
           className="w-full px-3 py-2 border border-slate-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
@@ -97,8 +135,8 @@ export function UserTable() {
 
       {/* Empty State */}
       {!loading && !error && data && data.items.length === 0 && (
-        <div className="p-8 text-center text-slate-500">
-          <p>No users found</p>
+        <div data-testid="empty-state" className="p-8 text-center text-slate-500">
+          <p>{term ? `No users match "${term}".` : 'No users found'}</p>
         </div>
       )}
 
@@ -156,9 +194,31 @@ export function UserTable() {
             </table>
           </div>
 
-          {/* Pagination Info */}
-          <div className="px-6 py-3 border-t border-slate-200 text-sm text-slate-500">
-            Showing {data.items.length} of {data.total} users
+          {/* Pagination */}
+          <div className="px-6 py-3 border-t border-slate-200 flex items-center justify-between gap-4 text-sm text-slate-500">
+            <span data-testid="user-page-info">
+              Showing {shownFrom}–{shownTo} of {data.total}
+            </span>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                data-testid="user-page-prev"
+                onClick={() => setPage((p) => Math.max(0, p - 1))}
+                disabled={!hasPrevious}
+                className="px-3 py-1.5 border border-slate-300 rounded text-slate-700 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                Prev
+              </button>
+              <button
+                type="button"
+                data-testid="user-page-next"
+                onClick={() => setPage((p) => p + 1)}
+                disabled={!hasNext}
+                className="px-3 py-1.5 border border-slate-300 rounded text-slate-700 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                Next
+              </button>
+            </div>
           </div>
         </>
       )}
