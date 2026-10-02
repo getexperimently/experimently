@@ -59,6 +59,7 @@ from backend.app.services.audit_log_service import AuditLogService
 from backend.app.services.experiment_service import (
     AnalysisConfigError,
     ExperimentService,
+    is_experiment_key_conflict,
 )
 
 #: The states in which ``PUT /experiments/{id}`` accepts ``targeting_rules``
@@ -325,34 +326,6 @@ async def list_experiments(
         )
 
 
-#: Postgres error code for a unique constraint violation.
-_UNIQUE_VIOLATION = "23505"
-
-
-def is_experiment_key_conflict(exc: BaseException) -> bool:
-    """True when *exc* is the database refusing a second experiment with a key.
-
-    Decided from the driver's structured diagnostics, never from the message
-    text. The index name follows the schema (``ix_<schema>_experiments_key``),
-    so it is derived from the diagnostics' own schema name rather than written
-    out: the schema differs between a deployment, CI and the core build.
-    Anything without those diagnostics is not recognised, which answers the
-    generic message instead of the 409.
-    """
-    orig = getattr(exc, "orig", None)
-    if orig is None or getattr(orig, "pgcode", None) != _UNIQUE_VIOLATION:
-        return False
-    diag = getattr(orig, "diag", None)
-    if diag is None:
-        return False
-    schema = getattr(diag, "schema_name", None)
-    return (
-        getattr(diag, "table_name", None) == "experiments"
-        and schema is not None
-        and getattr(diag, "constraint_name", None) == f"ix_{schema}_experiments_key"
-    )
-
-
 #: The fixed message for a create that failed for any reason other than a
 #: key the caller chose already being taken.
 CREATE_FAILED = "Something went wrong while creating the experiment"
@@ -468,8 +441,9 @@ async def create_experiment(
         key = experiment_in.key
         if key is not None and is_experiment_key_conflict(e):
             # Only a key the caller chose is named. A generated key that
-            # collides is not theirs; it takes the generic answer below and a
-            # retry generates a new one.
+            # collides is not theirs: the service has already tried other
+            # keys (#388), and if every one was taken it takes the generic
+            # answer below.
             logger.info("Experiment create refused: key %r already exists", key)
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,

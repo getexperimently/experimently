@@ -7,6 +7,7 @@ from uuid import UUID
 from fastapi.encoders import jsonable_encoder
 from pydantic import BaseModel
 from sqlalchemy import func, or_
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, joinedload
 
 from backend.app.core.targeting_adapter import (
@@ -31,6 +32,38 @@ from backend.app.schemas.experiment import (
 from backend.app.schemas.variance_reduction import VarianceReductionConfig
 
 logger = logging.getLogger(__name__)
+
+#: Postgres error code for a unique constraint violation.
+_UNIQUE_VIOLATION = "23505"
+
+#: How many keys a create without a ``key`` generates before it gives up. The
+#: random suffix has 16**6 values, so a second collision in a row is already
+#: vanishingly rare; the bound keeps a broken generator from looping (#388).
+KEY_GENERATION_ATTEMPTS = 3
+
+
+def is_experiment_key_conflict(exc: BaseException) -> bool:
+    """True when *exc* is the database refusing a second experiment with a key.
+
+    Decided from the driver's structured diagnostics, never from the message
+    text. The index name follows the schema (``ix_<schema>_experiments_key``),
+    so it is derived from the diagnostics' own schema name rather than written
+    out: the schema differs between a deployment, CI and the core build.
+    Anything without those diagnostics is not recognised, which answers the
+    generic message instead of the 409.
+    """
+    orig = getattr(exc, "orig", None)
+    if orig is None or getattr(orig, "pgcode", None) != _UNIQUE_VIOLATION:
+        return False
+    diag = getattr(orig, "diag", None)
+    if diag is None:
+        return False
+    schema = getattr(diag, "schema_name", None)
+    return (
+        getattr(diag, "table_name", None) == "experiments"
+        and schema is not None
+        and getattr(diag, "constraint_name", None) == f"ix_{schema}_experiments_key"
+    )
 
 
 def _as_utc(value: Any) -> Optional[datetime]:
@@ -536,6 +569,33 @@ class ExperimentService:
         ]
         return f"{slug or 'experiment'}-{_uuid.uuid4().hex[:6]}"
 
+    def _insert_with_generated_key(self, experiment: Experiment) -> None:
+        """Insert *experiment* under a generated key, retrying a taken one.
+
+        Each attempt flushes inside a savepoint, so a unique conflict on the
+        key index rolls back only that attempt and the session stays usable.
+        Any other refusal, or a conflict on the last attempt, is raised as is.
+        """
+        for attempt in range(1, KEY_GENERATION_ATTEMPTS + 1):
+            experiment.key = self.generate_key(experiment.name)
+            try:
+                with self.db.begin_nested():
+                    self.db.add(experiment)
+                    self.db.flush()  # Flush to get the experiment ID
+                return
+            except IntegrityError as exc:
+                if attempt == KEY_GENERATION_ATTEMPTS or not (
+                    is_experiment_key_conflict(exc)
+                ):
+                    raise
+                logger.info(
+                    "Generated experiment key %r is taken; generating another "
+                    "(attempt %d of %d)",
+                    experiment.key,
+                    attempt,
+                    KEY_GENERATION_ATTEMPTS,
+                )
+
     def create_experiment(
         self,
         obj_in: Union[ExperimentCreate, Dict[str, Any]],
@@ -593,10 +653,13 @@ class ExperimentService:
 
         # Create experiment
         experiment = Experiment(**obj_data)
-        if not experiment.key:
-            experiment.key = self.generate_key(experiment.name)
-        self.db.add(experiment)
-        self.db.flush()  # Flush to get the experiment ID
+        if experiment.key:
+            # A key the caller chose: a conflict is theirs to hear about, so
+            # it propagates unchanged (the endpoint answers 409 naming it).
+            self.db.add(experiment)
+            self.db.flush()  # Flush to get the experiment ID
+        else:
+            self._insert_with_generated_key(experiment)
 
         # Create variants
         for variant_data in variants_data:
