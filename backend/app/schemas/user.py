@@ -203,7 +203,12 @@ class UserResponse(BaseModel):
 
     id: Any  # Accept any type for id to handle both string and UUID
     username: str
-    email: str  # Using str instead of EmailStr for test compatibility
+    # Nullable, but still required (no default): ``users.email`` is nullable,
+    # and the Cognito sign-in creates an account with no email when the token
+    # carries none. A non-null ``str`` here made every operation that returns
+    # such an account answer 500 -- a list for every account in it (#342).
+    # Required with ``None`` allowed keeps the key in every response.
+    email: Optional[str]
     full_name: Optional[str] = None
     is_active: bool
     is_superuser: bool
