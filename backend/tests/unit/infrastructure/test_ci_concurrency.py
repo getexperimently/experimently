@@ -318,3 +318,4 @@ def test_b3_refuses_a_job_level_group():
 
 
 # G4 scratch commit A (not for merge)
+# G4 scratch commit B (not for merge)
