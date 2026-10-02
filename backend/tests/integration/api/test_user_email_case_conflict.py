@@ -10,8 +10,9 @@ All three routes now look the address up with ``lower(email) = lower(:email)``
 in SQL, excluding the row being updated, and answer 409 "Email already
 registered". When the commit itself fails with a unique violation (a row
 committed between the check and the commit), the transaction is rolled back
-and the same query is run again; a hit answers 409, anything else -- a
-username collision -- is raised as before (that 500 is #610).
+and the same query is run again; a hit answers 409. A username collision is
+answered 409 "Username already registered", never "Email already registered"
+(#610; see ``test_user_username_conflict.py``).
 
 The clients are built with ``raise_server_exceptions=False`` so that a server
 error shows up as the 500 a real client sees, not as an exception raised into
@@ -38,6 +39,7 @@ from backend.tests.integration.conftest import HASHED_PASSWORD, make_client_for_
 pytestmark = [pytest.mark.integration]
 
 EMAIL_TAKEN = "Email already registered"
+USERNAME_TAKEN = "Username already registered"
 PASSWORD = "Str0ng-Passw0rd"
 
 #: The two PUT routes, as a path template.
@@ -339,8 +341,8 @@ class TestUpdate:
     def test_a_username_collision_is_not_answered_email_already_registered(
         self, db_session: Session, route: str
     ):
-        """A duplicate username on a PUT is a 500 today (#610), and stays one
-        here: the re-query finds no email conflict, so the error is raised."""
+        """A duplicate username on a PUT answers 409 "Username already
+        registered" (#610), never the email answer."""
         other = _make_user(db_session)
         target = _make_user(db_session)
         client = _admin_client(db_session)
@@ -358,8 +360,8 @@ class TestUpdate:
         ):
             response = client.put(route.format(id=target.id), json=body)
 
-            assert response.status_code != 200, response.text
-            assert EMAIL_TAKEN not in response.text
+            assert response.status_code == 409, response.text
+            assert response.json() == {"detail": USERNAME_TAKEN}
             assert _row(db_session, target.id) == target_before
 
 

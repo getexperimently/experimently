@@ -129,11 +129,13 @@ describe('ExperimentsService.update', () => {
 });
 
 describe('ExperimentsService.delete', () => {
-  it('sends DELETE request', async () => {
+  // Regression (#603): the route requires `experiment_key` (the id itself);
+  // without it every call answered 422.
+  it('sends DELETE with the required experiment_key', async () => {
     mockOk(undefined);
     await ExperimentsService.delete('abc');
     expect(mockFetch).toHaveBeenCalledWith(
-      `${BASE}/api/v1/experiments/abc`,
+      `${BASE}/api/v1/experiments/abc?experiment_key=abc`,
       expect.objectContaining({ method: 'DELETE' }),
     );
   });

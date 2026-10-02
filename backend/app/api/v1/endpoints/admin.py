@@ -16,8 +16,10 @@ from backend.app.api import deps
 from backend.app.api.v1.endpoints.users import (
     apply_password_change,
     changed_email,
+    changed_username,
     commit_user_write,
     refuse_if_email_held,
+    refuse_if_username_held,
 )
 from backend.app.models.user import User
 from backend.app.schemas.user import (
@@ -109,13 +111,17 @@ async def update_user(
     # "Email already registered". Re-casing the account's own address is not.
     new_email = changed_email(user, update_data)
     refuse_if_email_held(db, new_email, exclude_id=user.id)
+    # Another account with the new username is a 409 "Username already
+    # registered", as on create (#610). It was a 500.
+    new_username = changed_username(user, update_data)
+    refuse_if_username_held(db, new_username, exclude_id=user.id)
 
     # Update user attributes
     for field in update_data:
         if hasattr(user, field):
             setattr(user, field, update_data[field])
 
-    commit_user_write(db, new_email, exclude_id=user.id)
+    commit_user_write(db, new_email, exclude_id=user.id, username=new_username)
     db.refresh(user)
 
     return user
