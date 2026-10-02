@@ -282,9 +282,38 @@ these permissions:
   `PutLogEvents`, which come with ECS Exec
 - full profile only: `dynamodb:Query` and `dynamodb:UpdateItem` on
   `arn:aws:dynamodb:<region>:<account>:table/experiment-counters-<env>` (see [DynamoDB](#dynamodb))
+- full profile only, for the `etl` module's routes (see [Glue](#glue-the-etl-routes)):
+    - `glue:StartJobRun` and `glue:GetJobRun` on
+      `arn:aws:glue:<region>:<account>:job/experimentation-events-etl-<env>` and
+      `job/experimentation-metrics-etl-<env>`
+    - `glue:StartCrawler` and `glue:GetCrawler` on `crawler/experimentation-crawler-<env>`
+    - `glue:GetTable` and `glue:BatchCreatePartition` on `catalog`,
+      `database/experimentation_<env>` and `table/experimentation_<env>/*`
 
-There is no Kinesis, Cognito or other DynamoDB permission. The `etl` module's Glue calls are not
-granted yet (#487).
+There is no Kinesis, Cognito, Athena, S3 or other DynamoDB permission, and no other Glue action
+or Glue object.
+
+### Glue: the ETL routes
+
+On the full profile the Fargate stack tells the API the Glue names the glue-etl stack creates
+(`GLUE_ETL_JOB_NAME`, `GLUE_METRICS_JOB_NAME`, `GLUE_CRAWLER_NAME`, `GLUE_DATABASE`, all from
+`glue_names` in `infrastructure/cdk/stacks/names.py`) and grants the six calls above on those
+objects alone. The routes accept only those names (see the ETL section of the API reference).
+
+The Glue client is built without naming a region, so it takes the region from
+`AWS_DEFAULT_REGION`. The client never reads `AWS_REGION`. The CDK sets `AWS_DEFAULT_REGION` on
+the task to the stack's region, and the repository's `docker-compose.yml` sets it from
+`AWS_REGION`. **Anywhere else** (Helm, a container you run yourself), set `AWS_DEFAULT_REGION`
+to the region your Glue job and crawler are in. Without it the job and crawler routes answer
+500 and the API logs `NoRegionError`, and `POST /etl/partitions/add` does not report the
+failure (#656). On Helm, put it in `api.extraEnv` alongside the `GLUE_*` names. The chart has
+no value of its own for it.
+
+`GLUE_EVENTS_TABLE` (default `raw_events`) names the one catalog table `POST /etl/partitions/add`
+accepts, and the CDK does not set it. It must be the table the crawler creates. The crawler is
+given an S3 path and no table prefix, so it picks the table's name itself when it runs. Check
+the name after the first crawl and set `GLUE_EVENTS_TABLE` to it; until then that route
+answers 404.
 
 ---
 
@@ -299,8 +328,10 @@ granted yet (#487).
 | `SECRET_KEY` | Yes | Application secret key (min 32 chars) |
 | `COGNITO_USER_POOL_ID` | Yes | AWS Cognito User Pool ID |
 | `COGNITO_CLIENT_ID` | Yes | Cognito app client ID |
-| `AWS_REGION` | Yes | Primary AWS region |
-| `AWS_DEFAULT_REGION` | No | Full profile: set by the CDK to the stack's region, for the DynamoDB counter client (see [DynamoDB](#dynamodb)) |
+| `AWS_REGION` | Yes | Primary AWS region, read by Cognito and the other settings that name it. The Glue and DynamoDB counter clients do not read it |
+| `AWS_DEFAULT_REGION` | Full profile: yes, for the ETL routes | The region the Glue client (see [Glue](#glue-the-etl-routes)) and the DynamoDB counter client (see [DynamoDB](#dynamodb)) use. The CDK sets it to the stack's region. Outside the CDK set it yourself (Helm: `api.extraEnv`); without it the job and crawler routes answer 500 |
+| `GLUE_ETL_JOB_NAME`, `GLUE_METRICS_JOB_NAME`, `GLUE_CRAWLER_NAME`, `GLUE_DATABASE` | Full profile, for the ETL routes | The Glue job, crawler and database names the ETL routes accept. The CDK sets them to the glue-etl stack's `-<env>` names |
+| `GLUE_EVENTS_TABLE` | Full profile, for `POST /etl/partitions/add` | The catalog table that route accepts (default `raw_events`). Not set by the CDK: set it to the table the crawler creates (see [Glue](#glue-the-etl-routes)) |
 | `DYNAMODB_COUNTERS_TABLE` | No | Full profile: the counters table, set by the CDK to `experiment-counters-<env>` (default `experiment-counters`; see [DynamoDB](#dynamodb)) |
 | `SLACK_BOT_TOKEN` | No | Slack bot token for alerting |
 | `SENDGRID_API_KEY` | No | SendGrid API key for email alerts |

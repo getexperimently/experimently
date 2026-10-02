@@ -1941,6 +1941,12 @@ configures nothing, so with it empty its routes answer 404 for every name, as
 does `jobs/run` for a job type whose job is unset. A run that Glue does not
 have answers 404 `"Job run not found"`.
 
+The API reaches Glue in the region named by `AWS_DEFAULT_REGION`, never
+`AWS_REGION`. With it unset, the job and crawler routes answer 500 (the
+partitions route does not report it, #656). `GLUE_EVENTS_TABLE` must
+be the table the crawler creates. See
+[AWS integration: Glue](../integrations/aws.md#glue-the-etl-routes).
+
 ---
 
 ### Real-time DynamoDB Counters
@@ -1975,20 +1981,20 @@ The following endpoints extend the core API. See the dedicated reference pages l
 
 See [Compliance API Reference](compliance.md) for full documentation.
 
-Minimum role: **ANALYST** for read; **ADMIN** for export and reports.
+ADMIN or ANALYST for the listing and the reports; ADMIN for the export.
 
+```text
+GET /api/v1/compliance/audit-events                — List audit events (paginated, filterable; every profile)
+GET /api/v1/compliance/reports/soc2                — SOC 2 report, default period 365 days (compliance module)
+GET /api/v1/compliance/reports/iso27001            — ISO 27001 report, default period 730 days (compliance module)
+GET /api/v1/compliance/export                      — Download as JSON or CSV (ADMIN; compliance module)
 ```
-GET /api/v1/compliance/audit-events                — List audit events (paginated, filterable)
-GET /api/v1/compliance/reports/soc2                — Rolling 365-day SOC 2 compliance report (ADMIN)
-GET /api/v1/compliance/reports/iso27001            — Rolling 730-day ISO 27001 compliance report (ADMIN)
-GET /api/v1/compliance/export                      — Streaming export in JSON or CSV format (ADMIN)
-```
 
-**Key query parameters for `audit-events`**: `page`, `page_size`, `action`, `resource_type`, `actor_id`, `start_date`, `end_date`
+**Query parameters for `audit-events`**: `page`, `limit`, `action`, `resource_type`, `actor_id`, `start_time`, `end_time`
 
-**Key query parameters for `export`**: `format` (`json`|`csv`), `action`, `resource_type`, `actor_id`, `start_date`, `end_date`
+**Query parameters for `export`**: `format` (`json`|`csv`), `start_time`, `end_time`
 
-All audit events carry an HMAC-SHA256 `signature` field and responses include an `X-Audit-Signature` header. See [Compliance API Reference](compliance.md) for signature verification details.
+With the compliance module, each event is signed with HMAC-SHA256 and the signature is in its `hmac_signature` field; the report checks them. See [Compliance API Reference](compliance.md) for what is recorded.
 
 ---
 

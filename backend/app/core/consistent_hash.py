@@ -45,7 +45,7 @@ HISTORY. There were four experiment/flag hashes, and they disagreed (#81).
     lambda/shared           MurmurHash3-ish of the user, salted "{key}_variant"
 
 The first is the contract: ``tests/sdk-contract/golden-vectors.json`` pins it
-and all fourteen SDKs implement it. The others were free to drift because
+and the SDKs implement it. The others were free to drift because
 nothing compared them.
 
 They had drifted. For ``user-123`` / ``my-flag`` -- one input, one hash
@@ -74,7 +74,7 @@ Step 4 is the one that is easy to get wrong and impossible to notice: every
 other reading of the digest produces a valid-looking number in the right range.
 
 MD5 is a bucketing function here, not a security primitive. It is fixed by the
-contract: fourteen SDKs implement it, so changing it is a coordinated release,
+contract: the SDKs implement it, so changing it is a coordinated release,
 not a refactor. ``usedforsecurity=False`` says so to the linters.
 """
 

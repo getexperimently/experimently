@@ -1,6 +1,6 @@
 import React from 'react';
 import { render, screen, fireEvent } from '@testing-library/react';
-import { AuditLogFilter } from '@/components/admin/audit/AuditLogFilter';
+import { AuditLogFilter, REVERSED_RANGE_MESSAGE } from '@/components/admin/audit/AuditLogFilter';
 
 describe('AuditLogFilter', () => {
   const defaultFilters = {};
@@ -10,11 +10,10 @@ describe('AuditLogFilter', () => {
     jest.clearAllMocks();
   });
 
-  it('renders all filter inputs (action_type, entity_type, user email, date range)', () => {
+  it('renders all filter inputs (action_type, entity_type, date range)', () => {
     render(<AuditLogFilter filters={defaultFilters} onFilterChange={mockOnFilterChange} />);
     expect(screen.getByTestId('filter-action-type')).toBeInTheDocument();
     expect(screen.getByTestId('filter-entity-type')).toBeInTheDocument();
-    expect(screen.getByTestId('filter-user-email')).toBeInTheDocument();
     expect(screen.getByTestId('filter-start-date')).toBeInTheDocument();
     expect(screen.getByTestId('filter-end-date')).toBeInTheDocument();
   });
@@ -39,14 +38,12 @@ describe('AuditLogFilter', () => {
     );
   });
 
-  it('calls onFilterChange when user email input changes', () => {
+  // #665: the API has no user filter, so a "User Email" box filtered nothing.
+  // It is gone until the API can filter by user (#669).
+  it('has no user email filter', () => {
     render(<AuditLogFilter filters={defaultFilters} onFilterChange={mockOnFilterChange} />);
-    fireEvent.change(screen.getByTestId('filter-user-email'), {
-      target: { value: 'test@example.com' },
-    });
-    expect(mockOnFilterChange).toHaveBeenCalledWith(
-      expect.objectContaining({ user_email: 'test@example.com' })
-    );
+    expect(screen.queryByTestId('filter-user-email')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/user email/i)).not.toBeInTheDocument();
   });
 
   it('calls onFilterChange when start_date changes', () => {
@@ -73,13 +70,48 @@ describe('AuditLogFilter', () => {
     const filtersWithValues = {
       action_type: 'toggle_enable',
       entity_type: 'feature_flag',
-      user_email: 'test@example.com',
       start_date: '2024-01-01',
       end_date: '2024-01-31',
     };
     render(<AuditLogFilter filters={filtersWithValues} onFilterChange={mockOnFilterChange} />);
     fireEvent.click(screen.getByTestId('clear-filters-button'));
     expect(mockOnFilterChange).toHaveBeenCalledWith({});
+  });
+
+  it('accepts a one-day range (To equal to From)', () => {
+    render(<AuditLogFilter filters={{ start_date: '2024-01-10' }} onFilterChange={mockOnFilterChange} />);
+    fireEvent.change(screen.getByTestId('filter-end-date'), { target: { value: '2024-01-10' } });
+    expect(mockOnFilterChange).toHaveBeenCalledWith(
+      expect.objectContaining({ start_date: '2024-01-10', end_date: '2024-01-10' })
+    );
+    expect(screen.queryByTestId('filter-date-error')).not.toBeInTheDocument();
+  });
+
+  it('refuses a To date before the From date, inline, without passing the range on', () => {
+    render(<AuditLogFilter filters={{ start_date: '2024-01-10' }} onFilterChange={mockOnFilterChange} />);
+    fireEvent.change(screen.getByTestId('filter-end-date'), { target: { value: '2024-01-09' } });
+    expect(mockOnFilterChange).not.toHaveBeenCalled();
+    expect(screen.getByTestId('filter-date-error')).toHaveTextContent(REVERSED_RANGE_MESSAGE);
+    expect(screen.getByTestId('filter-end-date')).toHaveValue('2024-01-09');
+    expect(screen.getByTestId('filter-end-date')).toHaveAttribute('aria-invalid', 'true');
+  });
+
+  it('refuses a From date moved past the To date', () => {
+    render(<AuditLogFilter filters={{ end_date: '2024-01-10' }} onFilterChange={mockOnFilterChange} />);
+    fireEvent.change(screen.getByTestId('filter-start-date'), { target: { value: '2024-01-11' } });
+    expect(mockOnFilterChange).not.toHaveBeenCalled();
+    expect(screen.getByTestId('filter-date-error')).toBeInTheDocument();
+  });
+
+  it('passes the range on once it is corrected, and clears the message', () => {
+    render(<AuditLogFilter filters={{ start_date: '2024-01-10' }} onFilterChange={mockOnFilterChange} />);
+    fireEvent.change(screen.getByTestId('filter-end-date'), { target: { value: '2024-01-09' } });
+    fireEvent.change(screen.getByTestId('filter-end-date'), { target: { value: '2024-01-12' } });
+    expect(mockOnFilterChange).toHaveBeenCalledTimes(1);
+    expect(mockOnFilterChange).toHaveBeenCalledWith(
+      expect.objectContaining({ start_date: '2024-01-10', end_date: '2024-01-12' })
+    );
+    expect(screen.queryByTestId('filter-date-error')).not.toBeInTheDocument();
   });
 
   it('renders with data-testid="audit-log-filter"', () => {

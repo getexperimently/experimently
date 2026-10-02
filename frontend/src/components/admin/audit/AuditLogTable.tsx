@@ -3,6 +3,7 @@ import { AdminService } from '@/services/admin';
 import { AuditLog, AuditLogListResponse } from '@/types/admin';
 import { AuditLogDetailPanel } from './AuditLogDetailPanel';
 import { AuditLogFilters } from './AuditLogFilter';
+import { localDayRange } from '@/utils/auditDates';
 
 interface AuditLogTableProps {
   filters?: AuditLogFilters;
@@ -29,8 +30,12 @@ export function AuditLogTable({ filters }: AuditLogTableProps) {
     setLoading(true);
     setError(null);
     try {
+      const { from_date, to_date } = localDayRange(filters?.start_date, filters?.end_date);
       const result = await AdminService.listAuditLogs({
-        ...filters,
+        action_type: filters?.action_type,
+        entity_type: filters?.entity_type,
+        from_date,
+        to_date,
         page: currentPage,
         limit: PAGE_LIMIT,
       });

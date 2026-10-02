@@ -964,7 +964,7 @@ class AssignmentService:
         """Assign *user_id* to a variant, by the hash every SDK implements.
 
         Uses `backend.app.core.consistent_hash`, which is the algorithm
-        `tests/sdk-contract/golden-vectors.json` pins and all fourteen SDKs
+        `tests/sdk-contract/golden-vectors.json` pins and the SDKs
         implement. Before #81 this method had its own: MD5 of
         ``"{user_id}:{experiment.id}"`` read as one 128-bit integer modulo 100.
 

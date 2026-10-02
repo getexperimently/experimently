@@ -90,7 +90,15 @@ export const ExperimentsService = {
    */
   async estimateSampleSize(query: SampleSizeQuery): Promise<SampleSizeEstimate> {
     return apiFetch<SampleSizeEstimate>(`${BASE}/analysis/sample-size`, {
-      query: { ...query },
+      query: {
+        baseline_rate: query.baseline_rate,
+        minimum_detectable_effect: query.minimum_detectable_effect,
+        statistical_power: query.statistical_power,
+        significance_level: query.significance_level,
+        variant_count: query.variant_count,
+        daily_traffic: query.daily_traffic,
+        traffic_allocation: query.traffic_allocation,
+      },
       redirectOn401: false,
     });
   },

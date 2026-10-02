@@ -16,9 +16,10 @@ counted in variant A by the API and variant B by an SDK evaluating locally
 produces no error, no log line and no failed request -- just a quietly wrong
 number in every metric computed from the join.
 
-These read `tests/sdk-contract/golden-vectors.json`, the same file the
-cross-SDK suite reads, so the backend cannot drift from the fourteen SDKs
-without failing here first.
+These read `tests/sdk-contract/golden-vectors.json`, the same file
+`tests/sdk-contract/hash_contract.py` runs each SDK's own hash against (python,
+js, edge, react-native and go, in the `SDK Contract Tests` job of the PR gate),
+so the backend cannot drift from those SDKs without failing here first.
 """
 
 from __future__ import annotations
@@ -53,7 +54,7 @@ def test_the_vector_file_is_readable_and_not_empty():
 
 @pytest.mark.regression
 def test_every_golden_vector_matches():
-    """The contract, verbatim, for all fourteen SDKs and the backend."""
+    """The contract, verbatim, for the SDKs and the backend."""
     mismatches = []
     for vector in _vectors()["hash_vectors"]:
         actual = hash_user(vector["user_id"], vector["flag_key"])

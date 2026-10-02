@@ -36,7 +36,7 @@ function mockError(status = 500, statusText = 'Internal Server Error') {
 describe('AdminService', () => {
   describe('listUsers', () => {
     it('calls correct endpoint', async () => {
-      mockOk({ items: [], total: 0, page: 1, limit: 20 });
+      mockOk({ items: [], total: 0, skip: 0, limit: 20 });
       await AdminService.listUsers();
       expect(mockFetch).toHaveBeenCalledWith(
         expect.stringContaining(`${BASE}/api/v1/admin/users`),
@@ -44,12 +44,15 @@ describe('AdminService', () => {
       );
     });
 
-    it('passes page/limit params', async () => {
-      mockOk({ items: [], total: 0, page: 2, limit: 10 });
-      await AdminService.listUsers({ page: 2, limit: 10 });
-      const url = mockFetch.mock.calls[0][0] as string;
-      expect(url).toContain('page=2');
-      expect(url).toContain('limit=10');
+    // #651: the API pages by skip/limit; it never read `page`.
+    it('passes skip/limit/search params, and no page', async () => {
+      mockOk({ items: [], total: 0, skip: 20, limit: 10 });
+      await AdminService.listUsers({ skip: 20, limit: 10, search: 'ann' });
+      const params = new URL(mockFetch.mock.calls[0][0] as string).searchParams;
+      expect(params.get('skip')).toBe('20');
+      expect(params.get('limit')).toBe('10');
+      expect(params.get('search')).toBe('ann');
+      expect(params.has('page')).toBe(false);
     });
 
     it('omits an empty search param', async () => {
@@ -114,12 +117,25 @@ describe('AdminService', () => {
       await AdminService.listAuditLogs({
         action_type: 'CREATE',
         entity_type: 'feature_flag',
-        start_date: '2024-01-01',
+        from_date: '2024-01-01T05:00:00.000Z',
+        to_date: '2024-01-02T05:00:00.000Z',
       });
-      const url = mockFetch.mock.calls[0][0] as string;
-      expect(url).toContain('action_type=CREATE');
-      expect(url).toContain('entity_type=feature_flag');
-      expect(url).toContain('start_date=2024-01-01');
+      const params = new URL(mockFetch.mock.calls[0][0] as string).searchParams;
+      expect(params.get('action_type')).toBe('CREATE');
+      expect(params.get('entity_type')).toBe('feature_flag');
+      expect(params.get('from_date')).toBe('2024-01-01T05:00:00.000Z');
+      expect(params.get('to_date')).toBe('2024-01-02T05:00:00.000Z');
+    });
+
+    // #665: the API reads from_date/to_date and has no entity_name; the old
+    // start_date/end_date/entity_name were dropped unread.
+    it('sends none of the keys the API does not read', async () => {
+      mockOk({ items: [], total: 0, page: 1, limit: 20 });
+      await AdminService.listAuditLogs({ from_date: '2024-01-01T00:00:00.000Z', to_date: '2024-01-02T00:00:00.000Z' });
+      const params = new URL(mockFetch.mock.calls[0][0] as string).searchParams;
+      for (const key of ['start_date', 'end_date', 'entity_name', 'user_email']) {
+        expect(params.has(key)).toBe(false);
+      }
     });
   });
 
