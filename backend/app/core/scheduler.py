@@ -17,6 +17,7 @@ from backend.app.core.metrics import update_active_experiments
 from backend.app.core.scheduler_tick import run_locked_tick
 from backend.app.db.session import SessionLocal
 from backend.app.models.experiment import Experiment, ExperimentStatus
+from backend.app.services.experiment_service import stamp_rollout_rule_id
 from backend.app.services.notification_service import NotificationService
 
 logger = get_logger(__name__)
@@ -144,6 +145,9 @@ class ExperimentScheduler:
                 try:
                     resumed = experiment.status == ExperimentStatus.PAUSED
                     due = experiment.resume_at if resumed else experiment.start_date
+                    # A scheduled first start stamps the rule id; a scheduled
+                    # resume keeps the users the rule admits (#533).
+                    stamp_rollout_rule_id(experiment, experiment.status)
                     experiment.status = ExperimentStatus.ACTIVE
                     experiment.updated_at = current_time
                     db.add(experiment)
