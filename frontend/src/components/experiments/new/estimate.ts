@@ -59,8 +59,9 @@ function readNumber(text: string): number | null {
 
 /**
  * The sample-size query for these inputs and this many variants, or the first
- * problem with them. A refused input never reaches the API: the endpoint answers
- * some out-of-range values with a nonsense number rather than an error.
+ * problem with them. A refused input never reaches the API. The endpoint also
+ * refuses a treatment rate of 100% or more itself, with a 422 carrying the
+ * `ceiling` sentence word for word (a backend test reads it from this file).
  */
 export function buildEstimateQuery(inputs: EstimateInputs, variantCount: number): EstimateQueryResult {
   if (variantCount < 2) return { ok: false, problem: ESTIMATE_PROBLEMS.variants };

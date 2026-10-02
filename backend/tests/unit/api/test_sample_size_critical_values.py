@@ -6,12 +6,16 @@ from a helper with hard-coded shortcuts keyed on the probability it was given:
 two-sided path passes ``alpha / 2``, so the shortcuts fired for a two-sided
 10% test (given 1.96, the two-sided 5% value), for one-sided tests at 5%, 1%
 and 10%, and for power 0.5 (``z_beta`` 0.67 instead of 0). Those answers were
-17-80% too large. The two-sided 5% and 1% cases never reached a shortcut and
-are unchanged, including the documented 47,034.
+17-80% too large.
+
+Since #685 the estimate uses the results page's two-proportion formula (pooled
+variance under the null, unpooled under the alternative), which needs 1-5 more
+users per variant than the unpooled-only formula it replaced; the documented
+answer moved from 47,034 to 47,036.
 
 Each case is checked twice: against a literal answer computed once and recorded,
-and against the same unpooled formula evaluated here with ``norm.ppf``, so the
-test is not a copy compared with a copy.
+and against the pooled formula evaluated here with ``norm.ppf``, so the test is
+not a copy compared with a copy.
 """
 
 import math
@@ -31,23 +35,23 @@ RELATIVE_MDE = 0.05
 
 # (significance_level, statistical_power, is_one_sided, samples_per_variant)
 CASES = [
-    # Two-sided 10%: formerly 47035 / 62966 / 77871.
-    (0.10, 0.80, False, 37048),
-    (0.10, 0.90, False, 51318),
-    (0.10, 0.95, False, 64851),
-    # One-sided: formerly 47035 / 70156 / 37202.
-    (0.05, 0.80, True, 37048),
-    (0.01, 0.80, True, 60140),
-    (0.10, 0.80, True, 27013),
-    # Power 0.5: formerly 41448.
-    (0.05, 0.50, False, 23020),
-    # Unchanged.
-    (0.05, 0.80, False, 47034),
-    (0.05, 0.90, False, 62964),
-    (0.05, 0.95, False, 77869),
-    (0.01, 0.80, False, 69985),
-    (0.01, 0.90, False, 89163),
-    (0.01, 0.95, False, 106749),
+    # Two-sided 10%. Shortcut era 47035 / 62966 / 77871; unpooled 37048 / 51318 / 64851.
+    (0.10, 0.80, False, 37050),
+    (0.10, 0.90, False, 51320),
+    (0.10, 0.95, False, 64853),
+    # One-sided. Shortcut era 47035 / 70156 / 37202; unpooled 37048 / 60140 / 27013.
+    (0.05, 0.80, True, 37050),
+    (0.01, 0.80, True, 60143),
+    (0.10, 0.80, True, 27014),
+    # Power 0.5. Shortcut era 41448; unpooled 23020.
+    (0.05, 0.50, False, 23022),
+    # Two-sided 5% and 1%. Unpooled 47034 / 62964 / 77869 / 69985 / 89163 / 106749.
+    (0.05, 0.80, False, 47036),
+    (0.05, 0.90, False, 62968),
+    (0.05, 0.95, False, 77873),
+    (0.01, 0.80, False, 69989),
+    (0.01, 0.90, False, 89168),
+    (0.01, 0.95, False, 106754),
 ]
 
 
@@ -56,8 +60,11 @@ def reference_per_variant(alpha: float, power: float, one_sided: bool) -> int:
     z_beta = norm.ppf(power)
     p1 = BASELINE
     p2 = BASELINE * (1 + RELATIVE_MDE)
-    variance = p1 * (1 - p1) + p2 * (1 - p2)
-    return math.ceil((z_alpha + z_beta) ** 2 * variance / (p2 - p1) ** 2)
+    p_bar = (p1 + p2) / 2
+    root = z_alpha * math.sqrt(2 * p_bar * (1 - p_bar)) + z_beta * math.sqrt(
+        p1 * (1 - p1) + p2 * (1 - p2)
+    )
+    return math.ceil(root**2 / (p2 - p1) ** 2)
 
 
 @pytest.fixture

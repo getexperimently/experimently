@@ -331,21 +331,27 @@ curl -s -G localhost:8000/api/v1/experiments/analysis/sample-size \
   --data-urlencode "baseline_rate=0.12" \
   --data-urlencode "minimum_detectable_effect=0.05" | jq '{samples_per_variant, total_samples}'
 ```
-<!-- expect: "samples_per_variant": 47034 -->
-<!-- expect: "total_samples": 94068 -->
+<!-- expect: "samples_per_variant": 47036 -->
+<!-- expect: "total_samples": 94072 -->
 
-For a 12% baseline and a 5% relative change it needs `47034` users per variant, `94068` in
+For a 12% baseline and a 5% relative change it needs `47036` users per variant, `94072` in
 all, at 80% power and 5% significance (two-sided). It also takes `statistical_power`,
 `significance_level`, `is_one_sided`, `variant_count`, and `daily_traffic` with
 `traffic_allocation` for a duration estimate.
 
-The calculation is the standard one for two proportions:
+The calculation is the standard one for two proportions (Fleiss), the same one the results
+page's Sample Size tab uses: the variance is pooled under the null hypothesis and unpooled
+under the alternative.
 
 ```text
-n ≈ (z_α/2 + z_β)² × [p₁(1−p₁) + p₂(1−p₂)] / (p₁ − p₂)²
+n = [z_α/2 × √(2p̄(1−p̄)) + z_β × √(p₁(1−p₁) + p₂(1−p₂))]² / (p₁ − p₂)²
 ```
 
-Where `p₁` = baseline rate, `p₂` = baseline rate × (1 + MDE), `z_α/2` = 1.96 (two-tailed, α=0.05), `z_β` = 0.842 (80% power).
+Where `p₁` = baseline rate, `p₂` = baseline rate × (1 + MDE), `p̄` = (p₁ + p₂) / 2,
+`z_α/2` = 1.96 (two-tailed, α=0.05; a one-sided test uses `z_α` = 1.645), `z_β` = 0.842
+(80% power), and `n` is rounded up. It is per variant, with no correction for comparing more
+than two variants; the total is `n` times the number of variants. A baseline that the effect
+would raise to 100% or more is refused with a 422.
 
 ---
 
