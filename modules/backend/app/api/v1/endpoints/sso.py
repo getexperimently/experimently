@@ -94,7 +94,10 @@ class SSOConfigCreate(BaseModel):
     )
     is_enforced: bool = Field(
         False,
-        description="Block password login when True",
+        description=(
+            "Stored and returned, but it has no effect: password sign-in is "
+            "not blocked when True"
+        ),
     )
     is_active: bool = Field(True)
 

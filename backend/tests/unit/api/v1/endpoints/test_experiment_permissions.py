@@ -541,12 +541,12 @@ def test_experiment_state_permissions(
     experiment_status,
     action,
     expected_status,
-    client: TestClient,
     db_session: Session,
     normal_user: User,
     mock_auth,
 ):
     """Test permissions based on experiment status."""
+    client = mock_auth  # the test client, signed in (#476)
     # Create a test experiment with the specified status
     experiment = Experiment(
         name="Test Experiment",

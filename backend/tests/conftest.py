@@ -562,8 +562,14 @@ def superuser(db_session):
 
 
 @pytest.fixture
-def mock_auth(normal_user, monkeypatch):
-    """Mock the authentication dependencies."""
+def mock_auth(client, normal_user, monkeypatch):
+    """The ``client`` test client, signed in as ``normal_user`` (a DEVELOPER).
+
+    It requests ``client`` and yields it, so a test takes this one fixture
+    rather than ``client`` and ``mock_auth`` together: both write the
+    app-global auth override, and with two the user depended on which pytest
+    set up last (#476, ``backend/tests/smoke/test_role_client_fixtures.py``).
+    """
 
     async def override_get_current_user():
         return normal_user
@@ -599,15 +605,15 @@ def mock_auth(normal_user, monkeypatch):
         override_get_current_active_user
     )
 
-    yield
+    yield client
 
     app.dependency_overrides.pop(deps.get_current_user, None)
     app.dependency_overrides.pop(deps.get_current_active_user, None)
 
 
 @pytest.fixture
-def mock_auth_superuser(superuser, monkeypatch):
-    """Mock the authentication dependencies to return a superuser."""
+def mock_auth_superuser(client, superuser, monkeypatch):
+    """The ``client`` test client, signed in as ``superuser``; see mock_auth."""
 
     async def override_get_current_user():
         return superuser
@@ -650,7 +656,7 @@ def mock_auth_superuser(superuser, monkeypatch):
         override_get_current_superuser
     )
 
-    yield
+    yield client
 
     # Clean up dependency overrides
     app.dependency_overrides.pop(deps.get_current_user, None)
