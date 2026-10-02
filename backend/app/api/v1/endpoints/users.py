@@ -386,6 +386,9 @@ async def get_user_me(
     """
     Get current user.
     """
+    # ``role`` falls back to VIEWER for a row with none, as ``create_user``
+    # and ``GET /auth/me`` do.
+    role = getattr(current_user, "role", None)
     # Ensure the response conforms to the UserResponse schema
     response_data = {
         "id": current_user.id,
@@ -394,6 +397,7 @@ async def get_user_me(
         "full_name": current_user.full_name,
         "is_active": current_user.is_active,
         "is_superuser": current_user.is_superuser,
+        "role": role.name if isinstance(role, UserRole) else "VIEWER",
         "created_at": current_user.created_at,
         "updated_at": current_user.updated_at,
     }
