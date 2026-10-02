@@ -1,4 +1,5 @@
 # backend/app/services/experiment_service.py
+import copy
 import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Set, Union
@@ -312,6 +313,23 @@ def rules_for_clone(source: Experiment) -> Any:
     if stored_rule_id(rules) == str(source.id):
         return {key: value for key, value in rules.items() if key != "id"}
     return rules
+
+
+# The experiment's analysis settings, which a clone starts with (#255). Every
+# one is copied as stored (deep-copied, so the clone never shares a JSON value
+# with its source). ``bayesian_decision`` is not among them: it is the source's
+# result, not a setting. The unit test
+# ``test_every_experiment_column_is_classified_for_clone`` fails on a new
+# column until it is listed here or named as one a clone does not copy.
+CLONED_ANALYSIS_FIELDS = (
+    "optimization_type",
+    "sequential_testing_enabled",
+    "sequential_testing_method",
+    "sequential_testing_config",
+    "variance_reduction_config",
+    "bayesian_enabled",
+    "bayesian_config",
+)
 
 
 class ExperimentService:
@@ -1028,6 +1046,10 @@ class ExperimentService:
             status=ExperimentStatus.DRAFT,
             owner_id=str(user_id),
             tags=experiment.tags,
+            **{
+                field: copy.deepcopy(getattr(experiment, field))
+                for field in CLONED_ANALYSIS_FIELDS
+            },
         )
 
         self.db.add(new_experiment)
