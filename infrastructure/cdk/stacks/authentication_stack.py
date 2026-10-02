@@ -20,8 +20,10 @@ class AuthenticationStack(Stack):
             self,
             "ExperimentationUserPool",
             user_pool_name=f"experimentation-platform-users-{environment}",
-            # Self-signup configuration
-            self_sign_up_enabled=True,
+            # Administrators create users; nobody can register themselves.
+            # The dashboard says the same ("Accounts are created by an
+            # administrator"). Pinned by tests/test_auth_stack.py.
+            self_sign_up_enabled=False,
             sign_in_aliases=cognito.SignInAliases(
                 email=True,
                 username=True,
