@@ -705,6 +705,88 @@ def test_a_create_that_cannot_be_saved_is_refused(signin, caplog):
 
 
 # --------------------------------------------------------------------------
+# Case 7: a value longer than its column (#709)
+# --------------------------------------------------------------------------
+
+#: The over-long values, 101 characters (one over the 100-character columns),
+#: and 248 for the sub (``cognito:`` + 248 is one over ``external_id``'s 255).
+_LONG = "L" * 101
+_LONG_SUB = "s" * 248
+
+
+def _long_identity(sfx: str, field: str) -> Dict[str, Any]:
+    username = f"long_{sfx}"
+    sub = str(uuid.uuid4())
+    email = f"long.{sfx}@example.com"
+    names = {"given_name": "Ada", "family_name": "Lee"}
+    if field == "username":
+        username = _LONG
+    elif field == "email":
+        email = f"{_LONG}@example.com"
+    elif field == "first_name":
+        names["given_name"] = _LONG
+    elif field == "last_name":
+        names["family_name"] = _LONG
+    elif field == "external_id":
+        sub = _LONG_SUB
+    return identity(username, sub, email, ["Developers"], **names)
+
+
+@pytest.mark.parametrize(
+    "field", ["username", "email", "first_name", "last_name", "external_id"]
+)
+def test_an_identity_with_a_value_longer_than_its_column_is_refused(
+    signin, caplog, field
+):
+    """Refused as ``field_too_long`` naming the column -- it was the insert
+    failing and being recorded as ``commit_failed`` -- and the record never
+    carries the over-long value."""
+    sfx = _suffix()
+    count = signin.rows.count()
+    signin.use(_long_identity(sfx, field))
+
+    response = _sign_in(signin, caplog)
+
+    _assert_refused(signin, response, caplog, "field_too_long", {}, count)
+    (record,) = [r for r in caplog.records if r.name == SIGN_IN_LOGGER]
+    assert record.field == field
+    over_long = _LONG_SUB if field == "external_id" else _LONG
+    assert over_long not in record.getMessage()
+    assert over_long not in repr(vars(record))
+
+
+def test_an_identity_with_every_value_at_its_column_length_gets_an_account(
+    signin, caplog
+):
+    """The boundary: 100 characters in each 100-character column is stored."""
+    sfx = _suffix()
+    username = f"edge_{sfx}".ljust(100, "u")
+    local = f"e{sfx}"
+    email = f"{local}@{'d' * (100 - len(local) - len('@.example.com'))}.example.com"
+    assert len(username) == len(email) == 100
+    count = signin.rows.count()
+    signin.use(
+        identity(
+            username,
+            str(uuid.uuid4()),
+            email,
+            ["Developers"],
+            given_name="g" * 100,
+            family_name="f" * 100,
+        )
+    )
+
+    response = _sign_in(signin, caplog)
+
+    assert response.status_code == 200, response.text
+    assert _reasons(caplog) == []
+    assert signin.rows.count() == count + 1
+    row_id = response.json()["id"]
+    assert signin.rows.column(row_id, "first_name") == "g" * 100
+    assert signin.rows.column(row_id, "last_name") == "f" * 100
+
+
+# --------------------------------------------------------------------------
 # Errors that are not refusals
 # --------------------------------------------------------------------------
 
