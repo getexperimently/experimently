@@ -3,8 +3,10 @@
 * A key the caller chose that another experiment already has: 409, naming it.
 * Anything else the database refuses (two metrics with one name, a value its
   column cannot hold that the schema let through, a generated key that
-  happens to collide): 400 with a
-  fixed message carrying the request ID.
+  keeps colliding on every retry): 400 with a fixed message carrying the
+  request ID.
+* A generated key that is taken is replaced by a new one, a bounded number of
+  times, so the caller who sent no key gets 201 (#388).
 * Any other failure: 500 with the same fixed message.
 * Every refused create leaves the session usable for the next request.
 
@@ -23,6 +25,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from backend.app.api import deps
 from backend.app.main import app
+from backend.app.services import experiment_service
 from backend.app.services.experiment_service import ExperimentService
 
 pytestmark = [pytest.mark.integration, pytest.mark.regression]
@@ -150,14 +153,43 @@ def test_a_generated_key_collision_is_not_reported_as_the_callers_key(
     first = admin_client.post(URL, json=_payload(taken))
     assert first.status_code == 201, first.text
 
-    monkeypatch.setattr(
-        ExperimentService, "generate_key", staticmethod(lambda n: taken)
-    )
+    calls: list[str] = []
+
+    def always_taken(name: str) -> str:
+        calls.append(name)
+        return taken
+
+    monkeypatch.setattr(ExperimentService, "generate_key", staticmethod(always_taken))
     resp = admin_client.post(URL, json=_payload(), headers={"X-Request-ID": "prb-d-1"})
 
+    # Every retry collided too, so the bounded retry gave up (#388).
+    assert len(calls) == experiment_service.KEY_GENERATION_ATTEMPTS
     assert resp.status_code == 400
     assert resp.json() == {"detail": f"{GENERIC} (request ID: prb-d-1)."}
     assert "None" not in resp.text
+
+
+def test_a_taken_generated_key_is_retried_with_a_new_one(
+    admin_client: TestClient, monkeypatch
+) -> None:
+    taken = _key("taken")
+    first = admin_client.post(URL, json=_payload(taken))
+    assert first.status_code == 201, first.text
+
+    real = ExperimentService.generate_key
+    calls: list[str] = []
+
+    def taken_once(name: str) -> str:
+        key = taken if not calls else real(name)
+        calls.append(key)
+        return key
+
+    monkeypatch.setattr(ExperimentService, "generate_key", staticmethod(taken_once))
+    resp = admin_client.post(URL, json=_payload())
+
+    assert resp.status_code == 201, resp.text
+    assert len(calls) == 2
+    assert resp.json()["key"] == calls[1] != taken
 
 
 def test_a_refused_create_leaves_the_session_usable(
