@@ -292,9 +292,16 @@ required. To compare that
 with what `scripts/configure-repo.sh` would write, run
 `scripts/check_required_checks.sh` with your own `gh` login (the Actions token
 cannot read branch protection). It prints every difference in check names,
-`strict`, the review rule and each check's app. `configure-repo.sh` runs the
-same comparison first, and refuses to write anything if live protection
-differs in more than check names.
+`strict` and the review rule, and in each check's app where the script names
+one. `configure-repo.sh` runs the same comparison first, and refuses to write
+anything if live protection differs in more than check names.
+
+`configure-repo.sh` sends the checks with no app id. GitHub's REST
+documentation says a check sent that way is assigned to the app that most
+recently posted it, and only an explicit `app_id: -1` allows any app. So a
+write is expected to keep these checks pinned to GitHub Actions. That is
+GitHub's documented behaviour, not something this repository has measured,
+and the drift check prints it as a note rather than as drift.
 
 `lint` is the composite gate: ruff (format + lint), import-linter for the
 core/modules boundary, `reuse lint` for licence headers, the requirements-lock

@@ -13,8 +13,9 @@
 # Before it writes anything it runs scripts/check_required_checks.sh against
 # live protection, and refuses -- writing nothing -- if live differs from what
 # it would write in any other way: `strict`, the review rule, the app each
-# check is pinned to, or the other protection flags. Those are the founder's
-# decision, not this file's, and a PUT here would silently replace them.
+# check is pinned to (where this body names one), or the other protection
+# flags. Those are the founder's decision, not this file's, and a PUT here
+# would silently replace them.
 # `--print-protection-payload` prints the protection body it would PUT and
 # exits without calling GitHub; check_required_checks.sh reads it from there.
 #
@@ -36,7 +37,7 @@ while [ $# -gt 0 ]; do
         --repo) REPO="$2"; shift 2 ;;
         --dry-run) DRY=1; shift ;;
         --print-protection-payload) PRINT_PAYLOAD=1; shift ;;
-        -h|--help) sed -n '2,26p' "$0"; exit 0 ;;
+        -h|--help) sed -n '2,28p' "$0"; exit 0 ;;
         *) echo "unknown argument: $1" >&2; exit 2 ;;
     esac
 done
@@ -68,6 +69,14 @@ REQUIRED_CHECKS=(
 # The branch protection body this script PUTs. `required_status_checks.strict`
 # makes a branch merge only when it is up to date with main, which is what
 # stops two independently green pull requests combining into a red main.
+# The checks go in the deprecated `contexts` list, with no app id. GitHub
+# documents that a check sent that way is assigned to the app that most
+# recently posted it, and that only an explicit `app_id: -1` in `checks`
+# allows any app:
+# https://docs.github.com/en/rest/branches/branch-protection#update-branch-protection
+# (from github/rest-api-description). That is GitHub's documented behaviour,
+# not something measured here; for checks GitHub Actions posts, a write would
+# be expected to keep them pinned to it (app 15368).
 # Live protection may differ from this (see the header); the guard below is
 # what stops a run from imposing it.
 protection_payload() {
