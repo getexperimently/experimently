@@ -3,9 +3,10 @@
 ``GET /api/v1/openfeature/flags`` builds each flag's ``rules`` from
 ``targeting_rules`` stored in the legacy list shape. A row whose stored value
 is a JSON scalar (a number or a boolean) carries no legacy rules, so it is
-listed with ``rules: []``, the same way the edge config treats it. These rows
-are written straight through the ORM, because that is how such a value reaches
-the table: the request schemas are not what put it there.
+listed with ``rules: []``, the same way the edge config treats it. The rows are
+written through the ORM so the test exercises the read path alone; until
+request validation lands (#535), such a value can also arrive through create
+or update.
 """
 
 from __future__ import annotations
