@@ -94,6 +94,9 @@ def test_the_documented_onboarding_creates_the_account(onboarding, db_session):
     body = me.json()
     assert body["username"] == step["Username"]
     assert body["email"] == "jane.doe@example.com"
+    # The response carries the role of the group the procedure added the
+    # user to, not null (#644).
+    assert body["role"] == "DEVELOPER"
     record = idp.admin_get_user(UserPoolId=pool_id, Username=step["Username"])
     sub = next(a["Value"] for a in record["UserAttributes"] if a["Name"] == "sub")
     account = db_session.get(User, uuid.UUID(body["id"]))
