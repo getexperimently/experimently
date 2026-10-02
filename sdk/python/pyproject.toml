@@ -4,14 +4,14 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "experimently"
-version = "1.1.0"
+version = "0.1.0"
 description = "Python client for the Experimently public API (experiments, feature flags, event tracking)"
 readme = "README.md"
 license = {text = "MIT"}
 requires-python = ">=3.9"
 keywords = ["experimentation", "a/b-testing", "feature-flags", "sdk"]
 classifiers = [
-    "Development Status :: 5 - Production/Stable",
+    "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
     "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
@@ -24,6 +24,11 @@ classifiers = [
 ]
 # Deliberately empty: the client uses only the standard library (urllib).
 dependencies = []
+
+[project.urls]
+Homepage = "https://github.com/getexperimently/experimently/tree/main/sdk/python#readme"
+Repository = "https://github.com/getexperimently/experimently"
+Issues = "https://github.com/getexperimently/experimently/issues"
 
 [project.optional-dependencies]
 dev = ["pytest>=7.0"]

@@ -1,5 +1,8 @@
 # experimently (Python)
 
+**0.x beta.** The API may change between 0.x minor versions; pin the exact version
+you test against.
+
 Synchronous, dependency-free Python client for the Experimently public API.
 Experiment assignment and feature-flag evaluation are decided **by the server** by default (sticky
 per user + experiment); the SDK caches the answers per user + key. Server-side code can opt in to
