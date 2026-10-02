@@ -55,13 +55,19 @@ class TestFeatureFlagToggleEndpoints:
     def setup_test_feature_flag(
         self, owner_id: uuid4, status: FeatureFlagStatus = FeatureFlagStatus.INACTIVE
     ):
-        """Setup a test feature flag."""
+        """Setup a test feature flag.
+
+        ``status`` is the enum member, because that is what the column returns
+        when a flag is loaded from the database. Building it with
+        ``status.value`` (a string) hid a bug in which ``/toggle`` compared the
+        loaded enum with the string and never turned an ACTIVE flag off.
+        """
         return FeatureFlag(
             id=uuid4(),
             key="test_feature_flag",
             name="Test Feature Flag",
             description="A test feature flag",
-            status=status.value,
+            status=status,
             owner_id=owner_id,
             created_at=datetime.now(timezone.utc),
             updated_at=datetime.now(timezone.utc),

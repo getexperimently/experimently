@@ -1018,9 +1018,15 @@ async def toggle_feature_flag(
         )
 
     try:
-        # Determine new status based on current status
-        old_status = flag.status
-        if flag.status == FeatureFlagStatus.ACTIVE.value:
+        # Determine new status based on current status. The column loads as
+        # FeatureFlagStatus; a writer may have left a plain string. Normalise
+        # to the string so the comparison and the audit row agree.
+        old_status = (
+            flag.status.value
+            if isinstance(flag.status, FeatureFlagStatus)
+            else flag.status
+        )
+        if old_status == FeatureFlagStatus.ACTIVE.value:
             new_status = FeatureFlagStatus.INACTIVE.value
             action_type = ActionType.TOGGLE_DISABLE
         else:

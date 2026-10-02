@@ -232,6 +232,30 @@
         "title": "AddExperimentToGroupRequest",
         "type": "object"
       },
+      "AdminUserPatch": {
+        "additionalProperties": false,
+        "description": "Change another account's role and/or active status (superuser only).\n\nSend only the keys to change; at least one is required. ``null`` is\nrefused, as is any other key.",
+        "properties": {
+          "is_active": {
+            "description": "false stops the account signing in and using its API keys.",
+            "title": "Is Active",
+            "type": "boolean"
+          },
+          "role": {
+            "description": "RBAC role name: ADMIN, DEVELOPER, ANALYST or VIEWER (case-insensitive).",
+            "enum": [
+              "ADMIN",
+              "DEVELOPER",
+              "ANALYST",
+              "VIEWER"
+            ],
+            "title": "Role",
+            "type": "string"
+          }
+        },
+        "title": "AdminUserPatch",
+        "type": "object"
+      },
       "AggregatedMetricResponse": {
         "description": "Schema for aggregated metric response.",
         "metadata": {
@@ -12560,7 +12584,7 @@
     },
     "/api/v1/admin/users": {
       "get": {
-        "description": "List all users.\n\nThis endpoint is only accessible by superusers and returns a list of all users\nin the system with pagination.",
+        "description": "List all users.\n\nThis endpoint is only accessible by superusers and returns a list of all users\nin the system with pagination, newest first.\n\nWith `search`, only users whose username, email, first name or last name\ncontains the term (case-insensitive, matched literally) are listed, and\n`total` counts those users. A term containing a NUL character answers 422.",
         "operationId": "list_users_api_v1_admin_users_get",
         "parameters": [
           {
@@ -12584,6 +12608,25 @@
               "minimum": 1,
               "title": "Limit",
               "type": "integer"
+            }
+          },
+          {
+            "description": "Case-insensitive substring of the username, email, first name or last name. Matched literally (`%`, `_` and `\\` are not wildcards). Leading and trailing spaces are ignored; an empty or all-space value lists every user.",
+            "in": "query",
+            "name": "search",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 100,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Case-insensitive substring of the username, email, first name or last name. Matched literally (`%`, `_` and `\\` are not wildcards). Leading and trailing spaces are ignored; an empty or all-space value lists every user.",
+              "title": "Search"
             }
           }
         ],
@@ -12711,6 +12754,66 @@
         "tags": [
           "Administration"
         ]
+      },
+      "patch": {
+        "description": "Change a user's role and/or active status.\n\nSuperusers only. Send only the keys to change. You cannot change your own\nrole or deactivate yourself (400). With Cognito sign-in and role sync on,\na role change is refused (409): the next request would overwrite it.\nResending the stored values changes nothing and answers 200. Deactivating\na user also stops the API keys they created.",
+        "operationId": "patch_user_api_v1_admin_users__user_id__patch",
+        "parameters": [
+          {
+            "description": "The ID of the user to change",
+            "in": "path",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "description": "The ID of the user to change",
+              "format": "uuid",
+              "title": "User Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AdminUserPatch"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Patch User",
+        "tags": [
+          "Administration"
+        ],
+        "x-stability": "beta"
       },
       "put": {
         "description": "Update user.\n\nThis endpoint is only accessible by superusers and allows updating\nuser details, including superuser status.",
@@ -15851,7 +15954,7 @@
     },
     "/api/v1/experiments/{experiment_id}/clone": {
       "post": {
-        "description": "Clone an experiment.\n\nThis endpoint creates a new experiment that is a copy of an existing experiment.\nThe cloned experiment will:\n- Have a name prefixed with \"Copy of\"\n- Be in DRAFT status\n- Have the same variants, metrics, and configuration as the original\n- Have the current user as the owner\n\nThis is useful for creating variations of existing experiments or repeating\nsuccessful experiments with minor modifications.\n\nReturns:\n    ExperimentResponse: The newly created cloned experiment\n\nRaises:\n    HTTPException 403: If the caller's role does not hold READ and CREATE on experiments\n    HTTPException 404: If the source experiment doesn't exist",
+        "description": "Clone an experiment.\n\nThis endpoint creates a new experiment that is a copy of an existing experiment.\nThe cloned experiment will:\n- Have a name prefixed with \"Copy of\", shortened to fit the 100-character\n  name limit when the source's name is long\n- Be in DRAFT status\n- Have the same variants, metrics, and configuration as the original\n- Have the current user as the owner\n\nThis is useful for creating variations of existing experiments or repeating\nsuccessful experiments with minor modifications.\n\nReturns:\n    ExperimentResponse: The newly created cloned experiment\n\nRaises:\n    HTTPException 403: If the caller's role does not hold READ and CREATE on experiments\n    HTTPException 404: If the source experiment doesn't exist",
         "operationId": "clone_experiment_api_v1_experiments__experiment_id__clone_post",
         "parameters": [
           {
