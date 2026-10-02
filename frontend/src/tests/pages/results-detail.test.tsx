@@ -62,6 +62,7 @@ const RESULTS = {
     has_winner: false,
     winning_variant_id: null,
     recommendation: 'CONTINUE_TESTING',
+    recommendation_reason: 'No statistically significant difference yet.',
   },
   metrics: [],
 };

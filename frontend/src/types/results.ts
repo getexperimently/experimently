@@ -43,7 +43,15 @@ export interface ExperimentSummaryData {
   has_winner: boolean;
   winning_variant_id: string | null;
   recommendation: RecommendationAction;
+  /** The engine's one-sentence explanation of the recommendation. */
+  recommendation_reason: string;
 }
+
+/** The test that produced a variant's p_value (backend StatisticalTest). */
+export type StatisticalTestUsed = 'fisher_exact' | 'z_test_proportions' | 'welch_t_test';
+
+/** Multiple-comparison correction (backend CorrectionMethod). Only these three exist. */
+export type CorrectionMethod = 'none' | 'bonferroni' | 'benjamini_hochberg';
 
 export interface VariantResult {
   variant_id: string;
@@ -61,6 +69,8 @@ export interface VariantResult {
   effect_size_label: EffectSizeLabel | null;
   relative_improvement_pct: number | null;
   power: number | null;
+  /** The test behind p_value; null for the control variant. */
+  statistical_test_used?: StatisticalTestUsed | null;
 }
 
 export interface MetricResult {
@@ -78,7 +88,7 @@ export interface ExperimentResultsResponse {
   start_date: string | null;
   end_date: string | null;
   confidence_level: number;
-  correction_method: string;
+  correction_method: CorrectionMethod;
   sample_size_adequate: boolean;
   computed_at: string;
   summary: ExperimentSummaryData;

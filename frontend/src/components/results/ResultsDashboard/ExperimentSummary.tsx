@@ -61,6 +61,10 @@ export function ExperimentSummary({ experiment }: ExperimentSummaryProps) {
     }
   }
 
+  const isWinner =
+    summary.recommendation === 'SHIP_VARIANT' && summary.has_winner && winnerName !== '';
+  const isLeading = !isWinner && summary.has_winner && winnerName !== '';
+
   return (
     <div
       className="bg-white rounded-xl border border-slate-200 p-6 space-y-4"
@@ -102,12 +106,26 @@ export function ExperimentSummary({ experiment }: ExperimentSummaryProps) {
         />
       </div>
 
-      {/* Winner */}
-      {summary.has_winner && winnerName && (
+      {/* Why: the engine's own sentence, so the pill is never unexplained. */}
+      {summary.recommendation_reason && (
+        <p className="text-sm text-slate-700" data-testid="recommendation-reason">
+          {summary.recommendation_reason}
+        </p>
+      )}
+
+      {/* Winner only when the recommendation is to ship it. A significant
+          variant under any other recommendation is "leading", not a winner. */}
+      {isWinner && (
         <div className="pt-2">
-          <p className="text-sm text-slate-500 mb-1">Winner</p>
+          <p className="text-sm text-slate-600 mb-1">Winner</p>
           <WinnerIndicator variantName={winnerName} show />
         </div>
+      )}
+      {isLeading && (
+        <p className="pt-2 text-sm font-medium text-slate-700" data-testid="leading-variant">
+          Leading: {winnerName}
+          {experiment.sample_size_adequate ? '' : ' (not yet adequate sample)'}
+        </p>
       )}
     </div>
   );
