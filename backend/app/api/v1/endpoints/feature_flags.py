@@ -561,12 +561,12 @@ async def delete_feature_flag(
     """
     Delete a feature flag.
 
-    This endpoint allows users to delete an existing feature flag.
-    The user must have access to the feature flag (be the owner or have permission).
+    This endpoint deletes an existing feature flag. Access is by role:
+    ADMIN and DEVELOPER may delete any flag; ANALYST and VIEWER may not.
 
     Deleting a feature flag has the following effects:
     - The feature flag and all its related data are permanently removed
-    - Any cached data related to the feature flag is invalidated
+    - An audit record of the deletion is written (if that fails, the delete still stands)
 
     **Note**: This operation cannot be undone. For active feature flags, consider
     changing the status to 'archived' instead.
@@ -989,11 +989,11 @@ async def toggle_feature_flag(
     The toggle operation includes:
     - Status change (ACTIVE ↔ INACTIVE)
     - Complete audit logging with user information and optional reason
-    - Cache invalidation
     - Response with new status and audit log ID
 
     **Authentication**: Requires valid user authentication.
-    **Permissions**: User must own the feature flag or be a superuser.
+    **Permissions**: ADMIN and DEVELOPER may toggle any flag; ANALYST and
+    VIEWER may not.
 
     Returns:
         ToggleResponse: Updated feature flag details with audit log ID
