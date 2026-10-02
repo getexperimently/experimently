@@ -251,6 +251,30 @@
         "title": "AddMemberRequest",
         "type": "object"
       },
+      "AdminUserPatch": {
+        "additionalProperties": false,
+        "description": "Change another account's role and/or active status (superuser only).\n\nSend only the keys to change; at least one is required. ``null`` is\nrefused, as is any other key.",
+        "properties": {
+          "is_active": {
+            "description": "false stops the account signing in and using its API keys.",
+            "title": "Is Active",
+            "type": "boolean"
+          },
+          "role": {
+            "description": "RBAC role name: ADMIN, DEVELOPER, ANALYST or VIEWER (case-insensitive).",
+            "enum": [
+              "ADMIN",
+              "DEVELOPER",
+              "ANALYST",
+              "VIEWER"
+            ],
+            "title": "Role",
+            "type": "string"
+          }
+        },
+        "title": "AdminUserPatch",
+        "type": "object"
+      },
       "AggregatedMetricResponse": {
         "description": "Schema for aggregated metric response.",
         "metadata": {
@@ -17321,6 +17345,66 @@
         "tags": [
           "Administration"
         ]
+      },
+      "patch": {
+        "description": "Change a user's role and/or active status.\n\nSuperusers only. Send only the keys to change. You cannot change your own\nrole or deactivate yourself (400). With Cognito sign-in and role sync on,\na role change is refused (409): the next request would overwrite it.\nResending the stored values changes nothing and answers 200. Deactivating\na user also stops the API keys they created.",
+        "operationId": "patch_user_api_v1_admin_users__user_id__patch",
+        "parameters": [
+          {
+            "description": "The ID of the user to change",
+            "in": "path",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "description": "The ID of the user to change",
+              "format": "uuid",
+              "title": "User Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AdminUserPatch"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Patch User",
+        "tags": [
+          "Administration"
+        ],
+        "x-stability": "beta"
       },
       "put": {
         "description": "Update user.\n\nThis endpoint is only accessible by superusers and allows updating\nuser details, including superuser status.",
