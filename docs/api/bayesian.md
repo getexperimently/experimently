@@ -125,7 +125,7 @@ it is answered as if it had not.
 | `prior_family` | `string` | `beta` | Conjugate prior family: `beta`, `normal` or `gamma` |
 | `alpha` | `float` | `1.0` | Prior alpha (> 0) |
 | `beta` | `float` | `1.0` | Prior beta (> 0) |
-| `loss_threshold` | `float` | `0.001` | Expected loss below which the best variant is declared the winner (> 0) |
+| `loss_threshold` | `float` | `0.001` | Expected loss the leading variant must be below to be declared the winner (> 0); it also needs a probability to be best of at least 0.975 (see [the decision values](#bayesiandecision-values)) |
 | `rope` | `[float, float]` | `null` | Region of Practical Equivalence, `[lower, upper]` with `lower < upper`, on the difference in conversion rate |
 | `credible_level` | `float` | `0.95` | Credible interval level, between 0 and 1 |
 
@@ -200,12 +200,51 @@ The rules are checked in this order:
 
 | Value | When |
 |---|---|
-| `STOP_WINNER` | The best variant's expected loss is below `loss_threshold`. |
+| `STOP_WINNER` | The variant most likely to be best has a probability to be best of at least **0.975**, and its expected loss is below `loss_threshold`. |
 | `STOP_EQUIVALENT` | `rope` is set, and for every other variant the probability that its difference from the best lies inside the ROPE is above 0.95. |
 | `CONTINUE` | Neither of the above. Keep collecting data. |
 
 The decision is a recommendation: nothing stops the experiment or changes its status.
 `STOP_FUTILE` is defined but no rule returns it.
+
+The example response above answers `CONTINUE`: the treatment's expected loss, 0.0002, is
+below the default `loss_threshold`, but its probability to be best, 0.9731, is under 0.975.
+
+### How often `STOP_WINNER` appears when there is no difference
+
+Before engine version 1.2.0, `STOP_WINNER` needed only the expected loss to be below
+`loss_threshold`. At a low conversion rate that is true of two identical variants once
+there is modest traffic: in 2,000 simulated A/A tests at a 1% rate with 5,000 users per
+variant, every one answered `STOP_WINNER`.
+
+The 0.975 threshold was chosen by simulation, 2,000 A/A tests in each of six cells:
+conversion rate 1%, 10% and 50%, with 5,000 and 20,000 users per variant. Measured at the
+default settings:
+
+| What was measured | Result |
+|---|---|
+| A/A, one look at the end | 90 to 108 `STOP_WINNER` per 2,000 (4.5% to 5.4%) |
+| A/A, read 10 times at equal intervals, `STOP_WINNER` at any read | 367 to 426 per 2,000 (18% to 21%) |
+| 1% against 1.25%, 40,000 users per variant, one look | 1,847 per 2,000 (92%) |
+
+Two things follow:
+
+- **Read the decision once, at the planned sample size.** Like a fixed-horizon p-value,
+  the decision assumes a single look. Checking it every day and stopping at the first
+  `STOP_WINNER` turns about a 5% false-winner rate into about 20% over ten reads. For an
+  experiment you want to monitor continuously, use the sequential analysis
+  ([`GET /results/{id}/sequential`](sequential-testing.md)), which is built for repeated
+  looks.
+- **The 0.975 threshold is deliberately not configurable.** It is what holds the
+  false-winner rate near 5%; a per-experiment setting would let one experiment lower it
+  back to the level that called identical variants winners. `bayesian_config` has no field
+  for it.
+- **`loss_threshold` rarely decides on its own.** At the default 0.001 it never vetoed a
+  variant that had reached 0.975 in any of the single-look simulations above. A smaller value makes the
+  rule stricter; a larger one cannot make it looser than the 0.975 probability allows.
+
+The A/A and power figures are held by tests in
+`backend/tests/unit/stats_validation/test_bayesian_stop_winner.py`.
 
 ---
 

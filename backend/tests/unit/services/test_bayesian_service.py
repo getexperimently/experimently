@@ -613,3 +613,33 @@ def test_should_stop_returns_stop_equivalent_with_rope():
     decision = should_stop(posteriors, config)
     # With very similar posteriors and wide ROPE, may return STOP_EQUIVALENT
     assert isinstance(decision, BayesianDecision)
+
+
+# ---------------------------------------------------------------------------
+# STOP_WINNER needs both conditions (#242)
+# ---------------------------------------------------------------------------
+
+_TWO_ARMS = [{"alpha": 51.0, "beta": 4951.0}, {"alpha": 51.0, "beta": 4951.0}]
+
+
+@pytest.mark.regression
+@pytest.mark.parametrize(
+    ("ptbb", "losses", "expected"),
+    [
+        # At the threshold, loss below: a winner.
+        ([0.025, 0.975], [0.01, 0.0001], BayesianDecision.STOP_WINNER),
+        # Just under the threshold: the loss alone is not enough (#242).
+        ([0.026, 0.974], [0.01, 0.0001], BayesianDecision.CONTINUE),
+        # Above the threshold, but choosing the leader is not cheap enough.
+        ([0.01, 0.99], [0.02, 0.002], BayesianDecision.CONTINUE),
+        # Two identical arms with a small loss: the case in the issue.
+        ([0.5, 0.5], [0.0008, 0.0008], BayesianDecision.CONTINUE),
+    ],
+    ids=["at-threshold", "under-threshold", "loss-too-high", "identical-arms"],
+)
+def test_stop_winner_needs_probability_and_loss(ptbb, losses, expected):
+    """STOP_WINNER: P(best) >= PROB_BEST_THRESHOLD and loss < loss_threshold."""
+    decision = should_stop(
+        _TWO_ARMS, BayesianConfig(loss_threshold=0.001), losses=losses, ptbb=ptbb
+    )
+    assert decision == expected
