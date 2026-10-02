@@ -110,10 +110,17 @@ class _Undecidable(Exception):
         self.value = value
 
 
-def evaluate(expr: str, context: Dict[str, Any]) -> Any:
+def evaluate(
+    expr: str, context: Dict[str, Any], null_under: Tuple[str, ...] = ()
+) -> Any:
     """Evaluate ``==``, ``!=``, ``&&``, ``||``, ``!``, parentheses, literals and
     dotted context lookups, with GitHub's short-circuit semantics (``a && b``
-    is ``b`` when ``a`` is truthy, else ``a``)."""
+    is ``b`` when ``a`` is truthy, else ``a``).
+
+    A lookup that is not in ``context`` is Unresolved, unless it starts with
+    one of the ``null_under`` prefixes: there it is null, which is what GitHub
+    gives for a property the payload does not have (``github.event.pull_request
+    .numbr`` is null on GitHub, not an error)."""
     toks = _tokens(expr)
     pos = 0
 
@@ -142,6 +149,8 @@ def evaluate(expr: str, context: Dict[str, Any]) -> Any:
                 if isinstance(cur, dict) and part in cur:
                     cur = cur[part]
                 else:
+                    if any(value.startswith(p) for p in null_under):
+                        return None
                     return Unresolved(value)
             return cur
         if (kind, value) == ("op", "("):
@@ -200,13 +209,15 @@ def evaluate(expr: str, context: Dict[str, Any]) -> Any:
 _TEMPLATE = re.compile(r"\$\{\{(.*?)\}\}", re.S)
 
 
-def render(template: str, context: Dict[str, Any]) -> Any:
+def render(
+    template: str, context: Dict[str, Any], null_under: Tuple[str, ...] = ()
+) -> Any:
     """A ``name:`` with every ``${{ }}`` evaluated; an Unresolved if any part is."""
     parts: List[str] = []
     last = 0
     for m in _TEMPLATE.finditer(template):
         parts.append(template[last : m.start()])
-        value = evaluate(m.group(1), context)
+        value = evaluate(m.group(1), context, null_under)
         if isinstance(value, Unresolved):
             return Unresolved(f"{template!r} ({value.what})")
         parts.append(

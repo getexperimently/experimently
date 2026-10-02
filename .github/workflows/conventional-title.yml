@@ -23,9 +23,11 @@ on:
     # `edited` matters -- it is how a corrected title re-runs the check.
     types: [opened, edited, synchronize, reopened, ready_for_review]
 
-concurrency:
-  group: conventional-title-${{ github.head_ref }}
-  cancel-in-progress: true
+# No `concurrency:` block, deliberately, for the reason regression-guard has
+# none (#399): `edited` fires on the same head commit as the run before it,
+# and a group cancels one of the two -- with `cancel-in-progress: true` the
+# running one, with `false` a replaced pending one -- and the cancelled run
+# stays in the rollup. Each run takes seconds; cancelling saves nothing.
 
 permissions:
   contents: read
