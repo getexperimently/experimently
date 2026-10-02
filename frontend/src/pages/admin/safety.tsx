@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/router';
 import { AdminLayout } from '@/components/admin/AdminLayout';
 import { SafetySettingsForm } from '@/components/admin/safety/SafetySettingsForm';
@@ -77,6 +77,21 @@ export function SafetyDashboard() {
   const [rollbackSuccess, setRollbackSuccess] = useState(false);
   const [rollbackError, setRollbackError] = useState<string | null>(null);
   const [rolling, setRolling] = useState(false);
+  /** The control that opened the dialog; focus goes back to it on close. */
+  const rollbackTriggerRef = useRef<HTMLElement | null>(null);
+  const rollbackReasonRef = useRef<HTMLInputElement>(null);
+  const rollbackCancelRef = useRef<HTMLButtonElement>(null);
+  const rollbackModalOpen = rollbackModal !== null;
+
+  // Move focus into the dialog when it opens.
+  useEffect(() => {
+    if (rollbackModalOpen) rollbackReasonRef.current?.focus();
+  }, [rollbackModalOpen]);
+
+  // On success the reason field and the confirm button go; keep focus in the dialog.
+  useEffect(() => {
+    if (rollbackSuccess) rollbackCancelRef.current?.focus();
+  }, [rollbackSuccess]);
 
   const refreshFlags = useCallback(async () => {
     setFlagsLoading(true);
@@ -100,6 +115,8 @@ export function SafetyDashboard() {
   const handleRollback = (flagId: string) => {
     const flag = flags.find((f) => f.flag_id === flagId);
     if (!flag) return;
+    rollbackTriggerRef.current =
+      document.activeElement instanceof HTMLElement ? document.activeElement : null;
     setRollbackModal({ flagId, flagName: flag.flag_name });
     setRollbackReason('');
     setRollbackSuccess(false);
@@ -141,10 +158,29 @@ export function SafetyDashboard() {
   const erroredKeys = failedChecks.filter((f) => !f.rateLimited).map((f) => f.key);
 
   const handleCloseModal = () => {
+    const flagId = rollbackModal?.flagId;
     setRollbackModal(null);
     setRollbackReason('');
     setRollbackSuccess(false);
     setRollbackError(null);
+    // Back to the button that opened the dialog. After a rollback the card shows
+    // "Off" in its place, so fall back to the card itself.
+    const trigger = rollbackTriggerRef.current;
+    rollbackTriggerRef.current = null;
+    if (trigger && trigger.isConnected) {
+      trigger.focus();
+    } else if (flagId) {
+      Array.from(document.querySelectorAll<HTMLElement>('[data-flag-id]'))
+        .find((el) => el.dataset.flagId === flagId)
+        ?.focus();
+    }
+  };
+
+  const handleModalKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    if (e.key === 'Escape') {
+      e.stopPropagation();
+      handleCloseModal();
+    }
   };
 
   return (
@@ -236,6 +272,9 @@ export function SafetyDashboard() {
             Rollbacks this session
           </h2>
           <RollbackHistoryTable rollbacks={rollbacks} />
+          <p data-testid="rollback-history-automatic-note" className="mt-2 text-xs text-slate-500">
+            Automatic rollbacks are not listed here yet.
+          </p>
         </section>
       </div>
 
@@ -246,9 +285,13 @@ export function SafetyDashboard() {
           className="fixed inset-0 bg-black bg-opacity-40 flex items-center justify-center z-50 p-4"
           role="dialog"
           aria-modal="true"
+          aria-labelledby="rollback-modal-title"
+          onKeyDown={handleModalKeyDown}
         >
           <div className="bg-white rounded-lg shadow-xl w-full max-w-md p-6 flex flex-col gap-4">
-            <h3 className="text-base font-semibold text-slate-800">Confirm Rollback</h3>
+            <h3 id="rollback-modal-title" className="text-base font-semibold text-slate-800">
+              Confirm Rollback
+            </h3>
 
             <p className="text-sm text-slate-600">
               You are about to roll back flag{' '}
@@ -275,6 +318,7 @@ export function SafetyDashboard() {
                   Reason (optional)
                 </label>
                 <input
+                  ref={rollbackReasonRef}
                   id="rollback-reason"
                   data-testid="rollback-reason-input"
                   type="text"
@@ -307,6 +351,8 @@ export function SafetyDashboard() {
 
             <div className="flex justify-end gap-3">
               <button
+                ref={rollbackCancelRef}
+                type="button"
                 data-testid="rollback-cancel-button"
                 onClick={handleCloseModal}
                 className="px-4 py-2 text-sm font-medium border border-slate-300 rounded hover:bg-slate-50 transition-colors"
@@ -315,6 +361,7 @@ export function SafetyDashboard() {
               </button>
               {!rollbackSuccess && (
                 <button
+                  type="button"
                   data-testid="rollback-confirm-button"
                   onClick={handleConfirmRollback}
                   disabled={rolling}

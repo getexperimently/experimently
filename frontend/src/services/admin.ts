@@ -19,6 +19,7 @@ import {
 } from '@/types/admin';
 import type { SafetyCheckResponse, SafetyMetricStatus } from '@/types/safety';
 import { apiFetch } from '@/services/api';
+import { type FeatureFlag, isFlagOn } from '@/services/featureFlags';
 
 const ERROR_RATE_METRICS = ['error_rate'];
 const LATENCY_METRICS = ['latency', 'avg_latency', 'p95_latency', 'max_latency'];
@@ -38,9 +39,14 @@ export function flagHealth(check: SafetyCheckResponse): FlagHealth {
   return 'healthy';
 }
 
-/** Join a `GET /safety/feature-flags/{id}/check` response with the flag it describes. */
+/**
+ * Join a `GET /safety/feature-flags/{id}/check` response with the flag it
+ * describes. `flag` is a `GET /feature-flags/` list item, which carries
+ * `status`; a flag whose status is absent counts as on, so the card keeps
+ * offering Roll back (the API answers "already off" for an inactive flag).
+ */
 export function toFlagSafetyStatus(
-  flag: { id: string; name: string; key: string },
+  flag: Pick<FeatureFlag, 'id' | 'name' | 'key' | 'status' | 'is_active'>,
   check: SafetyCheckResponse,
 ): FlagSafetyStatus {
   const errorRate = findMetric(check.metrics, ERROR_RATE_METRICS);
@@ -50,6 +56,7 @@ export function toFlagSafetyStatus(
     flag_name: flag.name,
     flag_key: flag.key,
     health: flagHealth(check),
+    is_on: flag.status === undefined && flag.is_active === undefined ? true : isFlagOn(flag),
     error_rate: errorRate ? errorRate.current_value : null,
     latency_ms: latency ? latency.current_value : null,
     last_checked: check.last_checked,

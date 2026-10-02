@@ -23,7 +23,7 @@ export function formatLatency(value: number | null): string {
 
 export function SafetyStatusCard({ flag, onRollback }: SafetyStatusCardProps) {
   const badgeClass = STATUS_BADGE_CLASSES[flag.health];
-  const showRollback = flag.health === 'warning' || flag.health === 'critical';
+  const showRollback = flag.is_on && (flag.health === 'warning' || flag.health === 'critical');
   const unmeasured = flag.check.details?.unmeasured_metrics;
   const disabled = flag.check.metrics.length === 0;
 
@@ -31,6 +31,8 @@ export function SafetyStatusCard({ flag, onRollback }: SafetyStatusCardProps) {
     <div
       data-testid="safety-status-card"
       data-flag-id={flag.flag_id}
+      // Focus lands here when the dialog closes after its Roll back button has gone.
+      tabIndex={-1}
       className="bg-white border border-slate-200 rounded-lg p-4 flex flex-col gap-3"
     >
       <div className="flex items-center justify-between gap-2">
@@ -71,13 +73,23 @@ export function SafetyStatusCard({ flag, onRollback }: SafetyStatusCardProps) {
         )}
       </div>
 
+      {!flag.is_on && (
+        <p
+          data-testid="flag-off-indicator"
+          className="mt-1 w-full text-center text-sm font-medium text-slate-700 border border-slate-300 rounded py-1.5"
+        >
+          Off
+        </p>
+      )}
+
       {showRollback && (
         <button
+          type="button"
           data-testid="rollback-button"
           onClick={() => onRollback(flag.flag_id)}
           className="mt-1 w-full bg-red-600 text-white text-sm font-medium py-1.5 rounded hover:bg-red-700 transition-colors"
         >
-          Rollback
+          Roll back
         </button>
       )}
     </div>

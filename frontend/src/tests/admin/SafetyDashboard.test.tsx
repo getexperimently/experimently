@@ -1,5 +1,6 @@
 import React from 'react';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import axe from 'axe-core';
 import { SafetyDashboard, SAFETY_CHECK_CONCURRENCY } from '@/pages/admin/safety';
 import { AdminService } from '@/services/admin';
 import { ApiError } from '@/services/api';
@@ -20,6 +21,7 @@ jest.mock('@/services/admin', () => {
 });
 
 jest.mock('@/services/featureFlags', () => ({
+  ...jest.requireActual('@/services/featureFlags'),
   FeatureFlagsService: { list: jest.fn(), safetyCheck: jest.fn() },
 }));
 
@@ -44,14 +46,23 @@ jest.mock('@/components/admin/safety/SafetyStatusCard', () => ({
     flag,
     onRollback,
   }: {
-    flag: { flag_id: string; flag_name: string; health: string };
+    flag: { flag_id: string; flag_name: string; health: string; is_on?: boolean };
     onRollback: (id: string) => void;
   }) => (
-    <div data-testid="safety-status-card" data-health={flag.health}>
+    <div
+      data-testid="safety-status-card"
+      data-health={flag.health}
+      data-flag-id={flag.flag_id}
+      tabIndex={-1}
+    >
       <span>{flag.flag_name}</span>
-      <button data-testid="rollback-button" onClick={() => onRollback(flag.flag_id)}>
-        Rollback
-      </button>
+      {flag.is_on === false ? (
+        <span data-testid="flag-off-indicator">Off</span>
+      ) : (
+        <button data-testid="rollback-button" onClick={() => onRollback(flag.flag_id)}>
+          Roll back
+        </button>
+      )}
     </div>
   ),
 }));
@@ -87,8 +98,8 @@ const mockSettings: SafetySettings = {
 };
 
 const flags = [
-  { id: 'flag-1', key: 'checkout-v2', name: 'Checkout v2', rollout_percentage: 50, owner_id: null, created_at: '', updated_at: '' },
-  { id: 'flag-2', key: 'payments', name: 'Payments redesign', rollout_percentage: 25, owner_id: null, created_at: '', updated_at: '' },
+  { id: 'flag-1', key: 'checkout-v2', name: 'Checkout v2', status: 'active', rollout_percentage: 50, owner_id: null, created_at: '', updated_at: '' },
+  { id: 'flag-2', key: 'payments', name: 'Payments redesign', status: 'active', rollout_percentage: 25, owner_id: null, created_at: '', updated_at: '' },
 ];
 
 const healthyCheck: SafetyCheckResponse = {
@@ -153,14 +164,18 @@ beforeEach(() => {
 });
 
 async function openRollbackModalForSecondFlag() {
-  render(<SafetyDashboard />);
+  const view = render(<SafetyDashboard />);
   await waitFor(() => {
     expect(screen.getAllByTestId('safety-status-card')).toHaveLength(2);
   });
-  fireEvent.click(screen.getAllByTestId('rollback-button')[1]);
+  // A real click focuses the button first; fireEvent.click does not.
+  const trigger = screen.getAllByTestId('rollback-button')[1];
+  trigger.focus();
+  fireEvent.click(trigger);
   await waitFor(() => {
     expect(screen.getByTestId('rollback-modal')).toBeInTheDocument();
   });
+  return { ...view, trigger };
 }
 
 describe('SafetyDashboard', () => {
@@ -314,5 +329,116 @@ describe('SafetyDashboard', () => {
   it('renders with data-testid="safety-dashboard"', () => {
     render(<SafetyDashboard />);
     expect(screen.getByTestId('safety-dashboard')).toBeInTheDocument();
+  });
+});
+
+describe('SafetyDashboard rollback dialog: keyboard and screen reader (#629)', () => {
+  it('names the dialog by its "Confirm Rollback" heading', async () => {
+    await openRollbackModalForSecondFlag();
+    const dialog = screen.getByRole('dialog', { name: 'Confirm Rollback' });
+    const labelledBy = dialog.getAttribute('aria-labelledby');
+    expect(labelledBy).toBeTruthy();
+    expect(document.getElementById(labelledBy as string)).toHaveTextContent('Confirm Rollback');
+  });
+
+  it('moves focus into the dialog when it opens', async () => {
+    await openRollbackModalForSecondFlag();
+    const dialog = screen.getByTestId('rollback-modal');
+    expect(dialog).toContainElement(document.activeElement as HTMLElement);
+    expect(screen.getByTestId('rollback-reason-input')).toHaveFocus();
+  });
+
+  it('closes on Escape without rolling back', async () => {
+    await openRollbackModalForSecondFlag();
+    fireEvent.keyDown(document.activeElement as Element, { key: 'Escape' });
+    await waitFor(() => {
+      expect(screen.queryByTestId('rollback-modal')).not.toBeInTheDocument();
+    });
+    expect(mockRollbackFlag).not.toHaveBeenCalled();
+  });
+
+  it('returns focus to the button that opened it, on Escape and on Cancel', async () => {
+    const { trigger } = await openRollbackModalForSecondFlag();
+    fireEvent.keyDown(document.activeElement as Element, { key: 'Escape' });
+    await waitFor(() => {
+      expect(screen.queryByTestId('rollback-modal')).not.toBeInTheDocument();
+    });
+    expect(trigger).toHaveFocus();
+
+    trigger.focus();
+    fireEvent.click(trigger);
+    expect(screen.getByTestId('rollback-reason-input')).toHaveFocus();
+    fireEvent.click(screen.getByTestId('rollback-cancel-button'));
+    expect(screen.queryByTestId('rollback-modal')).not.toBeInTheDocument();
+    expect(trigger).toHaveFocus();
+  });
+
+  it('after a rollback, Close lands focus on the flag card once its button has gone', async () => {
+    await openRollbackModalForSecondFlag();
+    mockListFlags.mockResolvedValue({
+      items: [flags[0], { ...flags[1], status: 'inactive' }],
+      total: 2,
+      skip: 0,
+      limit: 100,
+    });
+    fireEvent.click(screen.getByTestId('rollback-confirm-button'));
+    await screen.findByTestId('rollback-success-message');
+    // The confirm button is gone; focus must not fall out of the dialog.
+    expect(screen.getByTestId('rollback-cancel-button')).toHaveFocus();
+    await screen.findByTestId('flag-off-indicator');
+
+    fireEvent.click(screen.getByTestId('rollback-cancel-button'));
+    const card = screen
+      .getAllByTestId('safety-status-card')
+      .find((c) => c.getAttribute('data-flag-id') === 'flag-2');
+    expect(card).toHaveFocus();
+  });
+
+  it('passes the inactive status through to the card (#629)', async () => {
+    mockListFlags.mockResolvedValue({
+      items: [flags[0], { ...flags[1], status: 'inactive' }],
+      total: 2,
+      skip: 0,
+      limit: 100,
+    });
+    render(<SafetyDashboard />);
+    expect(await screen.findByTestId('flag-off-indicator')).toHaveTextContent('Off');
+    expect(screen.getAllByTestId('rollback-button')).toHaveLength(1);
+  });
+
+  it('says automatic rollbacks are not listed under the session table', async () => {
+    render(<SafetyDashboard />);
+    expect(await screen.findByTestId('rollback-history-automatic-note')).toHaveTextContent(
+      'Automatic rollbacks are not listed here yet.',
+    );
+  });
+});
+
+describe('SafetyDashboard accessibility (axe-core in jsdom; colour contrast is not computable here)', () => {
+  const axeOptions: axe.RunOptions = { rules: { 'color-contrast': { enabled: false } } };
+
+  async function violations(node: Element) {
+    const result = await axe.run(node, axeOptions);
+    return result.violations.map((v) => `${v.id}: ${v.nodes.map((n) => n.target).join(', ')}`);
+  }
+
+  it('has no axe violations with the grid loaded', async () => {
+    const { container } = render(<SafetyDashboard />);
+    await waitFor(() => {
+      expect(screen.getAllByTestId('safety-status-card')).toHaveLength(2);
+    });
+    expect(await violations(container)).toStrictEqual([]);
+  });
+
+  it('has no axe violations with the rollback dialog open', async () => {
+    const { container } = await openRollbackModalForSecondFlag();
+    expect(await violations(container)).toStrictEqual([]);
+  });
+
+  it('has no axe violations after a rollback succeeds', async () => {
+    const { container } = await openRollbackModalForSecondFlag();
+    fireEvent.click(screen.getByTestId('rollback-confirm-button'));
+    await screen.findByTestId('rollback-success-message');
+    expect(await violations(container)).toStrictEqual([]);
   });
 });

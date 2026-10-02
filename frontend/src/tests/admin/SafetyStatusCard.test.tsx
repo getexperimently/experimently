@@ -1,5 +1,6 @@
 import React from 'react';
 import { render, screen, fireEvent } from '@testing-library/react';
+import axe from 'axe-core';
 import { SafetyStatusCard } from '@/components/admin/safety/SafetyStatusCard';
 import { flagHealth, toFlagSafetyStatus } from '@/services/admin';
 import { FlagSafetyStatus } from '@/types/admin';
@@ -24,7 +25,10 @@ const check = (overrides: Partial<SafetyCheckResponse> = {}): SafetyCheckRespons
 });
 
 const makeFlag = (overrides: Partial<FlagSafetyStatus> = {}): FlagSafetyStatus => ({
-  ...toFlagSafetyStatus({ id: 'flag-123', name: 'my-feature-flag', key: 'my-feature-flag' }, check()),
+  ...toFlagSafetyStatus(
+    { id: 'flag-123', name: 'my-feature-flag', key: 'my-feature-flag', status: 'active' },
+    check(),
+  ),
   ...overrides,
 });
 
@@ -99,7 +103,7 @@ describe('SafetyStatusCard', () => {
     expect(screen.getByTestId('status-badge')).toHaveClass('bg-red-100');
   });
 
-  it('"Rollback" button is visible for critical/warning only and reports the flag id', () => {
+  it('"Roll back" button is visible for critical/warning only and reports the flag id', () => {
     const onRollback = jest.fn();
     const { rerender } = render(
       <SafetyStatusCard flag={makeFlag({ health: 'warning' })} onRollback={onRollback} />,
@@ -127,5 +131,53 @@ describe('SafetyStatusCard', () => {
   it('renders with data-testid="safety-status-card"', () => {
     render(<SafetyStatusCard flag={makeFlag()} onRollback={jest.fn()} />);
     expect(screen.getByTestId('safety-status-card')).toBeInTheDocument();
+  });
+});
+
+describe('SafetyStatusCard when the flag is off (#629)', () => {
+  it('carries the list item status: active is on, inactive and archived are off', () => {
+    const base = { id: 'f', name: 'Flag', key: 'flag' };
+    expect(toFlagSafetyStatus({ ...base, status: 'active' }, check()).is_on).toBe(true);
+    expect(toFlagSafetyStatus({ ...base, status: 'ACTIVE' }, check()).is_on).toBe(true);
+    expect(toFlagSafetyStatus({ ...base, status: 'inactive' }, check()).is_on).toBe(false);
+    expect(toFlagSafetyStatus({ ...base, status: 'archived' }, check()).is_on).toBe(false);
+    expect(toFlagSafetyStatus({ ...base, is_active: false }, check()).is_on).toBe(false);
+  });
+
+  it('labels the button with the verb "Roll back"', () => {
+    render(<SafetyStatusCard flag={makeFlag({ health: 'critical' })} onRollback={jest.fn()} />);
+    expect(screen.getByTestId('rollback-button')).toHaveTextContent(/^Roll back$/);
+  });
+
+  it.each(['critical', 'warning', 'healthy'] as const)(
+    'an inactive %s flag shows "Off" as text and no Roll back button',
+    (health) => {
+      const flag = makeFlag({ health, is_on: false });
+      render(<SafetyStatusCard flag={flag} onRollback={jest.fn()} />);
+      expect(screen.getByTestId('flag-off-indicator')).toHaveTextContent(/^Off$/);
+      expect(screen.queryByTestId('rollback-button')).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: /roll ?back/i })).not.toBeInTheDocument();
+    },
+  );
+
+  it('an active flag shows no "Off" indicator', () => {
+    render(<SafetyStatusCard flag={makeFlag({ health: 'critical' })} onRollback={jest.fn()} />);
+    expect(screen.queryByTestId('flag-off-indicator')).not.toBeInTheDocument();
+  });
+});
+
+describe('SafetyStatusCard accessibility (axe-core in jsdom; colour contrast is not computable here)', () => {
+  const axeOptions: axe.RunOptions = { rules: { 'color-contrast': { enabled: false } } };
+
+  it.each([
+    ['critical and on', { health: 'critical', is_on: true }],
+    ['critical and off', { health: 'critical', is_on: false }],
+    ['healthy and on', { health: 'healthy', is_on: true }],
+  ] as const)('has no axe violations: %s', async (_label, overrides) => {
+    const { container } = render(
+      <SafetyStatusCard flag={makeFlag({ ...overrides })} onRollback={jest.fn()} />,
+    );
+    const result = await axe.run(container, axeOptions);
+    expect(result.violations.map((v) => v.id)).toStrictEqual([]);
   });
 });

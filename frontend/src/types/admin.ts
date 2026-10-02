@@ -128,6 +128,8 @@ export interface FlagSafetyStatus {
   flag_name: string;
   flag_key: string;
   health: FlagHealth;
+  /** The flag is ACTIVE. An inactive or archived flag shows "Off" instead of Roll back. */
+  is_on: boolean;
   /** `error_rate` metric as a 0–1 fraction; null when not configured/measured. */
   error_rate: number | null;
   /** `latency` / `avg_latency` / `p95_latency` metric in ms; null when absent. */
