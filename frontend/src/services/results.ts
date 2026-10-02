@@ -9,11 +9,10 @@ import { apiFetch } from '@/services/api';
 export class ResultsService {
   static async getResults(
     experimentId: string,
-    params?: { metric_id?: string; breakdown?: string }
+    params?: { breakdown?: string }
   ): Promise<ExperimentResultsResponse> {
     return apiFetch<ExperimentResultsResponse>(`/api/v1/results/${experimentId}`, {
       query: {
-        metric_id: params?.metric_id || undefined,
         breakdown: params?.breakdown || undefined,
       },
     });
@@ -30,10 +29,10 @@ export class ResultsService {
 
   static async getSampleSize(
     experimentId: string,
-    params?: { mde?: number; power?: number }
+    params?: { mde?: number; power_target?: number }
   ): Promise<SampleSizeResult> {
     return apiFetch<SampleSizeResult>(`/api/v1/results/${experimentId}/sample-size`, {
-      query: { mde: params?.mde, power: params?.power },
+      query: { mde: params?.mde, power_target: params?.power_target },
     });
   }
 

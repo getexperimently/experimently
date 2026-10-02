@@ -176,7 +176,8 @@ export interface AdminStats {
 export interface UserListResponse {
   items: AdminUser[];
   total: number;
-  page: number;
+  /** Offset of the first item, as sent. */
+  skip: number;
   limit: number;
 }
 

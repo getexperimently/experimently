@@ -1,12 +1,19 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
+import { isDayRangeReversed } from '@/utils/auditDates';
 
+/**
+ * What the filter bar holds. `start_date`/`end_date` are calendar days
+ * (`YYYY-MM-DD`); `AuditLogTable` turns them into the API's `from_date` and
+ * `to_date`. There is no user filter: the API has none (#669).
+ */
 export interface AuditLogFilters {
   action_type?: string;
   entity_type?: string;
-  user_email?: string;
   start_date?: string;
   end_date?: string;
 }
+
+export const REVERSED_RANGE_MESSAGE = 'The To date must be on or after the From date.';
 
 interface AuditLogFilterProps {
   filters: AuditLogFilters;
@@ -35,11 +42,34 @@ const ENTITY_TYPES = [
 ];
 
 export function AuditLogFilter({ filters, onFilterChange }: AuditLogFilterProps) {
+  // The date inputs show what was typed even while the range is refused, so
+  // they keep their own copy; a valid range is passed up, a reversed one is not.
+  const [startDraft, setStartDraft] = useState(filters.start_date ?? '');
+  const [endDraft, setEndDraft] = useState(filters.end_date ?? '');
+
+  useEffect(() => {
+    setStartDraft(filters.start_date ?? '');
+    setEndDraft(filters.end_date ?? '');
+  }, [filters.start_date, filters.end_date]);
+
+  const reversed = isDayRangeReversed(startDraft, endDraft);
+
   const handleChange = (key: keyof AuditLogFilters, value: string) => {
     onFilterChange({ ...filters, [key]: value || undefined });
   };
 
+  const handleDateChange = (key: 'start_date' | 'end_date', value: string) => {
+    const start = key === 'start_date' ? value : startDraft;
+    const end = key === 'end_date' ? value : endDraft;
+    setStartDraft(start);
+    setEndDraft(end);
+    if (isDayRangeReversed(start, end)) return;
+    onFilterChange({ ...filters, start_date: start || undefined, end_date: end || undefined });
+  };
+
   const handleClear = () => {
+    setStartDraft('');
+    setEndDraft('');
     onFilterChange({});
   };
 
@@ -88,22 +118,6 @@ export function AuditLogFilter({ filters, onFilterChange }: AuditLogFilterProps)
         </select>
       </div>
 
-      {/* User Email */}
-      <div className="flex flex-col gap-1 min-w-[200px]">
-        <label className="text-xs font-medium text-slate-600" htmlFor="filter-user-email">
-          User Email
-        </label>
-        <input
-          id="filter-user-email"
-          data-testid="filter-user-email"
-          type="text"
-          value={filters.user_email ?? ''}
-          onChange={(e) => handleChange('user_email', e.target.value)}
-          placeholder="user@example.com"
-          className="border border-slate-300 rounded px-2 py-1.5 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500"
-        />
-      </div>
-
       {/* Start Date */}
       <div className="flex flex-col gap-1">
         <label className="text-xs font-medium text-slate-600" htmlFor="filter-start-date">
@@ -113,8 +127,10 @@ export function AuditLogFilter({ filters, onFilterChange }: AuditLogFilterProps)
           id="filter-start-date"
           data-testid="filter-start-date"
           type="date"
-          value={filters.start_date ?? ''}
-          onChange={(e) => handleChange('start_date', e.target.value)}
+          value={startDraft}
+          onChange={(e) => handleDateChange('start_date', e.target.value)}
+          aria-invalid={reversed || undefined}
+          aria-describedby={reversed ? 'filter-date-error' : undefined}
           className="border border-slate-300 rounded px-2 py-1.5 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500"
         />
       </div>
@@ -128,8 +144,10 @@ export function AuditLogFilter({ filters, onFilterChange }: AuditLogFilterProps)
           id="filter-end-date"
           data-testid="filter-end-date"
           type="date"
-          value={filters.end_date ?? ''}
-          onChange={(e) => handleChange('end_date', e.target.value)}
+          value={endDraft}
+          onChange={(e) => handleDateChange('end_date', e.target.value)}
+          aria-invalid={reversed || undefined}
+          aria-describedby={reversed ? 'filter-date-error' : undefined}
           className="border border-slate-300 rounded px-2 py-1.5 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500"
         />
       </div>
@@ -142,6 +160,17 @@ export function AuditLogFilter({ filters, onFilterChange }: AuditLogFilterProps)
       >
         Clear Filters
       </button>
+
+      {reversed && (
+        <p
+          id="filter-date-error"
+          data-testid="filter-date-error"
+          role="alert"
+          className="basis-full text-sm text-red-600"
+        >
+          {REVERSED_RANGE_MESSAGE}
+        </p>
+      )}
     </div>
   );
 }
