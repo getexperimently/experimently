@@ -1027,14 +1027,66 @@ class FargateServiceStack(Stack):
             scale_out_cooldown=Duration.seconds(30),
         )
 
-        # --- The etl module's Glue names ---
+        # --- The etl module's Glue names, and the task role's Glue access ---
         # The Glue stack names its jobs, crawler and database per environment
         # (stacks/names.py); the API calls them through these settings, whose
         # defaults are the old account-wide names. Set from the same function
         # so the two cannot drift. Core deployments have no Glue at all.
+        #
+        # The grant (#487) is the six calls ETLService makes, each on this
+        # environment's objects alone: the two jobs, the crawler, and the
+        # catalog, database and tables under that database (GetTable and
+        # BatchCreatePartition are authorised against all three). No wildcard
+        # but the tables of this environment's database.
+        # modules/backend/tests/unit/services/test_etl_service_calls.py fails
+        # if the service starts making any other call. The client finds its
+        # region in AWS_DEFAULT_REGION, set below with the counters table.
         if include_modules:
-            for variable, value in glue_names(env_name).items():
+            glue = glue_names(env_name)
+            for variable, value in glue.items():
                 self.container.add_environment(variable, value)
+            database = glue["GLUE_DATABASE"]
+            task_role.add_to_policy(
+                iam.PolicyStatement(
+                    actions=["glue:StartJobRun", "glue:GetJobRun"],
+                    resources=[
+                        self.format_arn(
+                            service="glue",
+                            resource="job",
+                            resource_name=glue[variable],
+                        )
+                        for variable in ("GLUE_ETL_JOB_NAME", "GLUE_METRICS_JOB_NAME")
+                    ],
+                )
+            )
+            task_role.add_to_policy(
+                iam.PolicyStatement(
+                    actions=["glue:StartCrawler", "glue:GetCrawler"],
+                    resources=[
+                        self.format_arn(
+                            service="glue",
+                            resource="crawler",
+                            resource_name=glue["GLUE_CRAWLER_NAME"],
+                        )
+                    ],
+                )
+            )
+            task_role.add_to_policy(
+                iam.PolicyStatement(
+                    actions=["glue:GetTable", "glue:BatchCreatePartition"],
+                    resources=[
+                        self.format_arn(service="glue", resource="catalog"),
+                        self.format_arn(
+                            service="glue", resource="database", resource_name=database
+                        ),
+                        self.format_arn(
+                            service="glue",
+                            resource="table",
+                            resource_name=f"{database}/*",
+                        ),
+                    ],
+                )
+            )
 
         # --- The counters module's DynamoDB table (#392) ---
         # The counters stack creates `counters_table_name(env)`; the API reads

@@ -314,8 +314,13 @@ dashboard is still on `:bootstrap`.
   `ssmmessages` and `logs` actions ECS Exec uses. The full profile adds
   `dynamodb:Query` and `dynamodb:UpdateItem` on the
   `experiment-counters-<env>` table alone, and sets `DYNAMODB_COUNTERS_TABLE`
-  and `AWS_DEFAULT_REGION` on the API container. There is no Kinesis, Cognito
-  or other DynamoDB permission
+  and `AWS_DEFAULT_REGION` on the API container. It also adds, for the ETL
+  routes, `glue:StartJobRun` and `glue:GetJobRun` on this environment's two
+  Glue jobs, `glue:StartCrawler` and `glue:GetCrawler` on its crawler, and
+  `glue:GetTable` and `glue:BatchCreatePartition` on the catalog, the
+  `experimentation_<env>` database and its tables, and sets the four `GLUE_*`
+  names on the API container. There is no Kinesis, Cognito, Athena, S3 or other
+  DynamoDB permission
 
 ### experimentation-dynamodb-<env> and experimentation-dynamodb-counters-<env>
 

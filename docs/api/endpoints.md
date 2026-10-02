@@ -1877,6 +1877,12 @@ configures nothing, so with it empty its routes answer 404 for every name, as
 does `jobs/run` for a job type whose job is unset. A run that Glue does not
 have answers 404 `"Job run not found"`.
 
+The API reaches Glue in the region named by `AWS_DEFAULT_REGION`, never
+`AWS_REGION`. With it unset, the job and crawler routes answer 500 (the
+partitions route does not report it, #656). `GLUE_EVENTS_TABLE` must
+be the table the crawler creates. See
+[AWS integration: Glue](../integrations/aws.md#glue-the-etl-routes).
+
 ---
 
 ### Real-time DynamoDB Counters
