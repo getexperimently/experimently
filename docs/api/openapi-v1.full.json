@@ -6335,11 +6335,19 @@
         "type": "object"
       },
       "FeatureFlagCreate": {
-        "description": "Model for creating a new feature flag.",
+        "additionalProperties": false,
+        "description": "The body of a flag create. A field not listed here answers 422.",
         "properties": {
+          "created_at": {
+            "description": "Read-only; ignored.",
+            "readOnly": true,
+            "title": "Created At"
+          },
           "default_value": {
             "default": false,
-            "title": "Default Value"
+            "description": "What the flag serves when it is off. Only false is accepted for now.",
+            "title": "Default Value",
+            "type": "boolean"
           },
           "description": {
             "anyOf": [
@@ -6353,8 +6361,14 @@
             ],
             "title": "Description"
           },
+          "id": {
+            "description": "Read-only; ignored.",
+            "readOnly": true,
+            "title": "Id"
+          },
           "is_active": {
-            "default": true,
+            "default": false,
+            "description": "Create the flag on. Left out, the flag starts off.",
             "title": "Is Active",
             "type": "boolean"
           },
@@ -6365,23 +6379,27 @@
             "type": "string"
           },
           "name": {
-            "maxLength": 255,
+            "maxLength": 100,
             "minLength": 1,
             "title": "Name",
             "type": "string"
           },
+          "owner_id": {
+            "description": "Read-only; ignored.",
+            "readOnly": true,
+            "title": "Owner Id"
+          },
           "rollout_percentage": {
-            "anyOf": [
-              {
-                "maximum": 100,
-                "minimum": 0,
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Rollout Percentage"
+            "default": 0,
+            "maximum": 100,
+            "minimum": 0,
+            "title": "Rollout Percentage",
+            "type": "integer"
+          },
+          "status": {
+            "description": "Read-only. Accepted when it equals the flag's status, in any case (on create: the status is_active gives it); any other value answers 422. Turn a flag on or off with is_active.",
+            "readOnly": true,
+            "title": "Status"
           },
           "tags": {
             "anyOf": [
@@ -6405,6 +6423,11 @@
               }
             ],
             "title": "Targeting Rules"
+          },
+          "updated_at": {
+            "description": "Read-only; ignored.",
+            "readOnly": true,
+            "title": "Updated At"
           }
         },
         "required": [
@@ -6460,12 +6483,15 @@
           "items": [
             {
               "created_at": "2023-01-01T00:00:00Z",
+              "default_value": false,
               "description": "Controls access to new feature",
               "id": "123e4567-e89b-12d3-a456-426614174000",
-              "is_active": true,
+              "is_active": false,
               "key": "new_feature",
               "name": "New Feature Flag",
-              "status": "active",
+              "owner_id": "5f0c8a52-1d7e-4c3b-9a6f-2b8e4d1c7a90",
+              "rollout_percentage": 0,
+              "status": "inactive",
               "updated_at": "2023-01-01T00:00:00Z"
             }
           ],
@@ -6476,7 +6502,7 @@
         "properties": {
           "items": {
             "items": {
-              "$ref": "#/components/schemas/FeatureFlagReadExtended"
+              "$ref": "#/components/schemas/FeatureFlagRead"
             },
             "title": "Items",
             "type": "array"
@@ -6503,8 +6529,8 @@
         "title": "FeatureFlagListResponse",
         "type": "object"
       },
-      "FeatureFlagReadExtended": {
-        "description": "Extended feature flag read model with additional information.\nUsed for detailed feature flag reads (``GET /feature-flags/`` items).\n\nThe ORM model only carries ``status`` (``FeatureFlagStatus``); this schema\nexposes it lower-cased (``\"active\"`` / ``\"inactive\"`` / ``\"archived\"``),\nthe same casing ``GET /feature-flags/{flag_id}`` uses, and derives\n``is_active`` from it so the two never disagree.",
+      "FeatureFlagRead": {
+        "description": "A feature flag, as every flag route returns it.\n\nAny of these bodies can be sent back with an update unchanged.",
         "properties": {
           "created_at": {
             "format": "date-time",
@@ -6512,13 +6538,13 @@
             "type": "string"
           },
           "default_value": {
-            "default": false,
-            "title": "Default Value"
+            "description": "What the flag serves when it is off.",
+            "title": "Default Value",
+            "type": "boolean"
           },
           "description": {
             "anyOf": [
               {
-                "maxLength": 2000,
                 "type": "string"
               },
               {
@@ -6533,46 +6559,15 @@
             "type": "string"
           },
           "is_active": {
-            "default": true,
+            "description": "True exactly when status is \"active\".",
             "title": "Is Active",
             "type": "boolean"
           },
           "key": {
-            "maxLength": 100,
-            "minLength": 1,
             "title": "Key",
             "type": "string"
           },
-          "last_evaluated": {
-            "anyOf": [
-              {
-                "format": "date-time",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Last Evaluated"
-          },
-          "metrics": {
-            "anyOf": [
-              {
-                "items": {
-                  "additionalProperties": true,
-                  "type": "object"
-                },
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Metrics"
-          },
           "name": {
-            "maxLength": 255,
-            "minLength": 1,
             "title": "Name",
             "type": "string"
           },
@@ -6586,32 +6581,22 @@
                 "type": "null"
               }
             ],
+            "description": "The user who created the flag; null once that user is gone.",
             "title": "Owner Id"
           },
           "rollout_percentage": {
-            "anyOf": [
-              {
-                "maximum": 100,
-                "minimum": 0,
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Rollout Percentage"
+            "title": "Rollout Percentage",
+            "type": "integer"
           },
           "status": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
+            "description": "The flag's status, lower-cased.",
+            "enum": [
+              "active",
+              "inactive",
+              "archived"
             ],
-            "description": "Lower-cased flag status: \"active\", \"inactive\" or \"archived\"",
-            "title": "Status"
+            "title": "Status",
+            "type": "string"
           },
           "tags": {
             "anyOf": [
@@ -6634,37 +6619,31 @@
                 "type": "null"
               }
             ],
+            "description": "The flag's targeting rules, as stored.",
             "title": "Targeting Rules"
           },
           "updated_at": {
             "format": "date-time",
             "title": "Updated At",
             "type": "string"
-          },
-          "variants": {
-            "anyOf": [
-              {
-                "items": {
-                  "additionalProperties": true,
-                  "type": "object"
-                },
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Variants"
           }
         },
         "required": [
+          "id",
           "key",
           "name",
-          "id",
+          "description",
+          "status",
+          "is_active",
+          "rollout_percentage",
+          "targeting_rules",
+          "default_value",
+          "tags",
+          "owner_id",
           "created_at",
           "updated_at"
         ],
-        "title": "FeatureFlagReadExtended",
+        "title": "FeatureFlagRead",
         "type": "object"
       },
       "FeatureFlagSafetyConfigResponse": {
@@ -6765,16 +6744,18 @@
         "type": "object"
       },
       "FeatureFlagUpdate": {
-        "description": "Model for updating a feature flag.",
+        "additionalProperties": false,
+        "description": "The body of a flag update.\n\nEvery field is optional, and a field left out keeps its value. key, name,\nis_active, rollout_percentage and default_value refuse null; description,\ntargeting_rules and tags accept null, which clears them. A field not\nlisted here answers 422.",
         "properties": {
+          "created_at": {
+            "description": "Read-only; ignored.",
+            "readOnly": true,
+            "title": "Created At"
+          },
           "default_value": {
-            "anyOf": [
-              {},
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Default Value"
+            "description": "What the flag serves when it is off. Only false is accepted for now.",
+            "title": "Default Value",
+            "type": "boolean"
           },
           "description": {
             "anyOf": [
@@ -6788,51 +6769,43 @@
             ],
             "title": "Description"
           },
+          "id": {
+            "description": "Read-only; ignored.",
+            "readOnly": true,
+            "title": "Id"
+          },
           "is_active": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Is Active"
+            "description": "Turn the flag on or off.",
+            "title": "Is Active",
+            "type": "boolean"
           },
           "key": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Key"
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Key",
+            "type": "string"
           },
           "name": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Name"
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "owner_id": {
+            "description": "Read-only; ignored.",
+            "readOnly": true,
+            "title": "Owner Id"
           },
           "rollout_percentage": {
-            "anyOf": [
-              {
-                "maximum": 100,
-                "minimum": 0,
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Rollout Percentage"
+            "maximum": 100,
+            "minimum": 0,
+            "title": "Rollout Percentage",
+            "type": "integer"
+          },
+          "status": {
+            "description": "Read-only. Accepted when it equals the flag's status, in any case (on create: the status is_active gives it); any other value answers 422. Turn a flag on or off with is_active.",
+            "readOnly": true,
+            "title": "Status"
           },
           "tags": {
             "anyOf": [
@@ -6856,6 +6829,11 @@
               }
             ],
             "title": "Targeting Rules"
+          },
+          "updated_at": {
+            "description": "Read-only; ignored.",
+            "readOnly": true,
+            "title": "Updated At"
           }
         },
         "title": "FeatureFlagUpdate",
@@ -23563,7 +23541,7 @@
         ]
       },
       "post": {
-        "description": "Create a new feature flag.\n\nThis endpoint allows users to create a new feature flag. The current user\nis automatically set as the owner of the feature flag.\n\nThe request must include:\n- A unique key for the feature flag\n- A name for the feature flag\n- Optional description\n- Optional targeting rules for specific user segments\n- Optional rollout percentage\n\nThe feature flag is created in INACTIVE status by default.\n\nReturns:\n    Dict[str, Any]: The newly created feature flag with all details\n\nRaises:\n    HTTPException: If the feature flag data is invalid or creation fails",
+        "description": "Create a new feature flag.\n\nThis endpoint allows users to create a new feature flag. The current user\nis automatically set as the owner of the feature flag.\n\nThe request must include:\n- A unique key for the feature flag\n- A name for the feature flag\n- Optional description\n- Optional targeting rules for specific user segments\n- Optional rollout percentage\n\nThe flag is created off (INACTIVE) unless the request sends\n`is_active: true`. A field the API does not read answers 422. The read-only\nfields of a flag response (`id`, `owner_id`, `created_at`, `updated_at`,\n`status`) are accepted and ignored, except that a `status` must be the one\nthe flag is created with.\n\nReturns:\n    FeatureFlagRead: The newly created feature flag\n\nRaises:\n    HTTPException 409: Another flag already has this key\n    HTTPException 422: The body is not a valid flag",
         "operationId": "create_feature_flag_api_v1_feature_flags__post",
         "parameters": [
           {
@@ -23593,9 +23571,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Create Feature Flag Api V1 Feature Flags  Post",
-                  "type": "object"
+                  "$ref": "#/components/schemas/FeatureFlagRead"
                 }
               }
             },
@@ -24154,7 +24130,7 @@
         ]
       },
       "get": {
-        "description": "Get feature flag by ID.\n\nRetrieves the detailed information for a specific feature flag.\nUsers can only access feature flags they own or have permission to view.\n\nReturns:\n    Dict[str, Any]: The feature flag details\n\nRaises:\n    HTTPException 404: If feature flag not found\n    HTTPException 403: If user doesn't have access to this feature flag",
+        "description": "Get feature flag by ID.\n\nRetrieves the detailed information for a specific feature flag.\nUsers can only access feature flags they own or have permission to view.\n\nReturns:\n    FeatureFlagRead: The feature flag\n\nRaises:\n    HTTPException 404: If feature flag not found\n    HTTPException 403: If user doesn't have access to this feature flag",
         "operationId": "get_feature_flag_api_v1_feature_flags__flag_id__get",
         "parameters": [
           {
@@ -24185,9 +24161,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Get Feature Flag Api V1 Feature Flags  Flag Id  Get",
-                  "type": "object"
+                  "$ref": "#/components/schemas/FeatureFlagRead"
                 }
               }
             },
@@ -24255,7 +24229,7 @@
         ]
       },
       "put": {
-        "description": "Update a feature flag.\n\nThis endpoint allows users to update an existing feature flag.\nThe user must have access to the feature flag (be the owner or have permission).\n\nFields that can be updated include:\n- Name and description\n- Status (active, inactive, archived)\n- Targeting rules\n- Rollout percentage\n\nReturns:\n    Dict[str, Any]: The updated feature flag with all details\n\nRaises:\n    HTTPException 400: If the update data is invalid\n    HTTPException 403: If the user doesn't have permission to update this feature flag",
+        "description": "Update a feature flag.\n\nThis endpoint allows users to update an existing feature flag.\nThe user must have access to the feature flag (be the owner or have permission).\n\nOnly the fields sent change. They include:\n- Key, name and description\n- `is_active`, which turns the flag on or off (an archived flag sent\n  `is_active: false` stays archived)\n- Targeting rules\n- Rollout percentage\n\nA field the API does not read answers 422, and so does an explicit null on\n`key`, `name`, `is_active`, `rollout_percentage` or `default_value`. The\nread-only fields of a flag response (`id`, `owner_id`, `created_at`,\n`updated_at`, `status`) are accepted and ignored, so a GET body can be sent\nback; a `status` must equal the flag's.\n\nReturns:\n    FeatureFlagRead: The updated feature flag\n\nRaises:\n    HTTPException 403: If the user doesn't have permission to update this feature flag\n    HTTPException 409: Another flag already has the key\n    HTTPException 422: The body is not a valid update",
         "operationId": "update_feature_flag_api_v1_feature_flags__flag_id__put",
         "parameters": [
           {
@@ -24297,9 +24271,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Update Feature Flag Api V1 Feature Flags  Flag Id  Put",
-                  "type": "object"
+                  "$ref": "#/components/schemas/FeatureFlagRead"
                 }
               }
             },
@@ -24372,7 +24344,7 @@
     },
     "/api/v1/feature-flags/{flag_id}/activate": {
       "post": {
-        "description": "Activate a feature flag.\n\nThis endpoint activates a feature flag, changing its status to ACTIVE.\nActivating a feature flag makes it available for use in applications.\n\nReturns:\n    Dict[str, Any]: The updated feature flag with ACTIVE status\n\nRaises:\n    HTTPException 400: If the feature flag cannot be activated\n    HTTPException 403: If the user doesn't have permission to activate this feature flag",
+        "description": "Activate a feature flag.\n\nThis endpoint activates a feature flag, changing its status to ACTIVE.\nActivating a feature flag makes it available for use in applications.\n\nReturns:\n    FeatureFlagRead: The feature flag, now ACTIVE\n\nRaises:\n    HTTPException 400: If the feature flag cannot be activated\n    HTTPException 403: If the user doesn't have permission to activate this feature flag",
         "operationId": "activate_feature_flag_api_v1_feature_flags__flag_id__activate_post",
         "parameters": [
           {
@@ -24403,9 +24375,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Activate Feature Flag Api V1 Feature Flags  Flag Id  Activate Post",
-                  "type": "object"
+                  "$ref": "#/components/schemas/FeatureFlagRead"
                 }
               }
             },
@@ -24475,7 +24445,7 @@
     },
     "/api/v1/feature-flags/{flag_id}/deactivate": {
       "post": {
-        "description": "Deactivate a feature flag.\n\nThis endpoint deactivates a feature flag, changing its status to INACTIVE.\nDeactivating a feature flag makes it unavailable for use in applications.\n\nReturns:\n    Dict[str, Any]: The updated feature flag with INACTIVE status\n\nRaises:\n    HTTPException 400: If the feature flag cannot be deactivated\n    HTTPException 403: If the user doesn't have permission to deactivate this feature flag",
+        "description": "Deactivate a feature flag.\n\nThis endpoint deactivates a feature flag, changing its status to INACTIVE.\nDeactivating a feature flag makes it unavailable for use in applications.\n\nReturns:\n    FeatureFlagRead: The feature flag, now INACTIVE\n\nRaises:\n    HTTPException 400: If the feature flag cannot be deactivated\n    HTTPException 403: If the user doesn't have permission to deactivate this feature flag",
         "operationId": "deactivate_feature_flag_api_v1_feature_flags__flag_id__deactivate_post",
         "parameters": [
           {
@@ -24506,9 +24476,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Deactivate Feature Flag Api V1 Feature Flags  Flag Id  Deactivate Post",
-                  "type": "object"
+                  "$ref": "#/components/schemas/FeatureFlagRead"
                 }
               }
             },

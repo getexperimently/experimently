@@ -10,12 +10,12 @@ from fastapi.encoders import jsonable_encoder
 from sqlalchemy.orm import Session
 
 from backend.app.crud.base import CRUDBase
-from backend.app.models.feature_flag import (
-    NOT_WRITTEN_BY_REQUESTS,
-    FeatureFlag,
-    FeatureFlagStatus,
+from backend.app.models.feature_flag import FeatureFlag, FeatureFlagStatus
+from backend.app.schemas.feature_flag import (
+    READ_ONLY_FIELDS,
+    FeatureFlagCreate,
+    FeatureFlagUpdate,
 )
-from backend.app.schemas.feature_flag import FeatureFlagCreate, FeatureFlagUpdate
 
 
 class CRUDFeatureFlag(CRUDBase[FeatureFlag, FeatureFlagCreate, FeatureFlagUpdate]):
@@ -45,29 +45,27 @@ class CRUDFeatureFlag(CRUDBase[FeatureFlag, FeatureFlagCreate, FeatureFlagUpdate
         Returns:
             The created feature flag
         """
-        # Convert Pydantic model to dict
+        # Keep only columns, and never a read-only field: each of those names a
+        # column (the primary key, the owner, a timestamp, the status), and a
+        # request may carry them because a GET body round-trips (#94).  No
+        # route calls this; the service is the writer the API uses.
         obj_in_data = (
             obj_in.model_dump()
             if hasattr(obj_in, "model_dump")
             else jsonable_encoder(obj_in)
         )
-
-        # Handle is_active to status conversion
-        if "is_active" in obj_in_data:
-            is_active = obj_in_data.pop("is_active")
-            obj_in_data["status"] = (
-                FeatureFlagStatus.ACTIVE.value
-                if is_active
-                else FeatureFlagStatus.INACTIVE.value
-            )
-
-        # Remove any fields that don't exist in the model
+        status = (
+            FeatureFlagStatus.ACTIVE.value
+            if obj_in_data.pop("is_active", False)
+            else FeatureFlagStatus.INACTIVE.value
+        )
         model_fields = [c.name for c in FeatureFlag.__table__.columns]
         obj_in_data = {
             k: v
             for k, v in obj_in_data.items()
-            if k in model_fields and k not in NOT_WRITTEN_BY_REQUESTS
+            if k in model_fields and k not in READ_ONLY_FIELDS
         }
+        obj_in_data["status"] = status
 
         # Create feature flag
         db_obj = FeatureFlag(**obj_in_data)
@@ -100,24 +98,23 @@ class CRUDFeatureFlag(CRUDBase[FeatureFlag, FeatureFlagCreate, FeatureFlagUpdate
         elif hasattr(obj_in, "dict"):
             update_data = obj_in.dict(exclude_unset=True)
         else:
-            update_data = obj_in
+            update_data = dict(obj_in)
 
-        # Handle is_active to status conversion
-        if "is_active" in update_data:
-            is_active = update_data.pop("is_active")
+        # Keep only columns, and never a read-only field (see ``create``); the
+        # status comes from ``is_active`` alone.
+        is_active = update_data.pop("is_active", None)
+        model_fields = [c.name for c in FeatureFlag.__table__.columns]
+        update_data = {
+            k: v
+            for k, v in update_data.items()
+            if k in model_fields and k not in READ_ONLY_FIELDS
+        }
+        if is_active is not None:
             update_data["status"] = (
                 FeatureFlagStatus.ACTIVE.value
                 if is_active
                 else FeatureFlagStatus.INACTIVE.value
             )
-
-        # Remove fields that don't exist in the model
-        model_fields = [c.name for c in FeatureFlag.__table__.columns]
-        update_data = {
-            k: v
-            for k, v in update_data.items()
-            if k in model_fields and k not in NOT_WRITTEN_BY_REQUESTS
-        }
 
         return super().update(db, db_obj=db_obj, obj_in=update_data)
 

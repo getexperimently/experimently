@@ -31,7 +31,6 @@ from backend.app.models.user import User
 from backend.app.schemas.feature_flag import (
     FeatureFlagCreate,
     FeatureFlagListResponse,
-    FeatureFlagReadExtended,
     FeatureFlagUpdate,
 )
 from backend.app.services.feature_flag_service import FeatureFlagService
@@ -51,9 +50,10 @@ TEST_FLAG_DATA = {
     "is_active": False,
     "rollout_percentage": 50,
     "targeting_rules": {"country": ["US", "CA"], "user_group": "beta"},
-    "variants": {"control": {"value": False}, "treatment": {"value": True}},
-    "default_value": "control",
 }
+
+#: Stored on the ORM fixture only: no request accepts ``variants`` (#94).
+TEST_FLAG_VARIANTS = {"control": {"value": False}, "treatment": {"value": True}}
 
 
 @pytest.fixture(autouse=True)
@@ -141,7 +141,7 @@ def test_feature_flag(db_session: Session, test_user: User) -> FeatureFlag:
         owner_id=test_user.id,
         rollout_percentage=50,
         targeting_rules=TEST_FLAG_DATA["targeting_rules"],
-        variants=TEST_FLAG_DATA["variants"],
+        variants=TEST_FLAG_VARIANTS,
     )
     db_session.add(flag)
     db_session.commit()
@@ -739,28 +739,8 @@ class TestFeatureFlagEndpoints:
 
         # Setup mock crud functions
         def mock_get_multi(*args, **kwargs):
-            # Convert the database models to FeatureFlagReadExtended compatible format
-            formatted_flags = []
-            for flag in own_flags().order_by(FeatureFlag.key).all():
-                formatted_flags.append(
-                    {
-                        "id": str(flag.id),
-                        "key": flag.key,
-                        "name": flag.name,
-                        "description": flag.description,
-                        "is_active": flag.status == FeatureFlagStatus.ACTIVE.value,
-                        "status": flag.status,
-                        "rollout_percentage": flag.rollout_percentage,
-                        "targeting_rules": flag.targeting_rules,
-                        "variants": [flag.variants] if flag.variants else [],
-                        "owner_id": str(flag.owner_id),
-                        "created_at": flag.created_at,
-                        "updated_at": flag.updated_at,
-                        "tags": flag.tags,
-                        "metrics": [],
-                    }
-                )
-            return formatted_flags
+            # The stored rows, as crud returns them
+            return list(own_flags().order_by(FeatureFlag.key).all())
 
         def mock_count(*args, **kwargs):
             return own_flags().count()
@@ -819,33 +799,13 @@ class TestFeatureFlagEndpoints:
 
         # Setup mock crud functions
         def mock_get_multi(*args, **kwargs):
-            # Convert the test feature flag to FeatureFlagReadExtended compatible format
+            # The stored row, as crud returns it
             flags = (
                 db_session.query(FeatureFlag)
                 .filter(FeatureFlag.id == test_feature_flag.id)
                 .all()
             )
-            formatted_flags = []
-            for flag in flags:
-                formatted_flags.append(
-                    {
-                        "id": str(flag.id),
-                        "key": flag.key,
-                        "name": flag.name,
-                        "description": flag.description,
-                        "is_active": flag.status == FeatureFlagStatus.ACTIVE.value,
-                        "status": flag.status,
-                        "rollout_percentage": flag.rollout_percentage,
-                        "targeting_rules": flag.targeting_rules,
-                        "variants": [flag.variants] if flag.variants else [],
-                        "owner_id": str(flag.owner_id),
-                        "created_at": flag.created_at,
-                        "updated_at": flag.updated_at,
-                        "tags": flag.tags,
-                        "metrics": [],
-                    }
-                )
-            return formatted_flags
+            return list(flags)
 
         def mock_count(*args, **kwargs):
             # Return the count (1 for the test feature flag)

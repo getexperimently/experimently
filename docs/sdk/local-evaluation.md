@@ -213,7 +213,8 @@ curl -s localhost:8000/api/v1/auth/me -H "Authorization: Bearer $TOKEN" | jq .ro
 
 It prints `"ADMIN"`.
 
-Create a flag, off for everyone except users in the US or Canada:
+Create a flag, turned on (`"is_active": true`; a new flag is off otherwise) and serving
+no one except users in the US or Canada:
 
 ```{.bash exec}
 curl -s -X POST localhost:8000/api/v1/feature-flags/ \
@@ -222,6 +223,7 @@ curl -s -X POST localhost:8000/api/v1/feature-flags/ \
   -d '{
     "key": "local-eval-demo",
     "name": "Local evaluation demo",
+    "is_active": true,
     "rollout_percentage": 0,
     "targeting_rules": {
       "logical_operator": "AND",

@@ -10,7 +10,9 @@ runner will execute the page; until then these pin the shape of each example:
 * every ```json sample parses;
 * no placeholder a reader cannot fill in is left in a shell example;
 * every body sent to the create or update endpoint uses only fields the request
-  schema accepts, because the API drops the rest without an error;
+  schema writes: the API refuses any other field with 422, and the read-only
+  fields it accepts (``id``, ``status``, ...) are ignored, so an example that
+  sends one teaches a field that does nothing;
 * the collection URL is written with its trailing slash, a single flag's without;
 * the page never mentions a draft state.
 """
@@ -23,7 +25,11 @@ import re
 
 import pytest
 
-from backend.app.schemas.feature_flag import FeatureFlagCreate, FeatureFlagUpdate
+from backend.app.schemas.feature_flag import (
+    READ_ONLY_FIELDS,
+    FeatureFlagCreate,
+    FeatureFlagUpdate,
+)
 
 pytestmark = [pytest.mark.unit, pytest.mark.regression]
 
@@ -112,13 +118,25 @@ def test_login_sends_an_email_not_a_username():
     assert login and all('"email"' in t and '"username"' not in t for t in login)
 
 
-def test_every_body_uses_only_fields_the_api_accepts():
+def _writable(schema) -> set[str]:
+    """The fields a request writes: declared, and not read-only (#94)."""
+    return set(schema.model_fields) - READ_ONLY_FIELDS
+
+
+def test_the_writable_set_excludes_every_read_only_field():
+    for schema in (FeatureFlagCreate, FeatureFlagUpdate):
+        assert READ_ONLY_FIELDS <= set(schema.model_fields)
+        assert not (_writable(schema) & READ_ONLY_FIELDS)
+        assert {"key", "name", "is_active", "default_value"} <= _writable(schema)
+
+
+def test_every_body_uses_only_fields_the_api_writes():
     for start, method, url, body in _flag_requests():
         schema = FeatureFlagCreate if method == "POST" else FeatureFlagUpdate
-        unknown = set(json.loads(body)) - set(schema.model_fields)
-        assert not unknown, (
-            f"create.md:{start}: {method} {url} sends {sorted(unknown)}, which the API "
-            f"drops without an error"
+        unwritten = set(json.loads(body)) - _writable(schema)
+        assert not unwritten, (
+            f"create.md:{start}: {method} {url} sends {sorted(unwritten)}, which the "
+            f"API refuses (422) or accepts and ignores"
         )
 
 

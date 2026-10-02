@@ -31,15 +31,6 @@ class FeatureFlagStatus(enum.Enum):
     ARCHIVED = "ARCHIVED"
 
 
-#: Columns no create or update request writes yet.  The request schemas still
-#: declare ``default_value`` untyped, and the writers keep only the keys that are
-#: columns, so without this a request's value would reach the column: a non-
-#: boolean would fail the INSERT, and ``true`` would be stored.  The
-#: create/update contract (#94) types the field, refuses ``true``, and then
-#: retires this.
-NOT_WRITTEN_BY_REQUESTS = frozenset({"default_value"})
-
-
 class FeatureFlag(Base, BaseModel):
     """Feature flag model for feature toggles."""
 
@@ -60,9 +51,9 @@ class FeatureFlag(Base, BaseModel):
     )
     targeting_rules = Column(JSONB)  # Rules for flag enablement
     rollout_percentage = Column(Integer, default=0, nullable=False)  # Gradual rollout
-    # What the flag serves when it is off; only false for now.  Stored, and
-    # nothing reads or writes it yet -- the create/update contract (#94) gives
-    # it meaning.  ``server_default`` is load-bearing: the previous release's
+    # What the flag serves when it is off.  The request schemas type it and
+    # accept only false for now (D40), so every row holds false; evaluation does
+    # not read it.  ``server_default`` is load-bearing: the previous release's
     # image inserts rows without naming this column, and the database fills it.
     default_value = Column(
         Boolean, nullable=False, default=False, server_default=false()

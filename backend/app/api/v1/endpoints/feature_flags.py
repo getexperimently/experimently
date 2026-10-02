@@ -21,6 +21,7 @@ from fastapi import (
     Response,
     status,
 )
+from fastapi.exceptions import RequestValidationError
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -41,14 +42,19 @@ from backend.app.models.feature_flag import FeatureFlag, FeatureFlagStatus
 from backend.app.models.user import User
 from backend.app.schemas.audit_log import ToggleRequest, ToggleResponse
 from backend.app.schemas.feature_flag import (
+    STATUS_READ_ONLY,
     FeatureFlagCreate,
     FeatureFlagListResponse,
+    FeatureFlagRead,
     FeatureFlagUpdate,
 )
 from backend.app.schemas.storable_text import storable_text_param
 from backend.app.services.audit_log_service import AuditLogService
 from backend.app.services.audit_service import AuditService
-from backend.app.services.feature_flag_service import FeatureFlagService
+from backend.app.services.feature_flag_service import (
+    FeatureFlagService,
+    FlagStatusReadOnly,
+)
 
 # Setup logger
 logger = logging.getLogger(__name__)
@@ -98,6 +104,17 @@ def _raise_if_key_conflict(
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT, detail=_flag_key_taken_detail(key)
         ) from None
+
+
+def _status_read_only() -> RequestValidationError:
+    """The 422 for a sent ``status`` that differs from the flag's (#94).
+
+    The same shape as every other request validation error, through the
+    application's handler; nothing in it comes from the request.
+    """
+    return RequestValidationError(
+        [{"type": "read_only", "loc": ("body", "status"), "msg": STATUS_READ_ONLY}]
+    )
 
 
 async def _skip_cache_ignored(skip_cache: bool = False) -> None:
@@ -218,7 +235,10 @@ async def list_feature_flags(
 
     # Create response with pagination
     response = FeatureFlagListResponse(
-        items=feature_flags_data, total=total, skip=skip, limit=limit
+        items=[FeatureFlagRead.model_validate(flag) for flag in feature_flags_data],
+        total=total,
+        skip=skip,
+        limit=limit,
     )
 
     return response
@@ -226,7 +246,7 @@ async def list_feature_flags(
 
 @router.post(
     "/",
-    response_model=Dict[str, Any],
+    response_model=FeatureFlagRead,
     status_code=status.HTTP_201_CREATED,
     summary="Create feature flag",
     response_description="Returns the created feature flag",
@@ -234,7 +254,7 @@ async def list_feature_flags(
 )
 @router.post(
     "",
-    response_model=Dict[str, Any],
+    response_model=FeatureFlagRead,
     status_code=status.HTTP_201_CREATED,
     include_in_schema=False,
 )
@@ -246,7 +266,7 @@ async def create_feature_flag(
     current_user: User = Depends(deps.get_current_active_user),
     _skip_cache: None = Depends(_skip_cache_ignored),
     _: bool = Depends(deps.can_create_feature_flag),  # Use the permission dependency
-) -> Dict[str, Any]:
+) -> FeatureFlagRead:
     """
     Create a new feature flag.
 
@@ -260,13 +280,18 @@ async def create_feature_flag(
     - Optional targeting rules for specific user segments
     - Optional rollout percentage
 
-    The feature flag is created in INACTIVE status by default.
+    The flag is created off (INACTIVE) unless the request sends
+    `is_active: true`. A field the API does not read answers 422. The read-only
+    fields of a flag response (`id`, `owner_id`, `created_at`, `updated_at`,
+    `status`) are accepted and ignored, except that a `status` must be the one
+    the flag is created with.
 
     Returns:
-        Dict[str, Any]: The newly created feature flag with all details
+        FeatureFlagRead: The newly created feature flag
 
     Raises:
-        HTTPException: If the feature flag data is invalid or creation fails
+        HTTPException 409: Another flag already has this key
+        HTTPException 422: The body is not a valid flag
     """
     # Create feature flag service
     feature_flag_service = FeatureFlagService(db)
@@ -286,35 +311,18 @@ async def create_feature_flag(
         feature_flag = feature_flag_service.create_feature_flag(
             flag_data=feature_flag_in, owner_id=current_user.id
         )
-
-        # Convert SQLAlchemy model to dictionary manually
-        response_dict = {
-            "id": str(feature_flag.id),
-            "key": feature_flag.key,
-            "name": feature_flag.name,
-            "description": feature_flag.description,
-            "status": feature_flag.status.value.lower()
-            if hasattr(feature_flag.status, "value")
-            else str(feature_flag.status).lower(),
-            "owner_id": str(feature_flag.owner_id) if feature_flag.owner_id else None,
-            "targeting_rules": feature_flag.targeting_rules,
-            "rollout_percentage": feature_flag.rollout_percentage,
-            "variants": feature_flag.variants,
-            "tags": feature_flag.tags,
-            "created_at": feature_flag.created_at.isoformat()
-            if feature_flag.created_at
-            else None,
-            "updated_at": feature_flag.updated_at.isoformat()
-            if feature_flag.updated_at
-            else None,
-        }
-
+    except FlagStatusReadOnly:
+        raise _status_read_only() from None
     except IntegrityError as e:
         # A concurrent create took the key after the pre-check above.
         _raise_if_key_conflict(db, e, feature_flag_in.key, None)
         raise
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+
+    # Built outside the ``except ValueError`` above: a ValidationError is a
+    # ValueError, and its text would carry stored values into a 400.
+    created = FeatureFlagRead.model_validate(feature_flag)
 
     # Compliance audit logging (non-fatal — do not fail the request if this fails)
     try:
@@ -323,12 +331,9 @@ async def create_feature_flag(
             action=AuditAction.CREATE,
             resource_type="feature_flag",
             outcome=AuditOutcome.SUCCESS,
-            resource_id=response_dict.get("id"),
+            resource_id=str(created.id),
             actor_id=str(current_user.id) if current_user else None,
-            new_value={
-                "key": response_dict.get("key"),
-                "name": response_dict.get("name"),
-            },
+            new_value={"key": created.key, "name": created.name},
         )
         # log() only flushes, and the create above has already committed, so
         # without this the record is rolled back when the session closes.
@@ -339,12 +344,12 @@ async def create_feature_flag(
             f"Compliance audit logging failed for feature_flag create: {audit_error}"
         )
 
-    return response_dict
+    return created
 
 
 @router.get(
     "/{flag_id}",
-    response_model=Dict[str, Any],
+    response_model=FeatureFlagRead,
     summary="Get feature flag",
     response_description="Returns the feature flag details",
 )
@@ -353,7 +358,7 @@ async def get_feature_flag(
     db: Session = Depends(deps.get_db),
     current_user: User = Depends(deps.get_current_active_user),
     _skip_cache: None = Depends(_skip_cache_ignored),
-) -> Dict[str, Any]:
+) -> FeatureFlagRead:
     """
     Get feature flag by ID.
 
@@ -361,7 +366,7 @@ async def get_feature_flag(
     Users can only access feature flags they own or have permission to view.
 
     Returns:
-        Dict[str, Any]: The feature flag details
+        FeatureFlagRead: The feature flag
 
     Raises:
         HTTPException 404: If feature flag not found
@@ -394,7 +399,7 @@ async def get_feature_flag(
 
 @router.put(
     "/{flag_id}",
-    response_model=Dict[str, Any],
+    response_model=FeatureFlagRead,
     summary="Update feature flag",
     response_description="Returns the updated feature flag",
     responses={409: {"description": "Another feature flag already has this key"}},
@@ -407,25 +412,33 @@ async def update_feature_flag(
     db: Session = Depends(deps.get_db),
     current_user: User = Depends(deps.get_current_active_user),
     _skip_cache: None = Depends(_skip_cache_ignored),
-) -> Dict[str, Any]:
+) -> FeatureFlagRead:
     """
     Update a feature flag.
 
     This endpoint allows users to update an existing feature flag.
     The user must have access to the feature flag (be the owner or have permission).
 
-    Fields that can be updated include:
-    - Name and description
-    - Status (active, inactive, archived)
+    Only the fields sent change. They include:
+    - Key, name and description
+    - `is_active`, which turns the flag on or off (an archived flag sent
+      `is_active: false` stays archived)
     - Targeting rules
     - Rollout percentage
 
+    A field the API does not read answers 422, and so does an explicit null on
+    `key`, `name`, `is_active`, `rollout_percentage` or `default_value`. The
+    read-only fields of a flag response (`id`, `owner_id`, `created_at`,
+    `updated_at`, `status`) are accepted and ignored, so a GET body can be sent
+    back; a `status` must equal the flag's.
+
     Returns:
-        Dict[str, Any]: The updated feature flag with all details
+        FeatureFlagRead: The updated feature flag
 
     Raises:
-        HTTPException 400: If the update data is invalid
         HTTPException 403: If the user doesn't have permission to update this feature flag
+        HTTPException 409: Another flag already has the key
+        HTTPException 422: The body is not a valid update
     """
     # Create feature flag service
     feature_flag_service = FeatureFlagService(db)
@@ -467,7 +480,9 @@ async def update_feature_flag(
 
     # Update feature flag
     try:
-        updated_flag = feature_flag_service.update_feature_flag(flag, feature_flag_in)
+        updated_row = feature_flag_service.update_feature_flag(flag, feature_flag_in)
+    except FlagStatusReadOnly:
+        raise _status_read_only() from None
     except IntegrityError as e:
         # A concurrent write took the key after the check above.
         _raise_if_key_conflict(db, e, feature_flag_in.key, flag_id)
@@ -475,23 +490,16 @@ async def update_feature_flag(
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 
+    # Built outside the ``except ValueError`` above (see create).
+    updated_flag = FeatureFlagRead.model_validate(updated_row)
+
     # Compliance audit logging (non-fatal)
     try:
         new_flag_snapshot = {
-            "key": updated_flag.get("key")
-            if isinstance(updated_flag, dict)
-            else getattr(updated_flag, "key", None),
-            "name": updated_flag.get("name")
-            if isinstance(updated_flag, dict)
-            else getattr(updated_flag, "name", None),
-            "status": str(
-                updated_flag.get("status")
-                if isinstance(updated_flag, dict)
-                else getattr(updated_flag, "status", None)
-            ),
-            "rollout_percentage": updated_flag.get("rollout_percentage")
-            if isinstance(updated_flag, dict)
-            else getattr(updated_flag, "rollout_percentage", None),
+            "key": updated_flag.key,
+            "name": updated_flag.name,
+            "status": updated_flag.status,
+            "rollout_percentage": updated_flag.rollout_percentage,
         }
         audit = AuditLogService(db)
         audit.log(
@@ -632,7 +640,7 @@ async def delete_feature_flag(
 
 @router.post(
     "/{flag_id}/activate",
-    response_model=Dict[str, Any],
+    response_model=FeatureFlagRead,
     summary="Activate feature flag",
     response_description="Returns the activated feature flag",
 )
@@ -641,7 +649,7 @@ async def activate_feature_flag(
     db: Session = Depends(deps.get_db),
     current_user: User = Depends(deps.get_current_active_user),
     _skip_cache: None = Depends(_skip_cache_ignored),
-) -> Dict[str, Any]:
+) -> FeatureFlagRead:
     """
     Activate a feature flag.
 
@@ -649,7 +657,7 @@ async def activate_feature_flag(
     Activating a feature flag makes it available for use in applications.
 
     Returns:
-        Dict[str, Any]: The updated feature flag with ACTIVE status
+        FeatureFlagRead: The feature flag, now ACTIVE
 
     Raises:
         HTTPException 400: If the feature flag cannot be activated
@@ -671,18 +679,7 @@ async def activate_feature_flag(
 
     # Check if feature flag is already active
     if flag.status in (FeatureFlagStatus.ACTIVE, FeatureFlagStatus.ACTIVE.value):
-        return {
-            "id": str(flag.id),
-            "key": flag.key,
-            "name": flag.name,
-            "description": flag.description,
-            "status": "active",
-            "rollout_percentage": flag.rollout_percentage,
-            "targeting_rules": flag.targeting_rules,
-            "owner_id": str(flag.owner_id),
-            "created_at": flag.created_at,
-            "updated_at": flag.updated_at,
-        }
+        return FeatureFlagRead.model_validate(flag)
 
     # Create feature flag service
     feature_flag_service = FeatureFlagService(db)
@@ -695,7 +692,7 @@ async def activate_feature_flag(
 
 @router.post(
     "/{flag_id}/deactivate",
-    response_model=Dict[str, Any],
+    response_model=FeatureFlagRead,
     summary="Deactivate feature flag",
     response_description="Returns the deactivated feature flag",
 )
@@ -704,7 +701,7 @@ async def deactivate_feature_flag(
     db: Session = Depends(deps.get_db),
     current_user: User = Depends(deps.get_current_active_user),
     _skip_cache: None = Depends(_skip_cache_ignored),
-) -> Dict[str, Any]:
+) -> FeatureFlagRead:
     """
     Deactivate a feature flag.
 
@@ -712,7 +709,7 @@ async def deactivate_feature_flag(
     Deactivating a feature flag makes it unavailable for use in applications.
 
     Returns:
-        Dict[str, Any]: The updated feature flag with INACTIVE status
+        FeatureFlagRead: The feature flag, now INACTIVE
 
     Raises:
         HTTPException 400: If the feature flag cannot be deactivated
@@ -734,18 +731,7 @@ async def deactivate_feature_flag(
 
     # Check if feature flag is already inactive
     if flag.status in (FeatureFlagStatus.INACTIVE, FeatureFlagStatus.INACTIVE.value):
-        return {
-            "id": str(flag.id),
-            "key": flag.key,
-            "name": flag.name,
-            "description": flag.description,
-            "status": "inactive",
-            "rollout_percentage": flag.rollout_percentage,
-            "targeting_rules": flag.targeting_rules,
-            "owner_id": str(flag.owner_id),
-            "created_at": flag.created_at,
-            "updated_at": flag.updated_at,
-        }
+        return FeatureFlagRead.model_validate(flag)
 
     # Create feature flag service
     feature_flag_service = FeatureFlagService(db)

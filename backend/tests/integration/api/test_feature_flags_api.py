@@ -35,7 +35,7 @@ from backend.tests.integration.helpers import assert_feature_flag_in_db, unique_
 @pytest.mark.integration
 @pytest.mark.requires_db
 class TestFeatureFlagsList:
-    """GET /api/v1/feature-flags/ — list items are validated by FeatureFlagReadExtended."""
+    """GET /api/v1/feature-flags/ — list items are validated by FeatureFlagRead."""
 
     def test_list_returns_200_and_paginated_structure(self, admin_client):
         """List endpoint returns 200 with a proper paginated response."""

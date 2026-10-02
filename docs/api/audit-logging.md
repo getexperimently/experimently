@@ -36,18 +36,19 @@ It prints `"ADMIN"`.
 Toggle several feature flags in one call. Each flag succeeds or fails on its own: the
 call answers `200` with a result per flag, even when some of them fail.
 
-These two flags give the call something to change. This saves their ids in `$DARK_ID`
+These two flags give the call something to change. They are created on
+(`"is_active": true`; a new flag is off otherwise). This saves their ids in `$DARK_ID`
 and `$CHECKOUT_ID`:
 
 ```{.bash exec}
 DARK_ID=$(curl -s -X POST localhost:8000/api/v1/feature-flags/ \
   -H "Authorization: Bearer $TOKEN" \
   -H 'content-type: application/json' \
-  -d '{"key": "dark-mode", "name": "Dark mode"}' | jq -r .id)
+  -d '{"key": "dark-mode", "name": "Dark mode", "is_active": true}' | jq -r .id)
 CHECKOUT_ID=$(curl -s -X POST localhost:8000/api/v1/feature-flags/ \
   -H "Authorization: Bearer $TOKEN" \
   -H 'content-type: application/json' \
-  -d '{"key": "new-checkout", "name": "New checkout"}' | jq -r .id)
+  -d '{"key": "new-checkout", "name": "New checkout", "is_active": true}' | jq -r .id)
 
 echo "$DARK_ID $CHECKOUT_ID" | wc -w
 ```

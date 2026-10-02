@@ -19,7 +19,10 @@ profile, and runs the documented ``alembic upgrade heads``.  Then:
    model's column -- creates, updates and lists flags against a database at
    this head, which is what a deploy (old tasks still serving) and an
    image-only rollback both do.  Its INSERTs do not name the column, so the
-   server default is what lets them succeed;
+   server default is what lets them succeed.  The writes go through the ORM
+   model as that release's writers did: this tree's own service and schemas
+   write and read ``default_value`` (the create/update contract), so they
+   cannot stand in for a release that did not know the column;
 4. ``downgrade`` removes exactly the column.
 """
 
@@ -247,34 +250,29 @@ _PREVIOUS_RELEASE_WRITES = textwrap.dedent(
 
     from backend.app.crud.crud_feature_flag import crud_feature_flag
     from backend.app.db.session import SessionLocal
-    from backend.app.models.feature_flag import FeatureFlag
-    from backend.app.schemas.feature_flag import (
-        FeatureFlagCreate,
-        FeatureFlagListResponse,
-        FeatureFlagUpdate,
-    )
-    from backend.app.services.feature_flag_service import FeatureFlagService
+    from backend.app.models.feature_flag import FeatureFlag, FeatureFlagStatus
 
     # The previous release's model: it does not know the column.
     assert "default_value" not in FeatureFlag.__table__.columns
 
     db = SessionLocal()
-    service = FeatureFlagService(db)
-    flag = service.create_feature_flag(
-        FeatureFlagCreate(key="previous-release-flag", name="Previous release"),
+    flag = FeatureFlag(
+        key="previous-release-flag",
+        name="Previous release",
+        status=FeatureFlagStatus.INACTIVE,
         owner_id=None,
     )
-    updated = service.update_feature_flag(
-        flag.id, FeatureFlagUpdate(rollout_percentage=25)
-    )
+    db.add(flag)
+    db.commit()
+    db.refresh(flag)
+    flag.rollout_percentage = 25
+    db.commit()
+    db.refresh(flag)
     items = crud_feature_flag.get_multi(db, skip=0, limit=100)
-    listed = FeatureFlagListResponse(
-        items=items, total=crud_feature_flag.count(db), skip=0, limit=100
-    )
     print(json.dumps({
         "id": str(flag.id),
-        "rollout_percentage": updated["rollout_percentage"],
-        "listed": [item.key for item in listed.items],
+        "rollout_percentage": flag.rollout_percentage,
+        "listed": [item.key for item in items],
     }))
     """
 )

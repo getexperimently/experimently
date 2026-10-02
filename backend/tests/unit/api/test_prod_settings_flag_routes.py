@@ -84,7 +84,17 @@ def client(prod_settings):
             patch.object(
                 ff.FeatureFlagService,
                 "get_feature_flag",
-                return_value={"id": "x", "key": "k"},
+                # A whole flag: the detail answers with the typed FeatureFlagRead.
+                return_value={
+                    "id": str(uuid.uuid4()),
+                    "key": "k",
+                    "name": "K",
+                    "status": "INACTIVE",
+                    "rollout_percentage": 0,
+                    "default_value": False,
+                    "created_at": "2026-01-01T00:00:00Z",
+                    "updated_at": "2026-01-01T00:00:00Z",
+                },
             ),
         ):
             yield TestClient(app, raise_server_exceptions=False)

@@ -243,9 +243,7 @@ class Story:
 
     def flag_rules(self, flag: dict[str, Any] | None = None) -> dict[str, Any]:
         flag = flag or self.flag()
-        rules = flag.get("rules")
-        if rules is None:
-            rules = flag.get("targeting_rules")
+        rules = flag.get("targeting_rules")
         return rules if isinstance(rules, dict) else {}
 
     def flag_page(self) -> str:

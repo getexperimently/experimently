@@ -88,6 +88,12 @@ and say in the pull request which stable operations changed and why; the
 smoke test's failure message lists them by method and path, with the first
 differing keys.
 
+Stable operations changed this way, before any user depended on them:
+
+| Operations | Changed by | What changed |
+|---|---|---|
+| `POST /api/v1/feature-flags/`, `GET /api/v1/feature-flags/`, `GET`/`PUT /api/v1/feature-flags/{flag_id}`, `POST /api/v1/feature-flags/{flag_id}/activate`, `POST /api/v1/feature-flags/{flag_id}/deactivate` | #94 | The request schemas refuse unknown fields and explicit nulls, a new flag is off unless `is_active: true` is sent, and `default_value` accepts only `false`. Every one of these operations answers with one documented flag schema, `FeatureFlagRead`, which names targeting `targeting_rules` and no longer carries `rules`, `variants`, `metrics` or `last_evaluated`. See [Creating Feature Flags](../feature-flags/create.md). |
+
 ## Deprecated operations
 
 A deprecated operation keeps its URL, shape and behaviour. It carries
