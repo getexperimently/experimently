@@ -12,6 +12,9 @@ This guide explains how to use the authentication features of Experimently, incl
     `local`, sign in with `POST /api/v1/auth/login`; an administrator creates accounts
     and resets passwords.
 
+    The dashboard does not yet sign in with Cognito. Sign in through the API with
+    `POST /api/v1/auth/token`. SSO sign-in needs `AUTH_PROVIDER=local`.
+
 ## Account Registration
 
 Only with `COGNITO_SELF_SIGNUP_ENABLED=true` and a user pool that allows self sign-up; otherwise see [Adding a user](../cognito_integration.md#adding-a-user).
@@ -32,18 +35,21 @@ To create an account on Experimently, you will need to provide:
 
 ### Registration Process
 
-1. Navigate to the registration page at `/register` or click "Sign Up" from the login page
-2. Enter your details in the registration form
-3. Click "Register" to submit your information
-4. Check your email for a verification code
-5. Enter the verification code on the confirmation page
-6. Once verified, you will be redirected to the login page
+The dashboard has no registration page and no sign-up link: registration is through the API
+only, and only with `COGNITO_SELF_SIGNUP_ENABLED=true`. Without it, both endpoints below
+answer 404 and an administrator creates your account
+([Adding a user](../cognito_integration.md#adding-a-user)).
+
+1. `POST /api/v1/auth/signup` with `username`, `password`, `email`, `given_name` and
+   `family_name`. Cognito emails a verification code to the address.
+2. `POST /api/v1/auth/confirm` with `username` and the `confirmation_code` from the email.
+3. Sign in with `POST /api/v1/auth/token` (form fields `username` and `password`). The
+   dashboard does not yet sign in with Cognito.
 
 ### Email Verification
 
 - Verification codes are valid for 24 hours
 - If you don't receive a verification code, check your spam folder
-- You can request a new code by clicking "Resend Code" on the verification page
 - Your account will not be fully active until you verify your email
 
 ## Login Process

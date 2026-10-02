@@ -12,6 +12,9 @@ This document provides technical documentation for developers integrating with a
     `local`, sign in with `POST /api/v1/auth/login`; an administrator creates accounts
     and resets passwords.
 
+    The dashboard does not yet sign in with Cognito. Sign in through the API with
+    `POST /api/v1/auth/token`. SSO sign-in needs `AUTH_PROVIDER=local`.
+
 ## Architecture Overview
 
 The authentication system is built on AWS Cognito and provides these key capabilities:

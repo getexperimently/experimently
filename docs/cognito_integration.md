@@ -14,6 +14,16 @@ The platform uses AWS Cognito for user authentication and leverages Cognito grou
    (see [When a role change takes effect](#when-a-role-change-takes-effect))
 4. Superusers (with full admin privileges) are automatically identified based on membership in designated admin groups
 
+## Signing in under Cognito
+
+The dashboard does not yet sign in with Cognito. Sign in through the API with
+`POST /api/v1/auth/token`. SSO sign-in needs `AUTH_PROVIDER=local`.
+
+Under `AUTH_PROVIDER=cognito` the dashboard's sign-in form answers that its endpoint is not
+available, and an SSO sign-in does not sign the user in. Dashboard sign-in
+under Cognito is tracked in [#708](https://github.com/getexperimently/experimently/issues/708),
+SSO under Cognito in [#707](https://github.com/getexperimently/experimently/issues/707).
+
 ## Required settings
 
 Under `AUTH_PROVIDER=cognito`, both `COGNITO_USER_POOL_ID` and `COGNITO_CLIENT_ID` are

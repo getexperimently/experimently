@@ -10,9 +10,9 @@ The following environment variables are essential for connecting to and working 
 |---------------|-------------|----------|---------|
 | `COGNITO_USER_POOL_ID` | The ID of your AWS Cognito User Pool (e.g., `us-west-2_abcDEF123`) | Yes | None |
 | `COGNITO_CLIENT_ID` | The App Client ID for your application | Yes | None |
-| `COGNITO_CLIENT_SECRET` | The App Client Secret (if client was created with a secret) | No | None |
+| `COGNITO_CLIENT_SECRET` | Read by nothing. The platform sends no `SECRET_HASH`, so an app client created with a secret cannot sign in: create the app client without one. | No | None |
 | `AWS_REGION` | The AWS region where your Cognito User Pool is deployed | Yes | `us-west-2` |
-| `COGNITO_DOMAIN` | Your Cognito domain for hosted UI (if used) | No | None |
+| `COGNITO_DOMAIN` | Read by nothing. The platform does not use the Cognito Hosted UI. | No | None |
 | `COGNITO_SELF_SIGNUP_ENABLED` | Under `AUTH_PROVIDER=cognito`, lets anyone who can reach the API register with `POST /api/v1/auth/signup` and `/confirm`. Off: both answer 404 and an administrator creates users ([Adding a user](../cognito_integration.md#adding-a-user)). Ignored under `local`, where both always answer 404. The user pool must also allow self sign-up; the reference pool does not. A self-registered user is in no Cognito group, so their first sign-in creates an account with the Viewer role. | No | `false` |
 
 Under `AUTH_PROVIDER=cognito`, both `COGNITO_USER_POOL_ID` and `COGNITO_CLIENT_ID` are
@@ -25,6 +25,9 @@ issuer the platform expects is built from it, and a pool ID in any other form re
 sign-in. Each refused sign-in is logged at WARNING on the `backend.app.auth.cognito_sign_in`
 logger with a `reason` field: `not_configured` when a setting is unset, `wrong_issuer` when
 the token was not issued to the configured user pool and app client.
+
+The dashboard does not yet sign in with Cognito. Sign in through the API with
+`POST /api/v1/auth/token`. SSO sign-in needs `AUTH_PROVIDER=local`.
 
 `COGNITO_SELF_SIGNUP_ENABLED` takes `true` or `false`, in any letter case (`1`/`0`, `yes`/`no`,
 `on`/`off`, `t`/`f` and `y`/`n` are read the same way). An empty value, or any other value,
@@ -74,9 +77,7 @@ Create a `.env` file in the root of your project with the following content:
 # AWS Cognito Configuration
 COGNITO_USER_POOL_ID=us-west-2_abcDEF123
 COGNITO_CLIENT_ID=1abc2defghij3klmno4pqr5st
-COGNITO_CLIENT_SECRET=your-client-secret-if-configured
 AWS_REGION=us-west-2
-COGNITO_DOMAIN=auth.yourapp.com
 
 # Authentication Settings
 ACCESS_TOKEN_EXPIRE_MINUTES=60

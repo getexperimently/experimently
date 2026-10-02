@@ -26,6 +26,8 @@ Where the login is checked depends on `AUTH_PROVIDER`:
 - **`cognito`**: the credentials are passed to an AWS Cognito user pool, which issues an
   access token and a refresh token. Users are created by an administrator
   ([Adding a user](../cognito_integration.md#adding-a-user)).
+  The dashboard does not yet sign in with Cognito. Sign in through the API with
+  `POST /api/v1/auth/token`. SSO sign-in needs `AUTH_PROVIDER=local`.
 
 ### Obtaining a Token
 
