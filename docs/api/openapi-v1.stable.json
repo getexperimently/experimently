@@ -12584,7 +12584,7 @@
     },
     "/api/v1/admin/users": {
       "get": {
-        "description": "List all users.\n\nThis endpoint is only accessible by superusers and returns a list of all users\nin the system with pagination.",
+        "description": "List all users.\n\nThis endpoint is only accessible by superusers and returns a list of all users\nin the system with pagination, newest first.\n\nWith `search`, only users whose username, email, first name or last name\ncontains the term (case-insensitive, matched literally) are listed, and\n`total` counts those users. A term containing a NUL character answers 422.",
         "operationId": "list_users_api_v1_admin_users_get",
         "parameters": [
           {
@@ -12608,6 +12608,25 @@
               "minimum": 1,
               "title": "Limit",
               "type": "integer"
+            }
+          },
+          {
+            "description": "Case-insensitive substring of the username, email, first name or last name. Matched literally (`%`, `_` and `\\` are not wildcards). Leading and trailing spaces are ignored; an empty or all-space value lists every user.",
+            "in": "query",
+            "name": "search",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 100,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Case-insensitive substring of the username, email, first name or last name. Matched literally (`%`, `_` and `\\` are not wildcards). Leading and trailing spaces are ignored; an empty or all-space value lists every user.",
+              "title": "Search"
             }
           }
         ],

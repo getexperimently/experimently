@@ -7,9 +7,10 @@ that require superuser privileges.
 
 import json
 import uuid
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from backend.app.api import deps
@@ -34,31 +35,71 @@ from backend.app.schemas.user import (
 router = APIRouter()
 
 
+#: The columns ``search`` matches, named one by one. Never build this list from
+#: the model's columns: anything added to ``User`` must not become searchable
+#: without someone deciding it should be (#651).
+USER_SEARCH_COLUMNS = (
+    User.username,
+    User.email,
+    User.first_name,
+    User.last_name,
+)
+
+
 @router.get("/users", response_model=UserListResponse)
 async def list_users(
     db: Session = Depends(deps.get_db),
     current_user: User = Depends(deps.get_current_superuser),
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=100),
+    search: Optional[str] = Query(
+        None,
+        max_length=100,
+        description=(
+            "Case-insensitive substring of the username, email, first name or "
+            "last name. Matched literally (`%`, `_` and `\\` are not "
+            "wildcards). Leading and trailing spaces are ignored; an empty or "
+            "all-space value lists every user."
+        ),
+    ),
 ) -> Any:
     """
     List all users.
 
     This endpoint is only accessible by superusers and returns a list of all users
-    in the system with pagination.
+    in the system with pagination, newest first.
+
+    With `search`, only users whose username, email, first name or last name
+    contains the term (case-insensitive, matched literally) are listed, and
+    `total` counts those users. A term containing a NUL character answers 422.
     """
+    if search is not None and "\x00" in search:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="search must not contain a NUL character",
+        )
+    term = (search or "").strip()
+
+    query = db.query(User)
+    if term:
+        query = query.filter(
+            or_(
+                *(
+                    column.icontains(term, autoescape=True)
+                    for column in USER_SEARCH_COLUMNS
+                )
+            )
+        )
+
     # Ordered: a paginated query without ORDER BY can repeat or skip rows
     # between pages, because the database is free to return them in any order.
     # Newest first is what an administrator looking for a just-created account
     # wants on page one.
     users = (
-        db.query(User)
-        .order_by(User.created_at.desc(), User.id)
-        .offset(skip)
-        .limit(limit)
-        .all()
+        query.order_by(User.created_at.desc(), User.id).offset(skip).limit(limit).all()
     )
-    total = db.query(User).count()
+    # Counted from the same filtered query, so "x of total" describes the list.
+    total = query.count()
 
     return UserListResponse(items=users, total=total, skip=skip, limit=limit)
 

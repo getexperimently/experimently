@@ -361,8 +361,11 @@ curl -X POST "http://localhost:8000/api/v1/users/" \
         "full_name": "string",
         "is_active": true,
         "is_superuser": false,
+        "role": "VIEWER",
         "created_at": "datetime",
-        "updated_at": "datetime"
+        "updated_at": "datetime",
+        "last_login": "datetime",
+        "preferences": {}
       }
     ],
     "total": 100,
@@ -370,6 +373,9 @@ curl -X POST "http://localhost:8000/api/v1/users/" \
     "limit": 100
   }
   ```
+- **Fields**: `full_name` is the first and last name joined by a space (or
+  whichever one is set), and `null` when neither is. `email`, `role`,
+  `last_login` and `preferences` may be `null`.
 
 ### Create User
 - **Endpoint**: `POST /api/v1/users/`
@@ -666,11 +672,22 @@ public `key`. They share the per-IP `SDK_RATE_LIMIT_PER_MINUTE` ceiling (default
 
 ### List Users (Admin)
 - **Endpoint**: `GET /api/v1/admin/users`
-- **Description**: List all users (superuser only)
+- **Description**: List all users, newest first (superuser only)
 - **Headers**: Authorization: Bearer {token}
 - **Query Parameters**:
   - skip: int (default: 0)
   - limit: int (default: 100, max: 100)
+  - search: string (optional, at most 100 characters). Lists only the users
+    whose username, email, first name or last name contains the term, ignoring
+    letter case. The term is matched literally: `%`, `_` and `\` are ordinary
+    characters, not wildcards. Leading and trailing spaces are ignored, and an
+    empty or all-space term lists every user. `total` counts the matching
+    users, so `skip`/`limit` page through the matches. A term matching nothing
+    answers 200 with `"items": []` and `"total": 0`. Each column is matched
+    on its own, so `Jane Smith` does not match a first name `Jane` and last
+    name `Smith`; search for either part.
+- **Errors**: 422 when `search` is longer than 100 characters or contains a
+  NUL character.
 - **Response**: 200 OK
   ```json
   {
@@ -682,8 +699,11 @@ public `key`. They share the per-IP `SDK_RATE_LIMIT_PER_MINUTE` ceiling (default
         "full_name": "string",
         "is_active": true,
         "is_superuser": false,
+        "role": "VIEWER",
         "created_at": "datetime",
-        "updated_at": "datetime"
+        "updated_at": "datetime",
+        "last_login": "datetime",
+        "preferences": {}
       }
     ],
     "total": 100,
@@ -691,6 +711,9 @@ public `key`. They share the per-IP `SDK_RATE_LIMIT_PER_MINUTE` ceiling (default
     "limit": 100
   }
   ```
+- **Fields**: `full_name` is the first and last name joined by a space (or
+  whichever one is set), and `null` when neither is. `email`, `role`,
+  `last_login` and `preferences` may be `null`.
 
 ### Update User (Admin)
 - **Endpoint**: `PUT /api/v1/admin/users/{user_id}`
