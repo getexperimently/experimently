@@ -42,6 +42,8 @@ pytestmark = [pytest.mark.integration]
 #: This revision, and the core revision it extends.
 REVISION = "271f03a31742"
 PREVIOUS_CORE_HEAD = "8fd44fb483a2"
+#: The core head of this tree, which ``upgrade heads`` runs on to.
+CORE_HEAD = "d12cbd384bbe"
 #: The modules branch's head, in the previous release and in this one alike.
 MODULES_HEAD = "modules_0002_warehouse_analysis"
 
@@ -50,8 +52,8 @@ PREVIOUS_ROWS = {
     FULL: {PREVIOUS_CORE_HEAD, MODULES_HEAD},
 }
 ROWS = {
-    CORE: {REVISION},
-    FULL: {REVISION, MODULES_HEAD},
+    CORE: {CORE_HEAD},
+    FULL: {CORE_HEAD, MODULES_HEAD},
 }
 
 COLUMN = "resume_at"

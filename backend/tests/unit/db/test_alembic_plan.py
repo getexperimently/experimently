@@ -45,8 +45,10 @@ CORE_VERSIONS = REPO_ROOT / "backend" / "app" / "db" / "migrations" / "versions"
 
 pytestmark = pytest.mark.unit
 
-#: The core chain's head: ``experiments.resume_at`` and its check (#436).
-CORE_HEAD = "271f03a31742"
+#: The core chain's head: ``users.email`` unique regardless of case (#343).
+CORE_HEAD = "d12cbd384bbe"
+#: ``experiments.resume_at`` and its check (#436), the revision before it.
+RESUME_AT = "271f03a31742"
 #: The SDK evaluation counters (#226), the first core revision after the marker.
 SDK_COUNTERS = "8fd44fb483a2"
 #: The marker revision: the second child of the branch point, so that the core
@@ -97,6 +99,7 @@ CORE_PLAN = [
     "a7b8c9d0e1f2",
     CORE_MARKER,
     SDK_COUNTERS,
+    RESUME_AT,
     CORE_HEAD,
 ]
 
@@ -105,10 +108,11 @@ CORE_PLAN = [
 #: whole reason the edge exists, and before the core marker and everything the
 #: core chain adds after it.
 FULL_PLAN = [
-    *CORE_PLAN[:-3],
+    *CORE_PLAN[:-4],
     *MODULES_BRANCH_PLAN,
     CORE_MARKER,
     SDK_COUNTERS,
+    RESUME_AT,
     CORE_HEAD,
 ]
 
@@ -229,8 +233,8 @@ def test_unapplying_the_branch_is_one_revision_and_modules_at_base_is_all_of_the
     assert _downgrade_plan(script, UNAPPLY_WHOLE_MODULES_BRANCH) == list(
         reversed(MODULES_BRANCH_PLAN)
     )
-    # 29: the 27 core revisions (through 271f03a31742, #436) and the branch's 2.
-    assert len(_downgrade_plan(script, "modules@base")) == len(FULL_PLAN) == 29
+    # 30: the 28 core revisions (through d12cbd384bbe, #343) and the branch's 2.
+    assert len(_downgrade_plan(script, "modules@base")) == len(FULL_PLAN) == 30
 
 
 #: A command line, not a mention of one: the three documents all warn about

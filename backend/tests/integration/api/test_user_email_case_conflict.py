@@ -14,6 +14,12 @@ and the same query is run again; a hit answers 409. A username collision is
 answered 409 "Username already registered", never "Email already registered"
 (#610; see ``test_user_username_conflict.py``).
 
+The database itself refuses a case-only pair since the ``lower(email)`` unique
+index (``ix_users_email_lower``, PR-B of #343), so the case-only race -- the
+pre-check misses and that index refuses the commit -- answers 409 too.  The
+tests about a pair that already exists build it with the index dropped
+(``without_email_lower_index``).
+
 The clients are built with ``raise_server_exceptions=False`` so that a server
 error shows up as the 500 a real client sees, not as an exception raised into
 the test.
@@ -35,6 +41,12 @@ from backend.app.core.database_config import get_schema_name
 from backend.app.main import app
 from backend.app.models.user import User, UserRole
 from backend.tests.integration.conftest import HASHED_PASSWORD, make_client_for_user
+from backend.tests.integration.email_lower_index import (
+    # A session-scoped autouse fixture: imported, it takes effect here.
+    email_lower_index_survives_the_session,
+    make_the_exact_email_index_fire_first,
+    without_email_lower_index,
+)
 
 pytestmark = [pytest.mark.integration]
 
@@ -191,7 +203,13 @@ class TestCreate:
     def test_the_race_with_an_identical_address_still_answers_409(
         self, db_session: Session, monkeypatch: pytest.MonkeyPatch
     ):
-        """The pre-check misses; the exact unique index refuses; the re-query maps it."""
+        """The pre-check misses; the exact unique index refuses; the re-query maps it.
+
+        The exact index is made the one PostgreSQL checks first, as on a
+        migrated database, so the collision is not reported by
+        ``ix_users_email_lower`` (a mapping keyed on that name would pass).
+        """
+        make_the_exact_email_index_fire_first(db_session)
         holder = _make_user(db_session)
         client = _admin_client(db_session)
         before = _user_count(db_session)
@@ -210,6 +228,31 @@ class TestCreate:
         assert response.status_code == 409, response.text
         assert response.json() == {"detail": EMAIL_TAKEN}
         assert _user_count(db_session) == before
+
+    @pytest.mark.regression
+    def test_the_race_with_a_case_variant_answers_409(
+        self, db_session: Session, monkeypatch: pytest.MonkeyPatch
+    ):
+        """The pre-check misses; ``ix_users_email_lower`` refuses; still 409."""
+        holder = _make_user(db_session)
+        client = _admin_client(db_session)
+        before = _user_count(db_session)
+        _skip_pre_check(monkeypatch)
+
+        response = client.post(
+            "/api/v1/users/",
+            json={
+                "username": f"new_{uuid.uuid4().hex[:8]}",
+                "email": holder.email.lower(),
+                "password": PASSWORD,
+                "full_name": "New",
+            },
+        )
+
+        assert response.status_code == 409, response.text
+        assert response.json() == {"detail": EMAIL_TAKEN}
+        assert _user_count(db_session) == before
+        assert _holders(db_session, holder.email) == 1
 
 
 @pytest.mark.parametrize("route", PUT_ROUTES)
@@ -256,9 +299,10 @@ class TestUpdate:
     ):
         """The pre-check misses; the exact unique index refuses; the re-query maps it.
 
-        Without the lower(email) index only an identical-case duplicate trips
-        a unique index, so that is the collision this race uses.
+        With the exact index checked first, as on a migrated database, the
+        collision is reported by it, not by ``ix_users_email_lower``.
         """
+        make_the_exact_email_index_fire_first(db_session)
         holder = _make_user(db_session)
         target = _make_user(db_session)
         client = _admin_client(db_session)
@@ -273,6 +317,27 @@ class TestUpdate:
         assert response.status_code == 409, response.text
         assert response.json() == {"detail": EMAIL_TAKEN}
         assert _row(db_session, target.id) == target_before
+
+    @pytest.mark.regression
+    def test_the_race_with_a_case_variant_answers_409(
+        self, db_session: Session, route: str, monkeypatch: pytest.MonkeyPatch
+    ):
+        """The pre-check misses; ``ix_users_email_lower`` refuses; still 409."""
+        holder = _make_user(db_session)
+        target = _make_user(db_session)
+        client = _admin_client(db_session)
+        target_before = _row(db_session, target.id)
+        _skip_pre_check(monkeypatch)
+
+        response = client.put(
+            route.format(id=target.id),
+            json=_put_body(target, email=holder.email.upper(), full_name="After"),
+        )
+
+        assert response.status_code == 409, response.text
+        assert response.json() == {"detail": EMAIL_TAKEN}
+        assert _row(db_session, target.id) == target_before
+        assert _holders(db_session, holder.email) == 1
 
     def test_re_casing_the_accounts_own_address_succeeds(
         self, db_session: Session, route: str
@@ -294,21 +359,29 @@ class TestUpdate:
         self, db_session: Session, route: str
     ):
         """An account in a pre-existing case pair (made by an administrator,
-        SQL or a restore) can still be edited without changing its address."""
-        target = _make_user(db_session)
-        _make_user(db_session, email=target.email.lower())  # the other half
-        client = _admin_client(db_session)
+        SQL or a restore) can still be edited without changing its address.
 
-        response = client.put(
-            route.format(id=target.id), json=_put_body(target, full_name="After")
-        )
+        The database refuses such a pair since ``ix_users_email_lower``, so it
+        is built with the index dropped; on the way out the pair is deleted
+        and the index re-created.
+        """
+        with without_email_lower_index(db_session) as added:
+            target = _make_user(db_session)
+            added.append(target.id)
+            other = _make_user(db_session, email=target.email.lower())
+            added.append(other.id)
+            client = _admin_client(db_session)
 
-        assert response.status_code == 200, response.text
-        assert _row(db_session, target.id) == (
-            target.email,
-            target.username,
-            "After",
-        )
+            response = client.put(
+                route.format(id=target.id), json=_put_body(target, full_name="After")
+            )
+
+            assert response.status_code == 200, response.text
+            assert _row(db_session, target.id) == (
+                target.email,
+                target.username,
+                "After",
+            )
 
     @pytest.mark.regression
     def test_resending_a_stored_address_with_a_mixed_case_domain_is_not_refused(
@@ -318,25 +391,29 @@ class TestUpdate:
         a restore wrote it), and it sits in a case pair. Resending it exactly
         as stored while changing another field answers 200 and keeps the
         row's bytes, although EmailStr lower-cases the domain of the request.
+        The pair is built with ``ix_users_email_lower`` dropped, as above.
         """
         suffix = uuid.uuid4().hex[:8]
-        target = _make_user(db_session, email=f"Bob.{suffix}@Acme.COM")
-        # The other half of the pair is exactly what EmailStr makes of the
-        # target's address, so writing that back would also collide exactly.
-        _make_user(db_session, email=f"Bob.{suffix}@acme.com")
-        client = _admin_client(db_session)
+        with without_email_lower_index(db_session) as added:
+            target = _make_user(db_session, email=f"Bob.{suffix}@Acme.COM")
+            added.append(target.id)
+            # The other half of the pair is exactly what EmailStr makes of the
+            # target's address, so writing that back would also collide exactly.
+            other = _make_user(db_session, email=f"Bob.{suffix}@acme.com")
+            added.append(other.id)
+            client = _admin_client(db_session)
 
-        response = client.put(
-            route.format(id=target.id),
-            json=_put_body(target, full_name="After"),
-        )
+            response = client.put(
+                route.format(id=target.id),
+                json=_put_body(target, full_name="After"),
+            )
 
-        assert response.status_code == 200, response.text
-        assert _row(db_session, target.id) == (
-            f"Bob.{suffix}@Acme.COM",
-            target.username,
-            "After",
-        )
+            assert response.status_code == 200, response.text
+            assert _row(db_session, target.id) == (
+                f"Bob.{suffix}@Acme.COM",
+                target.username,
+                "After",
+            )
 
     def test_a_username_collision_is_not_answered_email_already_registered(
         self, db_session: Session, route: str

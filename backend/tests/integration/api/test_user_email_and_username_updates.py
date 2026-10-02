@@ -358,7 +358,7 @@ def _login(client: TestClient, email: str, password: str = PASSWORD):
 def test_another_users_password_sign_in_is_unaffected_by_a_refused_email_change(
     anonymous, db_session
 ):
-    """A mixed-case address and its lower-case copy are distinct rows today.
+    """A mixed-case address and its lower-case copy cannot both be stored.
 
     Password sign-in looks the lower-cased address up first, so a second row
     holding the lower-case copy would answer for the first one's address.

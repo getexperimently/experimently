@@ -22,7 +22,7 @@ The User model represents platform users with authentication and permission data
 **Key Fields:**
 - `id`: UUID primary key
 - `username`: Unique username (required)
-- `email`: Unique email address (required)
+- `email`: Email address, unique regardless of letter case (required)
 - `hashed_password`: Securely stored password hash
 - `full_name`: User's full name
 - `is_active`: Whether the user account is active

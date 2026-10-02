@@ -508,3 +508,150 @@ Fargate stack from a checkout with this change
 ([rollback runbook](../deployment/rollback-runbook.md#deploy-refused-an-api-revision-that-would-run-migrations-on-start)).
 Rollback does not check its target in the same way; the runbook gives the
 command to check one by hand.
+
+---
+
+## Email addresses that differ only in case
+
+From this release an email address belongs to one account whatever its letter
+case: `Bob@acme.com` and `bob@acme.com` are the same address, and the database
+refuses a second account holding it (the unique index `ix_users_email_lower`).
+A database can already hold two such accounts if an administrator, SQL or a
+restore created them. The upgrade then stops before it changes anything:
+
+```text
+Refusing to upgrade schema experimentation: 2 groups of accounts have email addresses that differ only in letter case, and from this release an email address belongs to one account whatever its case.
+Accounts that share an address (user ids, one group per line, oldest first):
+  11111111-1111-1111-1111-111111111111 22222222-2222-2222-2222-222222222222
+  33333333-3333-3333-3333-333333333333 44444444-4444-4444-4444-444444444444
+Nothing has been changed: the database is still at the revision it had before this upgrade, and the release you upgraded from runs against it as before.
+See docs/self-hosting/migrations.md#email-addresses-that-differ-only-in-case
+```
+
+The message names account ids only, never an address. It lists at most 20
+groups, then `... and K more groups`; the listing query below shows them all.
+Every pending migration of that upgrade is rolled back with it, so the
+database is exactly as the release you upgraded from left it.
+
+**Where you see it, and how to keep serving:**
+
+- **Docker Compose.** The API container runs the upgrade on start, exits, and
+  restarts until the database is fixed: `docker compose logs api --tail 100`.
+  To serve meanwhile, start the previous release's image; nothing was migrated,
+  so it starts normally.
+- **Helm.** The `migrate` init container fails and the rolling update stalls;
+  the old pods keep serving. `kubectl logs <pod> -c migrate`.
+- **AWS.** The Deploy workflow's migration step fails and nothing shifts; the
+  previous release keeps serving. The step prints the migration task's last
+  100 log lines as **one tab-separated line**, so the message above appears
+  inside that line, ending with the
+  `docs/self-hosting/migrations.md#email-addresses-that-differ-only-in-case`
+  link. The task's log stream in CloudWatch shows it line by line.
+
+### Resolve each group
+
+For each group, choose the account that keeps the address and retire the
+others. Do this with `psql`, using the API's `POSTGRES_*` settings. Under Docker
+Compose, from `deploy/compose/`:
+
+```bash
+docker compose exec postgres sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"'
+```
+
+The statements below use the schema `experimentation`. If your
+`POSTGRES_SCHEMA` is different, replace it.
+
+1. **List every group.** Save this output somewhere private before you change
+   anything: its `email` column is the record of each address as it was, which
+   is what you need to undo a step by hand.
+
+   ```sql
+   -- List the accounts in each group
+   SELECT lower(email) AS address, email, id, username, created_at, is_active,
+          is_superuser, role, hashed_password IS NOT NULL AS has_password
+     FROM experimentation.users
+    WHERE lower(email) IN (SELECT lower(email) FROM experimentation.users
+                            WHERE email IS NOT NULL
+                            GROUP BY lower(email) HAVING count(*) > 1)
+    ORDER BY lower(email), created_at;
+   ```
+
+2. **Choose the account to keep.** Keep the account the person actually signs
+   in with; if you are not sure, ask them. There is no last-sign-in column to
+   go by.
+
+3. **Give the kept account the role it needs.** If the account you are about to
+   retire has the role or the superuser flag the person needs, copy them to the
+   account you keep first. Replace both ids with ids from the listing:
+
+   ```sql
+   -- Give the kept account the role of the one you retire
+   UPDATE experimentation.users AS kept
+      SET role = retired.role, is_superuser = retired.is_superuser
+     FROM experimentation.users AS retired
+    WHERE kept.id = '<id to keep>' AND retired.id = '<id to retire>';
+   ```
+
+4. **Retire the other account.** It keeps its history and everything it owns,
+   but it can no longer sign in and no longer holds the address. Its address
+   becomes `retired-<its id>@<its own domain>`:
+
+   ```sql
+   -- Retire the other account
+   UPDATE experimentation.users
+      SET email = 'retired-' || id || '@' || split_part(email, '@', 2),
+          is_active = false
+    WHERE id = '<id to retire>';
+   ```
+
+   The retired address keeps the account's own domain because the API refuses
+   addresses under reserved domains such as `.invalid`, `.test` or `.local`; an
+   account given one could no longer be edited through the API.
+
+   `email` holds at most 100 characters, and `retired-<id>@` takes 45 of them,
+   so this works when the domain is at most **55 characters**. For a longer
+   domain the statement fails with `value too long for type character
+   varying(100)` and changes nothing. Then either use the shorter form below,
+   which fits a domain of up to **61 characters**, or give the account an
+   address its owner actually holds (with the SQL above, or with
+   `PUT /api/v1/admin/users/{id}` from the release that is still serving,
+   which needs `username` and `email` in the body):
+
+   ```sql
+   -- If the domain is longer than 55 characters
+   UPDATE experimentation.users
+      SET email = 'r-' || id || '@' || split_part(email, '@', 2),
+          is_active = false
+    WHERE id = '<id to retire>';
+   ```
+
+5. **Check that no group is left.** This returns no rows when you are done:
+
+   ```sql
+   -- Check that no group is left
+   SELECT array_agg(id ORDER BY created_at) AS ids
+     FROM experimentation.users
+    WHERE email IS NOT NULL
+    GROUP BY lower(email) HAVING count(*) > 1;
+   ```
+
+6. **Run the upgrade again** the way you ran it the first time. It builds the
+   index itself.
+
+**Do not delete the account instead of retiring it.** Deleting a user deletes
+or detaches what refers to it: its API keys, reports, notification
+preferences, role assignments and workspace memberships are deleted with it,
+and the experiments, flags, audit records and everything else that names it
+lose that reference. Retiring keeps all of that.
+
+**Do not build the index by hand.** Run the upgrade, which locks the table,
+checks for groups and builds the index in one transaction. An index built
+another way can be left half-built: a `CREATE UNIQUE INDEX CONCURRENTLY` that
+fails on a group leaves an index that enforces nothing. The upgrade refuses to
+continue past an index called `ix_users_email_lower` that is not exactly the
+one it builds, and names the `DROP INDEX` to run before you try again.
+
+**If the upgrade says another session is writing to `users`.** The upgrade
+waits at most 30 seconds for the lock on `users`, so that it never holds up
+the API's writes for long. Nothing has been changed; run it again when that
+session has finished.

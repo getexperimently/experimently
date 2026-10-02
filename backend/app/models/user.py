@@ -5,8 +5,10 @@ from sqlalchemy import (
     Column,
     Enum,
     ForeignKey,
+    Index,
     String,
     Table,
+    func,
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.ext.declarative import declared_attr
@@ -76,6 +78,26 @@ role_permission_association = Table(
     ),
     schema=get_schema_name(),
 )
+
+
+#: An address belongs to one account whatever its letter case (#343).
+EMAIL_LOWER_INDEX = "ix_users_email_lower"
+
+
+def _email_lower_index(cls) -> Index:
+    """The unique index on ``lower(email)``, built once per table.
+
+    ``__table_args__`` is a ``declared_attr``, which runs again every time it
+    is read after mapping, and an ``Index`` over a mapped column attaches
+    itself to that column's table as it is built.  A second read would hand
+    the table a second index of the same name, and ``create_all`` would then
+    fail with "relation already exists".  Once the table exists, its own
+    index is returned instead.
+    """
+    table = cls.__dict__.get("__table__")
+    if table is not None:
+        return next(i for i in table.indexes if i.name == EMAIL_LOWER_INDEX)
+    return Index(EMAIL_LOWER_INDEX, func.lower(cls.email), unique=True)
 
 
 class User(Base, BaseModel):
@@ -156,7 +178,15 @@ class User(Base, BaseModel):
 
     @declared_attr
     def __table_args__(cls):
-        return ({"schema": get_schema_name()},)
+        return (
+            # An address belongs to one account whatever its letter case
+            # (#343), beside -- not instead of -- the exact index on ``email``.
+            # A fixed name rather than one derived from the schema, so the
+            # ``create_all`` of a fresh bootstrap and the core migration that
+            # adds it to an existing database build the same index.
+            _email_lower_index(cls),
+            {"schema": get_schema_name()},
+        )
 
     def __repr__(self):
         return f"<User {self.username}>"

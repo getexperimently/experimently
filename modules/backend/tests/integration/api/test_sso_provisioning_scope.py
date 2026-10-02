@@ -15,6 +15,7 @@ import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 from sqlalchemy import func, text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
 from backend.app.api import deps
@@ -170,17 +171,22 @@ def test_a_mixed_case_account_is_linked_not_duplicated(db_session: Session):
     assert _count(db_session, f"bob@{domain}") == 1
 
 
-def test_more_than_one_matching_account_is_refused(db_session: Session):
-    domain = _domain()
-    cfg = _config(db_session, domain)
-    _user(db_session, f"carol@{domain}")
-    _user(db_session, f"Carol@{domain}")
+def test_the_database_refuses_a_second_account_differing_only_in_case(
+    db_session: Session,
+):
+    """Two accounts can no longer match one sign-in: ``ix_users_email_lower``.
 
-    with pytest.raises(HTTPException) as exc_info:
-        sso_service.provision_user(db_session, _info(f"carol@{domain}"), cfg)
-    assert exc_info.value.status_code == 409
-    assert exc_info.value.detail == sso_service.EMAIL_AMBIGUOUS_DETAIL
-    assert _count(db_session, f"carol@{domain}") == 2
+    The refusal of more than one match is pinned with a stubbed query in
+    ``unit/services/test_sso_provision_ambiguity.py``; a real pair cannot be
+    built in the shared test schema without dropping the index.
+    """
+    domain = _domain()
+    _user(db_session, f"carol@{domain}")
+
+    with pytest.raises(IntegrityError, match="ix_users_email_lower"):
+        _user(db_session, f"Carol@{domain}")
+    db_session.rollback()
+    assert _count(db_session, f"carol@{domain}") == 1
 
 
 # ---------------------------------------------------------------------------
