@@ -360,6 +360,10 @@ def validate_flag_targeting(value: Any) -> Optional[TargetingRules]:
       (``rules[0].rule``), nested groups at any depth
       (``rules[0].rule.groups[1]``), conditions, and ``default_rule`` and
       ``default_rule.rule`` -- where the model would otherwise ignore it;
+    * native groups nested more than 10 levels below ``rules[i].rule``
+      (``<path>.groups: nested too deeply``), and native values with more
+      than 1000 rules, groups and conditions together, are refused before
+      the walk goes further;
     * ``rollout_percentage``, on dashboard rules and on a native rule, must be
       an integer from 0 to 100. A float with no fractional part (``100.0``)
       is accepted, as the native model accepts it; ``33.5``, ``true`` and
@@ -563,6 +567,14 @@ def _check_flag_percentage(value: Any, path: str) -> None:
         raise TargetingRulesError(path, "must be an integer from 0 to 100")
 
 
+#: Deepest nesting of native groups a flag may carry: ``rules[i].rule`` is
+#: level 0. The same limit as ``RuleValidator.max_rule_depth``.
+MAX_NATIVE_GROUP_DEPTH = 10
+#: Most rules, groups and conditions one native value may carry, counted
+#: together.
+MAX_NATIVE_NODES = 1000
+
+
 def _check_native_flag_rules(raw: Dict[str, Any]) -> None:
     """Refuse a key outside the schema at every native level, for flags.
 
@@ -570,17 +582,36 @@ def _check_native_flag_rules(raw: Dict[str, Any]) -> None:
     misspelt ``rollout_percentage`` or ``priority`` would take its default and
     a misspelt ``conditions`` would leave an empty group. Paths are built from
     indices and schema words only; a value of the wrong type is left to the
-    model, which reports it. Groups are walked with an explicit stack rather
-    than by recursion, so this walk adds no Python call depth per level.
-    """
-    rule_paths: List[Tuple[str, Any]] = []
-    rules = raw.get("rules")
-    if isinstance(rules, list):
-        rule_paths += [(f"rules[{index}]", rule) for index, rule in enumerate(rules)]
-    if "default_rule" in raw:
-        rule_paths.append(("default_rule", raw["default_rule"]))
+    model, which reports it.
 
-    for path, rule in rule_paths:
+    The walk is bounded before any per-level path is built: groups nested
+    more than :data:`MAX_NATIVE_GROUP_DEPTH` levels below ``rules[i].rule``
+    are refused (``<path>.groups: nested too deeply``), and so is a value
+    with more than :data:`MAX_NATIVE_NODES` rules, groups and conditions
+    together. Groups are walked with an explicit stack, not by recursion.
+    """
+    count = 0
+
+    def counted(more: int) -> None:
+        nonlocal count
+        count += more
+        if count > MAX_NATIVE_NODES:
+            raise TargetingRulesError(
+                "",
+                f"at most {MAX_NATIVE_NODES} rules, groups and conditions are allowed",
+            )
+
+    rules = raw.get("rules")
+    rules = rules if isinstance(rules, list) else []
+    counted(len(rules) + ("default_rule" in raw))
+
+    def each_rule():
+        for index, rule in enumerate(rules):
+            yield f"rules[{index}]", rule
+        if "default_rule" in raw:
+            yield "default_rule", raw["default_rule"]
+
+    for path, rule in each_rule():
         if not isinstance(rule, dict):
             continue
         if any(key not in _NATIVE_RULE_KEYS for key in rule):
@@ -591,15 +622,17 @@ def _check_native_flag_rules(raw: Dict[str, Any]) -> None:
             )
         # Depth first, in document order: a group, its conditions, then its
         # nested groups.
-        stack: List[Tuple[str, Any]] = [(f"{path}.rule", rule.get("rule"))]
+        counted(1)
+        stack: List[Tuple[str, Any, int]] = [(f"{path}.rule", rule.get("rule"), 0)]
         while stack:
-            gpath, group = stack.pop()
+            gpath, group, depth = stack.pop()
             if not isinstance(group, dict):
                 continue
             if any(key not in _NATIVE_GROUP_KEYS for key in group):
                 raise TargetingRulesError(gpath, "unknown key")
             conditions = group.get("conditions")
             if isinstance(conditions, list):
+                counted(len(conditions))
                 for ci, condition in enumerate(conditions):
                     if isinstance(condition, dict) and any(
                         key not in _NATIVE_CONDITION_KEYS for key in condition
@@ -608,9 +641,12 @@ def _check_native_flag_rules(raw: Dict[str, Any]) -> None:
                             f"{gpath}.conditions[{ci}]", "unknown key"
                         )
             nested = group.get("groups")
-            if isinstance(nested, list):
+            if isinstance(nested, list) and nested:
+                if depth >= MAX_NATIVE_GROUP_DEPTH:
+                    raise TargetingRulesError(f"{gpath}.groups", "nested too deeply")
+                counted(len(nested))
                 stack += [
-                    (f"{gpath}.groups[{gi}]", child)
+                    (f"{gpath}.groups[{gi}]", child, depth + 1)
                     for gi, child in reversed(list(enumerate(nested)))
                 ]
 

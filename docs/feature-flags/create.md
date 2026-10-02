@@ -211,6 +211,8 @@ update, and nothing is saved. That is:
 - native rules without `rules` (a `default_rule` on its own), and native rules with a key
   the shape does not have (a misspelt `rollout_percentage`, `priority` or `conditions`) on a
   rule, a group at any depth, a condition or the `default_rule`;
+- native groups nested more than 10 levels deep, and native rules with more than 1,000
+  rules, groups and conditions in all;
 - a group with no conditions, a condition with no attribute, and an attribute with
   anything other than letters, digits, `_` and `.`;
 - an unknown operator or logical operator (`and`, `or` or `not`, in any case);

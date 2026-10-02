@@ -110,6 +110,15 @@ def group(*conditions, groups=None, **extra):
     return value
 
 
+def nested(levels: int) -> Dict[str, Any]:
+    """A native group whose deepest nested group is ``levels`` below it, built
+    without recursion so it can be very deep."""
+    inner = group(NATIVE_EQ)
+    for _ in range(levels):
+        inner = group(groups=[inner])
+    return inner
+
+
 #: Every other value the experiment validator accepts, the flag validator
 #: accepts; then the flag-only rows.
 ACCEPTED: Dict[str, Any] = {
@@ -117,6 +126,10 @@ ACCEPTED: Dict[str, Any] = {
     "rollout_percentage 100.0": dash([US], rollout_percentage=100.0),
     "native rollout_percentage 100.0": native({"rollout_percentage": 100.0}),
     "native rollout_percentage 0": native({"rollout_percentage": 0}),
+    "native groups nested 10 levels deep": native(group=nested(10)),
+    "native, 1000 rules, groups and conditions": native(
+        group=group(*[NATIVE_EQ] * 998)
+    ),
     "native, every schema key at every level": {
         "version": "1.0",
         "rules": [
@@ -173,6 +186,7 @@ DEFAULT_RULE = {
 }
 
 _INTEGER = "must be an integer from 0 to 100"
+_NODES = "at most 1000 rules, groups and conditions are allowed"
 
 #: Native rules with a key outside the schema, or a rollout percentage that is
 #: not an integer, at every level (V6/V7). The model ignores an unknown nested
@@ -303,6 +317,18 @@ NATIVE_REFUSED: Dict[str, Tuple[Any, str]] = {
         dash([US], rollout_percentage=100.5),
         f"rollout_percentage: {_INTEGER}",
     ),
+    "native groups nested 11 levels deep": (
+        native(group=nested(11)),
+        "rules[0].rule" + ".groups[0]" * 10 + ".groups: nested too deeply",
+    ),
+    "native default_rule groups nested 11 levels deep": (
+        {"rules": [], "default_rule": {**DEFAULT_RULE, "rule": nested(11)}},
+        "default_rule.rule" + ".groups[0]" * 10 + ".groups: nested too deeply",
+    ),
+    "native, 1001 rules, groups and conditions": (
+        native(group=group(*[NATIVE_EQ] * 999)),
+        f"targeting rules: {_NODES}",
+    ),
 }
 
 #: value -> the exact message. Every experiment row, then the flag-only rows.
@@ -391,6 +417,40 @@ def test_a_rollout_percentage_outside_the_integers_0_to_100_is_refused(value):
         assert str(caught.value) == f"{path}: {_INTEGER}"
 
 
+@pytest.mark.regression
+def test_very_deep_nesting_is_refused_at_the_cap():
+    """100,000 levels: refused at level 10, before the walk goes deeper (the
+    message would otherwise name a path 100,000 groups long)."""
+    with pytest.raises(TargetingRulesError) as caught:
+        validate_flag_targeting(native(group=nested(100_000)))
+    assert str(caught.value) == (
+        "rules[0].rule" + ".groups[0]" * 10 + ".groups: nested too deeply"
+    )
+
+
+@pytest.mark.regression
+@pytest.mark.parametrize(
+    "value",
+    [
+        native(group=group(*[NATIVE_EQ] * 100_000)),
+        native(group=group(groups=[group(NATIVE_EQ)] * 100_000)),
+        {"rules": [NATIVE_RULE] * 100_000},
+    ],
+    ids=["conditions", "groups", "rules"],
+)
+def test_a_very_wide_value_is_refused_at_the_node_bound(value):
+    with pytest.raises(TargetingRulesError) as caught:
+        validate_flag_targeting(value)
+    assert str(caught.value) == f"targeting rules: {_NODES}"
+
+
+def test_the_depth_cap_is_the_rule_validators():
+    from backend.app.core.rule_validation import RuleValidator
+    from backend.app.core.targeting_adapter import MAX_NATIVE_GROUP_DEPTH
+
+    assert MAX_NATIVE_GROUP_DEPTH == RuleValidator().max_rule_depth == 10
+
+
 def test_the_experiment_validator_still_ignores_native_extras():
     """Experiments are unchanged here (follow-up #734): the same values the
     flag validator refuses still pass the experiment one."""
@@ -402,6 +462,12 @@ def test_the_experiment_validator_still_ignores_native_extras():
     ]:
         assert validate_experiment_targeting(copy.deepcopy(REFUSED[name][0]))
     assert validate_experiment_targeting(dash([US], rollout_percentage=33.5))
+    # Depth is still judged by RuleValidator alone, in its own words.
+    with pytest.raises(TargetingRulesError) as caught:
+        validate_experiment_targeting(native(group=nested(11)))
+    assert str(caught.value) == (
+        "rules[0].rule" + ".groups[0]" * 11 + ": rules are nested too deeply"
+    )
 
 
 # --- the table (V5) and the request models (V3) ----------------------------
