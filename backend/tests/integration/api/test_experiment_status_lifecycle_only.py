@@ -319,7 +319,7 @@ def test_superuser_put_of_the_current_non_draft_status_is_accepted(
 def test_developer_on_a_non_draft_keeps_the_state_refusal(
     client, make_user, new_draft, fresh
 ):
-    """A request the state rule refuses keeps its 403: the status check runs
+    """A request the state rule refuses keeps its 400: the status check runs
     after it."""
     experiment_id = new_draft()
     _set_status(fresh, experiment_id, ExperimentStatus.ACTIVE)
@@ -329,7 +329,7 @@ def test_developer_on_a_non_draft_keeps_the_state_refusal(
         f"{EXPERIMENTS}/{experiment_id}", json={"status": "paused"}, headers=_auth(user)
     )
 
-    assert response.status_code == 403, response.text
+    assert response.status_code == 400, response.text
     assert response.json()["detail"] == "Cannot update experiments in active status"
     assert _row(fresh, experiment_id)[0] == "active"
 
@@ -350,7 +350,7 @@ def test_paused_targeting_sent_with_the_current_status_is_still_refused(
         headers=_auth(user),
     )
 
-    assert response.status_code == 403, response.text
+    assert response.status_code == 400, response.text
     assert _row(fresh, experiment_id)[0] == "paused"
 
 

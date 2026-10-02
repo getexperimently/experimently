@@ -921,35 +921,31 @@ def _full_row(db_session, experiment_id):
         session.close()
 
 
-def test_experiment_update_refuses_an_unknown_time_zone_in_schedule(
+def test_experiment_update_refuses_schedule_whatever_its_zone(
     client, db_session, people
 ):
-    """``ScheduleConfig`` is also the ``schedule`` field of
-    ``PUT /experiments/{id}``. That field is not applied, but the request is
-    validated against it, so an unknown zone there is now a 422 at
-    ``["body", "schedule", "time_zone"]`` and the row is not touched (#483)."""
+    """``ScheduleConfig`` is also the declared ``schedule`` field of
+    ``PUT /experiments/{id}``, which never applied it. Since #595 any
+    ``schedule`` there is a 422 at ``["body", "schedule"]`` pointing at
+    ``/schedule``, before its zone is looked at, so an unknown zone and a known
+    one get the same refusal, the zone is not repeated and the row is not
+    touched. (Before #595 an unknown zone was a 422 at
+    ``["body", "schedule", "time_zone"]`` (#483) and a known one a 200.)"""
     experiment_id = _create(client, people)
     before = _full_row(db_session, experiment_id)
 
-    response = client.put(
-        f"{BASE}/{experiment_id}",
-        json={"schedule": {"time_zone": "Not/AZone"}},
-        headers=_auth(people["developer"]),
-    )
-
-    assert response.status_code == 422, response.text
-    locs = [e["loc"] for e in response.json()["detail"]]
-    assert ["body", "schedule", "time_zone"] in locs, locs
-    assert "Not/AZone" not in response.text
-    assert _full_row(db_session, experiment_id) == before
-
-    for zone in ("UTC", "America/Los_Angeles"):
-        accepted = client.put(
+    for zone in ("Not/AZone", "UTC", "America/Los_Angeles"):
+        response = client.put(
             f"{BASE}/{experiment_id}",
             json={"schedule": {"time_zone": zone}},
             headers=_auth(people["developer"]),
         )
-        assert accepted.status_code == 200, (zone, accepted.text)
+
+        assert response.status_code == 422, (zone, response.text)
+        locs = [e["loc"] for e in response.json()["detail"]]
+        assert locs == [["body", "schedule"]], (zone, locs)
+        assert zone not in response.text
+        assert _full_row(db_session, experiment_id) == before
 
 
 # --- the 400 for an ACTIVE experiment ----------------------------------------------

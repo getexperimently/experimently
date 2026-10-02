@@ -940,9 +940,9 @@ whatever the caller's role, superusers included:
 
 - `draft`: `targeting_rules` may be sent with any other field.
 - `paused`: `targeting_rules` must be the only field in the request; together
-  with anything else the request is refused with 403.
+  with anything else the request is refused with 400.
 - `active`, `completed`, `archived`: any request that includes
-  `targeting_rules` is refused with 403, even when the value equals the stored
+  `targeting_rules` is refused with 400, even when the value equals the stored
   one. The detail names the state, for example `Targeting can be changed only
   while the experiment is draft or paused; it is active.` Pause the experiment,
   change the targeting, then start it again.
@@ -960,6 +960,19 @@ such a request is refused with 422, nothing is changed, and the message names
 the field, for example `name cannot be null`. `name` is at most 100
 characters, as on create. Other fields, such as `description`, may still be
 sent as `null`.
+
+A refusal because of the experiment's state is a 400 whose detail names the
+state; a 403 means the caller's role may not update experiments, and is
+decided before the state is looked at. Outside `draft`, only a superuser may
+change an experiment's other fields (`Cannot update experiments in active
+status`), and `variants` and `metrics` cannot be changed by anyone
+(`Cannot update variants for experiments in active status`).
+
+`schedule` is not accepted by this endpoint. A request that contains it, with
+any value including `null` or `{}`, is refused with 422, nothing is changed,
+and the error is on `["body", "schedule"]` with the message `schedule is not
+applied by this endpoint; use PUT /api/v1/experiments/{experiment_id}/schedule`.
+Schedule an experiment with `PUT /api/v1/experiments/{experiment_id}/schedule`.
 
 ### An experiment's status
 

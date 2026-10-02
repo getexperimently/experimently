@@ -507,7 +507,7 @@ def test_experiment_endpoint_permissions(
             204,
         ),  # Can delete draft experiments - returns 204 No Content
         # Active experiments
-        (ExperimentStatus.ACTIVE, "UPDATE", 403),  # Cannot update active experiments
+        (ExperimentStatus.ACTIVE, "UPDATE", 400),  # Cannot update active - 400 (#602)
         (
             ExperimentStatus.ACTIVE,
             "DELETE",
@@ -517,8 +517,8 @@ def test_experiment_endpoint_permissions(
         (
             ExperimentStatus.COMPLETED,
             "UPDATE",
-            403,
-        ),  # Cannot update completed experiments
+            400,
+        ),  # Cannot update completed experiments - 400, the state (#602)
         (
             ExperimentStatus.COMPLETED,
             "DELETE",
@@ -528,8 +528,8 @@ def test_experiment_endpoint_permissions(
         (
             ExperimentStatus.ARCHIVED,
             "UPDATE",
-            403,
-        ),  # Cannot update archived experiments
+            400,
+        ),  # Cannot update archived experiments - 400, the state (#602)
         (
             ExperimentStatus.ARCHIVED,
             "DELETE",
