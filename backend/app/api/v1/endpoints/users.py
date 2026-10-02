@@ -10,6 +10,8 @@ from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from pydantic import EmailStr, TypeAdapter, ValidationError
+from sqlalchemy import func
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from backend.app.api import deps
@@ -58,6 +60,13 @@ NO_LOCAL_PASSWORD_DETAIL = (
     "This account does not sign in with a password, so it has no password to change."
 )
 LOCAL_PROVIDER_ONLY_DETAIL = "Endpoint not available: AUTH_PROVIDER is not 'local'"
+
+#: The answer when another account already holds the email address, in any
+#: letter case. The dashboard matches this text; keep it as it is.
+EMAIL_TAKEN_DETAIL = "Email already registered"
+
+#: SQLSTATE ``unique_violation``.
+_UNIQUE_VIOLATION = "23505"
 
 #: The same parser ``UserUpdate.email`` applies to the request body.
 _EMAIL = TypeAdapter(EmailStr)
@@ -135,6 +144,75 @@ def apply_password_change(
     update_data["hashed_password"] = get_password_hash(plain)
 
 
+def email_held_by_another(
+    db: Session, email: Optional[str], exclude_id: Any = None
+) -> bool:
+    """True when an account other than ``exclude_id`` holds ``email`` in any case.
+
+    Both sides are lower-cased by PostgreSQL's ``lower()``, never by Python's
+    ``str.lower()``: the two disagree outside ASCII, and the database is what
+    decides whether two addresses collide.
+    """
+    if email is None:
+        return False
+    query = db.query(User.id).filter(func.lower(User.email) == func.lower(email))
+    if exclude_id is not None:
+        query = query.filter(User.id != exclude_id)
+    return query.first() is not None
+
+
+def refuse_if_email_held(
+    db: Session, email: Optional[str], exclude_id: Any = None
+) -> None:
+    """409 ``EMAIL_TAKEN_DETAIL`` when another account holds ``email``."""
+    if email_held_by_another(db, email, exclude_id):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail=EMAIL_TAKEN_DETAIL
+        )
+
+
+def changed_email(user: User, update_data: Dict[str, Any]) -> Optional[str]:
+    """The email address an update sets, or None if it leaves it as stored.
+
+    An address resent exactly as stored is not a change, so it is not checked:
+    an account whose address another account already shares (rows created by
+    an administrator, SQL or a restore) can still be edited.
+    """
+    email = update_data.get("email")
+    if email is None or email == user.email:
+        return None
+    return email
+
+
+def commit_user_write(
+    db: Session, email: Optional[str], exclude_id: Any = None
+) -> None:
+    """Commit a write to ``users``; a unique violation on the email becomes 409.
+
+    The pre-check in each route cannot see a row committed between the check
+    and this commit. When the commit fails with a unique violation, the
+    transaction is rolled back and the same email query is run again
+    (excluding the row being updated). A hit answers 409; anything else -- a
+    username collision, for one -- is raised as it was. The decision does not
+    depend on the name of any index, which differs from one schema to another.
+    The exception's text is neither logged nor returned: it carries the
+    values of the row.
+
+    ``email`` is the address this write sets, or None when it sets none.
+    """
+    try:
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        orig = exc.orig
+        code = getattr(orig, "pgcode", None) or getattr(orig, "sqlstate", None)
+        if code == _UNIQUE_VIOLATION and email_held_by_another(db, email, exclude_id):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT, detail=EMAIL_TAKEN_DETAIL
+            ) from None
+        raise
+
+
 def require_local_provider() -> None:
     """404 unless ``AUTH_PROVIDER`` is ``local``.
 
@@ -200,13 +278,9 @@ async def create_user(
             detail="Not enough permissions",
         )
 
-    # Check if username or email already exists
-    user = db.query(User).filter(User.email == user_in.email).first()
-    if user:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="Email already registered",
-        )
+    # Check if username or email already exists. The email is refused when
+    # another account holds it in any letter case.
+    refuse_if_email_held(db, user_in.email)
 
     user = db.query(User).filter(User.username == user_in.username).first()
     if user:
@@ -237,7 +311,7 @@ async def create_user(
 
     user = User(**user_data)
     db.add(user)
-    db.commit()
+    commit_user_write(db, user_in.email)
     db.refresh(user)
 
     role = getattr(user, "role", None)
@@ -517,12 +591,17 @@ async def update_user(
         update_data.pop("is_superuser", None)
         update_data.pop("is_active", None)
 
+    # Another account holding the new address in any letter case is a 409.
+    # Re-casing the account's own address is not refused.
+    new_email = changed_email(user, update_data)
+    refuse_if_email_held(db, new_email, exclude_id=user.id)
+
     # Update user attributes
     for field in update_data:
         if hasattr(user, field):
             setattr(user, field, update_data[field])
 
-    db.commit()
+    commit_user_write(db, new_email, exclude_id=user.id)
     db.refresh(user)
 
     # Ensure the response conforms to the UserResponse schema

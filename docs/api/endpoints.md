@@ -389,6 +389,10 @@ curl -X POST "http://localhost:8000/api/v1/users/" \
 - **Password**: at least 8 characters and at most 72 bytes (UTF-8), with an
   upper-case letter, a lower-case letter and a digit. Anything else is a 422.
 - **Response**: 201 Created
+- **Errors**: 409 "Email already registered" when another account holds the
+  email address in any letter case (`Pat.Lee@example.com` and
+  `pat.lee@example.com` are the same address here). 409 "Username already
+  registered" when another account has the username.
 
 ### Get User
 - **Endpoint**: `GET /api/v1/users/{user_id}`
@@ -445,6 +449,10 @@ curl -X POST "http://localhost:8000/api/v1/users/" \
   `PUT /api/v1/admin/users/{user_id}`. 403 "To change your own password, use
   POST /api/v1/users/me/password, which asks for your current password." when
   the request sets the caller's own password.
+  409 "Email already registered" when a superuser sets an email address that
+  another account holds in any letter case. Changing only the letter case of
+  the account's own address is accepted, and resending the stored address
+  unchanged is never refused.
 
 ### Change Your Password
 - **Endpoint**: `POST /api/v1/users/me/password`
@@ -682,6 +690,17 @@ public `key`. They share the per-IP `SDK_RATE_LIMIT_PER_MINUTE` ceiling (default
     "limit": 100
   }
   ```
+
+### Update User (Admin)
+- **Endpoint**: `PUT /api/v1/admin/users/{user_id}`
+- **Description**: Update any user, including `is_superuser` (superuser only)
+- **Headers**: Authorization: Bearer {token}
+- **Request Body**: as Update User; `password` is treated the same way
+- **Response**: 200 OK, the user
+- **Errors**: 404 "User not found". 409 "Email already registered" when the
+  request sets an email address that another account holds in any letter
+  case. Changing only the letter case of the account's own address is
+  accepted, and resending the stored address unchanged is never refused.
 
 ### Delete User (Admin)
 - **Endpoint**: `DELETE /api/v1/admin/users/{user_id}`

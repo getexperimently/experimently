@@ -13,7 +13,12 @@ from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
 from sqlalchemy.orm import Session
 
 from backend.app.api import deps
-from backend.app.api.v1.endpoints.users import apply_password_change
+from backend.app.api.v1.endpoints.users import (
+    apply_password_change,
+    changed_email,
+    commit_user_write,
+    refuse_if_email_held,
+)
 from backend.app.models.user import User
 from backend.app.schemas.user import (
     UserListResponse,
@@ -100,12 +105,17 @@ async def update_user(
     # below cannot set it: the model has no ``password`` attribute.
     apply_password_change(user, current_user, update_data)
 
+    # Another account holding the new address in any letter case is a 409
+    # "Email already registered". Re-casing the account's own address is not.
+    new_email = changed_email(user, update_data)
+    refuse_if_email_held(db, new_email, exclude_id=user.id)
+
     # Update user attributes
     for field in update_data:
         if hasattr(user, field):
             setattr(user, field, update_data[field])
 
-    db.commit()
+    commit_user_write(db, new_email, exclude_id=user.id)
     db.refresh(user)
 
     return user
