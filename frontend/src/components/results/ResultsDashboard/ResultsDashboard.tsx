@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { ResultsService } from '@/services/results';
 import {
   ExperimentResultsResponse,
@@ -51,7 +51,12 @@ function LoadingSkeleton() {
 export function ResultsDashboard({ experimentId }: ResultsDashboardProps) {
   const [results, setResults] = useState<ExperimentResultsResponse | null>(null);
   const [daily, setDaily] = useState<DailyResultsResponse | null>(null);
+  // The sample size loads on its own, outside the page's Promise.all (#666):
+  // when it fails, the Sample Size tab says so and the rest of the page renders.
   const [sampleSize, setSampleSize] = useState<SampleSizeResult | null>(null);
+  const [sampleSizeLoading, setSampleSizeLoading] = useState(true);
+  const [sampleSizeError, setSampleSizeError] = useState<string | null>(null);
+  const sampleSizeRequest = useRef(0);
   const [sequential, setSequential] = useState<SequentialTestingResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -61,18 +66,37 @@ export function ResultsDashboard({ experimentId }: ResultsDashboardProps) {
   const [breakdown, setBreakdown] = useState<DimensionalBreakdownResponse | null>(null);
   const [breakdownLoading, setBreakdownLoading] = useState(false);
 
+  const fetchSampleSize = useCallback(async () => {
+    // Only the latest request may write state, so a slow answer for an
+    // earlier experiment never lands on this one.
+    const request = ++sampleSizeRequest.current;
+    setSampleSizeLoading(true);
+    setSampleSizeError(null);
+    try {
+      const s = await ResultsService.getSampleSize(experimentId);
+      if (request !== sampleSizeRequest.current) return;
+      setSampleSize(s);
+    } catch (e) {
+      if (request !== sampleSizeRequest.current) return;
+      setSampleSize(null);
+      setSampleSizeError(e instanceof Error ? e.message : 'Request failed');
+    } finally {
+      if (request === sampleSizeRequest.current) setSampleSizeLoading(false);
+    }
+  }, [experimentId]);
+
   const fetchAll = useCallback(async () => {
     setLoading(true);
     setError(null);
+    // Started alongside the results, but never awaited with them.
+    void fetchSampleSize();
     try {
-      const [r, d, s] = await Promise.all([
+      const [r, d] = await Promise.all([
         ResultsService.getResults(experimentId),
         ResultsService.getDailyResults(experimentId),
-        ResultsService.getSampleSize(experimentId),
       ]);
       setResults(r);
       setDaily(d);
-      setSampleSize(s);
 
       // Fetch sequential data if available (inline or via dedicated endpoint)
       if (r.sequential_testing) {
@@ -91,7 +115,7 @@ export function ResultsDashboard({ experimentId }: ResultsDashboardProps) {
     } finally {
       setLoading(false);
     }
-  }, [experimentId]);
+  }, [experimentId, fetchSampleSize]);
 
   // Issue #28: Fetch breakdown when dimension changes
   const fetchBreakdown = useCallback(async (dim: string | null) => {
@@ -154,7 +178,10 @@ export function ResultsDashboard({ experimentId }: ResultsDashboardProps) {
 
   return (
     <div className="space-y-6" data-testid="results-dashboard">
-      <ExperimentSummary experiment={results} />
+      <ExperimentSummary
+        experiment={results}
+        onOpenSampleSize={() => setActiveTab('sample-size')}
+      />
 
       {/* Tab navigation */}
       <nav
@@ -231,7 +258,7 @@ export function ResultsDashboard({ experimentId }: ResultsDashboardProps) {
           </section>
         )}
 
-        {activeTab === 'sample-size' && sampleSize && (
+        {activeTab === 'sample-size' && (
           <section
             className="max-w-lg"
             aria-label="Sample size adequacy"
@@ -239,7 +266,35 @@ export function ResultsDashboard({ experimentId }: ResultsDashboardProps) {
             <h3 className="text-base font-semibold text-slate-800 mb-4">
               Sample Size Analysis
             </h3>
-            <SampleSizeMeter data={sampleSize} />
+            {sampleSizeLoading ? (
+              <div
+                className="h-24 bg-slate-200 rounded-xl animate-pulse"
+                data-testid="sample-size-loading"
+                aria-label="Loading the sample size"
+              />
+            ) : sampleSizeError || !sampleSize ? (
+              <div
+                className="space-y-3 text-sm"
+                data-testid="sample-size-error"
+                role="alert"
+              >
+                <p className="text-red-700 font-medium">
+                  The sample size could not be loaded. The other tabs are not affected.
+                </p>
+                {sampleSizeError && (
+                  <p className="text-slate-600">{sampleSizeError}</p>
+                )}
+                <button
+                  type="button"
+                  onClick={() => void fetchSampleSize()}
+                  className="px-3 py-1.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+                >
+                  Try again
+                </button>
+              </div>
+            ) : (
+              <SampleSizeMeter data={sampleSize} />
+            )}
           </section>
         )}
 

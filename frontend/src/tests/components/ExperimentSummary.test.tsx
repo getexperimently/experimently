@@ -1,5 +1,6 @@
 import React from 'react';
-import { render, screen } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { ExperimentSummary } from '@/components/results/ResultsDashboard/ExperimentSummary';
 import { ExperimentResultsResponse } from '@/types/results';
 
@@ -129,5 +130,60 @@ describe('ExperimentSummary', () => {
   it('has the experiment-summary data-testid', () => {
     render(<ExperimentSummary experiment={baseExperiment} />);
     expect(screen.getByTestId('experiment-summary')).toBeInTheDocument();
+  });
+
+  // #666: the card reports the minimum the recommendation requires, not the
+  // planned sample size the Sample Size tab shows, so it must not share the
+  // tab's label or its "Adequate / Insufficient" verdict.
+  describe('Minimum sample card', () => {
+    it('reads "Minimum sample: Reached" when every variant has the minimum', () => {
+      render(<ExperimentSummary experiment={baseExperiment} />);
+      const card = screen.getByTestId('minimum-sample');
+      expect(within(card).getByText('Minimum sample')).toBeInTheDocument();
+      expect(within(card).getByText('Reached')).toBeInTheDocument();
+      expect(card).toHaveTextContent(/^Minimum sampleReached$/);
+    });
+
+    it('reads "Minimum sample: Not reached" otherwise', () => {
+      render(
+        <ExperimentSummary
+          experiment={{ ...baseExperiment, sample_size_adequate: false }}
+        />
+      );
+      const card = screen.getByTestId('minimum-sample');
+      expect(card).toHaveTextContent(/^Minimum sampleNot reached$/);
+    });
+
+    it('no longer uses the old "Sample Size: Adequate / Insufficient" wording', () => {
+      const { rerender } = render(<ExperimentSummary experiment={baseExperiment} />);
+      const summary = screen.getByTestId('experiment-summary');
+      expect(summary).not.toHaveTextContent(/Adequate|Insufficient/);
+      expect(within(summary).queryByText('Sample Size')).not.toBeInTheDocument();
+      rerender(
+        <ExperimentSummary
+          experiment={{ ...baseExperiment, sample_size_adequate: false }}
+        />
+      );
+      expect(screen.getByTestId('experiment-summary')).not.toHaveTextContent(
+        /Adequate|Insufficient/
+      );
+    });
+
+    it('offers a link to the Sample Size tab that calls the handler', async () => {
+      const onOpen = jest.fn();
+      render(
+        <ExperimentSummary experiment={baseExperiment} onOpenSampleSize={onOpen} />
+      );
+      const link = screen.getByRole('button', {
+        name: 'See the Sample Size tab for the planned sample.',
+      });
+      await userEvent.click(link);
+      expect(onOpen).toHaveBeenCalledTimes(1);
+    });
+
+    it('shows no link when there is no tab to open', () => {
+      render(<ExperimentSummary experiment={baseExperiment} />);
+      expect(screen.queryByTestId('open-sample-size-tab')).not.toBeInTheDocument();
+    });
   });
 });
