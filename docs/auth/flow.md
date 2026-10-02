@@ -12,6 +12,9 @@ This document contains the flow diagrams for the Cognito authentication system i
     `local`, sign in with `POST /api/v1/auth/login`; an administrator creates accounts
     and resets passwords.
 
+    The dashboard does not yet sign in with Cognito. Sign in through the API with
+    `POST /api/v1/auth/token`. SSO sign-in needs `AUTH_PROVIDER=local`.
+
 ## 1. Registration and Confirmation Flow
 
 Only with `COGNITO_SELF_SIGNUP_ENABLED=true` and a user pool that allows self sign-up; otherwise see [Adding a user](../cognito_integration.md#adding-a-user).

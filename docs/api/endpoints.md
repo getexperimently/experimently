@@ -69,6 +69,9 @@ The API uses two types of authentication:
     `local`, sign in with `POST /api/v1/auth/login`; an administrator creates accounts
     and resets passwords.
 
+    The dashboard does not yet sign in with Cognito. Sign in through the API with
+    `POST /api/v1/auth/token`. SSO sign-in needs `AUTH_PROVIDER=local`.
+
 Step 1: Register a new user:
 
 Only with `COGNITO_SELF_SIGNUP_ENABLED=true` and a user pool that allows self sign-up; otherwise see [Adding a user](../cognito_integration.md#adding-a-user).
@@ -279,6 +282,9 @@ curl -X POST "http://localhost:8000/api/v1/users/" \
     With any other provider, including the default `local`, all five answer 404. With
     `local`, sign in with `POST /api/v1/auth/login`; an administrator creates accounts
     and resets passwords.
+
+    The dashboard does not yet sign in with Cognito. Sign in through the API with
+    `POST /api/v1/auth/token`. SSO sign-in needs `AUTH_PROVIDER=local`.
 
 ### Sign Up
 - **Endpoint**: `POST /api/v1/auth/signup`

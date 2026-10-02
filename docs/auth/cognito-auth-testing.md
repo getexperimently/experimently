@@ -12,6 +12,9 @@ This document outlines the testing process for the AWS Cognito authentication im
     `local`, sign in with `POST /api/v1/auth/login`; an administrator creates accounts
     and resets passwords.
 
+    The dashboard does not yet sign in with Cognito. Sign in through the API with
+    `POST /api/v1/auth/token`. SSO sign-in needs `AUTH_PROVIDER=local`.
+
 ## Prerequisites
 
 - FastAPI application is running on `http://localhost:8000`
