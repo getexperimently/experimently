@@ -310,6 +310,34 @@ class TestUpdate:
             "After",
         )
 
+    @pytest.mark.regression
+    def test_resending_a_stored_address_with_a_mixed_case_domain_is_not_refused(
+        self, db_session: Session, route: str
+    ):
+        """The stored row's domain is not lower-case (an administrator, SQL or
+        a restore wrote it), and it sits in a case pair. Resending it exactly
+        as stored while changing another field answers 200 and keeps the
+        row's bytes, although EmailStr lower-cases the domain of the request.
+        """
+        suffix = uuid.uuid4().hex[:8]
+        target = _make_user(db_session, email=f"Bob.{suffix}@Acme.COM")
+        # The other half of the pair is exactly what EmailStr makes of the
+        # target's address, so writing that back would also collide exactly.
+        _make_user(db_session, email=f"Bob.{suffix}@acme.com")
+        client = _admin_client(db_session)
+
+        response = client.put(
+            route.format(id=target.id),
+            json=_put_body(target, full_name="After"),
+        )
+
+        assert response.status_code == 200, response.text
+        assert _row(db_session, target.id) == (
+            f"Bob.{suffix}@Acme.COM",
+            target.username,
+            "After",
+        )
+
     def test_a_username_collision_is_not_answered_email_already_registered(
         self, db_session: Session, route: str
     ):
