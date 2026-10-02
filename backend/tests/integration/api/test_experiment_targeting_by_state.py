@@ -6,13 +6,13 @@ Now, for every role that may update experiments, superuser included:
 
 * DRAFT: ``targeting_rules`` is accepted with any other field.
 * PAUSED: accepted only when it is the one field sent.
-* ACTIVE, COMPLETED, ARCHIVED: refused (403) whenever the request carries
+* ACTIVE, COMPLETED, ARCHIVED: refused (400) whenever the request carries
   ``targeting_rules``, even when the value equals the stored one, with a
   detail naming the state.
 
-A refusal by role and a refusal by state are both 403, so every refusal here
-asserts the detail as well as the status: a state refusal answered with the
-role message, or the reverse, fails.
+A refusal by role is 403 and a refusal by state is 400 (#602). Every refusal
+here asserts the detail as well as the status: a state refusal answered with
+the role message, or the reverse, fails.
 
 Each request is a real one: users of each role with a local JWT from
 ``create_local_access_token`` and no dependency override except
@@ -101,6 +101,9 @@ STATES = {
     "archived": ExperimentStatus.ARCHIVED,
 }
 EDITABLE = {"draft", "paused"}
+#: A role that may not update is refused by role (403) before the state is
+#: looked at; a role that may is refused by the state (400).
+ROLE_OR_STATE = {name: 400 if name in CHANGERS else 403 for name in ROLES}
 
 
 @pytest.fixture(autouse=True)
@@ -230,7 +233,7 @@ def _expected(role_name: str, state: str) -> tuple[int, str | None]:
     if role_name not in CHANGERS:
         return 403, ROLE_REFUSAL
     if state not in EDITABLE:
-        return 403, _state_refusal(state)
+        return 400, _state_refusal(state)
     return 200, None
 
 
@@ -277,7 +280,7 @@ def test_paused_targeting_with_another_field_is_refused(
         headers=_auth(user),
     )
 
-    assert response.status_code == 403, response.text
+    assert response.status_code == ROLE_OR_STATE[role_name], response.text
     expected = {
         "admin": OLD_STATE_REFUSAL.format("paused"),
         "developer": OLD_STATE_REFUSAL.format("paused"),
@@ -313,7 +316,7 @@ def test_paused_targeting_is_judged_on_the_fields_sent(
         headers=_auth(make_user("developer")),
     )
 
-    assert response.status_code == 403, response.text
+    assert response.status_code == 400, response.text
     assert response.json()["detail"] == OLD_STATE_REFUSAL.format("paused")
     assert _stored(fresh, experiment_id) == STORED
 
@@ -355,7 +358,7 @@ def test_paused_targeting_with_an_unknown_status_changes_nothing(
         headers=_auth(make_user("developer")),
     )
 
-    assert response.status_code in (403, 422), response.text
+    assert response.status_code in (400, 422), response.text
     assert _stored(fresh, experiment_id) == STORED
 
     def status_of(session):
@@ -399,7 +402,7 @@ def test_resending_the_stored_rules_on_an_active_experiment_is_refused(
         headers=_auth(make_user(role_name)),
     )
 
-    assert response.status_code == 403, response.text
+    assert response.status_code == 400, response.text
     assert response.json()["detail"] == _state_refusal("active")
     assert _stored(fresh, experiment_id) == STORED
 

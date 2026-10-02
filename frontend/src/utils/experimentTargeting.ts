@@ -190,9 +190,9 @@ function targetingProblems(detail: unknown): string[] {
  *
  * - 422 naming `targeting_rules`: each problem in the builder's words
  *   ("Group 1, Condition 2: unknown operator").
- * - 403 and 409: the API's own reason. A refusal for the experiment's state
- *   names the state, one for the role names the role, so the page does not
- *   guess which it was.
+ * - 400, 403 and 409: the API's own reason. A refusal for the experiment's
+ *   state (400) names the state, one for the role (403) names the role, so
+ *   the page does not guess which it was.
  * - anything else: the message the API client built.
  *
  * Deliberately separate from `describeCreateError`, whose 403 and 409 copy is

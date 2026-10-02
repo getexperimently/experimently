@@ -592,6 +592,11 @@ async def get_experiment(
     response_model=ExperimentResponse,
     summary="Update experiment",
     response_description="Returns the updated experiment",
+    responses={
+        status.HTTP_400_BAD_REQUEST: {
+            "description": "The experiment's state does not allow this change",
+        },
+    },
 )
 async def update_experiment(
     experiment_id: UUID = Path(..., description="The ID of the experiment to update"),
@@ -626,17 +631,25 @@ async def update_experiment(
     `/pause`, `/complete` or `/archive`. `status` still counts as a field
     sent, so on a PAUSED experiment `targeting_rules` must be sent without it.
 
+    `schedule` is not applied here: a request that contains it, with any
+    value including null, is refused with 422. Schedule an experiment with
+    `PUT /api/v1/experiments/{experiment_id}/schedule`.
+
     Returns:
         ExperimentResponse: The updated experiment
 
     Raises:
-        HTTPException 403: If the caller's role does not hold UPDATE on experiments,
-            or the experiment's state does not allow the change (the detail
-            names the state)
-        HTTPException 400: If trying to update variants/metrics for non-DRAFT experiment
+        HTTPException 403: If the caller's role does not hold UPDATE on
+            experiments. This is checked before the experiment's state.
+        HTTPException 400: If the experiment's state does not allow the change
+            (the detail names the state): any change to a non-DRAFT experiment
+            by a non-superuser, other than targeting alone on a PAUSED one;
+            targeting outside DRAFT or PAUSED; targeting with other fields on
+            a PAUSED experiment; variants or metrics outside DRAFT
         HTTPException 404: If the experiment doesn't exist
-        HTTPException 422: If `targeting_rules` is not a valid rule set, or
-            `status` differs from the experiment's current status
+        HTTPException 422: If `targeting_rules` is not a valid rule set,
+            `status` differs from the experiment's current status, or the
+            request contains `schedule`
     """
     try:
         # Get experiment
@@ -672,7 +685,7 @@ async def update_experiment(
         sends_targeting = "targeting_rules" in fields_sent
         if sends_targeting and experiment.status not in TARGETING_EDITABLE_STATUSES:
             raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
+                status_code=status.HTTP_400_BAD_REQUEST,
                 detail=(
                     "Targeting can be changed only while the experiment is "
                     f"draft or paused; it is {experiment.status.value}."
@@ -690,7 +703,7 @@ async def update_experiment(
             and not current_user.is_superuser
         ):
             raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
+                status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Cannot update experiments in {experiment.status.value} status",
             )
 
@@ -701,7 +714,7 @@ async def update_experiment(
             and not paused_targeting_only
         ):
             raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
+                status_code=status.HTTP_400_BAD_REQUEST,
                 detail=(
                     "While the experiment is paused, targeting can be changed "
                     "only on its own; send targeting_rules without other fields."
@@ -713,7 +726,7 @@ async def update_experiment(
         # including the superuser. A status equal to the current one is a
         # no-op so a GET-then-PUT round trip still works. This runs after the
         # role and state refusals above, so a request those refuse keeps its
-        # 403; and ``status`` stays in ``fields_sent``, so a PAUSED
+        # 403 or 400; and ``status`` stays in ``fields_sent``, so a PAUSED
         # experiment's targeting sent with a status is still refused there.
         # A null status never gets here: the schema refuses it (#541).
         if "status" in fields_sent:
@@ -731,7 +744,7 @@ async def update_experiment(
             for field in restricted_fields:
                 if field in update_data:
                     raise HTTPException(
-                        status_code=status.HTTP_403_FORBIDDEN,
+                        status_code=status.HTTP_400_BAD_REQUEST,
                         detail=f"Cannot update {field} for experiments in {experiment.status.value} status",
                     )
 

@@ -264,12 +264,12 @@ class TestUpdateExperimentAdditional:
         )
         assert response.status_code == 422, response.text
 
-    def test_update_restricted_field_on_active_experiment_returns_403(
+    def test_update_restricted_field_on_active_experiment_returns_400(
         self, admin_client
     ):
-        """Even a superuser cannot update `variants`/`metrics`/`start_date`/
-        `end_date` once an experiment has left DRAFT status — this check is
-        unconditional (not owner/permission gated).
+        """Even a superuser cannot update `variants`/`metrics` once an
+        experiment has left DRAFT status — this check is unconditional (not
+        owner/permission gated), and a state refusal is 400 (#602).
         """
         exp = _create_and_start(admin_client, "Update Restricted Active")
         response = admin_client.put(
@@ -280,12 +280,15 @@ class TestUpdateExperimentAdditional:
                 ]
             },
         )
-        assert response.status_code == 403, response.text
+        assert response.status_code == 400, response.text
+        assert response.json()["detail"] == (
+            "Cannot update variants for experiments in active status"
+        )
 
     def test_non_superuser_owner_cannot_update_active_experiment_at_all(
         self, developer_client
     ):
-        """The *first* status guard (non-DRAFT + non-superuser -> 403) is
+        """The *first* status guard (non-DRAFT + non-superuser -> 400) is
         distinct from the restricted-fields guard above: it blocks even
         unrestricted fields like `name` for a non-superuser owner once the
         experiment has left DRAFT. developer_client is a real owner here
@@ -302,7 +305,8 @@ class TestUpdateExperimentAdditional:
         response = developer_client.put(
             f"/api/v1/experiments/{exp_id}", json={"name": "New Name"}
         )
-        assert response.status_code == 403, response.text
+        assert response.status_code == 400, response.text
+        assert response.json()["detail"] == "Cannot update experiments in active status"
 
 
 # ---------------------------------------------------------------------------

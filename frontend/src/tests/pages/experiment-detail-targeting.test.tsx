@@ -645,7 +645,7 @@ describe('Who can join — saving', () => {
   });
 
   it.each([
-    [403, 'Targeting can be changed only while the experiment is draft or paused; it is active.'],
+    [400, 'Targeting can be changed only while the experiment is draft or paused; it is active.'],
     [409, 'The experiment changed since you opened it.'],
   ])('shows a %i in an alert that takes focus, with the server reason', async (status, detail) => {
     install({}, () => {
