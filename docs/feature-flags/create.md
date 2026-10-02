@@ -208,15 +208,20 @@ update, and nothing is saved. That is:
   at the top level, on a group or on a condition;
 - `groups` together with `rules`, `logical_operator` without `groups`, and a top-level
   `name`;
-- native rules without `rules` (a `default_rule` on its own);
+- native rules without `rules` (a `default_rule` on its own), and native rules with a key
+  the shape does not have (a misspelt `rollout_percentage`, `priority` or `conditions`) on a
+  rule, a group at any depth, a condition or the `default_rule`;
+- native groups nested more than 10 levels deep, and native rules with more than 1,000
+  rules, groups and conditions in all;
 - a group with no conditions, a condition with no attribute, and an attribute with
   anything other than letters, digits, `_` and `.`;
 - an unknown operator or logical operator (`and`, `or` or `not`, in any case);
 - a value the operator cannot use (`"abc"` for `greater_than`, `"not-a-version"` for
   `semver_gte`), a `regex` pattern RE2 refuses, and a list operator with more than 1,000
   values;
-- a top-level `rollout_percentage` outside 0–100, or an `id` that is not text of 1 to 100
-  characters.
+- a `rollout_percentage`, top-level or on a native rule, that is not an integer from 0 to
+  100 (`100.0` is accepted; `33.5`, `true` and `"50"` are not), or an `id` that is not text
+  of 1 to 100 characters.
 
 The message names the place and the reason, never the value you sent. Only the first
 problem found is reported. This request misspells `equals`:

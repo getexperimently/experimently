@@ -32,6 +32,7 @@ from backend.scripts import check_targeting_rules
 from backend.tests.integration.helpers import unique_flag_key
 from backend.tests.unit.core.test_flag_targeting_validation import (
     ACCEPTED,
+    NATIVE_SENTINEL,
     REFUSED,
     SENTINEL,
 )
@@ -208,8 +209,9 @@ def test_put_refuses_rules_the_evaluator_would_not_apply(
         {SENTINEL: ["US"]},
         {"rules": [{"id": SENTINEL, "rule": {"operator": SENTINEL}}]},
         SENTINEL,
+        *NATIVE_SENTINEL.values(),
     ],
-    ids=["operator", "attribute", "value", "key", "native", "string"],
+    ids=["operator", "attribute", "value", "key", "native", "string", *NATIVE_SENTINEL],
 )
 def test_the_422_never_repeats_the_submitted_value(
     admin_client, make_feature_flag, value
@@ -237,7 +239,15 @@ def test_the_422_never_repeats_the_submitted_value(
 
 @pytest.mark.parametrize(
     "name",
-    ["builder payload with id keys", "native", "empty dict", "None", "regex"],
+    [
+        "builder payload with id keys",
+        "native",
+        "empty dict",
+        "None",
+        "regex",
+        "rollout_percentage 100.0",
+        "native, every schema key at every level",
+    ],
 )
 def test_accepted_rules_are_stored_as_sent(admin_client, db_session, name):
     value = ACCEPTED[name]
