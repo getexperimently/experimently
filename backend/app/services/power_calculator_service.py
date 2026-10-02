@@ -112,6 +112,31 @@ TREATMENT_RATE_CEILING_MESSAGE = (
     "Lower the baseline rate or the effect."
 )
 
+# What the sample-size routes answer, with a 422, when the treatment rate is so
+# close to the baseline that the required sample size is not a finite number in
+# floating point: the treatment rate rounds to the baseline (a 0.12 baseline
+# with a 1e-17 effect), or the squared difference underflows to zero (a 1e-300
+# baseline with a 5% effect). See ``SampleSizeNotFiniteError``.
+SAMPLE_SIZE_NOT_FINITE_MESSAGE = (
+    "This baseline raised by this effect changes too little to estimate a "
+    "sample size. Raise the baseline rate or the effect."
+)
+
+
+class SampleSizeNotFiniteError(ValueError):
+    """The required sample size is not a finite number.
+
+    Raised by :func:`sample_size_two_proportions` exactly where it used to
+    raise ``ValueError`` (the two rates are equal in floating point) or
+    ``OverflowError`` (the squared difference underflows to zero, the
+    quotient is infinity, and ``math.ceil`` cannot convert it). It is a
+    ``ValueError``, so callers that already turned a ``ValueError`` into a 422
+    keep doing so; its text is :data:`SAMPLE_SIZE_NOT_FINITE_MESSAGE`.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(SAMPLE_SIZE_NOT_FINITE_MESSAGE)
+
 
 def sample_size_two_proportions(
     p1: float,
@@ -156,21 +181,31 @@ def sample_size_two_proportions(
 
     Raises
     ------
-    ValueError : ``p1 == p2``, or a rate outside [0, 1] (``math.sqrt`` of a
-        negative variance).
+    SampleSizeNotFiniteError : ``p1 == p2`` in floating point, or
+        ``(p2 - p1) ** 2`` underflows to zero, or the size is not finite.
+        A ``ValueError``.
+    ValueError : a rate outside [0, 1] (``math.sqrt`` of a negative variance).
     """
     z_alpha = norm.ppf(1 - alpha / (2 if two_tailed else 1))
     z_power = norm.ppf(power)
     pooled = (p1 + p2) / 2
     delta = abs(p2 - p1)
 
-    if delta == 0:
-        raise ValueError("p1 and p2 must differ (delta cannot be zero)")
+    # delta == 0 implies delta**2 == 0; the square also reaches zero for any
+    # delta below about 1.6e-162, where it underflows.
+    squared_delta = delta**2
+    if squared_delta == 0:
+        raise SampleSizeNotFiniteError()
 
     n = (
         z_alpha * math.sqrt(2 * pooled * (1 - pooled))
         + z_power * math.sqrt(p1 * (1 - p1) + p2 * (1 - p2))
-    ) ** 2 / delta**2
+    ) ** 2 / squared_delta
+
+    # A guard: no rates were found that overflow the quotient without the
+    # square underflowing first, but ``math.ceil`` of infinity would be a 500.
+    if not math.isfinite(n):
+        raise SampleSizeNotFiniteError()
 
     return math.ceil(n)
 

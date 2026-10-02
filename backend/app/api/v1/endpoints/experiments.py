@@ -62,7 +62,9 @@ from backend.app.services.experiment_service import (
     is_experiment_key_conflict,
 )
 from backend.app.services.power_calculator_service import (
+    SAMPLE_SIZE_NOT_FINITE_MESSAGE,
     TREATMENT_RATE_CEILING_MESSAGE,
+    SampleSizeNotFiniteError,
     sample_size_two_proportions,
 )
 
@@ -1901,13 +1903,21 @@ async def calculate_experiment_sample_size(
     # Two arms through the same formula as the results page's Sample Size tab
     # (pooled variance under H0, unpooled under H1), with no multiple-comparison
     # correction; every variant needs this many users.
-    samples_per_variant = sample_size_two_proportions(
-        p1=baseline_rate,
-        p2=treatment_rate,
-        alpha=significance_level,
-        power=statistical_power,
-        two_tailed=not is_one_sided,
-    )
+    try:
+        samples_per_variant = sample_size_two_proportions(
+            p1=baseline_rate,
+            p2=treatment_rate,
+            alpha=significance_level,
+            power=statistical_power,
+            two_tailed=not is_one_sided,
+        )
+    except SampleSizeNotFiniteError:
+        # The treatment rate is too close to the baseline for the size to be a
+        # finite number (an effect or a baseline near zero).
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=SAMPLE_SIZE_NOT_FINITE_MESSAGE,
+        )
 
     # Calculate total sample size
     total_samples = samples_per_variant * variant_count

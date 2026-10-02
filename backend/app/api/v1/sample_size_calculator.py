@@ -15,7 +15,9 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from backend.app.api import deps
 from backend.app.models.user import User
 from backend.app.services.power_calculator_service import (
+    SAMPLE_SIZE_NOT_FINITE_MESSAGE,
     TREATMENT_RATE_CEILING_MESSAGE,
+    SampleSizeNotFiniteError,
     sample_size_two_proportions,
 )
 
@@ -143,13 +145,21 @@ async def calculate_sample_size(
     # and the guided setup's estimate (pooled variance under H0, unpooled under
     # H1), with no multiple-comparison correction; every variant needs this
     # many users.
-    samples_per_variant = sample_size_two_proportions(
-        p1=baseline_rate,
-        p2=treatment_rate,
-        alpha=alpha,
-        power=power,
-        two_tailed=not is_one_sided,
-    )
+    try:
+        samples_per_variant = sample_size_two_proportions(
+            p1=baseline_rate,
+            p2=treatment_rate,
+            alpha=alpha,
+            power=power,
+            two_tailed=not is_one_sided,
+        )
+    except SampleSizeNotFiniteError:
+        # The treatment rate is too close to the baseline for the size to be a
+        # finite number (an effect or a baseline near zero).
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=SAMPLE_SIZE_NOT_FINITE_MESSAGE,
+        )
 
     # Calculate total sample size
     total_samples = samples_per_variant * variant_count
