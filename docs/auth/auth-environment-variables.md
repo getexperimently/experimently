@@ -14,6 +14,20 @@ The following environment variables are essential for connecting to and working 
 | `AWS_REGION` | The AWS region where your Cognito User Pool is deployed | Yes | `us-west-2` |
 | `COGNITO_DOMAIN` | Your Cognito domain for hosted UI (if used) | No | None |
 
+## User pool requirements
+
+The user pool that `COGNITO_USER_POOL_ID` names must require an email address:
+
+- make `email` a **required** standard attribute of the pool;
+- if users sign in through a federated identity provider (SAML, OIDC, Google and so on), map
+  the provider's email claim to the pool's `email` attribute.
+
+The platform creates a user's account the first time they sign in, and takes the account's
+email address from the pool's `email` attribute, so every identity that can sign in needs one.
+Cognito does not let you change a pool's required attributes after the pool is created, so
+set this when you create it. The reference pool in
+`infrastructure/cdk/stacks/authentication_stack.py` already requires `email`.
+
 ## Additional Configuration Options
 
 These variables provide additional customization for the authentication system:

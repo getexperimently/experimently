@@ -8,6 +8,15 @@ Flag evaluation and experiment assignment are decided **by the server**: every c
 public API with your `X-API-Key`, the server buckets the user (sticky per user + experiment), and
 the SDK caches the answer per user + key for a TTL. Nothing is bucketed on device.
 
+> **Beta: flag targeting on user attributes does not work in this SDK yet.** Flag
+> evaluation sends only the user id (`GET /api/v1/feature-flags/evaluate/{key}?user_id=…`),
+> not the user's attributes, so a flag targeting rule on an attribute (app version, OS,
+> country, plan) never matches here, and the flag's rollout percentage alone decides. Experiment
+> assignment is not affected: `getAssignment`, with `user.attributes`, sends the attributes as `context`, so experiment
+> targeting works. Until this is fixed ([#438](https://github.com/getexperimently/experimently/issues/438)), an app that needs attribute targeting on a
+> flag can call the evaluate endpoint itself with a `context` query parameter (a URL-encoded
+> JSON object of the attributes).
+
 Source: `sdk/ios`. A SwiftUI demo lives in `sdk/ios/Examples/SwiftUIExample/ExampleApp.swift`.
 
 ---

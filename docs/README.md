@@ -55,8 +55,10 @@
 | [Java SDK](sdk/java.md) | JVM SDK with Spring Boot auto-configuration, LRU cache, MD5 hashing |
 | [React SDK](sdk/react.md) | React hooks, context provider, HOC, SSR/Next.js support |
 | [Go SDK](sdk/go.md) | Go SDK with local evaluation, context cancellation, goroutine safety |
-| [iOS SDK](sdk/ios.md) | Swift SDK with async/await, offline fallback, SwiftUI integration |
-| [Android SDK](sdk/android.md) | Kotlin SDK with Coroutines, OkHttp, Compose integration |
+| [iOS SDK](sdk/ios.md) | Beta. Swift SDK with async/await, offline fallback, SwiftUI integration; flag evaluation does not send user attributes yet |
+| [Android SDK](sdk/android.md) | Beta. Kotlin SDK with Coroutines, OkHttp, Compose integration; flag evaluation does not send user attributes yet |
+| [Flutter SDK](sdk/flutter.md) | Beta. Dart SDK for Flutter and plain Dart; flag evaluation does not send user attributes yet |
+| [React Native SDK](sdk/react-native.md) | Beta. Provider, hooks and client for React Native; flag evaluation does not send user attributes yet |
 
 ---
 

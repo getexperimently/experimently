@@ -9,6 +9,15 @@ Flag evaluation and experiment assignment are decided **by the server**: every c
 public API with your `X-API-Key`, the server buckets the user (sticky per user + experiment), and
 the SDK caches the answer per user + key. Nothing is bucketed on the device.
 
+> **Beta: flag targeting on user attributes does not work in this SDK yet.** Flag
+> evaluation sends only the user id (`GET /api/v1/feature-flags/evaluate/{key}?user_id=…`),
+> not the user's attributes, so a flag targeting rule on an attribute (app version, OS,
+> country, plan) never matches here, and the flag's rollout percentage alone decides. Experiment
+> assignment is not affected: `getAssignment` sends the attributes as `context`, so experiment
+> targeting works. Until this is fixed ([#438](https://github.com/getexperimently/experimently/issues/438)), an app that needs attribute targeting on a
+> flag can call the evaluate endpoint itself with a `context` query parameter (a URL-encoded
+> JSON object of the attributes).
+
 Source: `sdk/flutter`.
 
 ---
@@ -110,7 +119,9 @@ const config = SdkConfig(
 
 ### `evaluateFlag(String flagKey, String userId): Future<EvalResult>`
 
-Calls `GET /api/v1/feature-flags/evaluate/{flagKey}?user_id=…` and returns an `EvalResult`:
+Calls `GET /api/v1/feature-flags/evaluate/{flagKey}?user_id=…` and returns the `EvalResult` below. An
+optional `attributes:` named argument is accepted but not sent (see the beta note at the top of
+this page).
 
 | Property | Type | Description |
 |----------|------|-------------|

@@ -194,12 +194,15 @@ For each metric and variant pair:
 
 | Column | Meaning |
 |--------|---------|
-| **Rate/Mean** | Conversion rate or average value for this variant |
-| **Relative Improvement** | How much better/worse vs. control (e.g., +12.3%) |
+| **Sample Size** | Users assigned to this variant |
+| **Value** | Conversion rate or average value for this variant |
+| **Improvement** | How much better/worse vs. control (e.g., +12.3%) |
 | **p-value** | Probability the difference is due to chance (lower = more confident) |
-| **Significant** | p-value < (1 - confidence level), e.g., < 0.05 for 95% confidence |
-| **Effect Size** | Practical magnitude: negligible / small / medium / large |
-| **Confidence Interval** | Range where the true difference likely falls |
+| **Significance** | p-value < (1 - confidence level), e.g., < 0.05 for 95% confidence |
+
+The table has no effect size or confidence interval column yet. Both are in the API
+response: `GET /api/v1/results/{experiment_id}` returns `effect_size`, `effect_size_label`
+(negligible / small / medium / large) and `confidence_interval` for each variant.
 
 **Green** = statistically significant improvement
 **Red** = statistically significant degradation
@@ -266,7 +269,7 @@ Navigate to **Feature Flags → New Flag**:
 
 **Manual rollout:**
 
-Go to the flag → Edit → set `Rollout Percentage` to the desired value. Changes take effect within 60 seconds (cache TTL).
+Open the flag, move the **Rollout percentage** slider to the desired value and press **Save Changes**. Changes take effect within 60 seconds (cache TTL).
 
 | Percentage | Meaning |
 |------------|---------|
@@ -291,7 +294,11 @@ Optionally restrict to specific users:
 
 For gradual rollouts on a schedule:
 
-Go to **Flag → Rollout Schedule → Create Schedule**:
+The dashboard has no screen for creating a rollout schedule yet. Create it through the
+API with `POST /api/v1/rollout-schedules` (the stages go in its `stages` list; see
+[Rollouts](../feature-flags/rollouts.md) for the full contract), then start it with
+`POST /api/v1/rollout-schedules/{schedule_id}/activate`. The flag's page in the dashboard
+shows the schedule, its status and its stages, read-only. A schedule like this one:
 
 | Stage | Target % | Trigger Type | Start Date |
 |-------|----------|-------------|-----------|
@@ -299,15 +306,17 @@ Go to **Flag → Rollout Schedule → Create Schedule**:
 | Stage 2 | 25% | Time-based | Apr 8, 2026 |
 | Stage 3 | 100% | Manual | — |
 
-The platform automatically advances time-based stages. Manual stages require you to explicitly click **Advance Stage** in the UI.
+The platform automatically advances time-based stages. A manual stage waits until you
+advance it. The dashboard has no button for that yet, so it is an API call:
+`POST /api/v1/rollout-schedules/stages/{stage_id}/advance`.
 
 **Best practice:** End your schedule with a manual stage for the final 100% rollout. This gives you a human approval gate before full deployment.
 
 ### Disabling / Rolling Back
 
 To instantly disable a flag:
-1. Set `Rollout Percentage = 0`
-2. Or click **Deactivate** to change status to `INACTIVE`
+1. Set the rollout percentage to 0 and press **Save Changes**
+2. Or turn the flag off with the switch at the top of its page; it then shows **Not serving**
 
 If you have safety monitoring configured, the platform can auto-rollback if error rates spike.
 
@@ -317,19 +326,18 @@ If you have safety monitoring configured, the platform can auto-rollback if erro
 
 ### Viewing All Experiments
 
-**Experiments list** shows all experiments with status, owner, and quick stats.
+**Experiments list** shows all experiments with their name, status, type, number of
+variants and creation date.
 
-Filter by:
-- Status: DRAFT / ACTIVE / PAUSED / COMPLETED
-- Date range
-- Owner
-- Experiment type
+Filter by status: All / Draft / Active / Paused / Completed. There is no filter by date,
+owner or experiment type yet.
 
 ### Exporting Results
 
-From the Results page:
-- **CSV export**: Download variant-level metric data
-- **API access**: `GET /api/v1/results/{id}` returns full JSON with all statistics
+The Results page has no export button yet. Use the API:
+- **CSV export**: `GET /api/v1/export/variants` downloads per-variant results as CSV
+  (`?format=json` for JSON); see [Data Export](../api/data-export.md)
+- **Full results**: `GET /api/v1/results/{experiment_id}` returns JSON with all statistics
 
 ---
 
