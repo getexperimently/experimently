@@ -140,6 +140,13 @@ NOT_DOCS_TESTS = {
     # Names docs/api/stability.md in a docstring (the claim its header test
     # pins); opens no file under docs/, and docs/api/** is never docs-only.
     "backend/tests/integration/api/test_edge_api.py": "docstring mention only",
+    # Runs the runbook SQL of docs/self-hosting/migrations.md against
+    # PostgreSQL, which the docs-only lane does not have. It reads the page
+    # through backend/tests/unit/docs/test_email_case_runbook.py, which is in
+    # DOCS_TESTS and pins the anchor and the SQL steps on a docs-only change.
+    "backend/tests/integration/database/test_users_email_lower_migration.py": (
+        "needs PostgreSQL; its docs reader is in DOCS_TESTS"
+    ),
     # Hands the classifier path STRINGS such as "docs/a.py"; opens no file.
     "backend/tests/unit/scripts/test_classify_changes.py": "fixture strings only",
     # Hands stub `git` and `python3` path STRINGS such as "docs/a.md" to the

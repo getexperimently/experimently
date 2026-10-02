@@ -15,7 +15,7 @@
 **Account Creation:**
 - All platform accounts (ADMIN, DEVELOPER, ANALYST, VIEWER) are provisioned via AWS Cognito by an ADMIN user
 - New accounts are created with the minimum necessary role (VIEWER by default; see `backend/app/core/config.py` Cognito group mapping)
-- Every account must have a unique email address in `experimentation.users.email`
+- Every account must have a unique email address in `experimentation.users.email`, regardless of letter case: `Bob@acme.com` and `bob@acme.com` are the same address
 - Service accounts for automated systems must be created with a dedicated email (e.g., `ci-deploy@yourcompany.com`) and the DEVELOPER role; they must not be used for human access
 - Shared accounts are prohibited
 

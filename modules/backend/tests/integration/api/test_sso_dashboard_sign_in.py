@@ -44,6 +44,11 @@ from backend.app.db.session import get_db as _session_get_db
 from backend.app.main import app
 from backend.app.middleware.rate_limiter import RATE_LIMIT_CONFIG
 from backend.app.models.user import User, UserRole
+from backend.tests.integration.email_lower_index import (
+    # A session-scoped autouse fixture: imported, it takes effect here.
+    email_lower_index_survives_the_session,
+    without_email_lower_index,
+)
 from modules.backend.app.models.sso_config import SSOConfig, SSOProviderType
 from modules.backend.app.services import sso_service
 
@@ -775,19 +780,27 @@ def test_an_identity_linked_to_another_account_is_sso_account(
 def test_two_accounts_with_this_email_is_sso_account(
     browser, config, dashboard, db_session, email
 ):
-    for spelling in (email, email.upper()):
-        db_session.add(
-            User(
+    """Two accounts match one sign-in: the dashboard is told ``sso_account``.
+
+    Since #343 the database refuses such a pair (``ix_users_email_lower``), so
+    it is built with the index dropped, and the rows deleted and the index
+    re-created on the way out (``without_email_lower_index``).
+    """
+    with without_email_lower_index(db_session) as added:
+        for spelling in (email, email.upper()):
+            user = User(
                 username=f"dup-{uuid.uuid4().hex[:8]}",
                 email=spelling,
                 hashed_password="x",
                 is_active=True,
             )
+            db_session.add(user)
+            db_session.flush()
+            added.append(user.id)
+        db_session.commit()
+        assert _error_of(_sign_in(browser, config.org_domain))["sso_error"] == (
+            "sso_account"
         )
-    db_session.commit()
-    assert _error_of(_sign_in(browser, config.org_domain))["sso_error"] == (
-        "sso_account"
-    )
 
 
 def test_a_deactivated_account_is_sso_inactive(
