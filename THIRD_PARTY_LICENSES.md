@@ -621,7 +621,7 @@ Resolved with `license-checker-rseidelsohn --production`.
 | `balanced-match` | 1.0.2 |
 | `base64-js` | 1.5.1 |
 | `bl` | 4.1.0 |
-| `brace-expansion` | 1.1.18 |
+| `brace-expansion` | 1.1.21 |
 | `braces` | 3.0.3 |
 | `browserslist` | 4.28.9 |
 | `buffer` | 5.7.1 |
