@@ -49,7 +49,19 @@ TEST_FLAG_DATA = {
     "description": TEST_FLAG_DESCRIPTION,
     "is_active": False,
     "rollout_percentage": 50,
-    "targeting_rules": {"country": ["US", "CA"], "user_group": "beta"},
+    # The dashboard shape: a flat ``{"country": [...]}`` answers 422 (#535).
+    "targeting_rules": {
+        "logical_operator": "AND",
+        "groups": [
+            {
+                "logical_operator": "AND",
+                "conditions": [
+                    {"attribute": "country", "operator": "in", "value": ["US", "CA"]},
+                    {"attribute": "user_group", "operator": "equals", "value": "beta"},
+                ],
+            }
+        ],
+    },
 }
 
 #: Stored on the ORM fixture only: no request accepts ``variants`` (#94).
@@ -369,7 +381,29 @@ class TestFeatureFlagEndpoints:
             "name": unique_name,
             "description": "Updated description",
             "rollout_percentage": 75,
-            "targeting_rules": {"country": ["US", "UK"], "user_group": "premium"},
+            "targeting_rules": {
+                "logical_operator": "OR",
+                "groups": [
+                    {
+                        "conditions": [
+                            {
+                                "attribute": "country",
+                                "operator": "in",
+                                "value": ["US", "UK"],
+                            }
+                        ]
+                    },
+                    {
+                        "conditions": [
+                            {
+                                "attribute": "user_group",
+                                "operator": "equals",
+                                "value": "premium",
+                            }
+                        ]
+                    },
+                ],
+            },
         }
 
         response = client.put(
@@ -383,6 +417,7 @@ class TestFeatureFlagEndpoints:
         assert data["name"] == unique_name
         assert data["description"] == "Updated description"
         assert data["rollout_percentage"] == 75
+        assert data["targeting_rules"] == update_data["targeting_rules"]
 
         # Clean up
         app.dependency_overrides.pop(deps.get_db, None)

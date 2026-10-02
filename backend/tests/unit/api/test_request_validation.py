@@ -276,7 +276,20 @@ class TestFeatureFlagValidation:
             "name": "New Checkout Flow",
             "description": "Enable the new checkout flow",
             "rollout_percentage": 20,
-            "targeting_rules": {"country": ["US", "CA"]},
+            "targeting_rules": {
+                "logical_operator": "AND",
+                "groups": [
+                    {
+                        "conditions": [
+                            {
+                                "attribute": "country",
+                                "operator": "in",
+                                "value": ["US", "CA"],
+                            }
+                        ]
+                    }
+                ],
+            },
         }
 
         # This should not raise an exception
@@ -286,7 +299,19 @@ class TestFeatureFlagValidation:
         assert feature_flag.key == "new-checkout-flow"
         assert feature_flag.name == "New Checkout Flow"
         assert feature_flag.model_dump().get("rollout_percentage") == 20
-        assert feature_flag.targeting_rules["country"] == ["US", "CA"]
+        # Stored as sent, never rewritten.
+        assert feature_flag.targeting_rules == valid_data["targeting_rules"]
+
+    def test_feature_flag_create_refuses_a_flat_targeting_object(self):
+        """#535: a flat ``{"country": [...]}`` is read by the flag evaluator as
+        no rules, so a save refuses it."""
+        with pytest.raises(ValidationError) as caught:
+            FeatureFlagCreate(
+                key="flat-rules", name="Flat", targeting_rules={"country": ["US"]}
+            )
+        assert caught.value.errors()[0]["msg"] == (
+            "Value error, targeting rules: unknown key"
+        )
 
     def test_feature_flag_key_format(self):
         """Test that feature flag key format is validated."""

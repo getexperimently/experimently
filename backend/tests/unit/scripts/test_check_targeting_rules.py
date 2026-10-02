@@ -1,0 +1,186 @@
+"""`python -m backend.scripts.check_targeting_rules` -- the post-upgrade report (#535)."""
+
+from __future__ import annotations
+
+from types import SimpleNamespace
+from typing import Any, Dict, List
+from unittest.mock import MagicMock
+
+import pytest
+
+from backend.app.models.feature_flag import FeatureFlagStatus
+from backend.app.services import feature_flag_service as ffs
+from backend.scripts import check_targeting_rules as check
+
+pytestmark = pytest.mark.unit
+
+US = {"attribute": "country", "operator": "equals", "value": "US"}
+
+
+def _dash(*conditions, **extra):
+    return {
+        "logical_operator": "AND",
+        "groups": [{"logical_operator": "AND", "conditions": list(conditions)}],
+        **extra,
+    }
+
+
+def _legacy(operator: Any = "eq", value: Any = "pro") -> List[Dict[str, Any]]:
+    condition: Dict[str, Any] = {"attribute": "plan", "value": value}
+    if operator is not None:
+        condition["operator"] = operator
+    return [
+        {
+            "id": "pro-only",
+            "type": "context",
+            "conditions": [condition],
+            "percentage": 100,
+        }
+    ]
+
+
+def test_one_line_per_listed_flag():
+    rows = [
+        ("id-1", "typo", _dash({**US, "operator": "equal"})),
+        ("id-2", "clean", _dash(US)),
+        ("id-3", "flat", {"country": ["US"]}),
+        ("id-4", "old-seed", {"operator": "and", "rules": []}),
+        ("id-5", "legacy-eq", _legacy("eq")),
+        ("id-6", "legacy-typo", _legacy("equal")),
+        ("id-7", "scalar", 42),
+        ("id-8", "empty", {}),
+        (
+            "id-9",
+            "lone-default",
+            {"default_rule": {"id": "d", "rule": {"operator": "and"}}},
+        ),
+    ]
+    lines = [f.line() for f in check.findings_for(rows)]
+    assert lines == [
+        "feature_flag\tid-1\ttypo\tgroups[0].conditions[0].operator\tunknown operator",
+        "feature_flag\tid-3\tflat\ttargeting_rules\tunknown key",
+        "feature_flag\tid-4\told-seed\ttargeting_rules\tunknown key",
+        "feature_flag\tid-5\tlegacy-eq\ttargeting_rules"
+        "\ta list of rules is not supported; use the groups shape",
+        "feature_flag\tid-6\tlegacy-typo\t[0].conditions[0].operator"
+        "\tlegacy condition whose operator is not eq, ne, gt, lt, contains or in; "
+        "its rule matches no user",
+        "feature_flag\tid-7\tscalar\ttargeting_rules\tmust be an object",
+        "feature_flag\tid-9\tlone-default\trules\trequired",
+    ]
+
+
+@pytest.mark.parametrize(
+    "operator", ["equal", "equals", "gte", "", None, ["eq"], {"op": "eq"}]
+)
+def test_a_legacy_condition_that_cannot_match_has_its_own_line(operator):
+    found = check.finding_for("id", "k", _legacy(operator))
+    assert found is not None and found.matches_no_user
+    assert found.path == "[0].conditions[0].operator"
+
+
+@pytest.mark.parametrize("operator", ["eq", "ne", "gt", "lt", "contains", "in"])
+def test_a_legacy_condition_with_a_known_operator_gets_the_list_line(operator):
+    found = check.finding_for("id", "k", _legacy(operator))
+    assert found is not None and not found.matches_no_user
+    assert found.reason == "a list of rules is not supported; use the groups shape"
+
+
+def test_the_first_condition_that_cannot_match_is_named():
+    rules = _legacy("eq") + [
+        {"type": "user_id", "user_ids": ["u"]},
+        {
+            "type": "context",
+            "conditions": [
+                {"attribute": "a", "operator": "eq", "value": 1},
+                {"attribute": "b", "operator": "equal", "value": 1},
+            ],
+        },
+    ]
+    assert check.finding_for("id", "k", rules).path == "[2].conditions[1].operator"
+
+
+def _served(rules: Any, context: Dict[str, Any], monkeypatch) -> Dict[str, Any]:
+    monkeypatch.setattr(ffs, "MetricsService", MagicMock())
+    flag = SimpleNamespace(
+        id="00000000-0000-0000-0000-000000000535",
+        key="legacy",
+        status=FeatureFlagStatus.ACTIVE,
+        rollout_percentage=0,
+        targeting_rules=rules,
+    )
+    service = ffs.FeatureFlagService(db=MagicMock())
+    return service.evaluate_flag_detailed(flag, "user-1", context)
+
+
+@pytest.mark.regression
+@pytest.mark.parametrize(
+    "rules",
+    [
+        _legacy("equal"),
+        _legacy(None),
+        _legacy("gte", 3),
+        _legacy("eq"),
+        _legacy("in", ["pro", "free"]),
+        _legacy("contains", "pr"),
+    ],
+    ids=["equal", "missing", "gte", "eq", "in", "contains"],
+)
+def test_the_legacy_label_is_what_the_evaluator_does(rules, monkeypatch):
+    """EM C2: "matches no user" is said of exactly the rows whose rule the flag
+    evaluator matches for no user. Each row is evaluated at global 0% for users
+    who send the attribute with the rule's value and with others."""
+    found = check.finding_for("id", "k", rules)
+    value = rules[0]["conditions"][0]["value"]
+    contexts = [{"plan": v} for v in ("pro", "free", "p", 3, 4, "")]
+    if not isinstance(value, list):
+        contexts.append({"plan": value})
+    matched = [
+        c
+        for c in contexts
+        if _served(rules, c, monkeypatch)["reason"] == "targeting_rule"
+    ]
+    assert found.matches_no_user == (matched == [])
+    assert ("matches no user" in found.line()) == found.matches_no_user
+
+
+def test_a_value_the_check_cannot_read_is_listed(monkeypatch):
+    def boom(_value):
+        raise RecursionError
+
+    monkeypatch.setattr(check, "validate_flag_targeting", boom)
+    found = check.finding_for("id", "k", {"groups": []})
+    assert found.line() == "feature_flag\tid\tk\ttargeting_rules\tcould not be checked"
+
+
+def test_the_feature_flags_table_is_read(monkeypatch):
+    seen = []
+
+    class Result:
+        def all(self):
+            return [("row", "key", {"country": ["US"]})]
+
+    class Connection:
+        def execute(self, statement):
+            seen.append(str(statement))
+            return Result()
+
+    found = check.scan(Connection(), "exp")
+    assert [f.line() for f in found] == [
+        "feature_flag\trow\tkey\ttargeting_rules\tunknown key"
+    ]
+    assert seen == [
+        'SELECT id, "key", "targeting_rules" FROM "exp"."feature_flags" '
+        'WHERE "targeting_rules" IS NOT NULL ORDER BY id'
+    ]
+
+
+@pytest.mark.regression
+def test_an_unreadable_database_exits_2(monkeypatch, capsys):
+    """Not 0: a report that cannot read the database must not look clean."""
+    monkeypatch.setenv("POSTGRES_SERVER", "127.0.0.1")
+    monkeypatch.setenv("POSTGRES_PORT", "1")
+    assert check.main([]) == 2
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "could not read the database" in captured.err

@@ -14,6 +14,9 @@ The create/update contract (#94, D39 as narrowed by D40):
 * A new flag is inactive unless ``is_active: true`` is sent.
 * ``default_value`` is stored and type-checked; a boolean flag accepts only
   ``false`` for now (D40).
+* ``targeting_rules`` the flag evaluator would not apply as written answer
+  422 (#535). That includes rules sent back from a GET: a GET body can be sent
+  back unchanged unless its ``targeting_rules`` are ones PUT now refuses (D41).
 * There is one response representation, :class:`FeatureFlagRead`. It shares no
   base with the request models: ``extra="forbid"`` is inherited, and a response
   model must never refuse a stored row.
@@ -35,6 +38,11 @@ from pydantic import (
 )
 from pydantic_core import PydanticCustomError
 
+from backend.app.core.targeting_adapter import (
+    TargetingRulesError,
+    validate_flag_targeting,
+)
+
 #: The fields a flag response carries that no request writes.  A request may
 #: send them back -- a GET body round-trips -- and they are ignored, except that
 #: a ``status`` must equal the stored one (``FeatureFlagService``).
@@ -53,6 +61,18 @@ DEFAULT_VALUE_UNSUPPORTED = (
 STATUS_READ_ONLY = "status is read-only. Use is_active to turn a flag on or off."
 
 _READ_ONLY = {"readOnly": True}
+
+#: The description of ``targeting_rules`` on a create and an update.
+TARGETING_RULES_DESCRIPTION = (
+    "Who gets the flag: the dashboard rule builder's shape "
+    '({"logical_operator", "groups": [{"logical_operator", "conditions": '
+    '[{"attribute", "operator", "value"}]}]}) or the native rules shape '
+    '({"rules": [...]}). null, {} and {"groups": []} mean no rules. Rules the '
+    "flag evaluator would not apply as written answer 422, with the place and "
+    "the reason in the message, for example "
+    '"groups[0].conditions[1].operator: unknown operator". A list of rules '
+    "is refused. Stored as sent."
+)
 
 
 class _FeatureFlagRequest(BaseModel):
@@ -110,6 +130,21 @@ class _FeatureFlagRequest(BaseModel):
             )
         return v
 
+    @field_validator("targeting_rules", check_fields=False)
+    @classmethod
+    def checked_targeting_rules(cls, value: Any) -> Any:
+        """Refuse rules the flag evaluator would not apply as written (#535).
+
+        The value is returned as given, never rewritten. The message is fixed
+        text naming a place and a reason, never the submitted rules (see
+        ``validate_flag_targeting``).
+        """
+        try:
+            validate_flag_targeting(value)
+        except TargetingRulesError as err:
+            raise ValueError(str(err)) from None
+        return value
+
     @field_validator("default_value", check_fields=False)
     @classmethod
     def only_false_for_now(cls, v: bool) -> bool:
@@ -135,7 +170,9 @@ class FeatureFlagCreate(_FeatureFlagRequest):
         False, description="Create the flag on. Left out, the flag starts off."
     )
     rollout_percentage: int = Field(0, ge=0, le=100)
-    targeting_rules: Optional[Any] = None
+    targeting_rules: Optional[Any] = Field(
+        None, description=TARGETING_RULES_DESCRIPTION
+    )
     default_value: StrictBool = Field(
         False,
         description=(
@@ -161,7 +198,9 @@ class FeatureFlagUpdate(_FeatureFlagRequest):
     description: Optional[str] = Field(None, max_length=2000)
     is_active: bool = Field(None, description="Turn the flag on or off.")
     rollout_percentage: int = Field(None, ge=0, le=100)
-    targeting_rules: Optional[Any] = None
+    targeting_rules: Optional[Any] = Field(
+        None, description=TARGETING_RULES_DESCRIPTION
+    )
     default_value: StrictBool = Field(
         None,
         description=(
@@ -186,7 +225,9 @@ class FeatureFlagEvaluation(BaseModel):
 class FeatureFlagRead(BaseModel):
     """A feature flag, as every flag route returns it.
 
-    Any of these bodies can be sent back with an update unchanged.
+    Any of these bodies can be sent back with an update unchanged unless its
+    `targeting_rules` are ones PUT now refuses (422); omitting the field
+    still works.
     """
 
     # Create, get, update, activate, deactivate and the list items all answer

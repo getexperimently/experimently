@@ -13,7 +13,7 @@
 
 [meta]
 documents = 35
-exec = 167
+exec = 168
 universe = [
     ".github/pull_request_template.md",
     "CHANGELOG.md",
@@ -194,9 +194,9 @@ expects = 0
 [[document]]
 path = "docs/feature-flags/create.md"
 environment = "stack"
-exec = 9
-skip = 0
-expects = 13
+exec = 10
+skip = 1
+expects = 15
 
 [[document]]
 path = "docs/sdk/local-evaluation.md"

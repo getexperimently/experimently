@@ -311,7 +311,8 @@ async def create_feature_flag(
     `is_active: true`. A field the API does not read answers 422. The read-only
     fields of a flag response (`id`, `owner_id`, `created_at`, `updated_at`,
     `status`) are accepted and ignored, except that a `status` must be the one
-    the flag is created with.
+    the flag is created with. `targeting_rules` the flag evaluator would not
+    apply as written answer 422, with the place and the reason in the message.
 
     Returns:
         FeatureFlagRead: The newly created feature flag
@@ -461,7 +462,12 @@ async def update_feature_flag(
     `key`, `name`, `is_active`, `rollout_percentage` or `default_value`. The
     read-only fields of a flag response (`id`, `owner_id`, `created_at`,
     `updated_at`, `status`) are accepted and ignored, so a GET body can be sent
-    back; a `status` must equal the flag's.
+    back unchanged unless its `targeting_rules` are ones PUT now refuses (422);
+    omitting the field still works. A `status` must equal the flag's.
+
+    `targeting_rules` the flag evaluator would not apply as written answer 422,
+    with the place and the reason in the message. Stored rules are not
+    re-checked unless they are sent.
 
     Returns:
         FeatureFlagRead: The updated feature flag

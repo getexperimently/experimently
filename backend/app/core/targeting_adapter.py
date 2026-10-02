@@ -256,7 +256,7 @@ def match_targeting_rule(
 
 
 # ---------------------------------------------------------------------------
-# Strict validation of experiment targeting rules (on write)
+# Strict validation of experiment and feature-flag targeting rules (on write)
 # ---------------------------------------------------------------------------
 
 #: Most items a list operator (``in``, ``not_in``, ``array_contains``,
@@ -290,17 +290,29 @@ _RULE_VALIDATOR_CODES = (
 
 
 class TargetingRulesError(ValueError):
-    """Experiment targeting rules refused on write.
+    """Targeting rules refused on write.
 
     ``path`` locates the problem (``groups[0].conditions[1].operator``) and
     ``code`` says what it is. Both are fixed text: neither ever carries a
     value from the submitted rules, so the message is safe to return in a 422.
+
+    ``subject`` names the rules in the message when ``path`` is empty, so the
+    line reads on its own (``targeting rules: unknown key``). The experiment
+    validator passes none, and its messages are unchanged.
     """
 
-    def __init__(self, path: str, code: str) -> None:
+    def __init__(self, path: str, code: str, *, subject: str = "") -> None:
         self.path = path
         self.code = code
-        super().__init__(f"{path}: {code}" if path else code)
+        where = path or subject
+        super().__init__(f"{where}: {code}" if where else code)
+
+
+#: What ``validate_flag_targeting`` calls the rules when a problem has no path.
+FLAG_RULES_SUBJECT = "targeting rules"
+
+_EXPERIMENT = "experiment"
+_FLAG = "flag"
 
 
 def validate_experiment_targeting(value: Any) -> Optional[TargetingRules]:
@@ -322,9 +334,49 @@ def validate_experiment_targeting(value: Any) -> Optional[TargetingRules]:
     Raises:
         TargetingRulesError: with a fixed message keyed by path.
     """
+    return _validate_targeting(value, kind=_EXPERIMENT)
+
+
+def validate_flag_targeting(value: Any) -> Optional[TargetingRules]:
+    """
+    Refuse feature-flag ``targeting_rules`` the flag evaluator would not apply as shown.
+
+    The same checks as :func:`validate_experiment_targeting`, with these
+    differences, each because of how flags are evaluated:
+
+    * a list (the legacy shape) is refused: ``a list of rules is not
+      supported; use the groups shape``;
+    * a top-level ``name`` on dashboard rules: ``name: not supported``;
+    * native rules without ``rules``: ``rules: required``, even beside a
+      ``default_rule``, which :func:`normalise_targeting_rules` does not read
+      without ``rules``. It is checked after the unknown-key check, so a flat
+      object still answers ``unknown key``;
+    * a problem with no path reads ``targeting rules: <reason>``.
+
+    For every value it accepts, what it returns is what
+    :func:`normalise_targeting_rules` gives the flag evaluator (``None`` and
+    an empty ``TargetingRules`` both meaning "no rules").
+
+    Raises:
+        TargetingRulesError: with a fixed message keyed by path.
+    """
+    try:
+        return _validate_targeting(value, kind=_FLAG)
+    except TargetingRulesError as err:
+        if err.path:
+            raise
+        raise TargetingRulesError("", err.code, subject=FLAG_RULES_SUBJECT) from None
+
+
+def _validate_targeting(value: Any, *, kind: str) -> Optional[TargetingRules]:
+    """The checks both validators share; ``kind`` is ``"experiment"`` or ``"flag"``."""
     if value is None:
         return None
     if isinstance(value, list):
+        if kind == _FLAG:
+            raise TargetingRulesError(
+                "", "a list of rules is not supported; use the groups shape"
+            )
         raise TargetingRulesError(
             "", "a list of rules is not supported for experiments"
         )
@@ -334,9 +386,9 @@ def validate_experiment_targeting(value: Any) -> Optional[TargetingRules]:
         return None
 
     if _is_dashboard_rules_shape(value):
-        rules, groups_base = _validated_dashboard(value), "groups"
+        rules, groups_base = _validated_dashboard(value, kind), "groups"
     else:
-        rules, groups_base = _validated_native(value), None
+        rules, groups_base = _validated_native(value, kind), None
 
     if not rules.rules and rules.default_rule is None:
         return None
@@ -345,9 +397,11 @@ def validate_experiment_targeting(value: Any) -> Optional[TargetingRules]:
     return rules
 
 
-def _validated_dashboard(raw: Dict[str, Any]) -> TargetingRules:
+def _validated_dashboard(raw: Dict[str, Any], kind: str) -> TargetingRules:
     if "name" in raw:
-        # Read by nothing on the experiment path, and the builder cannot keep it.
+        # Read by no evaluator, and the builder cannot keep it.
+        if kind == _FLAG:
+            raise TargetingRulesError("name", "not supported")
         raise TargetingRulesError("name", "not supported for experiment rules")
     if any(key not in _DASHBOARD_TOP_KEYS for key in raw):
         raise TargetingRulesError("", "unknown key")
@@ -433,12 +487,14 @@ def _validated_dashboard(raw: Dict[str, Any]) -> TargetingRules:
     raise TargetingRulesError("", "rules could not be converted")
 
 
-def _validated_native(raw: Dict[str, Any]) -> TargetingRules:
+def _validated_native(raw: Dict[str, Any], kind: str) -> TargetingRules:
     if "groups" in raw:
         raise TargetingRulesError("groups", "cannot be combined with rules")
     if any(key not in _NATIVE_TOP_KEYS for key in raw):
         raise TargetingRulesError("", "unknown key")
-    if "rules" not in raw and "default_rule" not in raw:
+    if "rules" not in raw and (kind == _FLAG or "default_rule" not in raw):
+        # The flag evaluator reads native rules only when ``rules`` is present
+        # (``normalise_targeting_rules``); a lone ``default_rule`` is ignored.
         raise TargetingRulesError("rules", "required")
     try:
         return TargetingRules.model_validate(raw)

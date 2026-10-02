@@ -173,11 +173,19 @@ curl -X POST "http://localhost:8000/api/v1/feature-flags/" \
     "key": "new_checkout_flow",
     "name": "New Checkout Flow",
     "description": "Rolling out new checkout experience",
-    "status": "ACTIVE",
+    "is_active": true,
     "rollout_percentage": 50,
     "targeting_rules": {
-      "countries": ["US"],
-      "user_segments": ["premium"]
+      "logical_operator": "AND",
+      "groups": [
+        {
+          "logical_operator": "AND",
+          "conditions": [
+            {"attribute": "country", "operator": "in", "value": ["US"]},
+            {"attribute": "plan", "operator": "equals", "value": "premium"}
+          ]
+        }
+      ]
     }
   }'
 ```
@@ -1106,6 +1114,18 @@ submitted value.
 
 Cloning an experiment copies its stored rules as they are, without this check,
 so an experiment created before the check keeps rules it would now refuse.
+
+`POST /api/v1/feature-flags/` and `PUT /api/v1/feature-flags/{flag_id}` answer
+422 for flag rules on the same terms. A flag's rules are also refused for a
+top-level `name`, and for native rules without `rules` (a `default_rule` on its
+own, which the flag evaluator does not read). A problem with the rules as a
+whole reads `targeting rules: <reason>`, for example `targeting rules: unknown
+key`. A flag's stored rules are not re-checked and are evaluated as before, but
+a `PUT` that sends back stored rules the API now refuses answers 422; leave
+`targeting_rules` out of the request instead.
+`python -m backend.scripts.check_targeting_rules` lists the flags whose stored
+rules are refused. See
+[Add targeting rules](../feature-flags/create.md#add-targeting-rules).
 
 An experiment's targeting can be changed only while it is `draft` or `paused`,
 whatever the caller's role, superusers included:
