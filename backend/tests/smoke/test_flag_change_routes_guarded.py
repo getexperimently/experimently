@@ -35,6 +35,9 @@ API_KEY = "exempt: an API-key evaluation that changes nothing"
 
 INVENTORY = {
     ("POST", "/api/v1/feature-flags/"): CREATE_GATE,
+    # The no-slash twin of the create route (#94), hidden from the OpenAPI
+    # document; the same endpoint function, so the same gate.
+    ("POST", "/api/v1/feature-flags"): CREATE_GATE,
     ("POST", "/api/v1/feature-flags/bulk-toggle"): FLAG_RULE,
     ("POST", "/api/v1/feature-flags/evaluate/{flag_key}"): API_KEY,
     ("PUT", "/api/v1/feature-flags/{flag_id}"): FLAG_RULE,
@@ -97,7 +100,7 @@ def test_the_inventory_is_exact():
         f"unclassified: {sorted(found - set(INVENTORY))}; "
         f"gone: {sorted(set(INVENTORY) - found)}"
     )
-    assert len(INVENTORY) == 23
+    assert len(INVENTORY) == 24
 
 
 @pytest.mark.parametrize("key", sorted(INVENTORY), ids=lambda k: f"{k[0]} {k[1]}")

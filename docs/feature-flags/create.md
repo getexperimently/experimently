@@ -87,8 +87,9 @@ set it with `is_active`.
 Run these in one terminal, in order. Each step uses the shell variables set by the ones
 before it (`$TOKEN`, `$FLAG_ID`, `$KEY`).
 
-**URLs.** The collection URL ends with a slash (`/api/v1/feature-flags/`), and a single
-flag's URL doesn't (`/api/v1/feature-flags/$FLAG_ID`). The other form answers
+**URLs.** The collection URL answers with or without a trailing slash
+(`/api/v1/feature-flags/` or `/api/v1/feature-flags`). A single flag's URL has no trailing
+slash (`/api/v1/feature-flags/$FLAG_ID`); with one, the API answers
 `307 Temporary Redirect`. `curl` doesn't follow the redirect, so nothing happens and
 nothing is printed.
 

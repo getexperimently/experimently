@@ -23329,6 +23329,9 @@
             },
             "description": "Permission denied"
           },
+          "409": {
+            "description": "A feature flag with this key already exists"
+          },
           "422": {
             "content": {
               "application/json": {
@@ -24029,6 +24032,9 @@
               }
             },
             "description": "Permission denied"
+          },
+          "409": {
+            "description": "Another feature flag already has this key"
           },
           "422": {
             "content": {

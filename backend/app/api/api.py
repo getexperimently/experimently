@@ -53,8 +53,6 @@ from backend.app.api.v1.sample_size_calculator import router as sample_size_rout
 from backend.app.core import hooks
 from backend.app.modules_loader import load_modules, mount_module_routers
 
-# from backend.app.routers import feature_flag_routes
-
 
 def register_core_routers(router: APIRouter) -> APIRouter:
     """Mount every core endpoint router on *router*; returns it.

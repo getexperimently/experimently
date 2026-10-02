@@ -22,6 +22,7 @@ from fastapi import (
     status,
 )
 from pydantic import BaseModel, ConfigDict, Field
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from backend.app.api import deps
@@ -58,6 +59,52 @@ logger = logging.getLogger(__name__)
 
 #: How long a cached flag detail or flag list lives, in seconds.
 FLAG_CACHE_TTL_SECONDS = 3600
+
+#: Postgres error code for a unique constraint violation.
+_UNIQUE_VIOLATION = "23505"
+
+
+def _flag_key_taken_detail(key: str) -> str:
+    return f"Feature flag with key '{key}' already exists"
+
+
+def _flag_key_held_by_another(
+    db: Session, key: str, exclude_id: Optional[UUID] = None
+) -> bool:
+    """True when a stored flag other than *exclude_id* has *key*.
+
+    One indexed query on the unique key, so it holds however many flags exist.
+    """
+    query = db.query(FeatureFlag.id).filter(FeatureFlag.key == key)
+    if exclude_id is not None:
+        query = query.filter(FeatureFlag.id != exclude_id)
+    return query.first() is not None
+
+
+def _raise_if_key_conflict(
+    db: Session, exc: IntegrityError, key: Optional[str], exclude_id: Optional[UUID]
+) -> None:
+    """Answer 409 when *exc* is a unique violation and *key* is now taken.
+
+    The pre-checks in create and update leave a gap before the commit: another
+    request can store the same key in it, and the unique index on ``key`` then
+    refuses ours. Decided by rolling back and looking the key up again (as
+    users.py does for emails), not by parsing the driver's message or naming
+    the index -- its name depends on how the schema was built. Returns without
+    raising when the refusal was about something else; the caller re-raises.
+    """
+    db.rollback()
+    orig = getattr(exc, "orig", None)
+    code = getattr(orig, "pgcode", None) or getattr(orig, "sqlstate", None)
+    if (
+        key is not None
+        and code == _UNIQUE_VIOLATION
+        and _flag_key_held_by_another(db, key, exclude_id)
+    ):
+        logger.info("Feature flag write refused: key %r already exists", key)
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail=_flag_key_taken_detail(key)
+        ) from None
 
 
 # The flag cache (#100). `deps.get_cache_control` hands out a redis.asyncio
@@ -156,11 +203,21 @@ router = APIRouter(
 )
 
 
+# The collection answers with and without the trailing slash (#94): without
+# the twin, `/feature-flags` was a 307 to `/feature-flags/`, which curl does
+# not follow and prints nothing for. Only the slash form is in the OpenAPI
+# document. Single-flag URLs (`/{flag_id}/`) keep their 307 -- a `/{flag_id}/`
+# twin would capture sibling paths such as `/bulk-toggle/`.
 @router.get(
     "/",
     response_model=FeatureFlagListResponse,
     summary="List feature flags",
     response_description="Returns a paginated list of feature flags",
+)
+@router.get(
+    "",
+    response_model=FeatureFlagListResponse,
+    include_in_schema=False,
 )
 async def list_feature_flags(
     *,
@@ -239,6 +296,13 @@ async def list_feature_flags(
     status_code=status.HTTP_201_CREATED,
     summary="Create feature flag",
     response_description="Returns the created feature flag",
+    responses={409: {"description": "A feature flag with this key already exists"}},
+)
+@router.post(
+    "",
+    response_model=Dict[str, Any],
+    status_code=status.HTTP_201_CREATED,
+    include_in_schema=False,
 )
 async def create_feature_flag(
     feature_flag_in: FeatureFlagCreate = Body(
@@ -274,13 +338,10 @@ async def create_feature_flag(
     feature_flag_service = FeatureFlagService(db)
 
     # Check if feature flag with the same key already exists
-    existing_flag = (
-        db.query(FeatureFlag).filter(FeatureFlag.key == feature_flag_in.key).first()
-    )
-    if existing_flag:
+    if _flag_key_held_by_another(db, feature_flag_in.key):
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail=f"Feature flag with key '{feature_flag_in.key}' already exists",
+            detail=_flag_key_taken_detail(feature_flag_in.key),
         )
 
     # Create feature flag
@@ -314,6 +375,10 @@ async def create_feature_flag(
             else None,
         }
 
+    except IntegrityError as e:
+        # A concurrent create took the key after the pre-check above.
+        _raise_if_key_conflict(db, e, feature_flag_in.key, None)
+        raise
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 
@@ -413,6 +478,7 @@ async def get_feature_flag(
     response_model=Dict[str, Any],
     summary="Update feature flag",
     response_description="Returns the updated feature flag",
+    responses={409: {"description": "Another feature flag already has this key"}},
 )
 async def update_feature_flag(
     flag_id: UUID = Path(..., description="The ID of the feature flag to update"),
@@ -460,20 +526,17 @@ async def update_feature_flag(
         )
 
     # If key is being updated, check if it conflicts with another feature flag
-    if feature_flag_in.key and feature_flag_in.key != flag.key:
-        existing_flag = next(
-            (
-                f
-                for f in feature_flag_service.get_feature_flags()
-                if f["key"] == feature_flag_in.key and str(f["id"]) != str(flag_id)
-            ),
-            None,
+    # A direct query on the key: scanning a page of flags missed every flag
+    # past the first 100, and the unique index then refused the commit (a 500).
+    if (
+        feature_flag_in.key
+        and feature_flag_in.key != flag.key
+        and _flag_key_held_by_another(db, feature_flag_in.key, flag_id)
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=_flag_key_taken_detail(feature_flag_in.key),
         )
-        if existing_flag:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail=f"Feature flag with key '{feature_flag_in.key}' already exists",
-            )
 
     # Capture pre-update state for audit trail
     old_flag_snapshot = {
@@ -486,6 +549,10 @@ async def update_feature_flag(
     # Update feature flag
     try:
         updated_flag = feature_flag_service.update_feature_flag(flag, feature_flag_in)
+    except IntegrityError as e:
+        # A concurrent write took the key after the check above.
+        _raise_if_key_conflict(db, e, feature_flag_in.key, flag_id)
+        raise
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 
