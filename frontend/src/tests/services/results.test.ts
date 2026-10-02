@@ -116,6 +116,29 @@ describe('ResultsService.getSampleSize', () => {
     expect(params.get('power_target')).toBe('0.9');
     expect(params.has('power')).toBe(false);
   });
+
+  // #666: with no overrides the server decides every input, so the URL
+  // carries no query at all -- above all no fixed baseline.
+  it('sends no parameters when the user has changed nothing', async () => {
+    mockOk({});
+    await ResultsService.getSampleSize('abc');
+    expect(mockFetch.mock.calls[0][0]).toBe(`${BASE}/api/v1/results/abc/sample-size`);
+  });
+
+  it('sends exactly the overrides it is given', async () => {
+    mockOk({});
+    await ResultsService.getSampleSize('abc', {
+      baseline_conversion_rate: 0.0234,
+      confidence_level: 0.9,
+      correction_method: 'bonferroni',
+    });
+    const params = new URL(mockFetch.mock.calls[0][0] as string, 'http://x').searchParams;
+    expect(Object.fromEntries(params)).toEqual({
+      baseline_conversion_rate: '0.0234',
+      confidence_level: '0.9',
+      correction_method: 'bonferroni',
+    });
+  });
 });
 
 describe('ResultsService.getSequentialResults', () => {

@@ -82,6 +82,18 @@ const mockSampleSize: SampleSizeResult = {
   mde: 0.02,
   confidence_level: 0.95,
   power_target: 0.8,
+  baseline_source: 'observed',
+  baseline_users: 4000,
+  metric_id: 'metric-1',
+  metric_name: 'Conversion',
+  metric_type: 'conversion',
+  analysed_as: 'conversion',
+  alpha: 0.05,
+  comparisons: 1,
+  correction_method: 'none',
+  mde_absolute: 0.0024,
+  unavailable_reason: null,
+  guide_only_reasons: [],
 };
 
 const mockBreakdown: DimensionalBreakdownResponse = {
@@ -312,6 +324,78 @@ describe('ResultsDashboard', () => {
       'true'
     );
     expect(await screen.findByTestId('sample-size-meter')).toBeInTheDocument();
+  });
+
+  // #666 (4a): the dashboard sends no fixed values. On load it sends nothing
+  // but the id, so the server plans from the observed control rate; after an
+  // edit it sends exactly what the user changed, and never touches the URL.
+  describe('the Sample Size tab sends only what the user changed', () => {
+    it('asks with the experiment id alone on load', async () => {
+      mockGetResults.mockResolvedValue(mockResults);
+      mockGetDailyResults.mockResolvedValue(mockDaily);
+      mockGetSampleSize.mockResolvedValue(mockSampleSize);
+
+      render(<ResultsDashboard experimentId="exp-1" />);
+      await waitFor(() => screen.getByTestId('experiment-summary'));
+      expect(mockGetSampleSize).toHaveBeenCalledTimes(1);
+      expect(mockGetSampleSize.mock.calls[0]).toEqual(['exp-1']);
+    });
+
+    it('recalculates with exactly the edited inputs, and leaves the URL alone', async () => {
+      mockGetResults.mockResolvedValue(mockResults);
+      mockGetDailyResults.mockResolvedValue(mockDaily);
+      mockGetSampleSize
+        .mockResolvedValueOnce(mockSampleSize)
+        .mockResolvedValue({ ...mockSampleSize, mde: 0.1, baseline_rate: 0.15, baseline_source: 'request' });
+      const urlBefore = window.location.href;
+
+      render(<ResultsDashboard experimentId="exp-1" />);
+      await waitFor(() => screen.getByRole('tablist'));
+      await userEvent.click(screen.getByRole('tab', { name: /sample size/i }));
+      await screen.findByTestId('sample-size-meter');
+
+      const baseline = screen.getByLabelText('Baseline conversion rate (%)');
+      await userEvent.clear(baseline);
+      await userEvent.type(baseline, '15');
+      const mde = screen.getByLabelText('Minimum detectable effect, relative (%)');
+      await userEvent.clear(mde);
+      await userEvent.type(mde, '10');
+      await userEvent.click(screen.getByRole('button', { name: 'Recalculate' }));
+
+      await waitFor(() => expect(mockGetSampleSize).toHaveBeenCalledTimes(2));
+      expect(mockGetSampleSize).toHaveBeenLastCalledWith('exp-1', {
+        baseline_conversion_rate: 0.15,
+        mde: 0.1,
+      });
+      expect(await screen.findByTestId('sample-size-baseline-source')).toHaveTextContent(
+        'Entered by you.'
+      );
+      expect(window.location.href).toBe(urlBefore);
+      expect(mockGetResults).toHaveBeenCalledTimes(1);
+    });
+
+    it('renders the meter for an experiment with no traffic yet', async () => {
+      mockGetResults.mockResolvedValue(mockResults);
+      mockGetDailyResults.mockResolvedValue(mockDaily);
+      mockGetSampleSize.mockResolvedValue({
+        ...mockSampleSize,
+        required_sample_size_per_variant: null,
+        current_sample_size_per_variant: 0,
+        is_adequate: false,
+        achieved_power: null,
+        baseline_rate: null,
+        baseline_source: null,
+        baseline_users: null,
+        mde_absolute: null,
+        unavailable_reason: 'no_control_data',
+      });
+
+      render(<ResultsDashboard experimentId="exp-1" />);
+      await waitFor(() => screen.getByRole('tablist'));
+      await userEvent.click(screen.getByRole('tab', { name: /sample size/i }));
+      expect(await screen.findByTestId('sample-size-meter')).toBeInTheDocument();
+      expect(screen.getByTestId('sample-size-no-traffic')).toBeInTheDocument();
+    });
   });
 
   // Issue #28: Breakdowns tab tests

@@ -6,7 +6,6 @@ sample size / power analysis, cache invalidation, and sequential testing analysi
 """
 
 import logging
-import math
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 from uuid import UUID
@@ -49,6 +48,11 @@ from backend.app.services.analysis_snapshot_service import record_snapshot
 from backend.app.services.cache import CacheService
 from backend.app.services.cuped_service import CupedService
 from backend.app.services.dimensional_analysis_service import DimensionalAnalysisService
+from backend.app.services.power_calculator_service import (
+    TREATMENT_RATE_CEILING_MESSAGE,
+    compute_power,
+    sample_size_two_proportions,
+)
 from backend.app.services.sequential_testing_service import SequentialTestingService
 from backend.app.services.srm_service import compute_srm_for_experiment
 
@@ -725,113 +729,202 @@ def get_experiment_daily_results(
 # ---------------------------------------------------------------------------
 
 
+#: The relative MDE planned for when the request names none.
+DEFAULT_SAMPLE_SIZE_MDE = 0.05
+
+
+def _guide_only_reasons(experiment: Experiment) -> List[str]:
+    """Why a fixed sample size only guides this experiment (see the schema)."""
+    reasons: List[str] = []
+    optimization = getattr(experiment, "optimization_type", None)
+    optimization = getattr(optimization, "value", optimization)
+    if optimization and str(optimization).lower() != "fixed":
+        reasons.append("adaptive_allocation")
+    else:
+        allocations = {
+            v.traffic_allocation
+            for v in experiment.variants or []
+            if v.traffic_allocation is not None
+        }
+        if len(allocations) > 1:
+            reasons.append("unequal_allocation")
+    if getattr(experiment, "sequential_testing_enabled", False):
+        reasons.append("sequential_testing")
+    if getattr(experiment, "bayesian_enabled", False):
+        reasons.append("bayesian")
+    return reasons
+
+
 @router.get("/{experiment_id}/sample-size", response_model=SampleSizeResult)
 def get_sample_size_status(
     experiment_id: UUID,
-    baseline_conversion_rate: float = Query(default=0.1, gt=0.0, lt=1.0),
-    mde: float = Query(default=0.05, gt=0.0, lt=1.0),
-    confidence_level: float = Query(default=0.95, ge=0.80, le=0.99),
-    power_target: float = Query(default=0.80, ge=0.50, le=0.99),
+    baseline_conversion_rate: Optional[float] = Query(
+        default=None,
+        gt=0.0,
+        lt=1.0,
+        description=(
+            "Baseline conversion rate to plan from. Omit it to use the rate "
+            "observed in the control variant on the primary metric so far."
+        ),
+    ),
+    mde: float = Query(
+        default=DEFAULT_SAMPLE_SIZE_MDE,
+        gt=0.0,
+        lt=1.0,
+        description=(
+            "Minimum detectable effect, relative to the baseline: 0.05 means "
+            "12% -> 12.6%. Default 0.05."
+        ),
+    ),
+    confidence_level: float = Query(
+        default=0.95,
+        ge=0.80,
+        le=0.99,
+        description="Confidence level of the two-sided test. Default 0.95.",
+    ),
+    power_target: float = Query(
+        default=0.80,
+        ge=0.50,
+        le=0.99,
+        description="Target power. Default 0.80.",
+    ),
+    correction_method: str = Query(
+        default="none",
+        pattern="^(none|bonferroni|benjamini_hochberg)$",
+        description=(
+            "Correction for comparing several variants with the control. "
+            "'bonferroni' and 'benjamini_hochberg' plan each comparison at "
+            "alpha / (variants - 1). Default 'none', as on the results."
+        ),
+    ),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
 ) -> SampleSizeResult:
     """
-    Calculate sample-size requirements and current power for an experiment.
+    The planned sample size for an experiment, and how far it has got.
 
-    Uses a two-proportion z-test formula to determine the required sample
-    size per variant and estimates the achieved power given current enrolment.
+    Plans a two-sided two-proportion test on the primary metric: the users
+    each variant needs to detect a relative lift of ``mde`` over the baseline
+    at ``confidence_level`` with ``power_target`` power.  The baseline is
+    ``baseline_conversion_rate`` when sent, otherwise the control variant's
+    conversion rate so far -- counted the way the results count it, but not
+    read from the results cache, so for up to its five minutes it can be
+    newer than the rate the results show.
+
+    Progress is the smallest variant's assignments.  Nothing is saved.
+    With no data to plan from the answer is 200 with
+    ``required_sample_size_per_variant: null`` and ``unavailable_reason``.
+    A sent baseline that the MDE raises to 100% or more answers 422.
     """
-    # Try the service first (future-proofing)
-    service = AnalysisService(db)
-    if hasattr(service, "get_sample_size_status"):
-        try:
-            result = service.get_sample_size_status(
-                experiment_id,
-                baseline_conversion_rate,
-                mde,
-                confidence_level,
-                power_target,
-            )
-            return SampleSizeResult(**result)
-        except ValueError:
-            raise HTTPException(status_code=404, detail="Experiment not found")
-        except Exception as exc:
-            raise unexpected_failure(
-                exc,
-                "Sample size",
-                "Could not compute the sample size",
-                db=db,
-                logger=logger,
-            )
+    if (
+        baseline_conversion_rate is not None
+        and baseline_conversion_rate * (1.0 + mde) >= 1.0
+    ):
+        raise HTTPException(status_code=422, detail=TREATMENT_RATE_CEILING_MESSAGE)
 
-    # --- Inline implementation ---
+    experiment = (
+        db.query(Experiment)
+        .options(
+            joinedload(Experiment.variants),
+            joinedload(Experiment.metric_definitions),
+        )
+        .filter(Experiment.id == experiment_id)
+        .first()
+    )
+    if experiment is None:
+        raise HTTPException(status_code=404, detail="Experiment not found")
+
     try:
-        from scipy.stats import norm
         from sqlalchemy import func as sqla_func
 
         from backend.app.models.assignment import Assignment
+        from backend.app.services.event_matching import count_converting_users
 
-        # Verify experiment exists
-        try:
-            _ = service.get_experiment_results(experiment_id)
-        except ValueError:
-            raise HTTPException(status_code=404, detail="Experiment not found")
-        except Exception:
-            pass  # Continue even if full results computation fails
-
+        variants = list(experiment.variants or [])
+        comparisons = max(1, len(variants) - 1)
         alpha = 1.0 - confidence_level
-        z_alpha = float(norm.ppf(1.0 - alpha / 2.0))
-        z_beta = float(norm.ppf(power_target))
+        if correction_method != "none":
+            alpha = alpha / comparisons
 
-        p1 = baseline_conversion_rate
-        p2 = p1 * (1.0 + mde)
-        # Clamp p2 to (0, 1)
-        p2 = min(max(p2, 1e-9), 1.0 - 1e-9)
-        p_bar = (p1 + p2) / 2.0
-
-        numerator = (
-            z_alpha * math.sqrt(2.0 * p_bar * (1.0 - p_bar))
-            + z_beta * math.sqrt(p1 * (1.0 - p1) + p2 * (1.0 - p2))
-        ) ** 2
-        denominator = (p2 - p1) ** 2
-        n = math.ceil(numerator / denominator) if denominator > 0 else 1
-        n = max(1, n)
-
-        # Current sample size from the assignments table
-        current_n = (
-            db.query(sqla_func.count(Assignment.id))
-            .filter(Assignment.experiment_id == experiment_id)
-            .scalar()
-            or 0
+        # Assignments per variant, counted as the results count them.
+        counts = dict(
+            db.query(Assignment.variant_id, sqla_func.count(Assignment.id))
+            .filter(Assignment.experiment_id == experiment.id)
+            .group_by(Assignment.variant_id)
+            .all()
         )
-        n_variants = 2  # Conservative default
-        current_per_variant = current_n // n_variants if n_variants > 0 else 0
+        per_variant = {str(v.id): int(counts.get(v.id, 0) or 0) for v in variants}
+        current = min(per_variant.values()) if per_variant else 0
 
-        # Achieved power
-        if current_per_variant > 0:
-            se = math.sqrt(p_bar * (1.0 - p_bar) * (2.0 / current_per_variant))
-            achieved_power = (
-                float(norm.cdf(abs(p2 - p1) / se - z_alpha)) if se > 0 else 0.0
-            )
+        metrics = AnalysisService._ordered_metrics(experiment)
+        metric = metrics[0] if metrics else None
+        control = next((v for v in variants if v.is_control), None)
+
+        baseline: Optional[float] = None
+        baseline_source: Optional[str] = None
+        baseline_users: Optional[int] = None
+        reason: Optional[str] = None
+
+        if baseline_conversion_rate is not None:
+            baseline = baseline_conversion_rate
+            baseline_source = "request"
+        elif metric is None:
+            reason = "no_metric"
+        elif control is None or per_variant.get(str(control.id), 0) == 0:
+            reason = "no_control_data"
         else:
-            achieved_power = 0.0
+            baseline_users = per_variant[str(control.id)]
+            converted = count_converting_users(
+                db, experiment.id, control.id, metric.event_name
+            )
+            if converted == 0:
+                reason = "no_control_conversions"
+            elif converted >= baseline_users:
+                reason = "rate_at_boundary"
+            else:
+                baseline = converted / baseline_users
+                baseline_source = "observed"
+                if baseline * (1.0 + mde) >= 1.0:
+                    reason = "effect_out_of_range"
 
-        achieved_power = min(1.0, max(0.0, achieved_power))
+        required: Optional[int] = None
+        achieved_power: Optional[float] = None
+        if baseline is not None and reason is None:
+            treatment = baseline * (1.0 + mde)
+            required = sample_size_two_proportions(
+                baseline, treatment, alpha, power_target, two_tailed=True
+            )
+            achieved_power = compute_power(
+                current, baseline, treatment, alpha, two_tailed=True
+            )
+
+        metric_type = getattr(metric, "metric_type", None) if metric else None
+        metric_type = getattr(metric_type, "value", metric_type)
 
         return SampleSizeResult(
-            required_sample_size_per_variant=n,
-            current_sample_size_per_variant=current_per_variant,
-            is_adequate=current_per_variant >= n,
+            required_sample_size_per_variant=required,
+            current_sample_size_per_variant=current,
+            is_adequate=required is not None and current >= required,
             achieved_power=achieved_power,
             days_to_significance=None,
             projected_completion_date=None,
-            baseline_rate=p1,
+            baseline_rate=baseline,
             mde=mde,
             confidence_level=confidence_level,
             power_target=power_target,
+            baseline_source=baseline_source,
+            baseline_users=baseline_users,
+            metric_id=metric.id if metric else None,
+            metric_name=metric.name if metric else None,
+            metric_type=str(metric_type).lower() if metric_type else None,
+            analysed_as="conversion",
+            alpha=alpha,
+            comparisons=comparisons,
+            correction_method=correction_method,
+            mde_absolute=baseline * mde if baseline is not None else None,
+            unavailable_reason=reason,
+            guide_only_reasons=_guide_only_reasons(experiment),
         )
-    except HTTPException:
-        raise
     except Exception as exc:
         raise unexpected_failure(
             exc,

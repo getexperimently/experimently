@@ -9164,25 +9164,96 @@
         "type": "object"
       },
       "SampleSizeResult": {
-        "description": "Result of a sample-size / statistical-power analysis.\n\nReturned by the sample-size calculation endpoint and embedded in\nexperiment results to convey whether the experiment has sufficient data\nto draw conclusions.",
+        "description": "The planned sample size for an experiment, and how far it has got.\n\nPlans a two-sided two-proportion test on the primary metric: the users\neach variant needs to detect a relative lift of ``mde`` over the baseline\nrate.  The baseline is the request's ``baseline_conversion_rate`` or,\nwithout one, the rate observed in the control variant so far.  Every input\nused is returned with where it came from.\n\nWhen there is nothing to plan from yet (no metric, no control users, no\ncontrol conversions) the answer is still 200: the required size and the\nachieved power are ``null`` and ``unavailable_reason`` says why.",
         "properties": {
           "achieved_power": {
-            "description": "Estimated statistical power (1 - beta) achievable with the current sample size, at the configured MDE and confidence level.",
-            "title": "Achieved Power",
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Power (1 - beta) the smallest variant has reached to detect the planned MDE (not the observed effect). 0.0 with no users; null when the required size is null.",
+            "title": "Achieved Power"
+          },
+          "alpha": {
+            "description": "Significance level of each comparison: 1 - confidence_level, divided by comparisons when a correction is requested.",
+            "title": "Alpha",
             "type": "number"
+          },
+          "analysed_as": {
+            "const": "conversion",
+            "default": "conversion",
+            "description": "The test planned for. Every metric is analysed as a conversion today, so this is always 'conversion'.",
+            "title": "Analysed As",
+            "type": "string"
           },
           "baseline_rate": {
-            "description": "Baseline conversion rate (or mean) used as the reference point for effect-size and power calculations.",
-            "title": "Baseline Rate",
-            "type": "number"
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Baseline conversion rate the plan starts from: the request's baseline_conversion_rate, or the control variant's observed rate. null when neither is available.",
+            "title": "Baseline Rate"
+          },
+          "baseline_source": {
+            "anyOf": [
+              {
+                "enum": [
+                  "observed",
+                  "request"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Where baseline_rate came from: 'request' (baseline_conversion_rate was sent) or 'observed' (the control variant's rate so far). null when there is no baseline.",
+            "title": "Baseline Source"
+          },
+          "baseline_users": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Control users behind an observed baseline rate. null unless baseline_source is 'observed'.",
+            "title": "Baseline Users"
+          },
+          "comparisons": {
+            "description": "Treatment variants compared with the control (variants - 1, at least 1).",
+            "minimum": 1,
+            "title": "Comparisons",
+            "type": "integer"
           },
           "confidence_level": {
-            "description": "Statistical confidence level used in this power analysis, in [0, 1].",
+            "description": "Confidence level of the test being planned, in [0, 1].",
             "title": "Confidence Level",
             "type": "number"
           },
+          "correction_method": {
+            "default": "none",
+            "description": "Correction for several comparisons. 'bonferroni' and 'benjamini_hochberg' both plan at alpha / comparisons (Bonferroni is an upper bound for Benjamini-Hochberg).",
+            "enum": [
+              "none",
+              "bonferroni",
+              "benjamini_hochberg"
+            ],
+            "title": "Correction Method",
+            "type": "string"
+          },
           "current_sample_size_per_variant": {
-            "description": "Actual number of users currently assigned to the smallest variant (used as the conservative reference).",
+            "description": "Users assigned so far to the smallest variant (the conservative reference: every variant has at least this many).",
             "title": "Current Sample Size Per Variant",
             "type": "integer"
           },
@@ -9195,21 +9266,84 @@
                 "type": "null"
               }
             ],
-            "description": "Projected number of additional calendar days until the required sample size is reached, based on the current enrolment rate.  None when the required size is already met or the rate cannot be estimated.",
+            "description": "Not estimated yet: always null.",
             "title": "Days To Significance"
           },
+          "guide_only_reasons": {
+            "description": "Why a fixed sample size is only a guide for this experiment: adaptive_allocation (a bandit moves traffic), unequal_allocation, sequential_testing, bayesian. Empty when none applies.",
+            "items": {
+              "enum": [
+                "adaptive_allocation",
+                "unequal_allocation",
+                "sequential_testing",
+                "bayesian"
+              ],
+              "type": "string"
+            },
+            "title": "Guide Only Reasons",
+            "type": "array"
+          },
           "is_adequate": {
-            "description": "True when current_sample_size_per_variant >= required_sample_size_per_variant.",
+            "description": "True when current_sample_size_per_variant >= required_sample_size_per_variant. False when the required size is null.",
             "title": "Is Adequate",
             "type": "boolean"
           },
           "mde": {
-            "description": "Minimum detectable effect (MDE) expressed as an absolute difference from the baseline rate.",
+            "description": "Minimum detectable effect, relative to the baseline rate: 0.05 means 12% -> 12.6%.",
             "title": "Mde",
             "type": "number"
           },
+          "mde_absolute": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "baseline_rate * mde, in rate units. null when there is no baseline.",
+            "title": "Mde Absolute"
+          },
+          "metric_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The primary metric planned for. null when there is none.",
+            "title": "Metric Id"
+          },
+          "metric_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Name of that metric.",
+            "title": "Metric Name"
+          },
+          "metric_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The metric's configured type, e.g. 'conversion'.",
+            "title": "Metric Type"
+          },
           "power_target": {
-            "description": "Target statistical power (1 - beta) used when computing the required sample size, typically 0.80.",
+            "description": "Target power (1 - beta) the required size is computed for.",
             "title": "Power Target",
             "type": "number"
           },
@@ -9223,14 +9357,40 @@
                 "type": "null"
               }
             ],
-            "description": "UTC timestamp of the projected date on which the required sample size will be reached.  None when days_to_significance is None.",
+            "description": "Not estimated yet: always null.",
             "title": "Projected Completion Date"
           },
           "required_sample_size_per_variant": {
-            "description": "Minimum number of users required per variant to achieve the target power at the configured MDE and confidence level.",
-            "minimum": 1,
-            "title": "Required Sample Size Per Variant",
-            "type": "integer"
+            "anyOf": [
+              {
+                "minimum": 1,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Users each variant needs to reach the target power at this MDE and confidence level. null when it cannot be computed; unavailable_reason says why.",
+            "title": "Required Sample Size Per Variant"
+          },
+          "unavailable_reason": {
+            "anyOf": [
+              {
+                "enum": [
+                  "no_metric",
+                  "no_control_data",
+                  "no_control_conversions",
+                  "rate_at_boundary",
+                  "effect_out_of_range"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Why required_sample_size_per_variant is null: no_metric, no_control_data (no control variant or no control users yet), no_control_conversions, rate_at_boundary (every control user converted), effect_out_of_range (the observed rate raised by the MDE reaches 100%). null when a size was computed.",
+            "title": "Unavailable Reason"
           }
         },
         "required": [
@@ -9241,7 +9401,9 @@
           "baseline_rate",
           "mde",
           "confidence_level",
-          "power_target"
+          "power_target",
+          "alpha",
+          "comparisons"
         ],
         "title": "SampleSizeResult",
         "type": "object"
@@ -22178,7 +22340,7 @@
     },
     "/api/v1/results/{experiment_id}/sample-size": {
       "get": {
-        "description": "Calculate sample-size requirements and current power for an experiment.\n\nUses a two-proportion z-test formula to determine the required sample\nsize per variant and estimates the achieved power given current enrolment.",
+        "description": "The planned sample size for an experiment, and how far it has got.\n\nPlans a two-sided two-proportion test on the primary metric: the users\neach variant needs to detect a relative lift of ``mde`` over the baseline\nat ``confidence_level`` with ``power_target`` power.  The baseline is\n``baseline_conversion_rate`` when sent, otherwise the control variant's\nconversion rate so far -- counted the way the results count it, but not\nread from the results cache, so for up to its five minutes it can be\nnewer than the rate the results show.\n\nProgress is the smallest variant's assignments.  Nothing is saved.\nWith no data to plan from the answer is 200 with\n``required_sample_size_per_variant: null`` and ``unavailable_reason``.\nA sent baseline that the MDE raises to 100% or more answers 422.",
         "operationId": "get_sample_size_status_api_v1_results__experiment_id__sample_size_get",
         "parameters": [
           {
@@ -22192,23 +22354,33 @@
             }
           },
           {
+            "description": "Baseline conversion rate to plan from. Omit it to use the rate observed in the control variant on the primary metric so far.",
             "in": "query",
             "name": "baseline_conversion_rate",
             "required": false,
             "schema": {
-              "default": 0.1,
-              "exclusiveMaximum": 1,
-              "exclusiveMinimum": 0,
-              "title": "Baseline Conversion Rate",
-              "type": "number"
+              "anyOf": [
+                {
+                  "exclusiveMaximum": 1,
+                  "exclusiveMinimum": 0,
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Baseline conversion rate to plan from. Omit it to use the rate observed in the control variant on the primary metric so far.",
+              "title": "Baseline Conversion Rate"
             }
           },
           {
+            "description": "Minimum detectable effect, relative to the baseline: 0.05 means 12% -> 12.6%. Default 0.05.",
             "in": "query",
             "name": "mde",
             "required": false,
             "schema": {
               "default": 0.05,
+              "description": "Minimum detectable effect, relative to the baseline: 0.05 means 12% -> 12.6%. Default 0.05.",
               "exclusiveMaximum": 1,
               "exclusiveMinimum": 0,
               "title": "Mde",
@@ -22216,11 +22388,13 @@
             }
           },
           {
+            "description": "Confidence level of the two-sided test. Default 0.95.",
             "in": "query",
             "name": "confidence_level",
             "required": false,
             "schema": {
               "default": 0.95,
+              "description": "Confidence level of the two-sided test. Default 0.95.",
               "maximum": 0.99,
               "minimum": 0.8,
               "title": "Confidence Level",
@@ -22228,15 +22402,30 @@
             }
           },
           {
+            "description": "Target power. Default 0.80.",
             "in": "query",
             "name": "power_target",
             "required": false,
             "schema": {
               "default": 0.8,
+              "description": "Target power. Default 0.80.",
               "maximum": 0.99,
               "minimum": 0.5,
               "title": "Power Target",
               "type": "number"
+            }
+          },
+          {
+            "description": "Correction for comparing several variants with the control. 'bonferroni' and 'benjamini_hochberg' plan each comparison at alpha / (variants - 1). Default 'none', as on the results.",
+            "in": "query",
+            "name": "correction_method",
+            "required": false,
+            "schema": {
+              "default": "none",
+              "description": "Correction for comparing several variants with the control. 'bonferroni' and 'benjamini_hochberg' plan each comparison at alpha / (variants - 1). Default 'none', as on the results.",
+              "pattern": "^(none|bonferroni|benjamini_hochberg)$",
+              "title": "Correction Method",
+              "type": "string"
             }
           }
         ],

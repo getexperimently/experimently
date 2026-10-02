@@ -138,7 +138,7 @@ def sample_size_two_proportions(
 
     The guided setup's estimate (``GET /experiments/analysis/sample-size``)
     and ``POST /utils/utils/sample-size`` call this with two arms; it is the
-    same formula the results page's Sample Size tab computes. It applies no
+    same function the results page's Sample Size tab calls. It applies no
     multiple-comparison correction: a caller that wants one passes an
     already-corrected ``alpha``.
 
@@ -173,6 +173,41 @@ def sample_size_two_proportions(
     ) ** 2 / delta**2
 
     return math.ceil(n)
+
+
+def compute_power(
+    n_per_group: int,
+    p1: float,
+    p2: float,
+    alpha: float,
+    two_tailed: bool,
+) -> float:
+    """
+    Power of the test ``sample_size_two_proportions`` plans, at ``n_per_group``.
+
+    The exact inverse of that formula. Solving it for ``z_power`` gives::
+
+        z_power = (sqrt(n) * |p2 - p1| - z_alpha * sqrt(2 * p_bar * (1 - p_bar)))
+                  / sqrt(p1*(1-p1) + p2*(1-p2))
+
+    and the power is ``Phi(z_power)``. So for the ``n`` that
+    ``sample_size_two_proportions`` returns at a target power, the power here
+    is at least that target, and at ``n - 1`` it is below it. The results
+    page's Sample Size tab uses it for the achieved power.
+
+    Returns 0.0 for ``n_per_group <= 0``.
+    """
+    if n_per_group <= 0:
+        return 0.0
+    delta = abs(p2 - p1)
+    if delta == 0:
+        raise ValueError("p1 and p2 must differ (delta cannot be zero)")
+    z_alpha = norm.ppf(1 - alpha / (2 if two_tailed else 1))
+    pooled = (p1 + p2) / 2
+    z_power = (
+        math.sqrt(n_per_group) * delta - z_alpha * math.sqrt(2 * pooled * (1 - pooled))
+    ) / math.sqrt(p1 * (1 - p1) + p2 * (1 - p2))
+    return float(norm.cdf(z_power))
 
 
 # ---------------------------------------------------------------------------

@@ -166,6 +166,45 @@ See [Statistical Methods](../api/sequential-testing.md) for details on mSPRT and
 
 ---
 
+## During the experiment: the Sample Size tab
+
+Everything above is for planning before launch. Once an experiment is running, the
+**Sample Size** tab of its results page (and `GET /api/v1/results/{experiment_id}/sample-size`)
+plans again from the experiment's own data, with the same formula as above:
+
+- **Baseline**: the conversion rate observed in the control variant on the primary metric so
+  far, counted the way the results count it (users with a conversion, over users assigned).
+  You can type a different rate instead. The results page is cached for up to five minutes and
+  the tab is not, so for that long the tab's rate can be newer than the one on the Overview.
+- **MDE**: 5% relative unless you change it. Experiments do not store a planned effect.
+- **Power** 80% and **significance** 5%, two-sided, unless you change them. Two-sided is what
+  the results test.
+- **Correction**: none unless you choose one, the same as the results. With Bonferroni or
+  Benjamini-Hochberg each of the `k - 1` comparisons is planned at `alpha / (k - 1)`. Unlike
+  the Power Calculator, the tab does not apply Bonferroni on its own: the multi-variant
+  paragraph above is about the Power Calculator only.
+- **Progress** is the smallest variant's users against the planned number, and the achieved
+  power is the power to detect the planned MDE at that size, not the effect observed so far.
+
+The tab plans a conversion rate (a two-proportion test) whatever the metric's type, because
+every metric is analysed as a conversion today, and it says so. Nothing typed on the tab is
+saved.
+
+**Worked example**: a control rate of 12% so far, a 5% relative MDE, 80% power, 5%
+significance:
+
+- `p1 = 0.12`, `p2 = 0.126`
+- `n = 47,036 per variant`
+- with 20,000 users in the smallest variant: 43% of the planned sample, and a power of 45% to
+  detect the 5% lift
+- with three variants and Bonferroni: each comparison at 2.5%, `n = 56,961 per variant`
+
+When there is nothing to plan from yet (no users in control, no control conversions, or every
+control user converted) the tab asks for the rate you expect, and the API answers 200 with
+`required_sample_size_per_variant: null` and an `unavailable_reason`.
+
+---
+
 ## REST API Reference
 
 All endpoints are unauthenticated (no login required). They perform pure computation with no database access.

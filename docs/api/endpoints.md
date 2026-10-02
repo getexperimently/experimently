@@ -1696,6 +1696,44 @@ Returns mSPRT analysis, always-valid confidence intervals, an early stopping rec
 
 ---
 
+### Sample Size
+
+See [Statistical Power Analysis](../statistics/power-analysis.md#during-the-experiment-the-sample-size-tab) for the method.
+
+```text
+GET /api/v1/results/{experiment_id}/sample-size
+```
+Returns the users each variant needs to detect a relative lift of `mde` over the baseline on the
+primary metric (a two-sided two-proportion test), the smallest variant's users so far, the power
+they give at that MDE, and every input used with where it came from. Nothing is saved.
+
+**Query params** (all optional; send only what you want to change):
+
+| Parameter | Default | Range |
+|---|---|---|
+| `baseline_conversion_rate` | the control variant's observed rate so far | above 0, below 1 |
+| `mde` | `0.05` (relative: 12% → 12.6%) | above 0, below 1 |
+| `confidence_level` | `0.95` | 0.80 to 0.99 |
+| `power_target` | `0.80` | 0.50 to 0.99 |
+| `correction_method` | `none` | `none`, `bonferroni`, `benjamini_hochberg`; the last two plan each comparison at `alpha / (variants - 1)` |
+
+**Response** (`SampleSizeResult`): `required_sample_size_per_variant`, `current_sample_size_per_variant`
+(the smallest variant), `is_adequate`, `achieved_power`, `baseline_rate`, `baseline_source`
+(`observed` or `request`), `baseline_users`, `mde`, `mde_absolute`, `confidence_level`, `alpha`
+(per comparison), `comparisons`, `correction_method`, `power_target`, `metric_id`, `metric_name`,
+`metric_type`, `analysed_as` (always `conversion` today), `guide_only_reasons` (why a fixed sample
+size is only a guide here: `adaptive_allocation`, `unequal_allocation`, `sequential_testing`,
+`bayesian`) and `unavailable_reason`. `days_to_significance` and `projected_completion_date` are always `null`.
+
+With nothing to plan from, the answer is still **200**: `required_sample_size_per_variant`,
+`achieved_power` and `baseline_rate` are `null`, and `unavailable_reason` is one of
+`no_metric`, `no_control_data`, `no_control_conversions`, `rate_at_boundary` (every control user
+converted) or `effect_out_of_range` (the observed rate raised by `mde` reaches 100%).
+A `baseline_conversion_rate` that `mde` raises to 100% or more answers **422**; an unknown
+experiment answers **404**.
+
+---
+
 ### CUPED Variance Reduction
 
 See [CUPED Guide](cuped.md) for full documentation.

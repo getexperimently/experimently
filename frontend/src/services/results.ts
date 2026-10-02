@@ -1,6 +1,7 @@
 import {
   ExperimentResultsResponse,
   DailyResultsResponse,
+  SampleSizeOverrides,
   SampleSizeResult,
 } from '@/types/results';
 import { SequentialTestingResponse } from '@/types/sequential';
@@ -27,12 +28,23 @@ export class ResultsService {
     });
   }
 
+  /**
+   * The planned sample size. Send only what the user changed: anything left
+   * out is decided by the server (the observed control rate, a 5% relative
+   * MDE, 80% power, 95% confidence, no correction).
+   */
   static async getSampleSize(
     experimentId: string,
-    params?: { mde?: number; power_target?: number }
+    overrides?: SampleSizeOverrides
   ): Promise<SampleSizeResult> {
     return apiFetch<SampleSizeResult>(`/api/v1/results/${experimentId}/sample-size`, {
-      query: { mde: params?.mde, power_target: params?.power_target },
+      query: {
+        baseline_conversion_rate: overrides?.baseline_conversion_rate,
+        mde: overrides?.mde,
+        power_target: overrides?.power_target,
+        confidence_level: overrides?.confidence_level,
+        correction_method: overrides?.correction_method,
+      },
     });
   }
 

@@ -163,7 +163,7 @@ any other change of status.
 **Rules for stopping early:**
 - You need statistical significance (p-value < 0.05) AND practical significance (effect size is meaningful)
 - Resist the urge to stop as soon as significance is reached — this inflates false positive rates
-- Use the **Sample Size Meter** to confirm you've reached the required sample size before deciding
+- Use the **Sample Size** tab to confirm the smallest variant has reached the planned sample before deciding
 
 ---
 
@@ -224,14 +224,43 @@ Look for:
 - Crossing lines → potential interaction effects or bugs
 - Spike on day 1 → novelty effect (users excited about newness)
 
-#### Sample Size Meter
+#### Sample Size
 
-Shows current vs. required sample size:
-- **Green (>100%)**: Adequate — you have enough data for a reliable decision
-- **Amber (80-100%)**: Almost there — wait a bit longer
-- **Red (<80%)**: Not enough data — results are unreliable, don't make a decision
+The **Sample Size** tab shows the planned sample size: how many users each variant needs to
+detect the smallest lift you care about, and how far the experiment has got.
 
-"Days to Significance" estimates how long until you reach the required sample size at the current rate.
+**Calculated from.** Every number the plan uses is shown, with where it came from:
+
+- **Baseline conversion rate**: the rate observed in the control variant on the primary metric
+  so far ("Observed in control so far: 11.8% (2,140 users)"), or the rate you typed ("Entered by
+  you"). The results are cached for up to five minutes and this tab is not, so for that long its
+  rate can be newer than the one on the Overview.
+- **Minimum detectable effect**: 5% relative unless you change it. Relative means 12% → 12.6%,
+  not 17%. Experiments do not store a planned effect.
+- **Power** (80%, 90% or 95%) and **significance** (5%, 1% or 10%, always two-sided, which is
+  what the results test).
+- **Correction**, for three or more variants: none unless you choose one, the same as the
+  results. Bonferroni or Benjamini-Hochberg plans each comparison with the control at
+  significance ÷ (variants − 1).
+
+Change any of them and press **Recalculate**. Nothing is saved and the page address does not
+change, so the plan goes back to the observed rate and the defaults when you reload.
+
+**Progress** is the smallest variant: "Smallest variant: 20,000 of 47,036 (43%)", then either
+"43% of planned sample" or "Planned sample reached". The power shown is the power to detect your
+planned lift at the current size, not the effect seen so far.
+
+The tab also says when:
+
+- **no users have been assigned yet**, or there is no rate to plan from (no control conversions,
+  or every control user converted): type the rate you expect;
+- **the metric is not a conversion**: every metric is analysed as a conversion today, so the
+  plan is for a conversion rate; use the Power Calculator for anything else;
+- **a fixed sample size is a guide only**: a bandit, an uneven split, sequential testing or
+  Bayesian analysis.
+
+This is not the same check as **Minimum sample** on the Overview card, which is the floor the
+recommendation needs.
 
 The tab loads its numbers separately from the rest of the page. If they cannot be loaded,
 the tab says so and offers **Try again**; the Overview and the other tabs still work.

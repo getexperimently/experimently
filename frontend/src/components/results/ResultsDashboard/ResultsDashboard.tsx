@@ -3,6 +3,7 @@ import { ResultsService } from '@/services/results';
 import {
   ExperimentResultsResponse,
   DailyResultsResponse,
+  SampleSizeOverrides,
   SampleSizeResult,
   DimensionalBreakdownResponse,
   MetricResult,
@@ -56,6 +57,9 @@ export function ResultsDashboard({ experimentId }: ResultsDashboardProps) {
   const [sampleSize, setSampleSize] = useState<SampleSizeResult | null>(null);
   const [sampleSizeLoading, setSampleSizeLoading] = useState(true);
   const [sampleSizeError, setSampleSizeError] = useState<string | null>(null);
+  // What the user changed on the tab. Nothing is saved, and nothing goes in
+  // the URL (#666): without overrides the server decides every input.
+  const [sampleSizeOverrides, setSampleSizeOverrides] = useState<SampleSizeOverrides>({});
   const sampleSizeRequest = useRef(0);
   const [sequential, setSequential] = useState<SequentialTestingResponse | null>(null);
   const [loading, setLoading] = useState(true);
@@ -66,14 +70,19 @@ export function ResultsDashboard({ experimentId }: ResultsDashboardProps) {
   const [breakdown, setBreakdown] = useState<DimensionalBreakdownResponse | null>(null);
   const [breakdownLoading, setBreakdownLoading] = useState(false);
 
-  const fetchSampleSize = useCallback(async () => {
+  const fetchSampleSize = useCallback(async (overrides: SampleSizeOverrides = {}) => {
     // Only the latest request may write state, so a slow answer for an
     // earlier experiment never lands on this one.
     const request = ++sampleSizeRequest.current;
+    setSampleSizeOverrides(overrides);
     setSampleSizeLoading(true);
     setSampleSizeError(null);
     try {
-      const s = await ResultsService.getSampleSize(experimentId);
+      // Only what the user changed is sent; with nothing changed, nothing is.
+      const s =
+        Object.keys(overrides).length > 0
+          ? await ResultsService.getSampleSize(experimentId, overrides)
+          : await ResultsService.getSampleSize(experimentId);
       if (request !== sampleSizeRequest.current) return;
       setSampleSize(s);
     } catch (e) {
@@ -88,7 +97,9 @@ export function ResultsDashboard({ experimentId }: ResultsDashboardProps) {
   const fetchAll = useCallback(async () => {
     setLoading(true);
     setError(null);
-    // Started alongside the results, but never awaited with them.
+    // Started alongside the results, but never awaited with them. A reload
+    // starts from the server's inputs again: nothing typed on the tab is kept.
+    setSampleSize(null);
     void fetchSampleSize();
     try {
       const [r, d] = await Promise.all([
@@ -266,7 +277,7 @@ export function ResultsDashboard({ experimentId }: ResultsDashboardProps) {
             <h3 className="text-base font-semibold text-slate-800 mb-4">
               Sample Size Analysis
             </h3>
-            {sampleSizeLoading ? (
+            {sampleSizeLoading && !sampleSize ? (
               <div
                 className="h-24 bg-slate-200 rounded-xl animate-pulse"
                 data-testid="sample-size-loading"
@@ -286,14 +297,19 @@ export function ResultsDashboard({ experimentId }: ResultsDashboardProps) {
                 )}
                 <button
                   type="button"
-                  onClick={() => void fetchSampleSize()}
+                  onClick={() => void fetchSampleSize(sampleSizeOverrides)}
                   className="px-3 py-1.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
                 >
                   Try again
                 </button>
               </div>
             ) : (
-              <SampleSizeMeter data={sampleSize} />
+              <SampleSizeMeter
+                data={sampleSize}
+                overrides={sampleSizeOverrides}
+                onRecalculate={(o) => void fetchSampleSize(o)}
+                recalculating={sampleSizeLoading}
+              />
             )}
           </section>
         )}

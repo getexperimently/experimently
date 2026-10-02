@@ -9,7 +9,7 @@ top-level experiment results response.
 
 from datetime import datetime
 from enum import Enum
-from typing import Annotated, Dict, List, Optional
+from typing import Annotated, Dict, List, Literal, Optional
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -630,92 +630,180 @@ class DailyResultsResponse(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-class SampleSizeResult(BaseModel):
-    """Result of a sample-size / statistical-power analysis.
+#: Why no required sample size could be computed (``unavailable_reason``).
+SampleSizeUnavailableReason = Literal[
+    "no_metric",
+    "no_control_data",
+    "no_control_conversions",
+    "rate_at_boundary",
+    "effect_out_of_range",
+]
 
-    Returned by the sample-size calculation endpoint and embedded in
-    experiment results to convey whether the experiment has sufficient data
-    to draw conclusions.
+#: Why a fixed sample size is only a guide for this experiment.
+SampleSizeGuideOnlyReason = Literal[
+    "adaptive_allocation",
+    "unequal_allocation",
+    "sequential_testing",
+    "bayesian",
+]
+
+
+class SampleSizeResult(BaseModel):
+    """The planned sample size for an experiment, and how far it has got.
+
+    Plans a two-sided two-proportion test on the primary metric: the users
+    each variant needs to detect a relative lift of ``mde`` over the baseline
+    rate.  The baseline is the request's ``baseline_conversion_rate`` or,
+    without one, the rate observed in the control variant so far.  Every input
+    used is returned with where it came from.
+
+    When there is nothing to plan from yet (no metric, no control users, no
+    control conversions) the answer is still 200: the required size and the
+    achieved power are ``null`` and ``unavailable_reason`` says why.
     """
 
     model_config = ConfigDict(from_attributes=True)
 
-    required_sample_size_per_variant: Annotated[int, Field(ge=1)] = Field(
+    required_sample_size_per_variant: Optional[Annotated[int, Field(ge=1)]] = Field(
         ...,
         description=(
-            "Minimum number of users required per variant to achieve the target "
-            "power at the configured MDE and confidence level."
+            "Users each variant needs to reach the target power at this MDE and "
+            "confidence level. null when it cannot be computed; "
+            "unavailable_reason says why."
         ),
     )
     current_sample_size_per_variant: int = Field(
         ...,
         description=(
-            "Actual number of users currently assigned to the smallest variant "
-            "(used as the conservative reference)."
+            "Users assigned so far to the smallest variant (the conservative "
+            "reference: every variant has at least this many)."
         ),
     )
     is_adequate: bool = Field(
         ...,
         description=(
             "True when current_sample_size_per_variant >= "
-            "required_sample_size_per_variant."
+            "required_sample_size_per_variant. False when the required size is "
+            "null."
         ),
     )
-    achieved_power: float = Field(
+    achieved_power: Optional[float] = Field(
         ...,
         description=(
-            "Estimated statistical power (1 - beta) achievable with the current "
-            "sample size, at the configured MDE and confidence level."
+            "Power (1 - beta) the smallest variant has reached to detect the "
+            "planned MDE (not the observed effect). 0.0 with no users; null when "
+            "the required size is null."
         ),
     )
     days_to_significance: Optional[int] = Field(
         None,
-        description=(
-            "Projected number of additional calendar days until the required "
-            "sample size is reached, based on the current enrolment rate.  "
-            "None when the required size is already met or the rate cannot be "
-            "estimated."
-        ),
+        description="Not estimated yet: always null.",
     )
     projected_completion_date: Optional[datetime] = Field(
         None,
-        description=(
-            "UTC timestamp of the projected date on which the required sample "
-            "size will be reached.  None when days_to_significance is None."
-        ),
+        description="Not estimated yet: always null.",
     )
-    baseline_rate: float = Field(
+    baseline_rate: Optional[float] = Field(
         ...,
         description=(
-            "Baseline conversion rate (or mean) used as the reference point for "
-            "effect-size and power calculations."
+            "Baseline conversion rate the plan starts from: the request's "
+            "baseline_conversion_rate, or the control variant's observed rate. "
+            "null when neither is available."
         ),
     )
     mde: float = Field(
         ...,
         description=(
-            "Minimum detectable effect (MDE) expressed as an absolute difference "
-            "from the baseline rate."
+            "Minimum detectable effect, relative to the baseline rate: 0.05 "
+            "means 12% -> 12.6%."
         ),
     )
     confidence_level: float = Field(
         ...,
-        description=(
-            "Statistical confidence level used in this power analysis, in [0, 1]."
-        ),
+        description="Confidence level of the test being planned, in [0, 1].",
     )
     power_target: float = Field(
         ...,
+        description="Target power (1 - beta) the required size is computed for.",
+    )
+    baseline_source: Optional[Literal["observed", "request"]] = Field(
+        None,
         description=(
-            "Target statistical power (1 - beta) used when computing the "
-            "required sample size, typically 0.80."
+            "Where baseline_rate came from: 'request' (baseline_conversion_rate "
+            "was sent) or 'observed' (the control variant's rate so far). null "
+            "when there is no baseline."
+        ),
+    )
+    baseline_users: Optional[int] = Field(
+        None,
+        description=(
+            "Control users behind an observed baseline rate. null unless "
+            "baseline_source is 'observed'."
+        ),
+    )
+    metric_id: Optional[UUID] = Field(
+        None, description="The primary metric planned for. null when there is none."
+    )
+    metric_name: Optional[str] = Field(None, description="Name of that metric.")
+    metric_type: Optional[str] = Field(
+        None, description="The metric's configured type, e.g. 'conversion'."
+    )
+    analysed_as: Literal["conversion"] = Field(
+        "conversion",
+        description=(
+            "The test planned for. Every metric is analysed as a conversion "
+            "today, so this is always 'conversion'."
+        ),
+    )
+    alpha: float = Field(
+        ...,
+        description=(
+            "Significance level of each comparison: 1 - confidence_level, "
+            "divided by comparisons when a correction is requested."
+        ),
+    )
+    comparisons: int = Field(
+        ...,
+        ge=1,
+        description="Treatment variants compared with the control (variants - 1, at least 1).",
+    )
+    correction_method: Literal["none", "bonferroni", "benjamini_hochberg"] = Field(
+        "none",
+        description=(
+            "Correction for several comparisons. 'bonferroni' and "
+            "'benjamini_hochberg' both plan at alpha / comparisons (Bonferroni is "
+            "an upper bound for Benjamini-Hochberg)."
+        ),
+    )
+    mde_absolute: Optional[float] = Field(
+        None,
+        description="baseline_rate * mde, in rate units. null when there is no baseline.",
+    )
+    unavailable_reason: Optional[SampleSizeUnavailableReason] = Field(
+        None,
+        description=(
+            "Why required_sample_size_per_variant is null: no_metric, "
+            "no_control_data (no control variant or no control users yet), "
+            "no_control_conversions, rate_at_boundary (every control user "
+            "converted), effect_out_of_range (the observed rate raised by the "
+            "MDE reaches 100%). null when a size was computed."
+        ),
+    )
+    guide_only_reasons: List[SampleSizeGuideOnlyReason] = Field(
+        default_factory=list,
+        description=(
+            "Why a fixed sample size is only a guide for this experiment: "
+            "adaptive_allocation (a bandit moves traffic), unequal_allocation, "
+            "sequential_testing, bayesian. Empty when none applies."
         ),
     )
 
     @field_validator("required_sample_size_per_variant", mode="before")
     @classmethod
-    def validate_required_sample_size(cls, v: int) -> int:
-        """Validate that required_sample_size_per_variant is at least 1."""
+    def validate_required_sample_size(cls, v: Optional[int]) -> Optional[int]:
+        """Validate that required_sample_size_per_variant is null or at least 1."""
+        if v is None:
+            return v
         if v < 1:
             raise ValueError(
                 f"required_sample_size_per_variant must be >= 1, got {v!r}."

@@ -119,15 +119,61 @@ export interface DailyResultsResponse {
   series: VariantTimeSeries[];
 }
 
+/** Why the planned sample size could not be computed (#666). */
+export type SampleSizeUnavailableReason =
+  | 'no_metric'
+  | 'no_control_data'
+  | 'no_control_conversions'
+  | 'rate_at_boundary'
+  | 'effect_out_of_range';
+
+/** Why a fixed sample size is only a guide for this experiment. */
+export type SampleSizeGuideOnlyReason =
+  | 'adaptive_allocation'
+  | 'unequal_allocation'
+  | 'sequential_testing'
+  | 'bayesian';
+
+/**
+ * GET /results/{id}/sample-size. Every key here is a property of the schema
+ * in the API snapshot, and every property is a key here (pinned by
+ * sample-size-types.test.ts).
+ */
 export interface SampleSizeResult {
-  required_sample_size_per_variant: number;
+  /** null when there is nothing to plan from; unavailable_reason says why. */
+  required_sample_size_per_variant: number | null;
+  /** The smallest variant's assignments. */
   current_sample_size_per_variant: number;
   is_adequate: boolean;
-  achieved_power: number;
+  /** At the planned MDE; null when the required size is null. */
+  achieved_power: number | null;
   days_to_significance: number | null;
   projected_completion_date: string | null;
-  baseline_rate: number;
+  baseline_rate: number | null;
+  /** Relative: 0.05 means 12% -> 12.6%. */
   mde: number;
   confidence_level: number;
   power_target: number;
+  baseline_source: 'observed' | 'request' | null;
+  baseline_users: number | null;
+  metric_id: string | null;
+  metric_name: string | null;
+  metric_type: string | null;
+  analysed_as: 'conversion';
+  /** Per comparison, after any correction. */
+  alpha: number;
+  comparisons: number;
+  correction_method: CorrectionMethod;
+  mde_absolute: number | null;
+  unavailable_reason: SampleSizeUnavailableReason | null;
+  guide_only_reasons: SampleSizeGuideOnlyReason[];
+}
+
+/** What the user changed on the Sample Size tab; nothing is saved. */
+export interface SampleSizeOverrides {
+  baseline_conversion_rate?: number;
+  mde?: number;
+  power_target?: number;
+  confidence_level?: number;
+  correction_method?: CorrectionMethod;
 }
