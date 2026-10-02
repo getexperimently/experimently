@@ -65,6 +65,10 @@ LOCAL_PROVIDER_ONLY_DETAIL = "Endpoint not available: AUTH_PROVIDER is not 'loca
 #: letter case. The dashboard matches this text; keep it as it is.
 EMAIL_TAKEN_DETAIL = "Email already registered"
 
+#: The answer when another account already has the username (exact match, as
+#: the unique constraint compares it).
+USERNAME_TAKEN_DETAIL = "Username already registered"
+
 #: SQLSTATE ``unique_violation``.
 _UNIQUE_VIOLATION = "23505"
 
@@ -184,21 +188,56 @@ def changed_email(user: User, update_data: Dict[str, Any]) -> Optional[str]:
     return email
 
 
+def username_held_by_another(
+    db: Session, username: Optional[str], exclude_id: Any = None
+) -> bool:
+    """True when an account other than ``exclude_id`` has exactly ``username``."""
+    if username is None:
+        return False
+    query = db.query(User.id).filter(User.username == username)
+    if exclude_id is not None:
+        query = query.filter(User.id != exclude_id)
+    return query.first() is not None
+
+
+def refuse_if_username_held(
+    db: Session, username: Optional[str], exclude_id: Any = None
+) -> None:
+    """409 ``USERNAME_TAKEN_DETAIL`` when another account has ``username``."""
+    if username_held_by_another(db, username, exclude_id):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail=USERNAME_TAKEN_DETAIL
+        )
+
+
+def changed_username(user: User, update_data: Dict[str, Any]) -> Optional[str]:
+    """The username an update sets, or None if it leaves it as stored."""
+    username = update_data.get("username")
+    if username is None or username == user.username:
+        return None
+    return username
+
+
 def commit_user_write(
-    db: Session, email: Optional[str], exclude_id: Any = None
+    db: Session,
+    email: Optional[str],
+    exclude_id: Any = None,
+    username: Optional[str] = None,
 ) -> None:
     """Commit a write to ``users``; a unique violation on the email becomes 409.
 
     The pre-check in each route cannot see a row committed between the check
     and this commit. When the commit fails with a unique violation, the
     transaction is rolled back and the same email query is run again
-    (excluding the row being updated). A hit answers 409; anything else -- a
-    username collision, for one -- is raised as it was. The decision does not
+    (excluding the row being updated), then the username query. A hit on the
+    email answers 409 ``EMAIL_TAKEN_DETAIL``, a hit on the username 409
+    ``USERNAME_TAKEN_DETAIL``; anything else is raised as it was. The decision does not
     depend on the name of any index, which differs from one schema to another.
     The exception's text is neither logged nor returned: it carries the
     values of the row.
 
-    ``email`` is the address this write sets, or None when it sets none.
+    ``email`` is the address this write sets, or None when it sets none;
+    ``username`` likewise.
     """
     try:
         db.commit()
@@ -209,6 +248,12 @@ def commit_user_write(
         if code == _UNIQUE_VIOLATION and email_held_by_another(db, email, exclude_id):
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT, detail=EMAIL_TAKEN_DETAIL
+            ) from None
+        if code == _UNIQUE_VIOLATION and username_held_by_another(
+            db, username, exclude_id
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT, detail=USERNAME_TAKEN_DETAIL
             ) from None
         raise
 
@@ -282,12 +327,7 @@ async def create_user(
     # another account holds it in any letter case.
     refuse_if_email_held(db, user_in.email)
 
-    user = db.query(User).filter(User.username == user_in.username).first()
-    if user:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="Username already registered",
-        )
+    refuse_if_username_held(db, user_in.username)
 
     # Create new user.  ``UserCreate.password`` is a ``SecretStr``; bcrypt
     # needs the plain text behind it.
@@ -311,7 +351,7 @@ async def create_user(
 
     user = User(**user_data)
     db.add(user)
-    commit_user_write(db, user_in.email)
+    commit_user_write(db, user_in.email, username=user_in.username)
     db.refresh(user)
 
     role = getattr(user, "role", None)
@@ -595,13 +635,17 @@ async def update_user(
     # Re-casing the account's own address is not refused.
     new_email = changed_email(user, update_data)
     refuse_if_email_held(db, new_email, exclude_id=user.id)
+    # Another account with the new username is a 409 "Username already
+    # registered", as on create (#610). It was a 500.
+    new_username = changed_username(user, update_data)
+    refuse_if_username_held(db, new_username, exclude_id=user.id)
 
     # Update user attributes
     for field in update_data:
         if hasattr(user, field):
             setattr(user, field, update_data[field])
 
-    commit_user_write(db, new_email, exclude_id=user.id)
+    commit_user_write(db, new_email, exclude_id=user.id, username=new_username)
     db.refresh(user)
 
     # Ensure the response conforms to the UserResponse schema

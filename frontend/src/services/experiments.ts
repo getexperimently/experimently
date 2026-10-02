@@ -99,8 +99,14 @@ export const ExperimentsService = {
     return apiFetch<Experiment>(`${BASE}/${id}`, { method: 'PUT', json: data });
   },
 
+  // The route requires `experiment_key`, which must equal the experiment id
+  // (a confirmation that the caller means this experiment). Only a DRAFT
+  // experiment can be deleted.
   async delete(id: string): Promise<void> {
-    await apiFetch<void>(`${BASE}/${id}`, { method: 'DELETE' });
+    await apiFetch<void>(`${BASE}/${id}`, {
+      method: 'DELETE',
+      query: { experiment_key: id },
+    });
   },
 
   // Lifecycle transitions — each returns the updated experiment.
