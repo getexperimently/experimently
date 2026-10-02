@@ -293,7 +293,9 @@ class CognitoAuthService:
         if not self.user_pool_id or not self.client_id:
             raise CognitoTokenRefused(REASON_NOT_CONFIGURED)
         try:
-            claims = jwt.decode(access_token, options={"verify_signature": False})
+            # GetUser has already accepted this access token; only its iss,
+            # token_use and client_id claims are compared with configuration.
+            claims = jwt.decode(access_token, options={"verify_signature": False})  # nosemgrep: python.jwt.security.unverified-jwt-decode.unverified-jwt-decode  # fmt: skip
         except jwt.PyJWTError:
             raise CognitoTokenRefused(REASON_WRONG_ISSUER) from None
         validate_access_token_claims(claims, self.user_pool_id, self.client_id)
