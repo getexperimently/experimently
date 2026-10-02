@@ -13,7 +13,11 @@ keywords = ["openfeature", "feature-flags", "experimentation", "a/b-testing"]
 dependencies = [
     # 0.9.0 introduced the tracking API (AbstractProvider.track / TrackingEventDetails).
     "openfeature-sdk>=0.10.0",
-    "experimently>=1.0.0",
+    # The Python SDK in sdk/python. Pre-1.0, a minor release may change the
+    # API, so admit the current minor only; widen this when that SDK moves.
+    # backend/tests/smoke/test_sdk_sibling_ranges.py fails if it stops
+    # admitting sdk/python's manifest version (#668).
+    "experimently>=0.1.0,<0.2",
 ]
 
 [project.optional-dependencies]
