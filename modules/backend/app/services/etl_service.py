@@ -41,6 +41,61 @@ def _glue_status_to_enum(raw: str) -> GlueJobStatus:
         return GlueJobStatus.RUNNING
 
 
+#: The fixed answers for a name the deployment did not configure. The name the
+#: caller sent is never repeated in them.
+UNKNOWN_JOB_DETAIL = "Unknown ETL job"
+UNKNOWN_CRAWLER_DETAIL = "Unknown crawler"
+UNKNOWN_TABLE_DETAIL = "Unknown Glue table"
+
+
+def _not_found(detail: str) -> HTTPException:
+    return HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=detail)
+
+
+def _require_configured_job(job_name: str) -> None:
+    """404 unless ``job_name`` is ``GLUE_ETL_JOB_NAME`` or ``GLUE_METRICS_JOB_NAME``.
+
+    A setting left empty configures nothing, so with both empty every name is
+    refused. Called before any Glue client is created.
+    """
+    configured = {
+        name
+        for name in (
+            modules_settings.GLUE_ETL_JOB_NAME,
+            modules_settings.GLUE_METRICS_JOB_NAME,
+        )
+        if name
+    }
+    if not job_name or job_name not in configured:
+        raise _not_found(UNKNOWN_JOB_DETAIL)
+
+
+def _require_configured_crawler(crawler_name: Optional[str]) -> str:
+    """Return the configured crawler; 404 for any other name.
+
+    An omitted (``None`` or empty) name means ``GLUE_CRAWLER_NAME``. With that
+    setting empty there is no crawler, and every name is refused.
+    """
+    configured = modules_settings.GLUE_CRAWLER_NAME
+    name = crawler_name or configured
+    if not configured or name != configured:
+        raise _not_found(UNKNOWN_CRAWLER_DETAIL)
+    return configured
+
+
+def _require_configured_table(database: str, table: str) -> None:
+    """404 unless the pair is ``GLUE_DATABASE``.``GLUE_EVENTS_TABLE``."""
+    configured_db = modules_settings.GLUE_DATABASE
+    configured_table = modules_settings.GLUE_EVENTS_TABLE
+    if (
+        not configured_db
+        or not configured_table
+        or database != configured_db
+        or table != configured_table
+    ):
+        raise _not_found(UNKNOWN_TABLE_DETAIL)
+
+
 def _job_name_to_type(job_name: str) -> ETLJobType:
     """Derive ETLJobType from job name heuristics."""
     if "metrics" in job_name:
@@ -97,6 +152,7 @@ class ETLService:
             HTTPException 500: if the Glue API call fails.
         """
         job_name = self._get_glue_job_name(request.job_type)
+        _require_configured_job(job_name)
 
         # Build Glue job arguments
         arguments = {
@@ -149,16 +205,15 @@ class ETLService:
             ETLJobResponse with current status and timing fields.
 
         Raises:
-            HTTPException 404: if the job run is not found.
+            HTTPException 404: if ``job_name`` is not a configured job (no
+                Glue call is made), or the job run is not found.
             HTTPException 500: on unexpected AWS errors.
         """
+        _require_configured_job(job_name)
         try:
             response = self._glue().get_job_run(JobName=job_name, RunId=job_run_id)
         except self._glue().exceptions.EntityNotFoundException:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Job run '{job_run_id}' not found for job '{job_name}'",
-            )
+            raise _not_found("Job run not found")
         except Exception as exc:
             logger.error(
                 "Glue job status failed (%s)", type(exc).__name__, exc_info=exc
@@ -214,8 +269,11 @@ class ETLService:
             List of PartitionInfo objects, one per hour (24 total).
 
         Raises:
+            HTTPException 404: if the pair is not ``GLUE_DATABASE`` and
+                ``GLUE_EVENTS_TABLE`` (no Glue call is made).
             HTTPException 500: if the Glue API call fails.
         """
+        _require_configured_table(database, table)
         year, month, day = date.split("-")
 
         # Auto-derive base location from Glue table definition
@@ -295,20 +353,24 @@ class ETLService:
     # run_crawler
     # ------------------------------------------------------------------
 
-    def run_crawler(self, crawler_name: str) -> GlueCrawlerStatus:
+    def run_crawler(self, crawler_name: Optional[str] = None) -> GlueCrawlerStatus:
         """
         Start a Glue crawler and return its status.
 
         Args:
-            crawler_name: Name of the Glue crawler.
+            crawler_name: Name of the Glue crawler; omitted means
+                ``GLUE_CRAWLER_NAME``.
 
         Returns:
             GlueCrawlerStatus reflecting the post-start state.
 
         Raises:
+            HTTPException 404: if ``crawler_name`` is not the configured
+                crawler (no Glue call is made).
             HTTPException 409: if the crawler is already running.
             HTTPException 500: on unexpected AWS errors.
         """
+        crawler_name = _require_configured_crawler(crawler_name)
         try:
             self._glue().start_crawler(Name=crawler_name)
         except Exception as exc:
@@ -332,20 +394,25 @@ class ETLService:
     # get_crawler_status
     # ------------------------------------------------------------------
 
-    def get_crawler_status(self, crawler_name: str) -> GlueCrawlerStatus:
+    def get_crawler_status(
+        self, crawler_name: Optional[str] = None
+    ) -> GlueCrawlerStatus:
         """
         Retrieve the current status of a Glue crawler.
 
         Args:
-            crawler_name: Name of the Glue crawler.
+            crawler_name: Name of the Glue crawler; omitted means
+                ``GLUE_CRAWLER_NAME``.
 
         Returns:
             GlueCrawlerStatus with state, last run info, and table counts.
 
         Raises:
-            HTTPException 404: if the crawler is not found.
+            HTTPException 404: if ``crawler_name`` is not the configured
+                crawler (no Glue call is made), or Glue does not have it.
             HTTPException 500: on unexpected AWS errors.
         """
+        crawler_name = _require_configured_crawler(crawler_name)
         try:
             response = self._glue().get_crawler(Name=crawler_name)
         except Exception as exc:

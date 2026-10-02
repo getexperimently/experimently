@@ -10,6 +10,11 @@ Endpoints:
     POST /api/v1/etl/partitions/add        — add S3 partitions to Glue catalog (ADMIN)
     GET  /api/v1/etl/crawler/status        — get crawler state (any authenticated user)
     POST /api/v1/etl/crawler/run           — trigger crawler (ADMIN)
+
+Every route works only on the names this deployment configured
+(``GLUE_ETL_JOB_NAME``, ``GLUE_METRICS_JOB_NAME``, ``GLUE_CRAWLER_NAME``,
+``GLUE_DATABASE``, ``GLUE_EVENTS_TABLE``). Any other name answers 404 with a
+fixed detail before Glue is called; ``ETLService`` holds the check.
 """
 
 import logging
@@ -93,6 +98,7 @@ def _require_admin(current_user: User) -> None:
     responses={
         202: {"description": "Job started successfully"},
         403: {"description": "Insufficient permissions"},
+        404: {"description": "The job type's Glue job is not configured"},
         422: {"description": "Invalid request parameters"},
         500: {"description": "Failed to start Glue job"},
     },
@@ -121,15 +127,23 @@ def run_etl_job(
     "/jobs/{run_id}/status",
     response_model=ETLJobResponse,
     summary="Get ETL job run status",
-    description="Retrieve the current status of a Glue job run. Any authenticated user can read.",
+    description=(
+        "Retrieve the current status of a Glue job run. Any authenticated user "
+        "can read. `job_name` must be one of the configured jobs "
+        "(`GLUE_ETL_JOB_NAME` or `GLUE_METRICS_JOB_NAME`); any other name "
+        'answers 404 "Unknown ETL job".'
+    ),
     responses={
         200: {"description": "Job status returned"},
-        404: {"description": "Job run not found"},
+        404: {"description": "Unknown ETL job, or job run not found"},
     },
 )
 def get_job_status(
     run_id: str,
-    job_name: str = Query(..., description="Glue job name"),
+    job_name: str = Query(
+        ...,
+        description="Glue job name: GLUE_ETL_JOB_NAME or GLUE_METRICS_JOB_NAME",
+    ),
     job_type: Optional[ETLJobType] = Query(None, description="ETL job type (optional)"),
     current_user: User = Depends(deps.get_current_active_user),
     svc: ETLService = Depends(get_etl_service),
@@ -154,17 +168,20 @@ def get_job_status(
     summary="Add S3 partitions to the Glue catalog",
     description=(
         "Register 24 hourly Hive-style partitions for a given date. "
-        "Requires ADMIN role."
+        "Requires ADMIN role. `database` and `table` must be the configured "
+        "`GLUE_DATABASE` and `GLUE_EVENTS_TABLE`; anything else answers 404 "
+        '"Unknown Glue table".'
     ),
     responses={
         201: {"description": "Partitions registered"},
         403: {"description": "Insufficient permissions"},
+        404: {"description": "Unknown Glue table"},
         500: {"description": "Failed to create partitions"},
     },
 )
 def add_partitions(
-    database: str = Query(..., description="Glue database name"),
-    table: str = Query(..., description="Glue table name"),
+    database: str = Query(..., description="Glue database name: GLUE_DATABASE"),
+    table: str = Query(..., description="Glue table name: GLUE_EVENTS_TABLE"),
     date: str = Query(..., description="Date in YYYY-MM-DD format"),
     current_user: User = Depends(deps.get_current_active_user),
     svc: ETLService = Depends(get_etl_service),
@@ -172,10 +189,7 @@ def add_partitions(
     """Register hourly S3 partitions in the Glue catalog for a given date."""
     _require_admin(current_user)
 
-    logger.info(
-        f"User {current_user.username} adding partitions for "
-        f"{database}.{table} date={date}"
-    )
+    logger.info(f"User {current_user.username} adding partitions for date={date}")
     return svc.add_partitions(database=database, table=table, date=date)
 
 
@@ -188,25 +202,27 @@ def add_partitions(
     "/crawler/status",
     response_model=GlueCrawlerStatus,
     summary="Get Glue crawler status",
-    description="Return the current state of the Glue crawler. Any authenticated user can read.",
+    description=(
+        "Return the current state of the Glue crawler. Any authenticated user "
+        "can read. `crawler_name` may be omitted; if given it must be the "
+        "configured `GLUE_CRAWLER_NAME`, and any other name answers 404 "
+        '"Unknown crawler".'
+    ),
     responses={
         200: {"description": "Crawler status returned"},
-        404: {"description": "Crawler not found"},
+        404: {"description": "Unknown crawler, or crawler not found"},
     },
 )
 def get_crawler_status(
-    crawler_name: str = Query(
+    crawler_name: Optional[str] = Query(
         None,
-        description="Glue crawler name (defaults to settings.GLUE_CRAWLER_NAME)",
+        description="Glue crawler name: GLUE_CRAWLER_NAME (the default)",
     ),
     current_user: User = Depends(deps.get_current_active_user),
     svc: ETLService = Depends(get_etl_service),
 ) -> GlueCrawlerStatus:
     """Return the current state of the Glue crawler."""
-    from modules.backend.app.settings import settings as cfg
-
-    name = crawler_name or cfg.GLUE_CRAWLER_NAME
-    return svc.get_crawler_status(crawler_name=name)
+    return svc.get_crawler_status(crawler_name=crawler_name)
 
 
 # ---------------------------------------------------------------------------
@@ -221,19 +237,22 @@ def get_crawler_status(
     summary="Trigger the Glue crawler",
     description=(
         "Start the Glue crawler to discover new partitions and update the catalog. "
-        "Requires ADMIN role."
+        "Requires ADMIN role. `crawler_name` may be omitted; if given it must be "
+        "the configured `GLUE_CRAWLER_NAME`, and any other name answers 404 "
+        '"Unknown crawler".'
     ),
     responses={
         202: {"description": "Crawler started"},
         403: {"description": "Insufficient permissions"},
+        404: {"description": "Unknown crawler"},
         409: {"description": "Crawler already running"},
         500: {"description": "Failed to start crawler"},
     },
 )
 def run_crawler(
-    crawler_name: str = Query(
+    crawler_name: Optional[str] = Query(
         None,
-        description="Glue crawler name (defaults to settings.GLUE_CRAWLER_NAME)",
+        description="Glue crawler name: GLUE_CRAWLER_NAME (the default)",
     ),
     current_user: User = Depends(deps.get_current_active_user),
     svc: ETLService = Depends(get_etl_service),
@@ -241,9 +260,5 @@ def run_crawler(
     """Start the Glue crawler and return its status."""
     _require_admin(current_user)
 
-    from modules.backend.app.settings import settings as cfg
-
-    name = crawler_name or cfg.GLUE_CRAWLER_NAME
-
-    logger.info(f"User {current_user.username} triggering Glue crawler '{name}'")
-    return svc.run_crawler(crawler_name=name)
+    logger.info(f"User {current_user.username} triggering the Glue crawler")
+    return svc.run_crawler(crawler_name=crawler_name)

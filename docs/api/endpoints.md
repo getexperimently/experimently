@@ -1850,6 +1850,20 @@ POST /api/v1/etl/partitions/add         — Register a new partition
 
 `POST /api/v1/etl/query` has been removed and answers 404.
 
+These routes act only on the Glue names the deployment configured. Any other
+name answers **404** with a fixed `detail`, and Glue is not called:
+
+| Route | Parameter | Accepted value | Otherwise |
+|---|---|---|---|
+| `GET .../jobs/{run_id}/status` | `job_name` | `GLUE_ETL_JOB_NAME` or `GLUE_METRICS_JOB_NAME` | `"Unknown ETL job"` |
+| `GET .../crawler/status`, `POST .../crawler/run` | `crawler_name` | `GLUE_CRAWLER_NAME`, the default when omitted | `"Unknown crawler"` |
+| `POST .../partitions/add` | `database`, `table` | `GLUE_DATABASE` and `GLUE_EVENTS_TABLE` | `"Unknown Glue table"` |
+
+`POST .../jobs/run` takes a `job_type`, not a name. A setting left empty
+configures nothing, so with it empty its routes answer 404 for every name, as
+does `jobs/run` for a job type whose job is unset. A run that Glue does not
+have answers 404 `"Job run not found"`.
+
 ---
 
 ### Real-time DynamoDB Counters
