@@ -29,7 +29,15 @@ concurrency:
 
 jobs:
   leak-guard:
-    name: Leak Guard
+    # One job, two names. A same-repository pull request's head commit gets a
+    # push run AND a pull_request run of this workflow; under one name, that is
+    # two producers of the required `Leak Guard`, and only the pull_request run
+    # reads the title and body. So the push run reports as `Leak Guard (push)`
+    # and the required name has exactly one producer. Do not split this into
+    # two jobs with an event `if:` -- the skipped one still reports its name on
+    # the head commit, which is the second producer again.
+    # backend/tests/unit/infrastructure/test_required_check_producers.py pins it.
+    name: ${{ github.event_name == 'push' && 'Leak Guard (push)' || 'Leak Guard' }}
     runs-on: ubuntu-latest
     steps:
       # Full history: the commit-message sweep needs the commits themselves,
