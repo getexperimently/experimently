@@ -421,7 +421,7 @@ expects = 0
 path = "docs/cognito_integration.md"
 environment = "bare"
 exec = 0
-skip = 2
+skip = 6
 expects = 0
 
 # Its blocks need a Kubernetes cluster: the chart-kind job extracts and runs

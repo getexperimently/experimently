@@ -3,14 +3,18 @@
 This guide explains how to use the authentication features of Experimently, including registration, login, password management, and security best practices.
 
 !!! note "Cognito only"
-    The sign-up, confirmation, password-reset and token-refresh endpoints
-    (`POST /api/v1/auth/signup`, `/confirm`, `/forgot-password`, `/reset-password`
-    and `/refresh`) are available only when `AUTH_PROVIDER=cognito`. With any other
-    provider, including the default `local`, they answer 404. With `local`, sign in
-    with `POST /api/v1/auth/login`; an administrator creates accounts and resets
-    passwords.
+    The password-reset and token-refresh endpoints (`POST /api/v1/auth/forgot-password`,
+    `/reset-password` and `/refresh`) are available only when `AUTH_PROVIDER=cognito`.
+    The sign-up and confirmation endpoints (`POST /api/v1/auth/signup` and `/confirm`)
+    also need `COGNITO_SELF_SIGNUP_ENABLED=true`; without it they answer 404 and an
+    administrator creates users ([Adding a user](../cognito_integration.md#adding-a-user)).
+    With any other provider, including the default `local`, all five answer 404. With
+    `local`, sign in with `POST /api/v1/auth/login`; an administrator creates accounts
+    and resets passwords.
 
 ## Account Registration
+
+Only with `COGNITO_SELF_SIGNUP_ENABLED=true` and a user pool that allows self sign-up; otherwise see [Adding a user](../cognito_integration.md#adding-a-user).
 
 ### Registration Requirements
 

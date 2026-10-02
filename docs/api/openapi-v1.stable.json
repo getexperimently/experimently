@@ -14034,7 +14034,7 @@
     },
     "/api/v1/auth/confirm": {
       "post": {
-        "description": "Confirm user registration with the verification code.",
+        "description": "Confirm a self sign-up with the verification code Cognito sent.\n\nAnswers 404 unless ``AUTH_PROVIDER=cognito`` and\n``COGNITO_SELF_SIGNUP_ENABLED=true``.",
         "operationId": "confirm_signup_api_v1_auth_confirm_post",
         "requestBody": {
           "content": {
@@ -14056,6 +14056,9 @@
               }
             },
             "description": "Successful Response"
+          },
+          "404": {
+            "description": "Self sign-up is not available: AUTH_PROVIDER is not 'cognito', or COGNITO_SELF_SIGNUP_ENABLED is not true"
           },
           "422": {
             "content": {
@@ -14300,7 +14303,7 @@
     },
     "/api/v1/auth/signup": {
       "post": {
-        "description": "Register a new user.",
+        "description": "Register a new user in the Cognito user pool.\n\nAnswers 404 unless ``AUTH_PROVIDER=cognito`` and\n``COGNITO_SELF_SIGNUP_ENABLED=true``; the user pool must also allow self\nsign-up.  When it is off, an administrator creates users in the user pool.",
         "operationId": "signup_api_v1_auth_signup_post",
         "requestBody": {
           "content": {
@@ -14322,6 +14325,9 @@
               }
             },
             "description": "Successful Response"
+          },
+          "404": {
+            "description": "Self sign-up is not available: AUTH_PROVIDER is not 'cognito', or COGNITO_SELF_SIGNUP_ENABLED is not true"
           },
           "422": {
             "content": {

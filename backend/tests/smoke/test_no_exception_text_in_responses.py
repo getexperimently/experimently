@@ -592,11 +592,6 @@ ALLOWED: Dict[Tuple[str, str, str], Tuple[int, str]] = {
     (f"{E}/tracking.py", "track_events_batch", "ValueError"): (1, SERVICE_VALUEERROR),
     (f"{E}/users.py", "apply_password_change", "ValueError"): (1, PASSWORD_RULE),
     (f"{E}/users.py", "change_own_password", "AccountLockedError"): (1, LOCKED),
-    ("backend/app/routers/auth.py", "confirm_signup", "ValueError"): (1, COGNITO),
-    ("backend/app/routers/auth.py", "forgot_password", "ValueError"): (1, COGNITO),
-    ("backend/app/routers/auth.py", "login", "ValueError"): (1, COGNITO),
-    ("backend/app/routers/auth.py", "reset_password", "ValueError"): (1, COGNITO),
-    ("backend/app/routers/auth.py", "signup", "ValueError"): (1, COGNITO),
     (
         "backend/app/services/experiment_wizard_service.py",
         "ExperimentWizardService.validate_and_submit",

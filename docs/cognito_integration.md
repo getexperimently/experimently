@@ -85,9 +85,60 @@ accounts, so it answers `200` for a sign-in that is refused everywhere else.
 
 ## Adding a user
 
-1. Create the user in the Cognito user pool, with an email address.
-2. Add them to the group for their role (see [Configuration](#configuration)).
-3. Let their first sign-in create their account.
+(Cognito onboarding by an administrator.) Users cannot register themselves unless
+`COGNITO_SELF_SIGNUP_ENABLED=true` (see
+[Authentication Environment Variables](auth/auth-environment-variables.md)). An administrator
+creates each one in the user pool, with a permanent password, and their first sign-in creates
+their account on the platform.
+
+1. **Once per pool, create the role groups.** The names are the keys of
+   `COGNITO_GROUP_ROLE_MAPPING` (`Admins`, `Developers`, `Analysts`, `Viewers`; see
+   [Configuration](#configuration)). The reference pool creates none.
+
+    ```{.bash skip reason="aws: needs the Cognito user pool"}
+    aws cognito-idp create-group --user-pool-id "$COGNITO_USER_POOL_ID" --group-name Developers
+    ```
+
+2. **Create the user.** Choose a username that is not an email address: the reference pool
+   lets people sign in with their email address too, so a username in email form is refused.
+   `email_verified=true` lets them reset their own password. `--message-action SUPPRESS`
+   stops Cognito emailing a temporary password, which cannot be used to sign in through the
+   API (see step 6). The reference pool also requires `given_name` and `family_name`.
+
+    ```{.bash skip reason="aws: needs the Cognito user pool"}
+    aws cognito-idp admin-create-user --user-pool-id "$COGNITO_USER_POOL_ID" --username jdoe --user-attributes Name=email,Value=jane.doe@example.com Name=email_verified,Value=true Name=given_name,Value=Jane Name=family_name,Value=Doe --message-action SUPPRESS
+    ```
+
+3. **Give them a permanent password.** `--permanent` is required. The password must meet the
+   pool's policy: in the reference pool, at least 8 characters with upper case, lower case, a
+   digit and a symbol.
+
+    ```{.bash skip reason="aws: needs the Cognito user pool"}
+    aws cognito-idp admin-set-user-password --user-pool-id "$COGNITO_USER_POOL_ID" --username jdoe --password 'Choose-A-Password-1' --permanent
+    ```
+
+    Then either tell the user the password through a channel you trust, or do not share it
+    and let them choose their own: `POST /api/v1/auth/forgot-password` with
+    `{"username":"jdoe"}` emails them a code, and `POST /api/v1/auth/reset-password` with
+    `username`, `confirmation_code` and `new_password` sets the password.
+
+4. **Add them to their role's group.**
+
+    ```{.bash skip reason="aws: needs the Cognito user pool"}
+    aws cognito-idp admin-add-user-to-group --user-pool-id "$COGNITO_USER_POOL_ID" --username jdoe --group-name Developers
+    ```
+
+5. **First sign-in.** The user calls `POST /api/v1/auth/token` (form fields `username` and
+   `password`), then `GET /api/v1/users/me` with the access token. That first authenticated
+   call creates their account (see
+   [How a sign-in finds its account](#how-a-sign-in-finds-its-account)). The dashboard does
+   not yet sign in with Cognito.
+
+6. **If the user cannot sign in with the password you set,** they still have a temporary
+   password: step 3 was skipped or run without `--permanent`, or Cognito sent an invitation
+   email. A temporary password cannot sign in through the API. Run step 3 again with
+   `--permanent`. Handling the new-password step at sign-in is tracked in
+   [#699](https://github.com/getexperimently/experimently/issues/699).
 
 Do not create the account on the platform first. An account created through the API or the
 dashboard has a password and is not linked to the Cognito user, so the user's sign-in would be

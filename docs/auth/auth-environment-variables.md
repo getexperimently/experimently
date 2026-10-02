@@ -13,6 +13,7 @@ The following environment variables are essential for connecting to and working 
 | `COGNITO_CLIENT_SECRET` | The App Client Secret (if client was created with a secret) | No | None |
 | `AWS_REGION` | The AWS region where your Cognito User Pool is deployed | Yes | `us-west-2` |
 | `COGNITO_DOMAIN` | Your Cognito domain for hosted UI (if used) | No | None |
+| `COGNITO_SELF_SIGNUP_ENABLED` | Under `AUTH_PROVIDER=cognito`, lets anyone who can reach the API register with `POST /api/v1/auth/signup` and `/confirm`. Off: both answer 404 and an administrator creates users ([Adding a user](../cognito_integration.md#adding-a-user)). Ignored under `local`, where both always answer 404. The user pool must also allow self sign-up; the reference pool does not. A self-registered user is in no Cognito group, so their first sign-in creates an account with the Viewer role. | No | `false` |
 
 Under `AUTH_PROVIDER=cognito`, both `COGNITO_USER_POOL_ID` and `COGNITO_CLIENT_ID` are
 required. A sign-in, and a call to `/api/v1/auth/me`, is accepted only for an access token
@@ -24,6 +25,17 @@ issuer the platform expects is built from it, and a pool ID in any other form re
 sign-in. Each refused sign-in is logged at WARNING on the `backend.app.auth.cognito_sign_in`
 logger with a `reason` field: `not_configured` when a setting is unset, `wrong_issuer` when
 the token was not issued to the configured user pool and app client.
+
+`COGNITO_SELF_SIGNUP_ENABLED` takes `true` or `false`, in any letter case (`1`/`0`, `yes`/`no`,
+`on`/`off`, `t`/`f` and `y`/`n` are read the same way). An empty value, or any other value,
+stops the API from starting with an error naming the setting. The name must be in upper case: a lower-case
+`cognito_self_signup_enabled` is ignored and the setting stays `false`.
+
+**Upgrading from a release where sign-up was always on.** A user who signed up but never
+confirmed before this release can no longer confirm through the API while the setting is off.
+Confirm them in the user pool with
+`aws cognito-idp admin-confirm-sign-up --user-pool-id "$COGNITO_USER_POOL_ID" --username "<their Cognito username>"`,
+or delete them and add them again as in [Adding a user](../cognito_integration.md#adding-a-user).
 
 ## User pool requirements
 

@@ -139,29 +139,63 @@ def auth_client(cognito_resources):
 
 
 @pytest.fixture
+def self_signup_enabled(monkeypatch):
+    """Turn on ``COGNITO_SELF_SIGNUP_ENABLED`` for one test.
+
+    Off by default for this package, as for a deployment: only the modules
+    that exercise ``/signup`` and ``/confirm`` opt in, so every other test
+    runs with the default.
+    """
+    from backend.app.core.config import settings
+
+    monkeypatch.setattr(settings, "COGNITO_SELF_SIGNUP_ENABLED", True)
+    yield
+
+
+@pytest.fixture
 def registered_user(cognito_resources, auth_client):
     """
-    A user that has been registered AND confirmed in the moto pool.
-    Uses admin_confirm_sign_up to bypass the email verification step.
+    A user in the moto pool with a permanent password (status CONFIRMED),
+    created the way ``docs/cognito_integration.md`` "Adding a user" tells an
+    administrator to: ``admin_create_user`` then ``admin_set_user_password``
+    with ``Permanent=True``.  It does not go through ``/signup``, which is off
+    by default.
+
+    The pool is module-scoped, so a second test in the module finds the user
+    already there: only ``UsernameExistsException`` is tolerated, the password
+    is set every time, and the fixture asserts the user really is CONFIRMED.
     Returns the VALID_USER dict.
     """
     from backend.tests.integration.auth.spec_cognito_integration import VALID_USER
 
     boto_client = cognito_resources["boto_client"]
     user_pool_id = cognito_resources["user_pool_id"]
+    username = VALID_USER["username"]
 
-    # Register via API
-    auth_client.post("/api/v1/auth/signup", json=VALID_USER)
-    # If user already exists from previous test, that's fine
-
-    # Admin-confirm the user (bypasses email code)
     try:
-        boto_client.admin_confirm_sign_up(
+        boto_client.admin_create_user(
             UserPoolId=user_pool_id,
-            Username=VALID_USER["username"],
+            Username=username,
+            UserAttributes=[
+                {"Name": "email", "Value": VALID_USER["email"]},
+                {"Name": "email_verified", "Value": "true"},
+                {"Name": "given_name", "Value": VALID_USER["given_name"]},
+                {"Name": "family_name", "Value": VALID_USER["family_name"]},
+            ],
+            MessageAction="SUPPRESS",
         )
-    except Exception:
-        pass  # Already confirmed
+    except boto_client.exceptions.UsernameExistsException:
+        pass  # created by an earlier test in this module
+    boto_client.admin_set_user_password(
+        UserPoolId=user_pool_id,
+        Username=username,
+        Password=VALID_USER["password"],
+        Permanent=True,
+    )
+    status = boto_client.admin_get_user(UserPoolId=user_pool_id, Username=username)[
+        "UserStatus"
+    ]
+    assert status == "CONFIRMED", status
 
     return VALID_USER
 

@@ -505,6 +505,12 @@ class Settings(BaseSettings):
     }
     COGNITO_ADMIN_GROUPS: List[str] = ["Admins", "SuperUsers"]
     SYNC_ROLES_ON_LOGIN: bool = True
+    # Under AUTH_PROVIDER=cognito, POST /api/v1/auth/signup and /confirm
+    # answer 404 unless this is true; an administrator creates users in the
+    # user pool instead (docs/cognito_integration.md, "Adding a user").
+    # Ignored under ``local``, where both routes always answer 404.  Read at
+    # request time, so a test can flip it on the singleton.
+    COGNITO_SELF_SIGNUP_ENABLED: bool = False
 
     model_config = SettingsConfigDict(
         case_sensitive=True,
