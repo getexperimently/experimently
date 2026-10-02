@@ -44,6 +44,7 @@ from sqlalchemy.orm import Session
 from backend.app.core.config import settings as core_settings
 from backend.app.core.logger import get_log_context
 from backend.app.models.user import User, UserRole
+from backend.app.schemas.storable_text import contains_unstorable_text
 from modules.backend.app.models.sso_config import SSOConfig
 from modules.backend.app.settings import settings
 
@@ -1028,6 +1029,23 @@ EMAIL_AMBIGUOUS_DETAIL = (
     "More than one account matches this email address; ask an administrator"
 )
 
+#: The most each value a sign-in stores can hold, read from the columns (#662),
+#: so a value is refused or shortened here instead of failing in the database.
+EMAIL_MAX: int = User.__table__.c.email.type.length
+NAME_MAX: int = min(
+    User.__table__.c.first_name.type.length, User.__table__.c.last_name.type.length
+)
+EXTERNAL_ID_MAX: int = User.__table__.c.external_id.type.length
+
+EMAIL_TOO_LONG_DETAIL = (
+    f"This account's email address is longer than {EMAIL_MAX} characters, "
+    "the most an account can hold. Ask an administrator."
+)
+IDENTITY_UNUSABLE_DETAIL = (
+    "The identity provider's identifier for this account is longer than "
+    f"{EXTERNAL_ID_MAX} characters or not valid text; ask an administrator"
+)
+
 
 def require_supported_provider(provider: str) -> None:
     """Refuse, with a fixed 400, a provider on the unsupported list."""
@@ -1060,7 +1078,37 @@ def _sso_email(user_info: Dict[str, Any], config: SSOConfig) -> str:
     expected = normalise_domain(config.org_domain)
     if not expected or domain != expected:
         raise SSORefusal(status.HTTP_403_FORBIDDEN, EMAIL_DOMAIN_DETAIL, SSO_DOMAIN)
+    # psycopg2 refuses a NUL, and an address is never shortened: a shortened
+    # one could be another person's (#662).
+    if "\x00" in email:
+        raise SSORefusal(status.HTTP_400_BAD_REQUEST, EMAIL_INVALID_DETAIL, SSO_EMAIL)
+    if len(email) > EMAIL_MAX:
+        raise SSORefusal(status.HTTP_400_BAD_REQUEST, EMAIL_TOO_LONG_DETAIL, SSO_EMAIL)
     return email
+
+
+#: NUL and the lone surrogates U+D800-U+DFFF (``json.loads`` makes one from
+#: ``"\\ud800"``): the characters the database cannot store. One character
+#: class, so a search cannot backtrack.
+_UNSTORABLE_CHARS = re.compile("[\x00\ud800-\udfff]")
+
+
+def _display_name(value: Any) -> Optional[str]:
+    """A name a provider sent, as a new account stores it: text only, without
+    NUL or surrogates, stripped and cut to ``NAME_MAX`` characters; ``None``
+    when nothing is left (#662)."""
+    if not isinstance(value, str):
+        return None
+    return _UNSTORABLE_CHARS.sub("", value).strip()[:NAME_MAX].strip() or None
+
+
+def _usable_external_id(value: Any) -> bool:
+    """Text the ``external_id`` column can store and compare."""
+    return (
+        isinstance(value, str)
+        and len(value) <= EXTERNAL_ID_MAX
+        and not contains_unstorable_text(value)
+    )
 
 
 def _is_verified_claim(value: Any) -> bool:
@@ -1217,6 +1265,11 @@ def provision_user(
     # its own email, and a sign-in under another email is refused rather than
     # handed that row or crashing on the unique column (#122).
     external_id = user_info.get("sub") or user_info.get("name_id")
+    # Checked before the lookup, which psycopg2 fails on a NUL or a surrogate.
+    if external_id and not _usable_external_id(external_id):
+        raise SSORefusal(
+            status.HTTP_400_BAD_REQUEST, IDENTITY_UNUSABLE_DETAIL, SSO_ACCOUNT
+        )
     if external_id and db.query(User).filter(User.external_id == external_id).first():
         raise SSORefusal(status.HTTP_409_CONFLICT, IDENTITY_TAKEN_DETAIL, SSO_ACCOUNT)
     role = UserRole(mapped) if mapped else UserRole.VIEWER
@@ -1225,17 +1278,19 @@ def provision_user(
     local_part = email.split("@")[0].replace(".", "_").replace("+", "_")[:40]
     username = f"{local_part}_{uuid.uuid4().hex[:8]}"
 
-    raw = user_info.get("raw") or {}
-    name_parts = (user_info.get("name") or "").split()
+    raw = user_info.get("raw")
+    raw = raw if isinstance(raw, dict) else {}
+    name = user_info.get("name")
+    name_parts = name.split() if isinstance(name, str) else []
     first_name = (
-        user_info.get("first_name")
-        or raw.get("given_name")
-        or (name_parts[0] if name_parts else None)
+        _display_name(user_info.get("first_name"))
+        or _display_name(raw.get("given_name"))
+        or (_display_name(name_parts[0]) if name_parts else None)
     )
     last_name = (
-        user_info.get("last_name")
-        or raw.get("family_name")
-        or (" ".join(name_parts[1:]) if len(name_parts) > 1 else None)
+        _display_name(user_info.get("last_name"))
+        or _display_name(raw.get("family_name"))
+        or (_display_name(" ".join(name_parts[1:])) if len(name_parts) > 1 else None)
     )
 
     new_user = User(

@@ -75,10 +75,10 @@ The browser returns to `<dashboard>/login?sso_error=<code>` and the sign-in page
 | `sso_expired` | the sign-in took more than 10 minutes |
 | `sso_state` | the callback did not carry the cookie of a sign-in this browser started, or its `state` did not match; also a hand-off code that was refused |
 | `sso_idp_error` | the provider returned an OAuth `error` (the page shows the code, e.g. `access_denied`) |
-| `sso_email` | the provider sent no usable email address |
+| `sso_email` | the provider sent no usable email address, or one longer than 100 characters |
 | `sso_unverified` | the provider has not verified the email address (see [Accounts and email addresses](#jit-user-provisioning)) |
 | `sso_domain` | the email address is not in the configuration's domain |
-| `sso_account` | the account needs an administrator: more than one account has the email, or the identity is already linked to another account |
+| `sso_account` | the account needs an administrator: more than one account has the email, the identity is already linked to another account, or the provider's identifier for the account (`sub`, or the SAML Name ID) is longer than 255 characters or not valid text |
 | `sso_inactive` | the account is deactivated |
 | `sso_not_configured` | no active OIDC configuration for the domain, or more than one; or the configuration was deactivated or deleted during the sign-in |
 | `sso_saml_only` | the domain's only active configuration is SAML |
@@ -86,7 +86,7 @@ The browser returns to `<dashboard>/login?sso_error=<code>` and the sign-in page
 | `sso_rate_limited` | the dashboard's own code: the exchange was rate-limited |
 | `sso_unreachable` | the dashboard's own code: the API could not be reached |
 
-For `sso_failed` and `sso_account` the page shows a Request ID when the API sent one; search the API log for it. A refusal in the callback is logged at WARNING with its `sso_error`, status, detail and request ID, and an unexpected error at ERROR with its traceback.
+For `sso_failed`, `sso_account` and `sso_email` the page shows a Request ID when the API sent one; search the API log for it. A refusal in the callback is logged at WARNING with its `sso_error`, status, detail and request ID, and an unexpected error at ERROR with its traceback.
 
 ### Where the dashboard is: `DASHBOARD_ORIGINS`
 
@@ -278,6 +278,8 @@ A new account is created with no password and these fields; an existing account'
 | `first_name` | the `firstName` attribute | the user info's `given_name`, else the first word of `name` |
 | `last_name` | the `lastName` attribute | the user info's `family_name`, else the rest of `name` |
 | `role` | from the `groups` attribute via `role_mapping`, else `viewer` | from the user info's `groups` via `role_mapping`, else `viewer` |
+
+A `first_name` or `last_name` longer than 100 characters is shortened to its first 100. An email address longer than 100 characters, the most an account can hold, is never shortened: the sign-in is refused with `sso_email`.
 
 ### Upgrading
 
