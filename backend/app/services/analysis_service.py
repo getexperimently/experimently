@@ -82,6 +82,11 @@ class AnalysisService:
 
         Args:
             experiment_id: ID of the experiment
+            confidence_level: level of every variant interval; ``1 -
+                confidence_level`` is the significance level.  The request's
+                ``confidence_level`` on ``/results``; experiments store none.
+            correction_method: ``none``, ``bonferroni`` or
+                ``benjamini_hochberg``
             include_bayesian: Compute ``bayesian_results`` when the experiment
                 has Bayesian analysis enabled. The data export passes False: it
                 reads only the frequentist ``metrics`` and ``summary``, which
@@ -108,7 +113,9 @@ class AnalysisService:
         metric_definitions = self._ordered_metrics(experiment)
         metrics_results = []
         for metric in metric_definitions:
-            metric_result = self.calculate_metric_results(experiment, metric)
+            metric_result = self.calculate_metric_results(
+                experiment, metric, confidence_level
+            )
             metrics_results.append(metric_result)
 
         # Calculate overall summary statistics
@@ -293,7 +300,10 @@ class AnalysisService:
         )
 
     def calculate_metric_results(
-        self, experiment: Experiment, metric: Metric
+        self,
+        experiment: Experiment,
+        metric: Metric,
+        confidence_level: float = 0.95,
     ) -> Dict[str, Any]:
         """
         Calculate results for a specific metric in an experiment.
@@ -301,6 +311,8 @@ class AnalysisService:
         Args:
             experiment: Experiment model object
             metric: Metric model object
+            confidence_level: level of each variant's interval; its
+                complement is the significance level
 
         Returns:
             Dictionary containing metric results
@@ -340,7 +352,8 @@ class AnalysisService:
             [
                 (variant, assignments[str(variant.id)], conversions[str(variant.id)])
                 for variant in experiment.variants
-            ]
+            ],
+            confidence_level,
         )
 
         # Format metric result

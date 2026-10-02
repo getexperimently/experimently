@@ -163,7 +163,7 @@ looks like this:
   "last_updated": "2026-09-26T14:32:00+00:00",
   "seed": 6346510783624545786,
   "n_samples": 10000,
-  "engine_version": "1.1.0"
+  "engine_version": "1.2.0"
 }
 ```
 
@@ -174,7 +174,7 @@ looks like this:
 | `algorithm` | The experiment's `optimization_type` |
 | `current_weight` | Current traffic allocation fraction (0–1, sums to 1.0 across variants) |
 | `pulls` | Total assignments to this variant |
-| `successes` | Conversion events recorded for this variant |
+| `successes` | Converting users in this variant: users assigned to it with at least one conversion event, each counted once |
 | `regret_reduction_pct` | Estimated regret reduction compared with a uniform split; `null` until there is data |
 | `recommendation` | `EXPLORING`, `CONVERGING`, or `DEPLOYING_<variant name>` once one variant dominates |
 | `last_updated` | When the weights were last computed; `null` before the first update |
@@ -243,8 +243,10 @@ For each variant the scheduler needs pulls (assignments) and successes (conversi
 1. **DynamoDB real-time counters** (`get_experiment_counters`), when the counters stack is deployed and
    every variant has at least as many pulls and successes there as in PostgreSQL. A partial DynamoDB count (a counter
    that started late, or a manual increment) is ignored in favour of PostgreSQL's complete one.
-2. **PostgreSQL**: pulls = `assignments` rows per variant; successes = distinct users with an event whose
-   `event_name` matches the experiment's primary metric (see the event-matching rule in the tracking API docs).
+2. **PostgreSQL**: pulls = `assignments` rows per variant; successes = converting users, counted exactly as
+   `/results` counts them: users assigned to the variant with at least one event, tagged with that variant, whose
+   `event_name` matches the experiment's primary metric (see the event-matching rule in the tracking API docs). A
+   user who converts three times counts once. With no metric configured, every event other than an experiment view is a success.
    This is the path used in local and single-region deployments.
 3. The previously persisted `BanditState`.
 4. Zero-count priors (equal weights).

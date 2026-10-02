@@ -1,10 +1,13 @@
 # models/event.py
+from datetime import datetime, timezone
 from enum import Enum
+from typing import Any, Optional
 
 from sqlalchemy import Column, Float, ForeignKey, Index, String
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.ext.declarative import declared_attr
 from sqlalchemy.orm import relationship
+from sqlalchemy.types import TypeDecorator
 
 from backend.app.core.database_config import get_schema_name
 
@@ -19,6 +22,55 @@ class EventType(str, Enum):
     CLICK = "click"  # User clicked on a tracked element
     PAGE_VIEW = "page_view"  # User viewed a tracked page
     CUSTOM = "custom"  # Custom event type
+
+
+def normalize_event_timestamp(value: Any) -> str:
+    """Return ``value`` as a UTC ISO-8601 string in one canonical format.
+
+    ``events.created_at`` is a string column, so every time window over events
+    is a string comparison.  That only orders correctly when every value is in
+    UTC and in the same shape, so every value is converted to UTC and written
+    the way ``datetime.isoformat()`` writes an aware UTC datetime:
+    ``YYYY-MM-DDTHH:MM:SS+00:00``, or ``YYYY-MM-DDTHH:MM:SS.ffffff+00:00``
+    when there are microseconds.  Those two shapes still sort in time order
+    ('+' sorts before '.', and a value with no fraction is the earlier one),
+    and they are what the server has always written for its own timestamps,
+    so rows written that way compare correctly with new ones.  A value with
+    no offset is taken to be UTC already.
+
+    Accepts a ``datetime`` or an ISO-8601 string (``Z`` or a numeric offset).
+    Raises ``ValueError`` for anything else, so an unreadable timestamp is
+    refused rather than stored and compared as text.
+    """
+    if isinstance(value, datetime):
+        moment = value
+    elif isinstance(value, str):
+        moment = datetime.fromisoformat(value.strip())
+    else:
+        raise ValueError("event timestamp must be a datetime or an ISO-8601 string")
+    if moment.tzinfo is None:
+        moment = moment.replace(tzinfo=timezone.utc)
+    return moment.astimezone(timezone.utc).isoformat()
+
+
+class UTCTimestampString(TypeDecorator):
+    """A ``String`` column whose bound values are normalised to UTC.
+
+    The database type is unchanged (no migration).  Normalising at the bind
+    covers every writer -- the tracking API, ``EventService``, the seed
+    scripts -- and every comparison: ``Event.created_at >= x`` binds ``x``
+    through this type, so a window boundary given as a ``datetime`` or with
+    an offset is compared in the same format as the stored values.  Values
+    read back are returned as stored.
+    """
+
+    impl = String
+    cache_ok = True
+
+    def process_bind_param(self, value: Any, dialect: Any) -> Optional[str]:
+        if value is None:
+            return None
+        return normalize_event_timestamp(value)
 
 
 class Event(Base, BaseModel):
@@ -48,9 +100,10 @@ class Event(Base, BaseModel):
     )
     value = Column(Float)  # Numeric value if applicable
     event_metadata = Column(JSONB)  # Additional data
-    created_at = Column(
-        String, nullable=False, index=True
-    )  # Timestamp for when the event was created
+    # When the event happened, as a UTC ISO-8601 string (see
+    # UTCTimestampString): the column is VARCHAR, so the format is what makes
+    # time windows compare correctly.
+    created_at = Column(UTCTimestampString, nullable=False, index=True)
 
     # Relationships
     experiment = relationship("Experiment", back_populates="events")

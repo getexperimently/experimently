@@ -189,7 +189,8 @@ class VariantResult(BaseModel):
         ...,
         description=(
             "Two-sided confidence interval as (lower, upper).  "
-            "The confidence level is specified at the experiment level."
+            "Its level is the confidence_level the request asked for "
+            "(default 0.95); experiments store no level of their own."
         ),
     )
     p_value: Optional[float] = Field(
@@ -211,7 +212,8 @@ class VariantResult(BaseModel):
         ...,
         description=(
             "True when the adjusted (or raw, if no correction) p-value is "
-            "below the experiment's significance threshold (1 - confidence_level)."
+            "below the significance threshold 1 - confidence_level, the same "
+            "level as confidence_interval."
         ),
     )
     effect_size: Optional[float] = Field(

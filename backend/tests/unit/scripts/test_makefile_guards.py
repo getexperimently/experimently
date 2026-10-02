@@ -217,3 +217,22 @@ class TestTheOpenApiFixturesNameTheirProfile:
                 f"{relative}: `{line.strip()}` dumps whichever profile the "
                 f"checkout happens to load"
             )
+
+
+@pytest.mark.regression
+def test_venv_installs_the_modules_requirements_in_a_full_checkout():
+    """`make venv` installs modules/requirements*.txt when modules/ is present.
+
+    Without it the warehouse and SSO tests cannot import sqlglot or duckdb in a
+    developer venv, and run only in CI. The install sits behind the same
+    one-line guard as test-modules, so a core checkout still succeeds.
+    """
+    text = MAKEFILE.read_text(encoding="utf-8")
+    start = text.index("\nvenv:")
+    end = text.index("\n.PHONY", start)
+    recipe = text[start:end]
+    assert "[ -f modules/requirements.txt ]" in recipe, recipe
+    assert "-r modules/requirements.txt -r modules/requirements-test.txt" in recipe, (
+        recipe
+    )
+    assert "core checkout" in recipe, recipe

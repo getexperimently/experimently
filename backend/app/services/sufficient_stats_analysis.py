@@ -77,20 +77,42 @@ def effect_size_label(abs_effect: float) -> str:
         return "large"
 
 
+def two_sided_z(confidence_level: float) -> float:
+    """The two-sided normal critical value for ``confidence_level``.
+
+    ``norm.ppf(1 - (1 - level) / 2)``: 1.6449 at 0.90, 1.9600 at 0.95,
+    2.5758 at 0.99.
+
+    Raises:
+        ValueError: unless ``0 < confidence_level < 1``.
+    """
+    if not 0.0 < confidence_level < 1.0:
+        raise ValueError(
+            f"confidence_level must be between 0 and 1, got {confidence_level!r}"
+        )
+    return float(stats.norm.ppf(1.0 - (1.0 - confidence_level) / 2.0))
+
+
 def binomial_variant_results(
     variants: Sequence[BinomialCounts],
+    confidence_level: float = 0.95,
 ) -> List[Dict[str, Any]]:
     """Per-variant results on the legacy percent scale.
 
     These are the ``variant_results`` of ``/results``' ``metrics_results``:
-    conversion rate and a 95% normal-approximation interval in percent, and,
-    for each treatment, Fisher's exact p-value against the control, its
-    significance at 0.05 and the relative improvement in percent.  The first
+    conversion rate and a normal-approximation interval at
+    ``confidence_level`` in percent, and, for each treatment, Fisher's exact
+    p-value against the control, its significance at
+    ``1 - confidence_level`` and the relative improvement in percent.  The
+    interval and the significance decision use the same level.  The first
     variant flagged ``is_control`` is the control.
 
     Raises:
-        ValueError: when no variant is the control.
+        ValueError: when no variant is the control, or the level is not
+            strictly between 0 and 1.
     """
+    z = two_sided_z(confidence_level)
+    alpha = 1.0 - confidence_level
     control = next((v for v, _, _ in variants if v.is_control), None)
     if control is None:
         raise ValueError("No variant is the control")
@@ -135,7 +157,7 @@ def binomial_variant_results(
 
             try:
                 odds_ratio, p_value = stats.fisher_exact(contingency_table)
-                is_significant = p_value < 0.05  # Using 95% confidence level
+                is_significant = p_value < alpha
 
                 if rates[control_id] > 0:
                     relative_improvement = (
@@ -152,8 +174,6 @@ def binomial_variant_results(
         # Confidence interval using the normal approximation
         if assignments[variant_id] > 0:
             proportion = rates[variant_id] / 100  # Convert percentage to proportion
-            z = 1.96  # For 95% confidence level
-
             se = math.sqrt((proportion * (1 - proportion)) / assignments[variant_id])
 
             ci_lower = max(0, (proportion - z * se) * 100)
@@ -194,7 +214,8 @@ def binomial_metric_result(
             ``variant`` has ``id``, ``name`` and ``is_control``
             (``BinomialVariant`` or an ORM ``Variant``); exactly one should be
             the control.
-        alpha: significance level for ``is_significant`` and observed power.
+        alpha: significance level for ``is_significant`` and observed power;
+            the interval is at ``1 - alpha``.
         correction_method: ``none``, ``bonferroni`` or ``benjamini_hochberg``,
             applied across the treatments of this metric.
         metric: the metric's identity: ``id``, ``name``, ``metric_type`` and
@@ -205,9 +226,10 @@ def binomial_metric_result(
         ``/results`` returns in ``metrics`` for the same counts.
 
     Raises:
-        ValueError: when no variant is the control.
+        ValueError: when no variant is the control, or ``alpha`` is not
+            strictly between 0 and 1.
     """
-    variant_results = binomial_variant_results(variants)
+    variant_results = binomial_variant_results(variants, 1.0 - alpha)
 
     control = next((v for v in variant_results if v["is_control"]), None)
     control_rate = (control["conversion_rate"] / 100.0) if control else 0.0

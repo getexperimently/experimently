@@ -647,7 +647,7 @@ class TestBanditSchedulerStatsFallback:
             )
 
         count_pulls.assert_called_once_with(exp.id)
-        count_conv.assert_called_once_with(exp.id, "purchase")
+        count_conv.assert_called_once_with(exp.id, "purchase", [vid1, vid2])
         assert stats[vid1].pulls == 100
         assert stats[vid1].successes == 40
         assert stats[vid1].failures == 60
@@ -732,7 +732,7 @@ class TestBanditSchedulerStatsFallback:
                 exp.id, [vid1, vid2], experiment=exp
             )
 
-        count_conv.assert_called_once_with(exp.id, None)
+        count_conv.assert_called_once_with(exp.id, None, [vid1, vid2])
         assert stats[vid2].successes == 2
 
     def test_old_signature_loads_experiment_from_db(self):
@@ -758,7 +758,7 @@ class TestBanditSchedulerStatsFallback:
         ):
             stats = scheduler.get_variant_stats_from_counters(exp.id, [vid1, vid2])
 
-        count_conv.assert_called_once_with(exp.id, "signup")
+        count_conv.assert_called_once_with(exp.id, "signup", [vid1, vid2])
         assert stats[vid1].successes == 7
 
     def test_falls_back_to_bandit_state_when_postgres_is_empty(self):

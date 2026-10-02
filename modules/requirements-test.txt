@@ -15,4 +15,4 @@
 # Warehouse analysis (#312): an in-process SQL engine the tests run the
 # generated statements' semantics on (grain, windows, time zones, centred
 # sums), in place of a cloud warehouse.
-duckdb==1.5.5
+duckdb==1.5.6

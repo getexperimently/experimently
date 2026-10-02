@@ -5,8 +5,9 @@ Tests the full HTTP request/response cycle for:
   POST /api/v1/results/{experiment_id}/post-stratification
   POST /api/v1/results/{experiment_id}/fdr-correction
 
-The PostStratificationService and BenjaminiHochbergService are patched to
-return predictable results, keeping tests independent of DB data volume.
+Post-stratification is not available yet and answers 501 (#443); the tests
+pin that it reports no numbers. BenjaminiHochbergService is patched to return
+predictable results, keeping the FDR tests independent of DB data volume.
 """
 
 import uuid
@@ -15,7 +16,12 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy.orm import Session
 
+from backend.app.api.v1.endpoints.post_stratification import (
+    POST_STRAT_UNAVAILABLE_DETAIL,
+)
+from backend.app.models.assignment import Assignment
 from backend.app.models.experiment import (
     Experiment,
     ExperimentStatus,
@@ -24,6 +30,7 @@ from backend.app.models.experiment import (
     MetricType,
     Variant,
 )
+from backend.app.services.post_stratification_service import PostStratificationService
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -69,23 +76,6 @@ def _create_experiment(client: TestClient, name: str = "EP-043 Test") -> dict:
     return response.json()
 
 
-def _make_post_strat_result() -> dict:
-    """Return a mock PostStratResult dict as the service would produce."""
-    return {
-        "metric_name": "metric_value",
-        "control_mean": 5.0,
-        "treatment_mean": 5.5,
-        "effect_size": 0.5,
-        "effect_size_relative": 0.1,
-        "variance_reduction": 25.5,
-        "adjusted_se": 0.12,
-        "p_value": 0.001,
-        "confidence_interval": (0.26, 0.74),
-        "n_strata": 2,
-        "strata_sizes": {"A": 500, "B": 500},
-    }
-
-
 def _make_fdr_results() -> list:
     """Return a list of mock FDRResult dicts."""
     return [
@@ -118,114 +108,95 @@ def _make_fdr_results() -> list:
 # ---------------------------------------------------------------------------
 
 
+#: Every number field of PostStratResultResponse. None may appear in a 501.
+RESULT_FIELDS = (
+    "control_mean",
+    "treatment_mean",
+    "effect_size",
+    "effect_size_relative",
+    "variance_reduction",
+    "adjusted_se",
+    "p_value",
+    "confidence_interval",
+    "n_strata",
+    "strata_sizes",
+)
+
+
+def _assign_users(db_session: Session, exp: dict, per_variant: int = 20) -> None:
+    """Give every variant of ``exp`` real assignment rows.
+
+    The route used to turn exactly this -- assignments and nothing else --
+    into a full result of random numbers.
+    """
+    for variant in exp["variants"]:
+        for i in range(per_variant):
+            db_session.add(
+                Assignment(
+                    experiment_id=uuid.UUID(exp["id"]),
+                    variant_id=uuid.UUID(variant["id"]),
+                    user_id=f"ps-{variant['name']}-{i}",
+                    context={"country": "US" if i % 2 else "DE"},
+                )
+            )
+    db_session.commit()
+
+
 @pytest.mark.integration
 @pytest.mark.requires_db
 class TestPostStratificationEndpoint:
-    """Integration tests for the post-stratification endpoint."""
+    """The post-stratification route is not available yet and says so (#443)."""
 
-    def test_post_strat_returns_200_with_valid_payload(self, admin_client):
-        """POST post-stratification with valid stratum_cols returns 200."""
-        exp = _create_experiment(admin_client, "PostStrat Basic Test")
-        exp_id = exp["id"]
+    @pytest.mark.regression
+    def test_post_strat_with_assignments_answers_501_not_numbers(
+        self, admin_client, db_session
+    ):
+        """An experiment with assigned users gets a 501 and no result fields.
 
-        mock_result = _make_post_strat_result()
+        On the old code this answered 200 with means drawn from
+        ``rng.normal(5.0, 1.0)`` / ``rng.normal(5.2, 1.0)``.
+        """
+        exp = _create_experiment(admin_client, "PostStrat Real Assignments")
+        _assign_users(db_session, exp)
 
-        with patch(
-            "backend.app.api.v1.endpoints.post_stratification.PostStratificationService.compute",
-            return_value=MagicMock(**mock_result),
+        response = admin_client.post(
+            f"/api/v1/results/{exp['id']}/post-stratification",
+            json={"stratum_cols": ["country"], "metric_col": "metric_value"},
+        )
+
+        assert response.status_code == 501, response.text
+        body = response.json()
+        assert body == {"detail": POST_STRAT_UNAVAILABLE_DETAIL}
+        assert not any(field in body for field in RESULT_FIELDS)
+
+    def test_post_strat_with_no_data_answers_501(self, admin_client):
+        """An experiment with no assignments is refused the same way."""
+        exp = _create_experiment(admin_client, "PostStrat No Data")
+
+        response = admin_client.post(
+            f"/api/v1/results/{exp['id']}/post-stratification",
+            json={"stratum_cols": ["country", "device"], "alpha": 0.01},
+        )
+
+        assert response.status_code == 501, response.text
+        assert response.json() == {"detail": POST_STRAT_UNAVAILABLE_DETAIL}
+
+    def test_post_strat_never_calls_the_service(self, admin_client, db_session):
+        """The 501 does not depend on the service failing: it is not called."""
+        exp = _create_experiment(admin_client, "PostStrat Service Untouched")
+        _assign_users(db_session, exp, per_variant=4)
+
+        with patch.object(
+            PostStratificationService,
+            "compute",
+            side_effect=AssertionError("post-stratification service was called"),
         ):
             response = admin_client.post(
-                f"/api/v1/results/{exp_id}/post-stratification",
-                json={
-                    "stratum_cols": ["country"],
-                    "metric_col": "metric_value",
-                    "alpha": 0.05,
-                },
-            )
-
-        assert response.status_code == 200, response.text
-
-    def test_post_strat_response_contains_required_fields(self, admin_client):
-        """POST post-stratification response contains all PostStratResult fields."""
-        exp = _create_experiment(admin_client, "PostStrat Fields Test")
-        exp_id = exp["id"]
-
-        mock_result = _make_post_strat_result()
-
-        with patch(
-            "backend.app.api.v1.endpoints.post_stratification.PostStratificationService.compute",
-            return_value=MagicMock(**mock_result),
-        ):
-            response = admin_client.post(
-                f"/api/v1/results/{exp_id}/post-stratification",
+                f"/api/v1/results/{exp['id']}/post-stratification",
                 json={"stratum_cols": ["country"]},
             )
 
-        assert response.status_code == 200, response.text
-        data = response.json()
-        required_fields = [
-            "metric_name",
-            "control_mean",
-            "treatment_mean",
-            "effect_size",
-            "effect_size_relative",
-            "variance_reduction",
-            "adjusted_se",
-            "p_value",
-            "confidence_interval",
-            "n_strata",
-            "strata_sizes",
-        ]
-        for field in required_fields:
-            assert field in data, f"Missing field: {field}"
-
-    def test_post_strat_variance_reduction_in_response(self, admin_client):
-        """variance_reduction field is returned in the response."""
-        exp = _create_experiment(admin_client, "PostStrat VR Test")
-        exp_id = exp["id"]
-
-        mock_result = _make_post_strat_result()
-        mock_result["variance_reduction"] = 42.5
-
-        with patch(
-            "backend.app.api.v1.endpoints.post_stratification.PostStratificationService.compute",
-            return_value=MagicMock(**mock_result),
-        ):
-            response = admin_client.post(
-                f"/api/v1/results/{exp_id}/post-stratification",
-                json={"stratum_cols": ["device"]},
-            )
-
-        assert response.status_code == 200, response.text
-        data = response.json()
-        assert data["variance_reduction"] == 42.5
-
-    def test_post_strat_multiple_stratum_cols(self, admin_client):
-        """POST post-stratification accepts multiple stratum_cols."""
-        exp = _create_experiment(admin_client, "PostStrat MultiStrat Test")
-        exp_id = exp["id"]
-
-        mock_result = _make_post_strat_result()
-        mock_result["n_strata"] = 4
-        mock_result["strata_sizes"] = {
-            "US_mobile": 200,
-            "US_desktop": 200,
-            "UK_mobile": 150,
-            "UK_desktop": 150,
-        }
-
-        with patch(
-            "backend.app.api.v1.endpoints.post_stratification.PostStratificationService.compute",
-            return_value=MagicMock(**mock_result),
-        ):
-            response = admin_client.post(
-                f"/api/v1/results/{exp_id}/post-stratification",
-                json={"stratum_cols": ["country", "device"]},
-            )
-
-        assert response.status_code == 200, response.text
-        data = response.json()
-        assert data["n_strata"] == 4
+        assert response.status_code == 501, response.text
 
     def test_post_strat_nonexistent_experiment_returns_404(self, admin_client):
         """POST post-stratification with nonexistent experiment_id returns 404."""
@@ -257,24 +228,6 @@ class TestPostStratificationEndpoint:
         )
         assert response.status_code == 422, response.text
 
-    def test_post_strat_custom_alpha(self, admin_client):
-        """POST post-stratification with custom alpha=0.01 is accepted."""
-        exp = _create_experiment(admin_client, "PostStrat Alpha Test")
-        exp_id = exp["id"]
-
-        mock_result = _make_post_strat_result()
-
-        with patch(
-            "backend.app.api.v1.endpoints.post_stratification.PostStratificationService.compute",
-            return_value=MagicMock(**mock_result),
-        ):
-            response = admin_client.post(
-                f"/api/v1/results/{exp_id}/post-stratification",
-                json={"stratum_cols": ["tier"], "alpha": 0.01},
-            )
-
-        assert response.status_code == 200, response.text
-
     def test_post_strat_invalid_alpha_returns_422(self, admin_client):
         """POST post-stratification with alpha > 1 returns 422."""
         exp = _create_experiment(admin_client, "PostStrat Bad Alpha Test")
@@ -285,22 +238,6 @@ class TestPostStratificationEndpoint:
             json={"stratum_cols": ["country"], "alpha": 1.5},
         )
         assert response.status_code == 422, response.text
-
-    def test_post_strat_service_value_error_returns_422(self, admin_client):
-        """POST post-stratification returns 422 when service raises ValueError."""
-        exp = _create_experiment(admin_client, "PostStrat ValError Test")
-        exp_id = exp["id"]
-
-        with patch(
-            "backend.app.api.v1.endpoints.post_stratification.PostStratificationService.compute",
-            side_effect=ValueError("Stratum 'region' not found in data"),
-        ):
-            response = admin_client.post(
-                f"/api/v1/results/{exp_id}/post-stratification",
-                json={"stratum_cols": ["region"]},
-            )
-
-        assert response.status_code in (422, 400), response.text
 
 
 # ---------------------------------------------------------------------------
