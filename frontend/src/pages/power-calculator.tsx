@@ -1,6 +1,5 @@
 'use client';
 
-import Link from 'next/link';
 import { useState, useEffect, useCallback } from 'react';
 import { docsUrl } from '@/services/docs';
 import {
@@ -179,9 +178,9 @@ export default function PowerCalculatorPage() {
             <p className="text-gray-500 text-base">
               Calculate the required sample size, detect the minimum effect size, and estimate
               how long your experiment needs to run. No account required.{' '}
-              <Link href="/docs/statistics/power-analysis" className="text-blue-600 hover:text-blue-700">
+              <a href={docsUrl('statistics/power-analysis')} className="text-blue-600 hover:text-blue-700">
                 Learn more
-              </Link>
+              </a>
             </p>
           </div>
 

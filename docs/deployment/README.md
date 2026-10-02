@@ -1,6 +1,6 @@
 # Deployment Documentation
 
-Operational documentation for deploying and operating Experimently on AWS.
+Operational documentation for deploying and operating Experimently in an AWS account.
 There are two environments, **`staging`** and **`prod`**, and one path for
 both: the same stacks (`ENVIRONMENT=<env> cdk deploy`) and the same three
 workflows, each dispatched with `environment: staging` or `environment: prod`.

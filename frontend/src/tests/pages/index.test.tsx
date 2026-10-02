@@ -149,6 +149,36 @@ describe('HomePage (/)', () => {
     expect(container.textContent ?? '').not.toMatch(pattern);
   });
 
+  /**
+   * Claims this page used to make that were not true (T86): an SDK count that
+   * `sdk/` had outgrown, local bucketing that matched the server exactly (the
+   * SDKs bucket nothing; the server decides), a benchmark that runs nightly
+   * described as running locally, and the AWS name used as a hyphenated
+   * adjective or a possessive noun.
+   *
+   * The fragments are concatenated, not joined with whitespace, so each entry
+   * is exactly the regular expression it reads as once put together; they are
+   * split only so the old wording never appears in this file. The meta
+   * description is not in `textContent`; the marketing build grep covers it.
+   */
+  const retired: Array<[string[], string]> = [
+    [['AW', 'S-\\w'], 'the AWS name is not a hyphenated adjective'],
+    [['on\\s+your', '\\s+AWS'], 'nor a noun the reader owns'],
+    [['four', 'teen'], 'the SDK count drifted from sdk/; the list is derived now'],
+    [['byte\\s+for', '\\s+byte'], 'the SDKs do not bucket locally'],
+    [['asserted\\s+on\\s+every', '\\s+local\\s+run'], 'the benchmarks run nightly, not locally'],
+  ];
+
+  it.each(retired)('no longer says %s (%s)', (parts) => {
+    const pattern = new RegExp((parts as string[]).join(''), 'i');
+    const { container } = render(
+      <AuthProvider>
+        <HomePage />
+      </AuthProvider>,
+    );
+    expect(container.textContent ?? '').not.toMatch(pattern);
+  });
+
   it('renders nothing but the title once authenticated, so there is no flash', async () => {
     localStorage.setItem(TOKEN_STORAGE_KEY, 'tok');
     mockFetch.mockResolvedValueOnce({

@@ -58,6 +58,21 @@ describe.each(PAGES)('%s on the marketing site', (name, make) => {
     expect({ page: name, dead }).toEqual({ page: name, dead: [] });
   });
 
+  // The prefix check above knows only the dashboard routes, so it passed a
+  // link to a docs path the export never had (T86). This one is an allow-list
+  // of what the marketing export serves: any other same-site href is dead.
+  it('links on this site only to pages the export serves', async () => {
+    const { container } = render(<AuthProvider>{make()}</AuthProvider>);
+    await waitFor(() => expect(container.querySelector('a, h1, h2')).toBeInTheDocument());
+
+    const SERVED = new Set(['/', '/docs', '/power-calculator', '/favicon.svg']);
+    const external = (h: string) => /^[a-z][a-z0-9+.-]*:/i.test(h) || h.startsWith('//');
+    const dead = Array.from(container.querySelectorAll('[href]'))
+      .map((a) => a.getAttribute('href') ?? '')
+      .filter((h) => !external(h) && !h.startsWith('#') && !h.startsWith('/_next/') && !SERVED.has(h));
+    expect({ page: name, dead }).toEqual({ page: name, dead: [] });
+  });
+
   it('renders without reaching the API', async () => {
     render(<AuthProvider>{make()}</AuthProvider>);
     await waitFor(() => {
