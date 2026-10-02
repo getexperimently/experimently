@@ -16,12 +16,14 @@ from backend.app.core.targeting_adapter import (
     match_targeting_rule,
     normalise_targeting_rules,
 )
-from backend.app.models.feature_flag import (
-    NOT_WRITTEN_BY_REQUESTS,
-    FeatureFlag,
-    FeatureFlagStatus,
+from backend.app.models.feature_flag import FeatureFlag, FeatureFlagStatus
+from backend.app.schemas.feature_flag import (
+    READ_ONLY_FIELDS,
+    FeatureFlagCreate,
+    FeatureFlagRead,
+    FeatureFlagUpdate,
+    flag_to_read,
 )
-from backend.app.schemas.feature_flag import FeatureFlagCreate, FeatureFlagUpdate
 from backend.app.schemas.metrics import ErrorLogCreate
 from backend.app.services.metrics_service import MetricsService
 
@@ -39,6 +41,34 @@ REASON_INACTIVE = "inactive"
 REASON_ERROR = "error"
 
 
+class FlagStatusReadOnly(Exception):
+    """A request's ``status`` differs from the flag's status.
+
+    ``status`` is read-only (#94): a GET body may send it back, so it is
+    accepted when it equals the stored status (on create, the status
+    ``is_active`` gives the new flag), compared case-insensitively, and never
+    written.  Any other value is refused rather than ignored -- ignoring it was
+    the silent no-op #94 reported.  Not a ``ValueError``: the routes answer a
+    ``ValueError`` with its text, and this one has a fixed 422.
+    """
+
+
+def _status_value(status: Any) -> str:
+    """``FeatureFlagStatus`` or its string value, as the upper-case string."""
+    return str(getattr(status, "value", status))
+
+
+def _check_sent_status(
+    flag_data: Union[FeatureFlagCreate, FeatureFlagUpdate], expected: Any
+) -> None:
+    """Raise :class:`FlagStatusReadOnly` when a sent ``status`` is not *expected*."""
+    if "status" not in flag_data.model_fields_set:
+        return
+    sent = flag_data.status
+    if not (isinstance(sent, str) and sent.upper() == _status_value(expected)):
+        raise FlagStatusReadOnly()
+
+
 class FeatureFlagService:
     """
     Service for managing feature flags in the platform.
@@ -53,7 +83,7 @@ class FeatureFlagService:
         """Initialize with a database session."""
         self.db = db
 
-    def get_feature_flag(self, flag_id: Union[str, UUID]) -> Optional[Dict[str, Any]]:
+    def get_feature_flag(self, flag_id: Union[str, UUID]) -> Optional[FeatureFlagRead]:
         """
         Get a feature flag by ID.
 
@@ -61,18 +91,18 @@ class FeatureFlagService:
             flag_id: ID of the feature flag
 
         Returns:
-            Dictionary containing the feature flag data or None if not found
+            The feature flag's response representation, or None if not found
         """
         flag = self.db.query(FeatureFlag).filter(FeatureFlag.id == flag_id).first()
 
         if not flag:
             return None
 
-        return self._feature_flag_to_dict(flag)
+        return flag_to_read(flag)
 
     def get_feature_flags(
         self, skip: int = 0, limit: int = 100, status: Optional[str] = None
-    ) -> List[Dict[str, Any]]:
+    ) -> List[FeatureFlagRead]:
         """
         Get all feature flags with optional status filter.
 
@@ -82,7 +112,7 @@ class FeatureFlagService:
             status: Optional status filter
 
         Returns:
-            List of feature flag dictionaries
+            List of feature flag response representations
         """
         query = self.db.query(FeatureFlag)
 
@@ -90,7 +120,7 @@ class FeatureFlagService:
             query = query.filter(FeatureFlag.status == status)
 
         flags = query.offset(skip).limit(limit).all()
-        return [self._feature_flag_to_dict(flag) for flag in flags]
+        return [flag_to_read(flag) for flag in flags]
 
     def count_feature_flags(self, status: Optional[str] = None) -> int:
         """
@@ -114,32 +144,28 @@ class FeatureFlagService:
     ) -> FeatureFlag:
         """Create a new feature flag owned by *owner_id*.
 
-        *owner_id* is required on purpose: the request schema has no owner field,
-        so a caller that forgets it would store a flag with no owner.
+        *owner_id* is required on purpose: the request's ``owner_id`` is
+        read-only and removed below, so the creator is always the owner and a
+        caller that forgets it would store a flag with no owner.
+
+        The read-only fields (``READ_ONLY_FIELDS``) are removed here, not only
+        by the route, because each of them names a column: one that reached the
+        row would rewrite the primary key, the owner or a timestamp.  A sent
+        ``status`` must equal the status ``is_active`` gives the new flag.
+
+        Raises:
+            FlagStatusReadOnly: a sent ``status`` differs from that status.
         """
+        status = (
+            FeatureFlagStatus.ACTIVE
+            if flag_data.is_active
+            else FeatureFlagStatus.INACTIVE
+        )
+        _check_sent_status(flag_data, status)
+
+        flag_dict = flag_data.model_dump(exclude=READ_ONLY_FIELDS | {"is_active"})
         try:
-            # Convert Pydantic model to dict and create DB model
-            flag_dict = flag_data.model_dump()
-
-            # Handle is_active to status conversion
-            if "is_active" in flag_dict:
-                is_active = flag_dict.pop("is_active")
-                flag_dict["status"] = (
-                    FeatureFlagStatus.ACTIVE
-                    if is_active
-                    else FeatureFlagStatus.INACTIVE
-                )
-
-            # Remove any other fields that don't exist in the model
-            for key in list(flag_dict.keys()):
-                if (
-                    key not in [c.name for c in FeatureFlag.__table__.columns]
-                    or key in NOT_WRITTEN_BY_REQUESTS
-                ):
-                    flag_dict.pop(key)
-
-            flag = FeatureFlag(**flag_dict)
-            flag.owner_id = owner_id
+            flag = FeatureFlag(**flag_dict, status=status, owner_id=owner_id)
 
             # Add and commit to DB
             self.db.add(flag)
@@ -154,41 +180,44 @@ class FeatureFlagService:
 
     def update_feature_flag(
         self, flag_id: Union[str, UUID, FeatureFlag], flag_data: FeatureFlagUpdate
-    ) -> Optional[Dict[str, Any]]:
-        """Update an existing feature flag."""
-        try:
-            # Handle if a FeatureFlag object was passed instead of an ID
-            if isinstance(flag_id, FeatureFlag):
-                flag = flag_id
+    ) -> Optional[FeatureFlag]:
+        """Update an existing feature flag; returns the stored row, or None.
+
+        Only the fields the request sent change.  The read-only fields are
+        removed here (see ``create_feature_flag``), and a sent ``status`` must
+        equal the stored one.
+
+        ``is_active`` sets the status: true makes the flag ACTIVE; false makes
+        it INACTIVE, except that an ARCHIVED flag stays ARCHIVED, so the GET body
+        of an archived flag can be sent back unchanged.  That is a rule of this
+        update only; the other routes that turn a flag off are unchanged
+        (archive semantics across them are #631).
+
+        Raises:
+            FlagStatusReadOnly: a sent ``status`` differs from the stored one.
+        """
+        # Handle if a FeatureFlag object was passed instead of an ID
+        if isinstance(flag_id, FeatureFlag):
+            flag = flag_id
+        else:
+            flag = self.db.query(FeatureFlag).filter(FeatureFlag.id == flag_id).first()
+
+        if not flag:
+            return None
+
+        stored = FeatureFlagStatus(_status_value(flag.status))
+        _check_sent_status(flag_data, stored)
+
+        update_data = flag_data.model_dump(exclude_unset=True, exclude=READ_ONLY_FIELDS)
+        if "is_active" in update_data:
+            if update_data.pop("is_active"):
+                update_data["status"] = FeatureFlagStatus.ACTIVE
+            elif stored is FeatureFlagStatus.ARCHIVED:
+                update_data["status"] = FeatureFlagStatus.ARCHIVED
             else:
-                # Get existing flag
-                flag = (
-                    self.db.query(FeatureFlag).filter(FeatureFlag.id == flag_id).first()
-                )
+                update_data["status"] = FeatureFlagStatus.INACTIVE
 
-            if not flag:
-                return None
-
-            # Update flag with new data
-            update_data = flag_data.model_dump(exclude_unset=True)
-
-            # Handle is_active to status conversion
-            if "is_active" in update_data:
-                is_active = update_data.pop("is_active")
-                update_data["status"] = (
-                    FeatureFlagStatus.ACTIVE
-                    if is_active
-                    else FeatureFlagStatus.INACTIVE
-                )
-
-            # Remove fields that don't exist in the model
-            for key in list(update_data.keys()):
-                if (
-                    key not in [c.name for c in FeatureFlag.__table__.columns]
-                    or key in NOT_WRITTEN_BY_REQUESTS
-                ):
-                    update_data.pop(key)
-
+        try:
             for field, value in update_data.items():
                 setattr(flag, field, value)
 
@@ -196,7 +225,7 @@ class FeatureFlagService:
             self.db.commit()
             self.db.refresh(flag)
 
-            return self._feature_flag_to_dict(flag)
+            return flag
         except Exception as e:
             logger.error(f"Error updating feature flag: {e!s}")
             self.db.rollback()
@@ -217,7 +246,7 @@ class FeatureFlagService:
 
         logger.info(f"Deleted feature flag {flag_id}: {flag_name}")
 
-    def activate_feature_flag(self, flag: FeatureFlag) -> Dict[str, Any]:
+    def activate_feature_flag(self, flag: FeatureFlag) -> FeatureFlagRead:
         """
         Activate a feature flag.
 
@@ -225,7 +254,7 @@ class FeatureFlagService:
             flag: Feature flag model object
 
         Returns:
-            Dictionary containing the updated feature flag data
+            The updated feature flag's response representation
         """
         flag.status = FeatureFlagStatus.ACTIVE.value
         flag.updated_at = datetime.now(timezone.utc)
@@ -234,9 +263,9 @@ class FeatureFlagService:
         self.db.refresh(flag)
 
         logger.info(f"Activated feature flag {flag.id}: {flag.name}")
-        return self._feature_flag_to_dict(flag)
+        return flag_to_read(flag)
 
-    def deactivate_feature_flag(self, flag: FeatureFlag) -> Dict[str, Any]:
+    def deactivate_feature_flag(self, flag: FeatureFlag) -> FeatureFlagRead:
         """
         Deactivate a feature flag.
 
@@ -244,7 +273,7 @@ class FeatureFlagService:
             flag: Feature flag model object
 
         Returns:
-            Dictionary containing the updated feature flag data
+            The updated feature flag's response representation
         """
         flag.status = FeatureFlagStatus.INACTIVE.value
         flag.updated_at = datetime.now(timezone.utc)
@@ -253,7 +282,7 @@ class FeatureFlagService:
         self.db.refresh(flag)
 
         logger.info(f"Deactivated feature flag {flag.id}: {flag.name}")
-        return self._feature_flag_to_dict(flag)
+        return flag_to_read(flag)
 
     def get_user_flags(
         self, user_id: str, context: Optional[Dict[str, Any]] = None
@@ -566,36 +595,3 @@ class FeatureFlagService:
 
         # User is in the rollout if their bucket is less than the percentage
         return bucket < percentage
-
-    def _feature_flag_to_dict(self, flag: FeatureFlag) -> Dict[str, Any]:
-        """
-        Convert a feature flag model to a dictionary for API responses.
-
-        Args:
-            flag: Feature flag model object
-
-        Returns:
-            Dictionary representation of the feature flag
-        """
-        return {
-            "id": str(flag.id),
-            "name": flag.name,
-            "key": flag.key,
-            "description": flag.description,
-            "status": flag.status.value.lower()
-            if hasattr(flag.status, "value")
-            else str(flag.status).lower(),
-            "rollout_percentage": flag.rollout_percentage,
-            "rules": flag.targeting_rules,
-            "owner_id": str(flag.owner_id),
-            "created_at": (
-                flag.created_at.isoformat()
-                if hasattr(flag.created_at, "isoformat")
-                else flag.created_at
-            ),
-            "updated_at": (
-                flag.updated_at.isoformat()
-                if hasattr(flag.updated_at, "isoformat")
-                else flag.updated_at
-            ),
-        }

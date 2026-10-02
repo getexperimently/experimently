@@ -32,7 +32,7 @@ class FakeStoryClient:
             "key": PLAYER_FLAG,
             "status": "active",
             "rollout_percentage": 5,
-            "rules": {"logical_operator": "OR", "groups": [copy.deepcopy(EMPLOYEE_GROUP)]},
+            "targeting_rules": {"logical_operator": "OR", "groups": [copy.deepcopy(EMPLOYEE_GROUP)]},
         }
         self.schedule = {
             "id": "sched-1",
@@ -67,7 +67,7 @@ class FakeStoryClient:
     def flag_by_key(self, key):
         self.calls.append(("flag_by_key", key))
         assert key == PLAYER_FLAG
-        return {"id": FLAG_ID, "key": key, "rollout_percentage": self.flag["rollout_percentage"], "targeting_rules": self.flag["rules"]}
+        return {"id": FLAG_ID, "key": key, "rollout_percentage": self.flag["rollout_percentage"], "targeting_rules": self.flag["targeting_rules"]}
 
     def get_flag(self, flag_id):
         self.calls.append(("get_flag", flag_id))
@@ -80,7 +80,7 @@ class FakeStoryClient:
         self.calls.append(("update_flag", flag_id))
         self.flag_updates.append(copy.deepcopy(body))
         if "targeting_rules" in body:
-            self.flag["rules"] = copy.deepcopy(body["targeting_rules"])
+            self.flag["targeting_rules"] = copy.deepcopy(body["targeting_rules"])
         if "rollout_percentage" in body:
             self.flag["rollout_percentage"] = body["rollout_percentage"]
         return copy.deepcopy(self.flag)
@@ -349,7 +349,7 @@ def test_step_7_reaches_100_completes_the_schedule_and_removes_the_rules():
     assert s.step_7() is True
     assert client.flag["rollout_percentage"] == 100
     assert client.stage_status(4) == "completed" and client.schedule["status"] == "completed"
-    assert client.flag["rules"] == {}
+    assert client.flag["targeting_rules"] == {}
     assert client.flag_updates[-1] == {"targeting_rules": {}}
     text = out.getvalue()
     assert "Rollout is now 100%" in text and "Removed the targeting rules" in text and "Targeting: none" in text
@@ -388,7 +388,7 @@ def test_auto_runs_all_seven_steps_in_order_through_main():
     assert text.index("Step 1/7") < text.index("Step 4/7") < text.index("Step 7/7")
     assert client.flag["rollout_percentage"] == 100 and client.schedule["status"] == "completed"
     assert client.rollbacks and client.rollbacks[0][0] == 5
-    assert client.flag["rules"] == {}
+    assert client.flag["targeting_rules"] == {}
 
 
 def test_main_reports_precondition_and_auth_failures():

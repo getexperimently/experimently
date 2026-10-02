@@ -77,8 +77,8 @@ Click **Create Feature Flag**. The flag starts **off** (its page reads *Not serv
 creating it never exposes anyone. When you're ready, turn it on with the switch beside
 *Not serving*, and the page then reads *Serving*. The same switch turns it off again.
 
-The dashboard's **On**/**Off** is the API's `status` of `"active"`/`"inactive"`, and you
-set it with `is_active`.
+The dashboard's **On**/**Off** is the API's `is_active` (`true`/`false`), reported
+beside it as `status` (`"active"`/`"inactive"`). You set it with `is_active`.
 
 ---
 
@@ -117,40 +117,50 @@ FLAG=$(curl -s -X POST localhost:8000/api/v1/feature-flags/ \
     "key": "new-checkout-flow",
     "name": "New Checkout Flow",
     "description": "Redesigned single-page checkout experience",
-    "rollout_percentage": 0,
-    "is_active": false
+    "rollout_percentage": 0
   }')
 FLAG_ID=$(jq -r .id <<<"$FLAG")
 
-jq '{key, status, rollout_percentage}' <<<"$FLAG"
+jq '{key, status, is_active, rollout_percentage, default_value}' <<<"$FLAG"
 ```
 <!-- expect: "status": "inactive" -->
+<!-- expect: "is_active": false -->
 <!-- expect: "rollout_percentage": 0 -->
 
 ```json
 {
   "key": "new-checkout-flow",
   "status": "inactive",
-  "rollout_percentage": 0
+  "is_active": false,
+  "rollout_percentage": 0,
+  "default_value": false
 }
 ```
 
-`"is_active": false` creates the flag switched off. **Leave it out and the flag is created
-on**, because `is_active` defaults to `true` in the API. (The dashboard always sends
-`false`.) The response reports the state as `status`. It also carries the flag's
-`id`, which this saves in `$FLAG_ID` for the next steps.
+**A new flag is off** unless the request sends `"is_active": true`, so creating one never
+exposes anyone. The response carries the flag's `id`, which this saves in `$FLAG_ID` for
+the next steps.
 
 The request takes these fields:
-- `key` and `name` (both required);
+- `key` and `name` (both required; `name` is at most 100 characters);
 - `description`;
-- `is_active`;
+- `is_active` (default `false`);
 - `rollout_percentage` (0–100, default 0);
 - `targeting_rules`;
+- `default_value`: what the flag serves when it is off. Only `false` is accepted for now,
+  and it is the default; `true` answers `422`;
 - `tags`.
 
-**The API ignores any other field without an error.** A `"status"` field, for example,
-has no effect, so check the response. A key that already exists answers `409`, and a key
-with capitals or spaces answers `422`.
+**Any other field answers `422`** (`"type": "extra_forbidden"`), so a misspelled or
+unsupported field is never dropped silently. `null` is refused for `key`, `name`,
+`is_active`, `rollout_percentage` and `default_value`. A key that already exists answers
+`409`, and a key with capitals or spaces answers `422`.
+
+The fields a response carries but no request writes (`id`, `owner_id`, `created_at`,
+`updated_at` and `status`) are accepted and ignored, so you can send back a flag exactly as
+`GET` returned it. A `status` must match: `"inactive"` (in any case) on a create without
+`is_active: true`, and the flag's current status on an update. Any other value answers
+`422` with `"type": "read_only"`; turn a flag on or off with `is_active`.
 
 ### Add targeting rules
 
@@ -245,8 +255,9 @@ curl -s -X PUT localhost:8000/api/v1/feature-flags/$FLAG_ID \
 ```
 
 `"is_active": false` turns it off again. `POST /api/v1/feature-flags/$FLAG_ID/activate`
-and `.../deactivate` do the same without a body. A `"status"` field in the `PUT` is
-ignored.
+and `.../deactivate` do the same without a body. A `PUT` changes only the fields it sends;
+a `status` in it must be the flag's current status. An archived flag sent
+`"is_active": false` stays archived.
 
 ### Create an API key
 
@@ -277,8 +288,8 @@ digit. Anything else is refused with `422`. To keep your flag inventory readable
 
 ## When a Flag Evaluates to Off
 
-A flag is on or off for each user, and there's no separate default value. Evaluation
-returns `enabled: false` when:
+A flag is on or off for each user. Its `default_value`, what it serves when it is off,
+is `false` for every flag for now. Evaluation returns `enabled: false` when:
 
 - the flag is off (`reason: "inactive"`);
 - the user matches no targeting rule and falls outside the rollout percentage

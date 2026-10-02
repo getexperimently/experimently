@@ -11,6 +11,7 @@ import uuid
 import pytest
 
 from backend.app.models.feature_flag import FeatureFlag, FeatureFlagStatus
+from backend.app.schemas.feature_flag import FeatureFlagRead
 from backend.app.services.feature_flag_service import FeatureFlagService
 from backend.tests.integration.helpers import unique_flag_key
 
@@ -195,8 +196,10 @@ class TestFeatureFlagEvaluationService:
 
         assert inactive_flag.key not in flags
 
-    def test_get_feature_flag_returns_dict(self, db_session, make_feature_flag):
-        """get_feature_flag() returns a dict with expected keys."""
+    def test_get_feature_flag_returns_the_read_model(
+        self, db_session, make_feature_flag
+    ):
+        """get_feature_flag() returns the flag's response representation (#94)."""
         flag = make_feature_flag(
             key=unique_flag_key("get-service"),
             name="Service Get Flag",
@@ -207,9 +210,9 @@ class TestFeatureFlagEvaluationService:
         result = service.get_feature_flag(flag.id)
 
         assert result is not None
-        assert isinstance(result, dict)
-        assert result["key"] == flag.key
-        assert result["rollout_percentage"] == 25
+        assert isinstance(result, FeatureFlagRead)
+        assert result.key == flag.key
+        assert result.rollout_percentage == 25
 
     def test_get_feature_flag_nonexistent_returns_none(self, db_session):
         """get_feature_flag() with a nonexistent ID returns None."""

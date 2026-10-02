@@ -182,7 +182,8 @@ curl -s "localhost:8000/api/v1/feature-flags/evaluate/new_checkout?user_id=user-
 <!-- expect: "enabled": true -->
 <!-- expect: "reason": "rollout" -->
 
-The flag is created switched off (`"is_active": false`; leave it out and it starts on).
+The flag is created switched off (`"is_active": false`, which is also what leaving it out
+does; a field the API does not read answers 422).
 The second command turns it on for 10% of users and prints `"active"`. The third
 evaluates it for `user-2` and prints `"enabled": true` with `"reason": "rollout"`:
 `user-2` is inside the 10%, `user-123` is not, and a user always gets the same answer.
