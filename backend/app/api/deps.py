@@ -32,7 +32,11 @@ from backend.app.models.experiment import Experiment, ExperimentStatus
 from backend.app.models.feature_flag import FeatureFlag
 from backend.app.models.report import Report
 from backend.app.models.user import User, UserRole
-from backend.app.services.auth_service import auth_service
+from backend.app.services.auth_service import (
+    CognitoTokenRefused,
+    auth_service,
+    log_token_refused,
+)
 
 # Try to import Redis, handle gracefully if not installed
 try:
@@ -331,6 +335,9 @@ def get_current_user(
                 db.refresh(user)
 
         return user
+    except CognitoTokenRefused as refusal:
+        log_token_refused(refusal, "sign-in")
+        raise _credentials_exception()
     except Exception as e:
         logger.error(f"Authentication error: {e!s}")
         raise HTTPException(
