@@ -11,6 +11,20 @@ The platform uses AWS Cognito for user authentication and leverages Cognito grou
 3. Changes to Cognito groups are reflected in user roles on next login
 4. Superusers (with full admin privileges) are automatically identified based on membership in designated admin groups
 
+## User pool requirements
+
+The user pool that `COGNITO_USER_POOL_ID` names must require an email address:
+
+- make `email` a **required** standard attribute of the pool;
+- if users sign in through a federated identity provider (SAML, OIDC, Google and so on), map
+  the provider's email claim to the pool's `email` attribute.
+
+The platform creates a user's account the first time they sign in, and takes the account's
+email address from the pool's `email` attribute, so every identity that can sign in needs one.
+Cognito does not let you change a pool's required attributes after the pool is created, so
+set this when you create it. The reference pool in
+`infrastructure/cdk/stacks/authentication_stack.py` already requires `email`.
+
 ## Configuration
 
 The following settings in `backend/app/core/config.py` control the Cognito integration:
