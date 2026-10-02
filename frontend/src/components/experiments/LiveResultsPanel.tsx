@@ -12,6 +12,11 @@ import {
   ConnectionStatus,
   VariantResult,
 } from '@/hooks/useExperimentStream';
+import {
+  NOT_ENOUGH_DATA,
+  formatSignedPct,
+  isFiniteNumber,
+} from '@/components/results/shared/resultFormat';
 
 // ---------------------------------------------------------------------------
 // Props
@@ -78,16 +83,22 @@ function VariantsTable({ variants }: { variants: VariantResult[] }) {
             <th className="pb-2 pr-4 text-right">Conversions</th>
             <th className="pb-2 pr-4 text-right">Rate</th>
             <th className="pb-2 pr-4 text-right">Lift vs Control</th>
-            <th className="pb-2 pr-4 text-right">P-value</th>
-            <th className="pb-2 text-center">Status</th>
+            <th className="pb-2 pr-4 text-right">p-value (unadjusted)</th>
+            <th className="pb-2 text-center">Live z-test</th>
           </tr>
         </thead>
         <tbody className="divide-y divide-slate-100">
           {variants.map((variant) => {
-            const isSignificant =
+            // The stream's own z-test at a fixed 0.05, unadjusted and on
+            // conversions only. It is not the experiment's significance
+            // decision (that is on the Overview tab), so it is never called
+            // "Significant" here.
+            const belowLiveThreshold =
               !variant.isControl &&
-              variant.pValue !== null &&
+              isFiniteNumber(variant.pValue) &&
               variant.pValue < 0.05;
+            const hasRate = isFiniteNumber(variant.conversionRate) && variant.participantCount > 0;
+            const hasLift = isFiniteNumber(variant.relativeLift);
 
             return (
               <tr
@@ -110,42 +121,43 @@ function VariantsTable({ variants }: { variants: VariantResult[] }) {
                   {variant.conversionCount.toLocaleString()}
                 </td>
                 <td className="py-2 pr-4 text-right tabular-nums text-slate-700">
-                  {(variant.conversionRate * 100).toFixed(2)}%
+                  {hasRate ? `${(variant.conversionRate * 100).toFixed(2)}%` : NOT_ENOUGH_DATA}
                 </td>
                 <td className="py-2 pr-4 text-right tabular-nums">
                   {variant.isControl ? (
-                    <span className="text-slate-400">—</span>
-                  ) : (
+                    <span className="text-slate-600">—</span>
+                  ) : hasLift ? (
                     <span
                       className={
                         variant.relativeLift > 0
-                          ? 'text-green-600'
+                          ? 'text-green-700'
                           : variant.relativeLift < 0
-                          ? 'text-red-600'
-                          : 'text-slate-500'
+                          ? 'text-red-700'
+                          : 'text-slate-600'
                       }
                     >
-                      {variant.relativeLift >= 0 ? '+' : ''}
-                      {(variant.relativeLift * 100).toFixed(1)}%
+                      {formatSignedPct(variant.relativeLift * 100)}
                     </span>
+                  ) : (
+                    NOT_ENOUGH_DATA
                   )}
                 </td>
                 <td className="py-2 pr-4 text-right tabular-nums text-slate-700">
                   {variant.isControl ? (
-                    <span className="text-slate-400">—</span>
-                  ) : variant.pValue !== null ? (
+                    <span className="text-slate-600">—</span>
+                  ) : isFiniteNumber(variant.pValue) ? (
                     variant.pValue.toFixed(3)
                   ) : (
-                    <span className="text-slate-400">—</span>
+                    NOT_ENOUGH_DATA
                   )}
                 </td>
                 <td className="py-2 text-center">
-                  {variant.isControl ? null : isSignificant ? (
-                    <span className="inline-block rounded-full bg-green-100 px-2 py-0.5 text-xs font-semibold text-green-700">
-                      Significant
+                  {variant.isControl ? null : belowLiveThreshold ? (
+                    <span className="inline-block rounded-full bg-green-100 px-2 py-0.5 text-xs font-semibold text-green-800">
+                      p &lt; 0.05 (unadjusted)
                     </span>
                   ) : (
-                    <span className="inline-block rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-500">
+                    <span className="inline-block rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-700">
                       Not yet
                     </span>
                   )}
@@ -233,6 +245,12 @@ export function LiveResultsPanel({ experimentId }: LiveResultsPanelProps) {
 
       {/* Content */}
       <div className="px-5 py-4 space-y-4">
+        {/* The stream runs its own test; say which, so it is not read as the
+            experiment's result at its confidence level. */}
+        <p className="text-sm text-slate-700" data-testid="live-method-label">
+          Live estimate: z-test, unadjusted, conversion only
+        </p>
+
         {/* Error banner */}
         {error && (
           <div
@@ -291,7 +309,7 @@ export function LiveResultsPanel({ experimentId }: LiveResultsPanelProps) {
             )}
             <div>
               <span className="font-medium text-slate-500 uppercase text-xs tracking-wide">
-                Significant
+                Live z-test p &lt; 0.05 (unadjusted)
               </span>
               <p
                 className={`mt-0.5 font-semibold ${

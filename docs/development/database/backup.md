@@ -15,47 +15,47 @@ Each database resource has its own backup mechanism and retention policy that is
 
 ### Backup Mechanism
 
-Aurora PostgreSQL uses automated backups that include:
-1. **Daily Snapshots**: Full database snapshots taken daily during the backup window
-2. **Continuous Backup**: Transaction logs are backed up continuously, enabling point-in-time recovery
-3. **Manual Snapshots**: In addition to automated backups, manual snapshots are taken before major changes
+Aurora PostgreSQL protects the cluster with:
+1. **Automated backups**: a daily snapshot and continuous backup of the transaction log, which
+   together allow point-in-time recovery to any moment within the retention period
+2. **Manual snapshots**: `deploy.yml` takes one before every deploy's migration
+   (`pre-deploy-<env>-<tag>-<time>`); they are kept until you delete them
+3. **A final snapshot** when the prod database stack is deleted
 
-### Backup Windows
+### Backup and Maintenance Windows
 
-| Environment | Backup Window (UTC) | Maintenance Window (UTC) |
-|-------------|---------------------|--------------------------|
-| Development | 02:00-03:00         | Sun 04:00-05:00          |
-| Staging     | 02:00-03:00         | Sun 04:00-05:00          |
-| Production  | 02:00-03:00         | Sun 04:00-05:00          |
+The stack sets no preferred backup window and no preferred maintenance window, so Aurora
+chooses both for the cluster's region.
 
 ### Retention Policy
 
 | Environment | Automated Backup Retention | Point-in-Time Recovery | Manual Snapshot Retention |
 |-------------|----------------------------|------------------------|---------------------------|
-| Development | 7 days                     | Up to 7 days           | Until manually deleted    |
-| Staging     | 7 days                     | Up to 7 days           | Until manually deleted    |
-| Production  | 7 days                     | Up to 7 days           | Until manually deleted    |
+| Production  | 35 days                    | Up to 35 days          | Until manually deleted    |
+| Staging     | 35 days                    | Up to 35 days          | Until manually deleted    |
+| Any other   | 1 day                      | Up to 1 day            | Until manually deleted    |
 
 ### Implementation
 
-The retention policy is defined in the Aurora cluster configuration:
+The retention is what the stack sets: `aurora_backup_retention_days()` in
+`infrastructure/cdk/stacks/environments.py` returns it per environment, and
+`infrastructure/cdk/stacks/enhanced_database_stack.py` passes it to the cluster as
+`backup=rds.BackupProps(retention=Duration.days(...))`. 35 days is the most Aurora allows.
 
-```python
-self.aurora_cluster = rds.DatabaseCluster(
-    # ... other configuration ...
-    backup_retention=Duration.days(7),
-    preferred_backup_window="02:00-03:00",  # UTC
-    preferred_maintenance_window="sun:04:00-sun:05:00",  # UTC
-    # ... other configuration ...
-)
-```
+A cluster deployed from an earlier version of the CDK app, which set no retention, keeps
+CloudFormation's default of 1 day until its database stack is redeployed. Check what a cluster
+actually keeps with `aws rds describe-db-clusters --query 'DBClusters[].BackupRetentionPeriod'`.
 
 ### Disaster Recovery
 
 In case of database failure:
-1. Aurora will automatically fail over to a replica in multi-AZ deployments (staging and production)
-2. For complete cluster failure, recovery can be performed from the most recent automated backup
-3. Point-in-time recovery can be used to restore to any point within the retention period
+1. In prod, Aurora fails over to the reader instance. Staging and other environments run a
+   single instance, so Aurora replaces it instead, which takes longer
+2. For complete cluster failure, restore to a new cluster from an automated backup or a manual
+   snapshot
+3. Point-in-time recovery can restore to any point within the retention period
+
+The procedures are in the [Disaster Recovery Plan](../../deployment/disaster-recovery.md).
 
 ## DynamoDB Tables
 

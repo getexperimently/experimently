@@ -210,7 +210,7 @@ change with a shell block has to be tagged and enrolled; see
 
 ```text
 backend/app/        FastAPI application: api/, core/, services/, models/, schemas/
-backend/lambda/     Lambda handlers (assignment, event processor, flag evaluation)
+backend/lambda/     Lambda handlers (event processor, flag evaluation), deployed by no stack
 backend/scripts/    One-off and seed scripts
 backend/tests/      unit/ integration/ smoke/ e2e/ contract/ performance/ realistic/
 frontend/           Next.js dashboard (TypeScript)

@@ -72,16 +72,16 @@ ANALYSIS_STATUS: Dict[str, AnalysisLabel] = {
         "null. A null has_novelty means not computed, not no novelty. "
         f"{_ISSUES}/219",
     ),
-    # The confidence sequence is corrected in #231; no planned-looks table is
-    # computed (#232).  The /sequential route may append sentences (the
-    # always_valid alias, an unusable stored alpha) to this notice.
+    # The confidence sequence is the inverted mSPRT (#231), so it agrees with
+    # the stop decision; no planned-looks table is computed (#232).  The
+    # /sequential route may append sentences (the always_valid alias, an
+    # unusable stored alpha) to this notice.
     "sequential": AnalysisLabel(
         BETA,
         "Beta: the stop/continue decision is mSPRT alone, at the significance "
         "level shown by the boundary (1/alpha). alpha_spending is always empty: "
-        "the planned-looks (alpha-spending) table is not computed yet. The "
-        "confidence sequence is being corrected. "
-        f"{_ISSUES}/231",
+        "the planned-looks (alpha-spending) table is not computed yet. "
+        f"{_ISSUES}/232",
     ),
     # Warehouse analysis (#312): proportion and mean results computed from
     # the per-variant counts and sums a warehouse returns, by

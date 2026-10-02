@@ -1,5 +1,8 @@
 # @getexperimently/js-sdk
 
+**0.x beta.** The API may change between 0.x minor versions; pin the exact version
+you test against.
+
 JavaScript/TypeScript client for the Experimently public API. Node >= 18 and browsers,
 zero runtime dependencies (global `fetch`), CommonJS build with type declarations.
 

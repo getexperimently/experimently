@@ -55,7 +55,7 @@ EXPECTED_STATUS = {
     "warehouse_mean": "ga",
 }
 
-EXPECTED_ISSUE = {"cuped": 217, "interactions": 219, "novelty": 219, "sequential": 231}
+EXPECTED_ISSUE = {"cuped": 217, "interactions": 219, "novelty": 219, "sequential": 232}
 
 
 # ---------------------------------------------------------------------------

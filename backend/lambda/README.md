@@ -1,6 +1,9 @@
-# Lambda Functions for Real-time Services
+# Lambda Functions (not deployed)
 
-This directory contains AWS Lambda functions for high-performance, real-time experiment assignment and event processing.
+This directory contains AWS Lambda code for event processing and feature flag evaluation.
+**No stack deploys it**; see `docs/integrations/aws.md` for the functions the stacks do deploy.
+Experiment assignment happens only in the API (`POST /api/v1/tracking/assign`), which applies
+the global holdout, mutual exclusion groups and targeting.
 
 ## 📁 Structure
 
@@ -12,39 +15,20 @@ backend/lambda/
 │   ├── models.py             # Pydantic data models
 │   └── utils.py              # Common utilities (logging, AWS helpers)
 │
-├── assignment/               # Experiment assignment Lambda
-│   ├── handler.py           # Main handler (TODO)
+├── event_processor/         # Event processor Lambda
+│   ├── handler.py
 │   ├── requirements.txt
 │   └── tests/
 │
-├── events/                  # Event processor Lambda
-│   ├── handler.py          # Main handler (TODO)
-│   ├── requirements.txt
-│   └── tests/
-│
-└── feature_flags/          # Feature flag evaluation Lambda
-    ├── handler.py         # Main handler (TODO)
+└── feature_flag_evaluation/ # Feature flag evaluation Lambda
+    ├── handler.py
     ├── requirements.txt
     └── tests/
 ```
 
 ## 🎯 Lambda Functions
 
-### 1. Assignment Lambda
-**Purpose:** Real-time experiment variant assignment using consistent hashing
-
-**Performance Targets:**
-- P50 latency: < 20ms
-- P99 latency: < 50ms
-- Throughput: 10K requests/second
-
-**Key Features:**
-- Deterministic assignments (same user + experiment = same variant)
-- Respects traffic allocation
-- Evaluates targeting rules
-- Stores assignments in DynamoDB
-
-### 2. Event Processor Lambda
+### 1. Event Processor Lambda
 **Purpose:** Process incoming events from Kinesis stream
 
 **Performance Targets:**
@@ -58,7 +42,7 @@ backend/lambda/
 - Archives to S3 via Firehose
 - Handles partial batch failures
 
-### 3. Feature Flag Evaluation Lambda
+### 2. Feature Flag Evaluation Lambda
 **Purpose:** Real-time feature flag evaluation with targeting
 
 **Performance Targets:**
@@ -117,12 +101,9 @@ Common helper functions:
 
 ## 🚀 Deployment
 
-Lambda functions are deployed using AWS CDK:
-
-```bash
-cd infrastructure/cdk
-cdk deploy --all
-```
+No stack deploys these functions. `cdk deploy --all` deploys the platform, and
+`infrastructure/tests/test_lambda_functions_doc.py` fails if a stack starts
+deploying code from this directory without the docs describing it.
 
 ## 📊 Monitoring
 
@@ -139,9 +120,9 @@ All Lambda functions emit metrics to CloudWatch:
 Run unit tests:
 
 ```bash
-pytest backend/lambda/assignment/tests/
-pytest backend/lambda/events/tests/
-pytest backend/lambda/feature_flags/tests/
+python -m pytest backend/lambda/event_processor
+python -m pytest backend/lambda/feature_flag_evaluation
+python -m pytest backend/lambda/shared
 ```
 
 ## 📝 Development Status
@@ -152,11 +133,9 @@ pytest backend/lambda/feature_flags/tests/
   - [x] Consistent hashing algorithm
   - [x] Data models and helpers
 
-- [ ] Phase 2: Assignment Lambda (IN PROGRESS)
-- [ ] Phase 3: Event Processor Lambda
-- [ ] Phase 4: Feature Flag Lambda
-- [ ] Phase 5: Testing & Optimization
-- [ ] Phase 6: Deployment & Documentation
+- The assignment function was removed (#480): assignment is the API's.
+- [ ] Event Processor Lambda: code and tests, not deployed
+- [ ] Feature Flag Lambda: code and tests, not deployed
 
 ## 📚 References
 

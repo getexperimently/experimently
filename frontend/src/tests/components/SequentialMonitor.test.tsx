@@ -108,12 +108,15 @@ describe('SequentialMonitor', () => {
           ...minimalData,
           analysis_status: 'beta',
           analysis_notice:
-            'Beta: the confidence sequence is being corrected. https://github.com/getexperimently/experimently/issues/231',
+            'Beta: the stop/continue decision is mSPRT alone, at the significance ' +
+            'level shown by the boundary (1/alpha). alpha_spending is always empty: ' +
+            'the planned-looks (alpha-spending) table is not computed yet. ' +
+            'https://github.com/getexperimently/experimently/issues/232',
         }}
       />
     );
     expect(screen.getByTestId('analysis-notice')).toHaveTextContent(
-      /confidence sequence is being corrected/i
+      /planned-looks \(alpha-spending\) table is not computed yet/i
     );
   });
 

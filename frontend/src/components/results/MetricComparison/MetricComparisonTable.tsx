@@ -1,44 +1,108 @@
 import React, { useState } from 'react';
-import { MetricResult, VariantResult } from '@/types/results';
+import { CorrectionMethod, MetricResult, VariantResult } from '@/types/results';
 import { StatisticalBadge } from '@/components/results/shared/StatisticalBadge';
+import {
+  NOT_ENOUGH_DATA,
+  analysedAsRate,
+  correctionLabel,
+  decisivePValue,
+  formatRate,
+  formatSignedPct,
+  isFiniteNumber,
+  rateDescription,
+} from '@/components/results/shared/resultFormat';
 
 interface MetricComparisonTableProps {
   metrics: MetricResult[];
   confidenceLevel: number;
+  /** The response's correction_method; names the adjusted p-values. */
+  correctionMethod?: CorrectionMethod;
 }
 
 type SortKey = 'metric' | 'variant' | 'sample_size' | 'mean' | 'improvement' | 'p_value';
 type SortDir = 'asc' | 'desc';
 
+// Colour follows the engine's is_significant — the same decision as the
+// badge and the recommendation. The sign and the badge text carry the
+// meaning; the colour only repeats it.
 function improvementClass(variant: VariantResult): string {
   if (variant.is_control) return 'text-slate-600';
-  if (variant.relative_improvement_pct === null) return 'text-slate-500';
+  if (!isFiniteNumber(variant.relative_improvement_pct)) return 'text-slate-500';
   if (!variant.is_significant) return 'text-slate-500';
   return variant.relative_improvement_pct >= 0 ? 'text-green-700' : 'text-red-700';
 }
 
-function formatPct(v: number | null): string {
-  if (v === null) return '—';
-  return `${(v * 100).toFixed(2)}%`;
+function formatImprovement(v: number | null | undefined, isControl: boolean): string {
+  if (isControl) return '—';
+  if (!isFiniteNumber(v)) return NOT_ENOUGH_DATA;
+  return formatSignedPct(v);
 }
 
-function formatImprovement(v: number | null, isControl: boolean): string {
-  if (isControl) return '—';
-  if (v === null) return '—';
-  const sign = v >= 0 ? '+' : '';
-  return `${sign}${v.toFixed(1)}%`;
+function formatValue(metric: MetricResult, variant: VariantResult): string {
+  if (analysedAsRate(metric)) return formatRate(variant.mean, variant.sample_size);
+  // A mean (welch_t_test). Units arrive with the mean analysis; until then a
+  // plain number, never a currency or "per user".
+  if (!isFiniteNumber(variant.mean) || variant.sample_size <= 0) return NOT_ENOUGH_DATA;
+  return variant.mean.toFixed(2);
 }
+
+/** Sort key for a possibly non-finite number: unknowns sort first ascending. */
+function sortable(v: number | null | undefined): number {
+  return isFiniteNumber(v) ? v : -Infinity;
+}
+
+function PValueCell({
+  variant,
+  correctionMethod,
+}: {
+  variant: VariantResult;
+  correctionMethod?: CorrectionMethod;
+}) {
+  if (variant.is_control) return <>—</>;
+  const correction = correctionLabel(correctionMethod);
+  const adjusted = variant.adjusted_p_value;
+  const raw = variant.p_value;
+
+  if (correction && isFiniteNumber(adjusted)) {
+    return (
+      <span className="flex flex-col">
+        <span>{adjusted.toFixed(4)}</span>
+        <span className="text-xs text-slate-600">adjusted ({correction})</span>
+        {isFiniteNumber(raw) && (
+          <span className="text-xs text-slate-600">raw {raw.toFixed(4)}</span>
+        )}
+      </span>
+    );
+  }
+  if (!isFiniteNumber(raw)) return <>{NOT_ENOUGH_DATA}</>;
+  // The dashboard requests no correction, so this is the usual case: the
+  // engine decided significance from the raw p, and the label says so.
+  return (
+    <span className="flex flex-col">
+      <span>{raw.toFixed(4)}</span>
+      <span className="text-xs text-slate-600">unadjusted</span>
+    </span>
+  );
+}
+
+const COLUMNS: [SortKey, string][] = [
+  ['metric', 'Metric'],
+  ['variant', 'Variant'],
+  ['sample_size', 'Sample Size'],
+  ['mean', 'Value'],
+  ['improvement', 'Improvement'],
+  ['p_value', 'p-value'],
+];
 
 interface FlatRow {
-  metricId: string;
-  metricName: string;
-  isPrimary: boolean;
+  metric: MetricResult;
   variant: VariantResult;
 }
 
 export function MetricComparisonTable({
   metrics,
   confidenceLevel,
+  correctionMethod,
 }: MetricComparisonTableProps) {
   const [sortKey, setSortKey] = useState<SortKey>('metric');
   const [sortDir, setSortDir] = useState<SortDir>('asc');
@@ -51,20 +115,17 @@ export function MetricComparisonTable({
     );
   }
 
+  const correction = correctionLabel(correctionMethod);
+
   const rows: FlatRow[] = metrics.flatMap((m) =>
-    m.variants.map((v) => ({
-      metricId: m.metric_id,
-      metricName: m.metric_name,
-      isPrimary: m.is_primary,
-      variant: v,
-    }))
+    m.variants.map((v) => ({ metric: m, variant: v }))
   );
 
-  const sorted = [...rows].sort((a, b) => {
+  const ordered = [...rows].sort((a, b) => {
     let cmp = 0;
     switch (sortKey) {
       case 'metric':
-        cmp = a.metricName.localeCompare(b.metricName);
+        cmp = a.metric.metric_name.localeCompare(b.metric.metric_name);
         break;
       case 'variant':
         cmp = a.variant.variant_name.localeCompare(b.variant.variant_name);
@@ -73,17 +134,21 @@ export function MetricComparisonTable({
         cmp = a.variant.sample_size - b.variant.sample_size;
         break;
       case 'mean':
-        cmp = a.variant.mean - b.variant.mean;
+        cmp = sortable(a.variant.mean) - sortable(b.variant.mean);
         break;
       case 'improvement':
         cmp =
-          (a.variant.relative_improvement_pct ?? -Infinity) -
-          (b.variant.relative_improvement_pct ?? -Infinity);
+          sortable(a.variant.relative_improvement_pct) -
+          sortable(b.variant.relative_improvement_pct);
         break;
-      case 'p_value':
-        cmp = (a.variant.p_value ?? 1) - (b.variant.p_value ?? 1);
+      case 'p_value': {
+        const pa = decisivePValue(a.variant);
+        const pb = decisivePValue(b.variant);
+        cmp = (isFiniteNumber(pa) ? pa : 1) - (isFiniteNumber(pb) ? pb : 1);
         break;
+      }
     }
+    if (Number.isNaN(cmp)) cmp = 0;
     return sortDir === 'asc' ? cmp : -cmp;
   });
 
@@ -96,6 +161,11 @@ export function MetricComparisonTable({
     }
   }
 
+  function ariaSort(key: SortKey): 'ascending' | 'descending' | 'none' {
+    if (sortKey !== key) return 'none';
+    return sortDir === 'asc' ? 'ascending' : 'descending';
+  }
+
   function sortIcon(key: SortKey) {
     if (sortKey !== key) return '↕';
     return sortDir === 'asc' ? '↑' : '↓';
@@ -106,77 +176,82 @@ export function MetricComparisonTable({
       <table className="min-w-full divide-y divide-slate-200 text-sm">
         <thead className="bg-slate-50">
           <tr>
-            {(
-              [
-                ['metric', 'Metric'],
-                ['variant', 'Variant'],
-                ['sample_size', 'Sample Size'],
-                ['mean', 'Rate / Mean'],
-                ['improvement', 'Improvement'],
-                ['p_value', 'p-value'],
-              ] as [SortKey, string][]
-            ).map(([key, label]) => (
+            {COLUMNS.map(([key, label]) => (
               <th
                 key={key}
-                onClick={() => handleSort(key)}
-                className="px-4 py-3 text-left font-medium text-slate-600 cursor-pointer hover:bg-slate-100 select-none"
-                aria-sort={sortKey === key ? (sortDir === 'asc' ? 'ascending' : 'descending') : 'none'}
+                scope="col"
+                className="px-4 py-3 text-left font-medium text-slate-600"
+                aria-sort={ariaSort(key)}
               >
-                {label} <span aria-hidden>{sortIcon(key)}</span>
+                <button
+                  type="button"
+                  onClick={() => handleSort(key)}
+                  className="inline-flex items-center gap-1 rounded hover:text-slate-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+                >
+                  {label}
+                  <span aria-hidden="true">{sortIcon(key)}</span>
+                </button>
               </th>
             ))}
-            <th className="px-4 py-3 text-left font-medium text-slate-600">
+            <th scope="col" className="px-4 py-3 text-left font-medium text-slate-600">
               Significance
             </th>
           </tr>
         </thead>
         <tbody className="divide-y divide-slate-100 bg-white">
-          {sorted.map((row, i) => (
-            <tr
-              key={`${row.metricId}-${row.variant.variant_id}`}
-              className={`${i % 2 === 0 ? '' : 'bg-slate-50/50'} ${
-                row.isPrimary ? 'ring-1 ring-inset ring-blue-100' : ''
-              }`}
-            >
-              <td className="px-4 py-3 font-medium text-slate-800">
-                {row.metricName}
-                {row.isPrimary && (
-                  <span className="ml-1.5 text-xs text-blue-600 font-normal">
-                    primary
+          {ordered.map((row, i) => {
+            const { metric, variant } = row;
+            const decisive = decisivePValue(variant);
+            const adjustedShown = correction !== null && isFiniteNumber(variant.adjusted_p_value);
+            return (
+              <tr
+                key={`${metric.metric_id}-${variant.variant_id}`}
+                className={`${i % 2 === 0 ? '' : 'bg-slate-50/50'} ${
+                  metric.is_primary ? 'ring-1 ring-inset ring-blue-100' : ''
+                }`}
+              >
+                <td className="px-4 py-3 font-medium text-slate-800">
+                  {metric.metric_name}
+                  {metric.is_primary && (
+                    <span className="ml-1.5 text-xs text-blue-700 font-normal">primary</span>
+                  )}
+                </td>
+                <td className="px-4 py-3 text-slate-700">
+                  {variant.variant_name}
+                  {variant.is_control && (
+                    <span className="ml-1.5 text-xs text-slate-600">(control)</span>
+                  )}
+                </td>
+                <td className="px-4 py-3 text-slate-700">
+                  {variant.sample_size.toLocaleString()}
+                </td>
+                <td className="px-4 py-3 text-slate-700">
+                  <span className="flex flex-col">
+                    <span>{formatValue(metric, variant)}</span>
+                    {metric.metric_type !== 'conversion' && (
+                      <span className="text-xs text-slate-600">
+                        {analysedAsRate(metric) ? rateDescription(metric) : 'mean'}
+                      </span>
+                    )}
                   </span>
-                )}
-              </td>
-              <td className="px-4 py-3 text-slate-700">
-                {row.variant.variant_name}
-                {row.variant.is_control && (
-                  <span className="ml-1.5 text-xs text-slate-400">(control)</span>
-                )}
-              </td>
-              <td className="px-4 py-3 text-slate-700">
-                {row.variant.sample_size.toLocaleString()}
-              </td>
-              <td className="px-4 py-3 text-slate-700">
-                {formatPct(row.variant.mean)}
-              </td>
-              <td className={`px-4 py-3 font-medium ${improvementClass(row.variant)}`}>
-                {formatImprovement(
-                  row.variant.relative_improvement_pct,
-                  row.variant.is_control
-                )}
-              </td>
-              <td className="px-4 py-3 text-slate-700">
-                {row.variant.p_value !== null
-                  ? row.variant.p_value.toFixed(4)
-                  : '—'}
-              </td>
-              <td className="px-4 py-3">
-                <StatisticalBadge
-                  pValue={row.variant.p_value}
-                  confidenceLevel={confidenceLevel}
-                />
-              </td>
-            </tr>
-          ))}
+                </td>
+                <td className={`px-4 py-3 font-medium ${improvementClass(variant)}`}>
+                  {formatImprovement(variant.relative_improvement_pct, variant.is_control)}
+                </td>
+                <td className="px-4 py-3 text-slate-700">
+                  <PValueCell variant={variant} correctionMethod={correctionMethod} />
+                </td>
+                <td className="px-4 py-3">
+                  <StatisticalBadge
+                    pValue={variant.is_control ? null : isFiniteNumber(decisive) ? decisive : NaN}
+                    confidenceLevel={confidenceLevel}
+                    isSignificant={variant.is_significant}
+                    pLabel={adjustedShown ? 'adjusted p' : 'p'}
+                  />
+                </td>
+              </tr>
+            );
+          })}
         </tbody>
       </table>
     </div>
