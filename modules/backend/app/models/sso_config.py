@@ -63,7 +63,7 @@ class SSOConfig(Base):
     # Behavior
     is_enforced = Column(
         Boolean, default=False, nullable=False
-    )  # Block password login when True
+    )  # Stored only: nothing reads it, so password sign-in is not blocked (#504)
     is_active = Column(Boolean, default=True, nullable=False)
 
     # Timestamps

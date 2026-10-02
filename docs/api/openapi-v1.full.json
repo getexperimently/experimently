@@ -12382,7 +12382,7 @@
           },
           "is_enforced": {
             "default": false,
-            "description": "Block password login when True",
+            "description": "Stored and returned, but it has no effect: password sign-in is not blocked when True",
             "title": "Is Enforced",
             "type": "boolean"
           },

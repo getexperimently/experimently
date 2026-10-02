@@ -37,9 +37,7 @@ from backend.app.schemas.feature_flag import (
 from backend.app.services.feature_flag_service import FeatureFlagService
 
 # Test constants
-TEST_USER_ID = (
-    "bce3f687-ac5f-4735-9b63-d4f2efcc36e7"  # Match the ID from the mock_auth fixture
-)
+TEST_USER_ID = "bce3f687-ac5f-4735-9b63-d4f2efcc36e7"  # Match the ID the client fixture signs in as
 TEST_FLAG_ID = str(uuid.uuid4())
 TEST_FLAG_KEY = "test-feature-flag"
 TEST_FLAG_NAME = "Test Feature Flag"
@@ -99,7 +97,7 @@ def test_user(db_session: Session) -> User:
     db_session.execute(text("SET search_path TO test_experimentation"))
     db_session.commit()
 
-    # Look up by the specific ID that mock_auth uses, or by email.
+    # Look up by the specific ID the client fixture uses, or by email.
     user = db_session.query(User).filter(User.id == TEST_USER_ID).first()
     if not user:
         # Remove any existing user with this email to avoid unique constraint
@@ -152,8 +150,13 @@ def test_feature_flag(db_session: Session, test_user: User) -> FeatureFlag:
 
 
 @pytest.fixture
-def mock_auth():
-    """Mock authentication for testing."""
+def client(client):
+    """The shared ``client``, signed in as the TEST_USER_ID superuser.
+
+    This was a separate ``mock_auth`` fixture requested beside ``client``. Both
+    write the app-global auth override, so the user depended on which pytest set
+    up last (#476); overriding ``client`` itself fixes the order.
+    """
 
     class MockAuth:
         def override_get_current_user(self):
@@ -213,7 +216,7 @@ def mock_auth():
     )
     app.dependency_overrides[deps.get_cache_control] = override_cache_control
 
-    yield mock_auth
+    yield client
 
     # Clean up
     app.dependency_overrides = {}
@@ -223,7 +226,7 @@ class TestFeatureFlagEndpoints:
     """Test suite for feature flag endpoints."""
 
     def test_create_feature_flag(
-        self, client: TestClient, db_session: Session, mock_auth, test_user: User
+        self, client: TestClient, db_session: Session, test_user: User
     ):
         """Test creating a new feature flag."""
 
@@ -277,7 +280,6 @@ class TestFeatureFlagEndpoints:
         self,
         client: TestClient,
         db_session: Session,
-        mock_auth,
         test_feature_flag: FeatureFlag,
     ):
         """Test creating a feature flag with duplicate key."""
@@ -308,7 +310,6 @@ class TestFeatureFlagEndpoints:
         self,
         client: TestClient,
         db_session: Session,
-        mock_auth,
         test_feature_flag: FeatureFlag,
     ):
         """Test retrieving a feature flag by ID."""
@@ -336,7 +337,7 @@ class TestFeatureFlagEndpoints:
         app.dependency_overrides.pop(deps.get_db, None)
 
     def test_get_nonexistent_feature_flag(
-        self, client: TestClient, db_session: Session, mock_auth
+        self, client: TestClient, db_session: Session
     ):
         """Test retrieving a nonexistent feature flag."""
         response = client.get(
@@ -350,7 +351,6 @@ class TestFeatureFlagEndpoints:
         self,
         client: TestClient,
         db_session: Session,
-        mock_auth,
         test_feature_flag: FeatureFlag,
     ):
         """Test updating a feature flag."""
@@ -391,7 +391,6 @@ class TestFeatureFlagEndpoints:
         self,
         client: TestClient,
         db_session: Session,
-        mock_auth,
         test_feature_flag: FeatureFlag,
     ):
         """Test deleting a feature flag."""
@@ -449,7 +448,6 @@ class TestFeatureFlagEndpoints:
         self,
         client: TestClient,
         db_session: Session,
-        mock_auth,
         test_feature_flag: FeatureFlag,
     ):
         """Test activating a feature flag."""
@@ -501,7 +499,6 @@ class TestFeatureFlagEndpoints:
         self,
         client: TestClient,
         db_session: Session,
-        mock_auth,
         test_feature_flag: FeatureFlag,
     ):
         """Test deactivating a feature flag."""
@@ -554,7 +551,6 @@ class TestFeatureFlagEndpoints:
         client: TestClient,
         db_session: Session,
         test_feature_flag: FeatureFlag,
-        mock_auth,
     ):
         """Test evaluating a feature flag for a specific user."""
         # Create a new flag just for this test
@@ -631,7 +627,6 @@ class TestFeatureFlagEndpoints:
         client: TestClient,
         db_session: Session,
         test_feature_flag: FeatureFlag,
-        mock_auth,
     ):
         """Test retrieving all feature flags for a user."""
         # Create a new flag just for this test
@@ -705,7 +700,6 @@ class TestFeatureFlagEndpoints:
         self,
         client: TestClient,
         db_session: Session,
-        mock_auth,
         test_user: User,
     ):
         """Test listing feature flags.
@@ -811,7 +805,6 @@ class TestFeatureFlagEndpoints:
         self,
         client: TestClient,
         db_session: Session,
-        mock_auth,
         test_feature_flag: FeatureFlag,
     ):
         """Test listing feature flags with search."""
@@ -906,9 +899,7 @@ class TestFeatureFlagEndpoints:
             # Clean up
             app.dependency_overrides.pop(deps.get_db, None)
 
-    def test_feature_flag_validation(
-        self, client: TestClient, db_session: Session, mock_auth
-    ):
+    def test_feature_flag_validation(self, client: TestClient, db_session: Session):
         """Test feature flag validation."""
 
         # Override the get_db dependency to use the test session

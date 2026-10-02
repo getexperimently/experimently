@@ -208,7 +208,6 @@ log_cli_date_format = "%Y-%m-%d %H:%M:%S"
 source = ["backend/app"]
 omit = [
     "backend/app/db/migrations/*",
-    "backend/app/db/init_db.py",
     "backend/app/*/__init__.py",
 ]
 
