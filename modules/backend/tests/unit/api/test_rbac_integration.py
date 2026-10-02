@@ -227,7 +227,7 @@ class TestRBACIntegration:
         # Mock the Cognito response with developer group
         mock_auth_service.get_user_with_groups.return_value = {
             "username": "dev_user",
-            "attributes": {"email": "dev@example.com"},
+            "attributes": {"sub": "sub-dev_user", "email": "dev@example.com"},
             "groups": ["Developers"],
         }
 
@@ -241,17 +241,22 @@ class TestRBACIntegration:
         mock_db_session.query().filter().first.return_value = None
 
         # Call get_current_user to create the user based on Cognito groups
-        with patch("backend.app.api.deps.settings", mock_settings):
-            with patch("backend.app.api.deps.map_cognito_groups_to_role") as mock_map:
+        with patch("backend.app.services.cognito_accounts.settings", mock_settings):
+            with patch(
+                "backend.app.services.cognito_accounts.map_cognito_groups_to_role"
+            ) as mock_map:
                 mock_map.return_value = UserRole.DEVELOPER
-                with patch("backend.app.api.deps.should_be_superuser") as mock_super:
+                with patch(
+                    "backend.app.services.cognito_accounts.should_be_superuser"
+                ) as mock_super:
                     mock_super.return_value = False
 
                     # Call the function
                     user = get_current_user("test-token", mock_db_session)
 
-                    # Verify user was created with correct role
+                    # Verify user was created with correct role, linked to its sub
                     assert user.role == UserRole.DEVELOPER
+                    assert user.external_id == "cognito:sub-dev_user"
 
                     # Verify permissions based on the role
                     assert (
@@ -277,7 +282,7 @@ class TestRBACIntegration:
         # Mock the Cognito response with admin group
         mock_auth_service.get_user_with_groups.return_value = {
             "username": "admin_user",
-            "attributes": {"email": "admin@example.com"},
+            "attributes": {"sub": "sub-admin_user", "email": "admin@example.com"},
             "groups": ["Admins"],  # In COGNITO_ADMIN_GROUPS
         }
 
@@ -291,10 +296,14 @@ class TestRBACIntegration:
         mock_db_session.query().filter().first.return_value = None
 
         # Call get_current_user to create the user based on Cognito groups
-        with patch("backend.app.api.deps.settings", mock_settings):
-            with patch("backend.app.api.deps.map_cognito_groups_to_role") as mock_map:
+        with patch("backend.app.services.cognito_accounts.settings", mock_settings):
+            with patch(
+                "backend.app.services.cognito_accounts.map_cognito_groups_to_role"
+            ) as mock_map:
                 mock_map.return_value = UserRole.ADMIN
-                with patch("backend.app.api.deps.should_be_superuser") as mock_super:
+                with patch(
+                    "backend.app.services.cognito_accounts.should_be_superuser"
+                ) as mock_super:
                     mock_super.return_value = True
 
                     # Call the function
@@ -316,6 +325,7 @@ class TestRBACIntegration:
         # Create existing user with VIEWER role
         existing_user = User(
             username="changing_user",
+            external_id="cognito:sub-changing_user",
             email="changing@example.com",
             role=UserRole.VIEWER,
             is_superuser=False,
@@ -325,7 +335,7 @@ class TestRBACIntegration:
         # Mock the Cognito response with new role (developer)
         mock_auth_service.get_user_with_groups.return_value = {
             "username": "changing_user",
-            "attributes": {"email": "changing@example.com"},
+            "attributes": {"sub": "sub-changing_user", "email": "changing@example.com"},
             "groups": ["Developers"],  # Now in Developers group
         }
 
@@ -336,10 +346,14 @@ class TestRBACIntegration:
         }
 
         # Call get_current_user to update the user based on new Cognito groups
-        with patch("backend.app.api.deps.settings", mock_settings):
-            with patch("backend.app.api.deps.map_cognito_groups_to_role") as mock_map:
+        with patch("backend.app.services.cognito_accounts.settings", mock_settings):
+            with patch(
+                "backend.app.services.cognito_accounts.map_cognito_groups_to_role"
+            ) as mock_map:
                 mock_map.return_value = UserRole.DEVELOPER
-                with patch("backend.app.api.deps.should_be_superuser") as mock_super:
+                with patch(
+                    "backend.app.services.cognito_accounts.should_be_superuser"
+                ) as mock_super:
                     mock_super.return_value = False
 
                     # Call the function

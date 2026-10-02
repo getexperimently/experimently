@@ -442,7 +442,7 @@ def client(db_session, monkeypatch):
     def mock_get_user_with_groups(*args, **kwargs):
         return {
             "username": "test_user",
-            "attributes": {"email": "test@example.com"},
+            "attributes": {"sub": "sub-testuser", "email": "test@example.com"},
             "groups": ["admin-group"],
         }
 
@@ -581,7 +581,7 @@ def mock_auth(client, normal_user, monkeypatch):
     def mock_get_user_with_groups(*args, **kwargs):
         return {
             "username": normal_user.username,
-            "attributes": {"email": normal_user.email},
+            "attributes": {"sub": f"sub-{normal_user.id}", "email": normal_user.email},
             "groups": ["developer-group"],
         }
 
@@ -628,7 +628,7 @@ def mock_auth_superuser(client, superuser, monkeypatch):
     def mock_get_user_with_groups(*args, **kwargs):
         return {
             "username": superuser.username,
-            "attributes": {"email": superuser.email},
+            "attributes": {"sub": f"sub-{superuser.id}", "email": superuser.email},
             "groups": ["admin-group"],
         }
 

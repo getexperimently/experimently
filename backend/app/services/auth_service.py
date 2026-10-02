@@ -85,6 +85,17 @@ def validate_access_token_claims(
         raise CognitoTokenRefused(REASON_WRONG_ISSUER)
 
 
+def groups_from_claims(claims: Mapping[str, Any]) -> list:
+    """The group names in a verified access token's ``cognito:groups`` claim.
+
+    Absent (the user is in no group) or not a list of names: no groups.
+    """
+    value = claims.get("cognito:groups")
+    if not isinstance(value, list):
+        return []
+    return [name for name in value if isinstance(name, str)]
+
+
 class CognitoAuthService:
     """Service for AWS Cognito authentication operations."""
 
@@ -283,8 +294,9 @@ class CognitoAuthService:
             logger.error(f"Unexpected error during token refresh: {e!s}")
             raise ValueError("An unexpected error occurred during token refresh")
 
-    def _check_token_audience(self, access_token: str) -> None:
-        """Refuse a token not issued to this deployment's pool and app client.
+    def _check_token_audience(self, access_token: str) -> Dict[str, Any]:
+        """Refuse a token not issued to this deployment's pool and app client,
+        and return its claims.
 
         Called only after ``GetUser`` has accepted the token, so the token is
         authentic and unexpired and its claims can be read without verifying
@@ -299,6 +311,7 @@ class CognitoAuthService:
         except jwt.PyJWTError:
             raise CognitoTokenRefused(REASON_WRONG_ISSUER) from None
         validate_access_token_claims(claims, self.user_pool_id, self.client_id)
+        return claims
 
     def get_user(self, access_token: str) -> Dict[str, Any]:
         """Get user details from the access token.
@@ -336,6 +349,12 @@ class CognitoAuthService:
         """
         Get user details and group membership from access token.
 
+        The groups are the token's ``cognito:groups`` claim, read once the
+        token has passed the issuer and app-client check. An access token
+        carries the claim only when the user is in at least one group, so an
+        absent claim means no groups. A change of group therefore takes
+        effect with the user's next access token.
+
         Args:
             access_token: JWT access token from Cognito
 
@@ -350,31 +369,15 @@ class CognitoAuthService:
         try:
             # Get basic user details
             response = self.client.get_user(AccessToken=access_token)
-            self._check_token_audience(access_token)
+            claims = self._check_token_audience(access_token)
 
             # Extract user attributes
             user_attributes = {
                 attr["Name"]: attr["Value"]
                 for attr in response.get("UserAttributes", [])
             }
-
-            # Get username for group lookup
             username = response.get("Username")
-
-            # Get user's Cognito groups
-            groups = []
-            if self.user_pool_id:
-                try:
-                    # Use admin_list_groups_for_user to get group membership
-                    group_response = self.client.admin_list_groups_for_user(
-                        UserPoolId=self.user_pool_id, Username=username
-                    )
-                    groups = [
-                        group.get("GroupName")
-                        for group in group_response.get("Groups", [])
-                    ]
-                except Exception as e:
-                    logger.warning(f"Error getting user groups: {e!s}")
+            groups = groups_from_claims(claims)
 
             logger.info(
                 f"User details with groups retrieved for username: {username}, groups: {groups}"
