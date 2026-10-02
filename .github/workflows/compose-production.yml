@@ -40,7 +40,9 @@ permissions:
   contents: read
 
 concurrency:
-  group: compose-production-${{ github.head_ref || github.run_id }}
+  # Keyed on the pull request NUMBER, not head_ref: two forks' `patch-1`
+  # branches share a head_ref and would cancel each other's runs (#75).
+  group: compose-production-${{ github.event.pull_request.number || github.run_id }}
   cancel-in-progress: true
 
 env:

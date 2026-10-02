@@ -131,10 +131,27 @@ jobs:
     if: always()
     steps:
       - name: Fail if any gate failed
+        env:
+          # The whole `needs` object, {"job": {"result": ..., "outputs": ...}},
+          # as the scan workflow's summary job reads it. A job added to `needs`
+          # is checked without anyone also adding it to a list here. With the
+          # typed list this replaced, a new failing gate in `needs` was not
+          # read and this summary stayed green.
+          # backend/tests/unit/infrastructure/test_ci_aggregators.py pins it.
+          RESULTS: ${{ toJSON(needs) }}
         run: |
-          if [ "${{ needs.backend-gate.result }}" != "success" ] || \
-             [ "${{ needs.frontend-gate.result }}" != "success" ] || \
-             [ "${{ needs.security-gate.result }}" != "success" ]; then
+          set -euo pipefail
+          printf '%s\n' "$RESULTS" | jq -r 'to_entries[] | "\(.key)=\(.value.result)"' > results.txt
+          test -s results.txt || { printf '::error::needs produced no results\n'; exit 1; }
+          failed=0
+          while IFS='=' read -r job result; do
+            printf '  %s: %s\n' "$job" "$result"
+            case "$result" in
+              success) ;;
+              *) printf '::error::%s: %s\n' "$job" "$result"; failed=1 ;;
+            esac
+          done < results.txt
+          if [ "$failed" -ne 0 ]; then
             echo "::error::Release gate failed"
             exit 1
           fi

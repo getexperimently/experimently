@@ -143,7 +143,7 @@ It prints the stored thresholds:
 |-------|------|----------|-------------|
 | `enabled` | boolean | No | Whether the monitor checks this flag (default `true`) |
 | `metrics` | object | No | Map of metric name → threshold (see above). An empty map means nothing is checked |
-| `rollback_percentage` | int | No | Percentage the automatic rollback sets the flag to (default `0`, i.e. fully off). Set it to e.g. `5` to fall back to an internal/canary slice instead of turning the flag off; manual rollbacks take the percentage as a query parameter |
+| `rollback_percentage` | int | No | Global rollout percentage the automatic rollback sets the flag to (default `0`). Set it to e.g. `5` to keep a small slice of users on the flag. Users matched by a targeting rule are not affected (see [What a rollback changes](#what-a-rollback-changes)); manual rollbacks take the percentage as a query parameter |
 
 The response (the same shape as `GET .../config`) also carries the configuration's `id`,
 `feature_flag_id`, `enabled`, `rollback_percentage`, `created_at` and `updated_at`.
@@ -273,8 +273,26 @@ When the monitor finds a flag unhealthy and `enable_automatic_rollbacks` is on, 
    metric value and threshold, the previous and target percentages, and the reason
 3. Dispatches a notification to the configured Slack channels and email addresses
 
-Users outside the rollback percentage no longer receive the flag after the rollback. Investigate the root cause
-before re-enabling.
+Investigate the root cause before re-enabling.
+
+### What a rollback changes
+
+A rollback, automatic or manual, changes only the flag's global `rollout_percentage`. It does
+not change the flag's status or its targeting rules. After a rollback:
+
+- a user who matches no targeting rule is bucketed by the new global percentage, so at `0%`
+  that user gets `enabled: false` with `reason: "rollout"`;
+- a user who matches a targeting rule is bucketed by that rule's own `rollout_percentage`
+  (100 unless the rule sets one), so the rollback does not change whether that user gets
+  the flag. With the default rule percentage, a rule-matched user keeps the flag, with
+  `reason: "targeting_rule"`.
+
+To stop a flag for every user, rule-matched or not, turn it off:
+`POST /api/v1/feature-flags/$FLAG_ID/deactivate`, or `"is_active": false` in a `PUT` (see
+[Creating Feature Flags](create.md#when-a-flag-evaluates-to-off)). An inactive flag evaluates
+to `enabled: false` with `reason: "inactive"` for everyone. Whether a rollback to `0%` should
+also do this is tracked in
+[#629](https://github.com/getexperimently/experimently/issues/629).
 
 Error metrics count both server-side evaluation failures and errors reported by clients through
 `POST /api/v1/tracking/errors` (see [Creating Feature Flags](create.md#reporting-client-side-errors)), so a crash
@@ -327,6 +345,10 @@ curl -s -X POST "localhost:8000/api/v1/safety/feature-flags/$FLAG_ID/rollback?pe
 The response also carries `feature_flag_id`, `trigger_type` (`manual`), `rollback_record_id`,
 `timestamp` and `details` (the reason). A flag that is not `ACTIVE`, or is already at `0%`,
 returns `success: false` with an explanatory message.
+
+A manual rollback changes the same thing as an automatic one: the global rollout percentage.
+Users matched by a targeting rule keep the rule's percentage (see
+[What a rollback changes](#what-a-rollback-changes)). To stop the flag for everyone, deactivate it.
 
 ---
 

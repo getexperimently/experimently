@@ -452,7 +452,8 @@ curl -X POST "http://localhost:8000/api/v1/users/" \
   409 "Email already registered" when a superuser sets an email address that
   another account holds in any letter case. Changing only the letter case of
   the account's own address is accepted, and resending the stored address
-  unchanged is never refused.
+  unchanged is never refused. 409 "Username already registered" when a
+  superuser sets a username another account has.
 
 ### Change Your Password
 - **Endpoint**: `POST /api/v1/users/me/password`
@@ -701,6 +702,8 @@ public `key`. They share the per-IP `SDK_RATE_LIMIT_PER_MINUTE` ceiling (default
   request sets an email address that another account holds in any letter
   case. Changing only the letter case of the account's own address is
   accepted, and resending the stored address unchanged is never refused.
+  409 "Username already registered" when the request sets a username another
+  account has.
 
 ### Delete User (Admin)
 - **Endpoint**: `DELETE /api/v1/admin/users/{user_id}`

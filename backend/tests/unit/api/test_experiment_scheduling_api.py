@@ -196,10 +196,9 @@ def draft_experiment(db_session, superuser):
 class TestExperimentSchedulingAPI:
     """Tests for experiment scheduling API endpoints."""
 
-    def test_update_experiment_schedule(
-        self, client, draft_experiment, mock_auth_superuser
-    ):
+    def test_update_experiment_schedule(self, draft_experiment, mock_auth_superuser):
         """Test updating experiment schedule via API."""
+        client = mock_auth_superuser  # the test client, signed in (#476)
         # Set up test data
         start_date = datetime.now(timezone.utc) + timedelta(days=1)
         end_date = start_date + timedelta(days=7)
@@ -223,8 +222,9 @@ class TestExperimentSchedulingAPI:
         assert "start_date" in data
         assert "end_date" in data
 
-    def test_update_nonexistent_experiment_schedule(self, client, mock_auth_superuser):
+    def test_update_nonexistent_experiment_schedule(self, mock_auth_superuser):
         """Test updating schedule for a non-existent experiment."""
+        client = mock_auth_superuser  # the test client, signed in (#476)
         # Set up test data
         start_date = datetime.now(timezone.utc) + timedelta(days=1)
         end_date = start_date + timedelta(days=7)
@@ -246,9 +246,10 @@ class TestExperimentSchedulingAPI:
         assert response.status_code == 404
 
     def test_update_experiment_schedule_invalid_dates(
-        self, client, draft_experiment, mock_auth_superuser
+        self, draft_experiment, mock_auth_superuser
     ):
         """Test updating experiment schedule with invalid dates (end before start)."""
+        client = mock_auth_superuser  # the test client, signed in (#476)
         start_date = (datetime.now(timezone.utc) + timedelta(days=7)).isoformat()
         end_date = (datetime.now(timezone.utc) + timedelta(days=1)).isoformat()
 
@@ -267,9 +268,10 @@ class TestExperimentSchedulingAPI:
         )
 
     def test_update_experiment_schedule_past_start_date(
-        self, client, draft_experiment, mock_auth_superuser
+        self, draft_experiment, mock_auth_superuser
     ):
         """Test updating experiment schedule with start date in the past."""
+        client = mock_auth_superuser  # the test client, signed in (#476)
         start_date = (datetime.now(timezone.utc) - timedelta(days=1)).isoformat()
         end_date = (datetime.now(timezone.utc) + timedelta(days=7)).isoformat()
 
@@ -315,8 +317,9 @@ class TestExperimentSchedulingAPI:
         # The correct behavior should be: assert response.status_code == status.HTTP_403_FORBIDDEN
         assert True
 
-    def test_update_non_existent_experiment_schedule(self, client, mock_auth_superuser):
+    def test_update_non_existent_experiment_schedule(self, mock_auth_superuser):
         """Test updating schedule for a non-existent experiment."""
+        client = mock_auth_superuser  # the test client, signed in (#476)
         non_existent_id = str(uuid4())
         start_date = (datetime.now(timezone.utc) + timedelta(days=1)).isoformat()
         end_date = (datetime.now(timezone.utc) + timedelta(days=7)).isoformat()

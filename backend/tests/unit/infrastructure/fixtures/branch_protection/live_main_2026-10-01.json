@@ -1,0 +1,141 @@
+{
+  "url": "https://api.github.com/repos/getexperimently/experimently/branches/main/protection",
+  "required_status_checks": {
+    "url": "https://api.github.com/repos/getexperimently/experimently/branches/main/protection/required_status_checks",
+    "strict": false,
+    "contexts": [
+      "Release Gate Summary",
+      "Security Scan Summary",
+      "Unit Tests",
+      "Smoke Tests",
+      "Frontend Tests",
+      "SDK Contract Tests",
+      "integration-tests",
+      "SDK Unit Tests",
+      "Browser E2E",
+      "Docker Smoke",
+      "lint",
+      "regression-guard",
+      "SDK Live Contract / sdk-live-contract (core)",
+      "core-build",
+      "full-build",
+      "Module Tests",
+      "Base Requirements Only",
+      "CDK Stack Tests (Python)",
+      "DCO",
+      "Leak Guard"
+    ],
+    "contexts_url": "https://api.github.com/repos/getexperimently/experimently/branches/main/protection/required_status_checks/contexts",
+    "checks": [
+      {
+        "context": "Release Gate Summary",
+        "app_id": 15368
+      },
+      {
+        "context": "Security Scan Summary",
+        "app_id": 15368
+      },
+      {
+        "context": "Unit Tests",
+        "app_id": 15368
+      },
+      {
+        "context": "Smoke Tests",
+        "app_id": 15368
+      },
+      {
+        "context": "Frontend Tests",
+        "app_id": 15368
+      },
+      {
+        "context": "SDK Contract Tests",
+        "app_id": 15368
+      },
+      {
+        "context": "integration-tests",
+        "app_id": 15368
+      },
+      {
+        "context": "SDK Unit Tests",
+        "app_id": 15368
+      },
+      {
+        "context": "Browser E2E",
+        "app_id": 15368
+      },
+      {
+        "context": "Docker Smoke",
+        "app_id": 15368
+      },
+      {
+        "context": "lint",
+        "app_id": 15368
+      },
+      {
+        "context": "regression-guard",
+        "app_id": 15368
+      },
+      {
+        "context": "SDK Live Contract / sdk-live-contract (core)",
+        "app_id": 15368
+      },
+      {
+        "context": "core-build",
+        "app_id": 15368
+      },
+      {
+        "context": "full-build",
+        "app_id": 15368
+      },
+      {
+        "context": "Module Tests",
+        "app_id": 15368
+      },
+      {
+        "context": "Base Requirements Only",
+        "app_id": 15368
+      },
+      {
+        "context": "CDK Stack Tests (Python)",
+        "app_id": 15368
+      },
+      {
+        "context": "DCO",
+        "app_id": 15368
+      },
+      {
+        "context": "Leak Guard",
+        "app_id": 15368
+      }
+    ]
+  },
+  "required_signatures": {
+    "url": "https://api.github.com/repos/getexperimently/experimently/branches/main/protection/required_signatures",
+    "enabled": false
+  },
+  "enforce_admins": {
+    "url": "https://api.github.com/repos/getexperimently/experimently/branches/main/protection/enforce_admins",
+    "enabled": false
+  },
+  "required_linear_history": {
+    "enabled": true
+  },
+  "allow_force_pushes": {
+    "enabled": false
+  },
+  "allow_deletions": {
+    "enabled": false
+  },
+  "block_creations": {
+    "enabled": false
+  },
+  "required_conversation_resolution": {
+    "enabled": true
+  },
+  "lock_branch": {
+    "enabled": false
+  },
+  "allow_fork_syncing": {
+    "enabled": false
+  }
+}

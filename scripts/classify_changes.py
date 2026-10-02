@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 """Is a pull request documentation only?  Reads a file list, answers yes or no.
 
-``pr-qa-gate.yml``'s ``changes`` job feeds this the output of::
+``pr-qa-gate.yml``'s ``changes`` job collects the output of::
 
     git diff --no-renames --name-only "$BASE" "$HEAD"
 
-one path per line on stdin, and appends what it prints to ``$GITHUB_OUTPUT``.
+into a variable, hands it to this script one path per line on stdin, checks
+that the answer is one line, and only then appends it to ``$GITHUB_OUTPUT``.
 The answer decides whether the heavy jobs do their work or only report, so a
 wrong "yes" is the dangerous direction: a code change classed as docs merges
 green without its tests.  Everything here is therefore fail-closed.

@@ -49,10 +49,14 @@ pytestmark = pytest.mark.unit
 #: replaced the sequential confidence sequence with the inverted mSPRT, which
 #: moves the ``cs`` and ``analysis`` outputs below.  #231 also clips that
 #: interval to [-1, 1]; the interval of this dataset lies inside that range,
-#: so the clip leaves the 1.2.0 fingerprint as it was.
+#: so the clip leaves the 1.2.0 fingerprint as it was.  #242, in the same
+#: version, made STOP_WINNER need a probability to be best of 0.975: the
+#: ``bayesian`` case (0.97465) and the added ``bayesian_aa`` case both
+#: answered STOP_WINNER before it and CONTINUE after.  The 1.1.0 entry is kept
+#: as released; it predates the ``bayesian_aa`` case.
 ENGINE_FINGERPRINTS: Dict[str, str] = {
     "1.1.0": "2feed80e7e305c3c8d0b183e1f2905799e8af73b34aa674cd358fa5948d2f089",
-    "1.2.0": "a1b39b9e82d8a46ab3c3c6ec86e37d0401c66d27a03a3dc8751cc5ca1eca9aba",
+    "1.2.0": "4860dd07b1052f1f47329d61cc5fa72f58a1721177f07bb1e912d00754a0a2c3",
 }
 
 # Two ids where the control sorts AFTER the treatment, so an engine that
@@ -158,6 +162,17 @@ def _engine_outputs() -> Dict[str, Any]:
     )
     bayes.pop("engine_version", None)
     outputs["bayesian"] = bayes
+
+    # Two identical 1% arms at 5,000 users each (#242): the expected loss is
+    # below the default 0.001, so the pre-#242 rule answered STOP_WINNER; the
+    # probability to be best is about 0.5, so the current rule answers CONTINUE.
+    bayes_aa = BayesianService().analyze(
+        [{"conversions": 50, "total": 5000}, {"conversions": 50, "total": 5000}],
+        n_samples=20_000,
+        seed=20260926,
+    )
+    bayes_aa.pop("engine_version", None)
+    outputs["bayesian_aa"] = bayes_aa
 
     # Sequential (/sequential).
     seq = SequentialTestingService()

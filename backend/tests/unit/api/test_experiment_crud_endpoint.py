@@ -103,11 +103,11 @@ class TestExperimentCreate:
         MockMetricsCollector,
         mock_dispatch,
         MockExperimentService,
-        client: TestClient,
         db_session: Session,
         mock_auth,
     ):
         """Test successful experiment creation with valid data."""
+        client = mock_auth  # the test client, signed in (#476)
         # Set test environment
         os.environ["TESTING"] = "true"
 
