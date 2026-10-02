@@ -12,7 +12,7 @@
 # scripts/doc_examples.py), and each page's residual counts can only fall.
 
 [meta]
-documents = 34
+documents = 35
 exec = 165
 universe = [
     ".github/pull_request_template.md",
@@ -415,6 +415,13 @@ path = "docs/guides/user-guide.md"
 environment = "bare"
 exec = 0
 skip = 1
+expects = 0
+
+[[document]]
+path = "docs/cognito_integration.md"
+environment = "bare"
+exec = 0
+skip = 2
 expects = 0
 
 # Its blocks need a Kubernetes cluster: the chart-kind job extracts and runs

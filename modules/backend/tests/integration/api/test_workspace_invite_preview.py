@@ -321,7 +321,7 @@ def test_an_unknown_token_is_still_404(client, db_session, invited):
 #
 # With AUTH_PROVIDER=local an inactive account is already refused inside
 # get_current_user (400), so the preview's own is_active check is reached only
-# on the Cognito path, which returns the stored row as it is. The Cognito call
+# on the Cognito path, which returns the linked row as it is. The Cognito call
 # is stubbed; nothing here talks to AWS.
 
 
@@ -333,10 +333,10 @@ def cognito(monkeypatch):
     class _Stub:
         user_data: dict = {}
 
-        def returns(self, username: str, email: str) -> None:
+        def returns(self, username: str, email: str, sub: str) -> None:
             self.user_data = {
                 "username": username,
-                "attributes": {"email": email},
+                "attributes": {"sub": sub, "email": email},
                 "groups": [],
             }
 
@@ -350,12 +350,20 @@ def cognito(monkeypatch):
 COGNITO_HEADERS = {"Authorization": "Bearer cognito-access-token"}
 
 
+def _link(db: Session, user: User) -> str:
+    """Link ``user`` to a Cognito user ID, as an administrator does; return it."""
+    sub = str(uuid.uuid4())
+    user.external_id = f"cognito:{sub}"
+    db.commit()
+    return sub
+
+
 def test_an_active_invitee_signed_in_through_cognito_sees_the_address(
     client, db_session, cognito, invite, invited
 ):
     """The positive control for the two tests below: the stub does sign in."""
     invitee = _user(db_session, invited)
-    cognito.returns(invitee.username, invited)
+    cognito.returns(invitee.username, invited, _link(db_session, invitee))
 
     resp = _preview(client, invite.token, COGNITO_HEADERS)
 
@@ -368,15 +376,15 @@ def test_an_inactive_invitee_sees_the_address_masked(
     client, db_session, cognito, invite, invited
 ):
     invitee = _user(db_session, invited, is_active=False)
-    cognito.returns(invitee.username, invited)
+    cognito.returns(invitee.username, invited, _link(db_session, invitee))
 
     _assert_masked(_preview(client, invite.token, COGNITO_HEADERS), invited)
 
 
-def test_a_first_sign_in_that_cannot_be_saved_still_gets_the_preview(
+def test_a_refused_first_sign_in_still_gets_the_preview(
     client, db_session, cognito, invite, invited
 ):
-    """Writing the new user row fails on a unique constraint.
+    """A first Cognito sign-in whose address another account holds is refused.
 
     get_current_user then answers 401; the preview goes on with the same
     request session, so it has to be usable afterwards. 200, masked, and no
@@ -384,7 +392,7 @@ def test_a_first_sign_in_that_cannot_be_saved_still_gets_the_preview(
     """
     _user(db_session, invited)
     new_username = f"cog_{uuid.uuid4().hex[:10]}"
-    cognito.returns(new_username, invited)
+    cognito.returns(new_username, invited, str(uuid.uuid4()))
 
     _assert_masked(_preview(client, invite.token, COGNITO_HEADERS), invited)
 

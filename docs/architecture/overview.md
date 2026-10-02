@@ -266,7 +266,7 @@ The architecture is designed to provide high-performance experiment evaluation, 
 
 2. **Performance Optimization**
 
-    - Redis caching for feature flag/experiment configurations
+    - Redis caching for experiment configurations (feature flags are read from the database on every request)
     - DynamoDB for high-throughput event ingestion
     - API response caching at CloudFront edge locations
 

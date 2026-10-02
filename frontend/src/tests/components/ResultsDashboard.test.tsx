@@ -3,6 +3,7 @@ import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { ResultsDashboard } from '@/components/results/ResultsDashboard/ResultsDashboard';
 import { ResultsService } from '@/services/results';
+import { ApiError } from '@/services/api';
 import {
   ExperimentResultsResponse,
   DailyResultsResponse,
@@ -224,6 +225,93 @@ describe('ResultsDashboard', () => {
     await waitFor(() =>
       expect(screen.getByTestId('experiment-summary')).toBeInTheDocument()
     );
+  });
+
+  // #666: the sample size loads on its own. Its failure stays inside the
+  // Sample Size tab; it must not blank the page.
+  describe('when the sample-size request fails', () => {
+    const serverError = () =>
+      new ApiError({ status: 500, detail: 'The sample size could not be computed.' });
+
+    it('still renders the Overview, and the Sample Size tab shows the error', async () => {
+      mockGetResults.mockResolvedValue(mockResults);
+      mockGetDailyResults.mockResolvedValue(mockDaily);
+      mockGetSampleSize.mockRejectedValue(serverError());
+
+      render(<ResultsDashboard experimentId="exp-1" />);
+      await waitFor(() =>
+        expect(screen.getByTestId('experiment-summary')).toBeInTheDocument()
+      );
+      expect(screen.queryByTestId('error-state')).not.toBeInTheDocument();
+      expect(screen.getByRole('tab', { name: /overview/i })).toHaveAttribute(
+        'aria-selected',
+        'true'
+      );
+      expect(screen.getByText('All Metrics')).toBeInTheDocument();
+
+      await userEvent.click(screen.getByRole('tab', { name: /sample size/i }));
+      const alert = await screen.findByTestId('sample-size-error');
+      expect(alert).toHaveAttribute('role', 'alert');
+      expect(alert).toHaveTextContent('The sample size could not be loaded.');
+      expect(alert).toHaveTextContent('The sample size could not be computed.');
+      expect(screen.queryByTestId('sample-size-meter')).not.toBeInTheDocument();
+      // Only the tab reports it; the summary card above is untouched.
+      expect(screen.getByTestId('experiment-summary')).toBeInTheDocument();
+    });
+
+    it('lets the user try the tab again without reloading the page', async () => {
+      mockGetResults.mockResolvedValue(mockResults);
+      mockGetDailyResults.mockResolvedValue(mockDaily);
+      mockGetSampleSize
+        .mockRejectedValueOnce(serverError())
+        .mockResolvedValue(mockSampleSize);
+
+      render(<ResultsDashboard experimentId="exp-1" />);
+      await waitFor(() => screen.getByRole('tablist'));
+      await userEvent.click(screen.getByRole('tab', { name: /sample size/i }));
+      await screen.findByTestId('sample-size-error');
+
+      await userEvent.click(screen.getByRole('button', { name: /try again/i }));
+      expect(await screen.findByTestId('sample-size-meter')).toBeInTheDocument();
+      expect(screen.queryByTestId('sample-size-error')).not.toBeInTheDocument();
+      expect(mockGetResults).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it('renders the page before the sample size answers, and the tab once it does', async () => {
+    let resolveSampleSize: (v: SampleSizeResult) => void = () => {};
+    mockGetResults.mockResolvedValue(mockResults);
+    mockGetDailyResults.mockResolvedValue(mockDaily);
+    mockGetSampleSize.mockImplementation(
+      () => new Promise<SampleSizeResult>((resolve) => (resolveSampleSize = resolve))
+    );
+
+    render(<ResultsDashboard experimentId="exp-1" />);
+    await waitFor(() =>
+      expect(screen.getByTestId('experiment-summary')).toBeInTheDocument()
+    );
+    await userEvent.click(screen.getByRole('tab', { name: /sample size/i }));
+    expect(screen.getByTestId('sample-size-loading')).toBeInTheDocument();
+
+    resolveSampleSize(mockSampleSize);
+    expect(await screen.findByTestId('sample-size-meter')).toBeInTheDocument();
+  });
+
+  it('opens the Sample Size tab from the Overview card link', async () => {
+    mockGetResults.mockResolvedValue(mockResults);
+    mockGetDailyResults.mockResolvedValue(mockDaily);
+    mockGetSampleSize.mockResolvedValue(mockSampleSize);
+
+    render(<ResultsDashboard experimentId="exp-1" />);
+    await waitFor(() => screen.getByTestId('experiment-summary'));
+    await userEvent.click(
+      screen.getByRole('button', { name: 'See the Sample Size tab for the planned sample.' })
+    );
+    expect(screen.getByRole('tab', { name: /sample size/i })).toHaveAttribute(
+      'aria-selected',
+      'true'
+    );
+    expect(await screen.findByTestId('sample-size-meter')).toBeInTheDocument();
   });
 
   // Issue #28: Breakdowns tab tests

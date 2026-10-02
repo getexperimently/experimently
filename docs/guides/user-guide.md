@@ -177,6 +177,11 @@ Shows at a glance:
 - **Status**: Active / Completed
 - **Duration**: Days running
 - **Total Users**: Participants across all variants
+- **Minimum sample**: *Reached* when every variant has at least the primary metric's
+  minimum sample size (100 users unless the metric sets another), otherwise *Not reached*.
+  A variant is recommended for shipping only once this is reached. It is a floor, not the
+  planned sample size: the **Sample Size** tab shows that, and the card's "See the Sample
+  Size tab for the planned sample." link opens it.
 - **Recommendation**: SHIP VARIANT / KEEP CONTROL / CONTINUE TESTING / INCONCLUSIVE
 
 #### Recommendation Meanings
@@ -227,6 +232,9 @@ Shows current vs. required sample size:
 - **Red (<80%)**: Not enough data — results are unreliable, don't make a decision
 
 "Days to Significance" estimates how long until you reach the required sample size at the current rate.
+
+The tab loads its numbers separately from the rest of the page. If they cannot be loaded,
+the tab says so and offers **Try again**; the Overview and the other tabs still work.
 
 ---
 

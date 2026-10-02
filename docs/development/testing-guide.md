@@ -382,7 +382,7 @@ from unittest.mock import patch, MagicMock
 def test_cognito_auth_mocked():
     mock_user_data = {
         "username": "testuser",
-        "attributes": {"email": "test@example.com"},
+        "attributes": {"sub": "sub-testuser", "email": "test@example.com"},
         "groups": ["admin-group"],
     }
 

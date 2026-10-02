@@ -224,6 +224,7 @@ class TestAuthDependencies:
             mock_user_data = {
                 "username": "test_user",
                 "attributes": {
+                    "sub": "sub-test-user",
                     "email": "test@example.com",
                     "given_name": "Test",
                     "family_name": "User",
@@ -239,6 +240,7 @@ class TestAuthDependencies:
             mock_user = MockUser(
                 username="test_user",
                 email="test@example.com",
+                external_id="cognito:sub-test-user",
                 first_name="Test",
                 last_name="User",
                 is_active=True,
@@ -254,10 +256,13 @@ class TestAuthDependencies:
                 patch("backend.app.api.deps.User.username", MockUser.username),
                 patch("backend.app.api.deps.UserRole"),
                 patch(
-                    "backend.app.api.deps.map_cognito_groups_to_role",
+                    "backend.app.services.cognito_accounts.map_cognito_groups_to_role",
                     return_value="developer",
                 ),
-                patch("backend.app.api.deps.should_be_superuser", return_value=False),
+                patch(
+                    "backend.app.services.cognito_accounts.should_be_superuser",
+                    return_value=False,
+                ),
             ):
                 # Call function
                 user = deps.get_current_user("valid_token", mock_db)
@@ -637,7 +642,7 @@ class TestIntegrationDependencyInjection:
             # Mock user data
             mock_user_data = {
                 "username": "test_user",
-                "attributes": {"email": "test@example.com"},
+                "attributes": {"sub": "sub-test-user", "email": "test@example.com"},
                 "groups": ["viewer"],  # Add groups to user data
             }
             # Replace get_user with get_user_with_groups
@@ -648,6 +653,7 @@ class TestIntegrationDependencyInjection:
                 id=1,
                 username="test_user",
                 email="test@example.com",
+                external_id="cognito:sub-test-user",
                 is_active=True,
                 role="viewer",  # Add role to mock user
             )
@@ -697,7 +703,7 @@ class TestIntegrationDependencyInjection:
             # Mock user data
             mock_user_data = {
                 "username": "test_user",
-                "attributes": {"email": "test@example.com"},
+                "attributes": {"sub": "sub-test-user", "email": "test@example.com"},
             }
             mock_auth_service.get_user_with_groups.return_value = mock_user_data
 
@@ -706,6 +712,7 @@ class TestIntegrationDependencyInjection:
                 id=1,
                 username="test_user",
                 email="test@example.com",
+                external_id="cognito:sub-test-user",
                 is_active=True,
                 is_superuser=False,
             )

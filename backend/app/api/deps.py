@@ -10,7 +10,6 @@ from pydantic import BaseModel
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
-from backend.app.core.cognito import map_cognito_groups_to_role, should_be_superuser
 from backend.app.core.config import settings
 from backend.app.core.logger import unexpected_failure
 from backend.app.core.permissions import (
@@ -36,6 +35,11 @@ from backend.app.services.auth_service import (
     CognitoTokenRefused,
     auth_service,
     log_token_refused,
+)
+from backend.app.services.cognito_accounts import (
+    CognitoSignInRefused,
+    log_sign_in_refused,
+    resolve_cognito_user,
 )
 
 # Try to import Redis, handle gracefully if not installed
@@ -236,8 +240,11 @@ def get_current_user(
     3. ``AUTH_PROVIDER=local``: decode the HS256 JWT issued by
        ``/api/v1/auth/login`` and load the user by id (401 on any failure,
        400 if the account is inactive).
-    4. ``AUTH_PROVIDER=cognito``: validate the token with Cognito and sync the
-       user's role from its groups (unchanged legacy path).
+    4. ``AUTH_PROVIDER=cognito``: validate the token with Cognito, then find
+       the account linked to the Cognito user ID, or create it on a first
+       sign-in (``services.cognito_accounts.resolve_cognito_user``). Every
+       refusal is the same 401; its reason goes to the
+       ``backend.app.auth.cognito_sign_in`` logger.
 
     Args:
         token (str): Bearer access token (may be None)
@@ -267,84 +274,25 @@ def get_current_user(
         return _authenticate_local_token(token, db)
 
     try:
-        # Get user details and groups from Cognito
         user_data = auth_service.get_user_with_groups(token)
-
-        # Get user from database
-        username = user_data.get("username")
-        user = db.query(User).filter(User.username == username).first()
-
-        # Extract groups and map to role
-        cognito_groups = user_data.get("groups", [])
-
-        # Map Cognito groups to role
-        role = map_cognito_groups_to_role(cognito_groups)
-
-        # Determine superuser status from Cognito admin groups
-        is_superuser = should_be_superuser(cognito_groups)
-
-        # If superuser, ensure they have ADMIN role for full permissions
-        if is_superuser and role != UserRole.ADMIN:
-            role = UserRole.ADMIN
-            logger.info(f"User {username} is a superuser, assigning ADMIN role")
-
-        if not user:
-            # Create user in database if not exists
-            email = user_data.get("attributes", {}).get("email")
-            full_name = (
-                f"{user_data.get('attributes', {}).get('given_name', '')} "
-                f"{user_data.get('attributes', {}).get('family_name', '')}"
-            ).strip()
-
-            user = User(
-                username=username,
-                email=email,
-                full_name=full_name,
-                is_active=True,
-                role=role,
-                is_superuser=is_superuser,
-            )
-            db.add(user)
-            db.commit()
-            db.refresh(user)
-
-            logger.info(
-                f"Created new user {username} with role {role} and superuser={is_superuser}"
-            )
-        elif settings.SYNC_ROLES_ON_LOGIN:
-            # Update user's role and superuser status if changed
-            role_changed = user.role != role
-            superuser_changed = user.is_superuser != is_superuser
-
-            if role_changed or superuser_changed:
-                # Update user properties
-                if role_changed:
-                    user.role = role
-                    logger.info(
-                        f"User {username} role updated to {role} based on Cognito groups"
-                    )
-
-                if superuser_changed:
-                    user.is_superuser = is_superuser
-                    logger.info(
-                        f"User {username} superuser status updated to {is_superuser}"
-                    )
-
-                # Commit changes to database
-                db.commit()
-                db.refresh(user)
-
-        return user
     except CognitoTokenRefused as refusal:
         log_token_refused(refusal, "sign-in")
         raise _credentials_exception()
     except Exception as e:
-        logger.error(f"Authentication error: {e!s}")
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Could not validate credentials",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
+        # The type only: the message can carry what the caller sent.
+        logger.error(f"Cognito token not accepted: {type(e).__name__}")
+        raise _credentials_exception()
+
+    try:
+        return resolve_cognito_user(db, user_data)
+    except CognitoSignInRefused as refusal:
+        db.rollback()
+        log_sign_in_refused(refusal)
+        raise _credentials_exception()
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Cognito sign-in failed: {type(e).__name__}")
+        raise _credentials_exception()
 
 
 def get_current_active_user(current_user: User = Depends(get_current_user)) -> User:

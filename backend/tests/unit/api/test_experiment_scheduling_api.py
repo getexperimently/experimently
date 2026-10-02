@@ -76,7 +76,7 @@ def admin_token(admin_user, monkeypatch):
     def mock_get_user_with_groups(*args, **kwargs):
         return {
             "username": admin_user.username,
-            "attributes": {"email": admin_user.email},
+            "attributes": {"sub": f"sub-{admin_user.id}", "email": admin_user.email},
             "groups": ["admin-group"],  # This will map to ADMIN role
         }
 
@@ -119,7 +119,10 @@ def regular_user_token(regular_user, monkeypatch):
     def mock_get_user_with_groups(*args, **kwargs):
         return {
             "username": regular_user.username,
-            "attributes": {"email": regular_user.email},
+            "attributes": {
+                "sub": f"sub-{regular_user.id}",
+                "email": regular_user.email,
+            },
             "groups": ["developer-group"],  # This will map to DEVELOPER role
         }
 
@@ -163,7 +166,7 @@ def mock_current_user(monkeypatch):
     def mock_get_user_with_groups(*args, **kwargs):
         return {
             "username": user.username,
-            "attributes": {"email": user.email},
+            "attributes": {"sub": f"sub-{user.id}", "email": user.email},
             "groups": ["admin-group"],  # This will map to ADMIN role
         }
 

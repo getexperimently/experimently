@@ -157,17 +157,6 @@ def mock_cognito_user_with_groups_response():
     }
 
 
-@pytest.fixture
-def mock_cognito_groups_response():
-    """Cognito list groups for user response fixture."""
-    return {
-        "Groups": [
-            {"GroupName": "Developers", "Precedence": 10},
-            {"GroupName": "Analysts", "Precedence": 20},
-        ]
-    }
-
-
 def create_client_error(code, message, operation):
     """Helper function to create boto3 ClientError exceptions."""
     error_response = {"Error": {"Code": code, "Message": message}}
@@ -681,37 +670,61 @@ def test_auth_service_singleton_mock(mock_auth_service_singleton):
     assert result["attributes"]["email"] == "test@example.com"
 
 
+def _token_with(claims: Dict[str, Any]) -> str:
+    payload = {
+        "sub": "test-user-id",
+        "iss": "https://cognito-idp.us-east-1.amazonaws.com/us-east-1_TestPool1",
+        "client_id": "test-client-id",
+        "token_use": "access",
+        "username": "testuser",
+        "exp": int(time.time()) + 3600,
+        **claims,
+    }
+    return jwt.encode(payload, "mock-secret", algorithm="HS256")
+
+
 def test_get_user_with_groups(
-    auth_service,
-    mock_boto3_client,
-    mock_cognito_jwt,
-    mock_cognito_user_response,
-    mock_cognito_groups_response,
+    auth_service, mock_boto3_client, mock_cognito_user_response
 ):
-    """Test getting user details and group membership."""
-    # Mock Cognito responses
+    """The groups are the verified token's ``cognito:groups`` claim; Cognito
+    is not asked for them."""
     mock_boto3_client.get_user.return_value = mock_cognito_user_response
-    mock_boto3_client.admin_list_groups_for_user.return_value = (
-        mock_cognito_groups_response
-    )
+    token = _token_with({"cognito:groups": ["Developers", "Analysts"]})
 
-    # Set up user pool ID
-    auth_service.user_pool_id = "us-east-1_TestPool1"
+    result = auth_service.get_user_with_groups(token)
 
-    # Call get_user_with_groups method
-    result = auth_service.get_user_with_groups(mock_cognito_jwt)
-
-    # Verify Cognito client calls
-    mock_boto3_client.get_user.assert_called_once_with(AccessToken=mock_cognito_jwt)
-    mock_boto3_client.admin_list_groups_for_user.assert_called_once_with(
-        UserPoolId="us-east-1_TestPool1", Username="testuser"
-    )
-
-    # Verify result
+    mock_boto3_client.get_user.assert_called_once_with(AccessToken=token)
+    mock_boto3_client.admin_list_groups_for_user.assert_not_called()
     assert result["username"] == "testuser"
-    assert "attributes" in result
+    assert result["attributes"]["sub"] == "test-user-id"
     assert result["attributes"]["email"] == "test@example.com"
     assert result["groups"] == ["Developers", "Analysts"]
+
+
+def test_get_user_with_groups_without_the_claim_is_no_groups(
+    auth_service, mock_boto3_client, mock_cognito_jwt, mock_cognito_user_response
+):
+    """Cognito leaves the claim out of the token of a user in no group."""
+    mock_boto3_client.get_user.return_value = mock_cognito_user_response
+
+    result = auth_service.get_user_with_groups(mock_cognito_jwt)
+
+    assert result["groups"] == []
+    mock_boto3_client.admin_list_groups_for_user.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "claim", ["Admins", {"Admins": True}, None, ["Admins", 7, None]]
+)
+def test_get_user_with_groups_keeps_only_group_names(
+    auth_service, mock_boto3_client, mock_cognito_user_response, claim
+):
+    """A claim that is not a list of names gives no groups from it."""
+    mock_boto3_client.get_user.return_value = mock_cognito_user_response
+
+    result = auth_service.get_user_with_groups(_token_with({"cognito:groups": claim}))
+
+    assert result["groups"] == (["Admins"] if isinstance(claim, list) else [])
 
 
 def test_get_user_with_groups_no_pool_id(
@@ -755,10 +768,7 @@ class TestCognitoClientIsLazy:
         assert len(created) == 1  # cached
 
     def test_a_fake_client_can_still_be_installed(self):
-        from backend.app.services.auth_service import (
-            CognitoAuthService,
-            CognitoTokenRefused,
-        )
+        from backend.app.services.auth_service import CognitoAuthService
 
         service = CognitoAuthService()
         fake = object()
