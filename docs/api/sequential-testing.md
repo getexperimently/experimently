@@ -48,7 +48,11 @@ stop decision share V, τ² and α, they cannot disagree: 0 is outside the inter
 exactly when `can_stop` is `true`. At a 10% conversion rate, α = 0.05 and the default
 τ² = 0.001, the half-width is about 0.041 at 1,000 users per arm, 0.0136 at 10,000
 and 0.00055 at 10 million. Early on it is wider than a fixed-horizon interval: that
-is the price of being valid however often you look. While an arm has no users, or
+is the price of being valid however often you look. A difference in rates cannot
+leave `[-1, 1]`, so the interval is clipped to that range: with 10 users per arm at
+a 50% rate the formula gives about ±3.92, and the response reports `[-1, 1]`.
+Clipping changes neither the stop decision nor coverage, because 0 and the true
+difference always lie inside `[-1, 1]`. While an arm has no users, or
 the estimated variance is zero (within each arm every user has the same outcome),
 nothing bounds the effect and the interval is `[-1, 1]`, the whole range of a
 difference in rates; `can_stop` is then `false`.

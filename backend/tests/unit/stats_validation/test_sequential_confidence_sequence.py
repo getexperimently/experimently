@@ -251,3 +251,44 @@ def test_no_finite_interval_without_variance(counts):
     assert (cs.lower, cs.upper, cs.width) == (-1.0, 1.0, 2.0)
     assert cs.sample_size == counts[1] + counts[3]
     assert msprt.can_stop is False
+
+
+# ---------------------------------------------------------------------------
+# The interval stays inside [-1, 1]
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.regression
+def test_small_sample_interval_is_clipped_to_the_proportion_range():
+    """At p = 0.5 with 10 per arm the half-width is about 3.92: the interval is [-1, 1].
+
+    A difference of proportions cannot leave [-1, 1]. Before the clip this
+    look was reported as roughly [-3.92, 3.92], which the dashboard drew raw.
+    The clipped interval must still be the whole range (a wide interval must
+    not look narrow) and must still contain 0, as ``can_stop`` is false.
+    """
+    service = SequentialTestingService()
+    raw_half_width = closed_form_half_width(2 * 0.25 / 10, TAU_SQUARED, ALPHA)
+    assert raw_half_width > 3.9  # not vacuous: the unclipped interval leaves [-1, 1]
+    cs = service.compute_always_valid_ci(
+        5, 10, 5, 10, alpha=ALPHA, tau_squared=TAU_SQUARED
+    )
+    msprt = service.compute_msprt(5, 10, 5, 10, tau_squared=TAU_SQUARED, alpha=ALPHA)
+    assert (cs.lower, cs.upper, cs.width) == (-1.0, 1.0, 2.0)
+    assert cs.lower <= 0.0 <= cs.upper
+    assert msprt.can_stop is False
+
+
+@pytest.mark.regression
+def test_clip_is_one_sided_when_only_one_end_leaves_the_range():
+    """1/10 against 9/10: the upper end is clipped to 1, the lower end is not."""
+    service = SequentialTestingService()
+    variance = 0.1 * 0.9 / 10 + 0.9 * 0.1 / 10
+    half_width = closed_form_half_width(variance, TAU_SQUARED, ALPHA)
+    cs = service.compute_always_valid_ci(
+        1, 10, 9, 10, alpha=ALPHA, tau_squared=TAU_SQUARED
+    )
+    assert 0.8 + half_width > 1.0 > 0.8 - half_width > -1.0  # not vacuous
+    assert cs.upper == 1.0
+    assert cs.lower == pytest.approx(0.8 - half_width, rel=1e-12)
+    assert cs.width == pytest.approx(cs.upper - cs.lower, rel=1e-12)

@@ -42,14 +42,20 @@ describe('AnalysisNotice', () => {
       <AnalysisNotice
         status="beta"
         notice={
-          'Beta: part is not computed. ' +
-          'https://github.com/getexperimently/experimently/issues/231 ' +
-          'The stored method always_valid is shown as msprt.'
+          'Beta: the stop/continue decision is mSPRT alone, at the significance ' +
+          'level shown by the boundary (1/alpha). alpha_spending is always empty: ' +
+          'the planned-looks (alpha-spending) table is not computed yet. ' +
+          'https://github.com/getexperimently/experimently/issues/232 ' +
+          "The configured method 'always_valid' is an alias of 'msprt'; this is the " +
+          'mSPRT analysis.'
         }
       />
     );
     expect(screen.getByTestId('analysis-notice-text')).toHaveTextContent(
-      'part is not computed. issue #231 The stored method always_valid is shown as msprt.'
+      'the stop/continue decision is mSPRT alone, at the significance level shown by ' +
+        'the boundary (1/alpha). alpha_spending is always empty: the planned-looks ' +
+        '(alpha-spending) table is not computed yet. issue #232 ' +
+        "The configured method 'always_valid' is an alias of 'msprt'; this is the mSPRT analysis."
     );
   });
 

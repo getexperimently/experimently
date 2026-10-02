@@ -47,7 +47,9 @@ pytestmark = pytest.mark.unit
 #: multiplier and significance level (pinned by
 #: ``test_sufficient_stats_fingerprint.py``, not by this dataset), and #231
 #: replaced the sequential confidence sequence with the inverted mSPRT, which
-#: moves the ``cs`` and ``analysis`` outputs below.
+#: moves the ``cs`` and ``analysis`` outputs below.  #231 also clips that
+#: interval to [-1, 1]; the interval of this dataset lies inside that range,
+#: so the clip leaves the 1.2.0 fingerprint as it was.
 ENGINE_FINGERPRINTS: Dict[str, str] = {
     "1.1.0": "2feed80e7e305c3c8d0b183e1f2905799e8af73b34aa674cd358fa5948d2f089",
     "1.2.0": "a1b39b9e82d8a46ab3c3c6ec86e37d0401c66d27a03a3dc8751cc5ca1eca9aba",
