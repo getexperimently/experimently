@@ -1,4 +1,5 @@
 from aws_cdk import (
+    Duration,
     Stack,
     CfnOutput,
     Tags,
@@ -11,6 +12,7 @@ from aws_cdk import (
 from constructs import Construct
 
 from stacks.environments import (
+    aurora_backup_retention_days,
     aurora_instance_count,
     data_removal_policy,
     database_removal_policy,
@@ -215,6 +217,12 @@ class EnhancedDatabaseStack(Stack):
             # billed resource `cdk destroy` leaves behind, which staging
             # should not (stacks/environments.py).
             removal_policy=database_removal_policy(environment),
+            # 35 days of automated backups and point-in-time restore in prod
+            # and staging, 1 elsewhere (#391). No preferred window is set, so
+            # Aurora keeps choosing it.
+            backup=rds.BackupProps(
+                retention=Duration.days(aurora_backup_retention_days(environment))
+            ),
         )
 
         # What the application tasks need from this stack (#78): the WRITER

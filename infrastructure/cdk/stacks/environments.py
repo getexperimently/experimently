@@ -53,6 +53,21 @@ def database_removal_policy(env_name: str) -> RemovalPolicy:
     return RemovalPolicy.SNAPSHOT if retains_data(env_name) else RemovalPolicy.DESTROY
 
 
+#: Days of Aurora automated backups, and so of point-in-time restore (#391,
+#: DECISIONS D38). 35 is the most Aurora allows.
+AURORA_BACKUP_RETENTION_DAYS = {"prod": 35, "staging": 35}
+
+
+def aurora_backup_retention_days(env_name: str) -> int:
+    """35 days of Aurora backups in prod and staging; 1 everywhere else (#391).
+
+    Set explicitly in every environment rather than left unset, which means
+    CloudFormation's default of 1 day. Raising it updates the cluster in
+    place; lowering it later discards the backups older than the new value.
+    """
+    return AURORA_BACKUP_RETENTION_DAYS.get(env_name, 1)
+
+
 def nat_gateway_count(env_name: str) -> int:
     """Two in prod (one per AZ); one elsewhere (DECISIONS D7)."""
     return 2 if env_name == "prod" else 1

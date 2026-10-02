@@ -756,8 +756,18 @@ aws rds describe-db-cluster-snapshots \
   --query 'sort_by(DBClusterSnapshots, &SnapshotCreateTime)[-5:].{ID:DBClusterSnapshotIdentifier,Time:SnapshotCreateTime,Status:Status}'
 ```
 
-Aurora supports point-in-time recovery (PITR) to any 5-minute window in the
-last 35 days. Restore to a new cluster from the target snapshot (~30 min):
+Aurora supports point-in-time recovery (PITR) to any 5-minute window within
+the cluster's backup retention period. The stack sets 35 days in prod and
+staging and 1 day elsewhere. A cluster deployed from an earlier version of the
+CDK app keeps its old value (1 day) until its database stack is redeployed, so
+check what it actually keeps:
+
+```bash
+aws rds describe-db-clusters --db-cluster-identifier "$CLUSTER" \
+  --query 'DBClusters[].BackupRetentionPeriod'
+```
+
+Restore to a new cluster from the target snapshot (~30 min):
 
 ```bash
 aws rds restore-db-cluster-to-point-in-time \

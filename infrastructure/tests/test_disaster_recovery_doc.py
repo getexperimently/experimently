@@ -2,9 +2,10 @@
 
 The page used to promise S3 cross-region replication of "frontend" assets
 (no stack puts the dashboard in S3), replicated secrets, a 35-day Aurora
-retention, log export to S3 and alarms that do not exist. Operators follow
-that page mid-incident, so each figure it now gives is checked here against a
-real ``app.synth()`` of prod, and the page must still say it. A change to the
+retention (true only since #391 set it), log export to S3 and alarms that do
+not exist. Operators follow that page mid-incident, so each figure it now
+gives is checked here against a real ``app.synth()`` of prod (and of staging,
+for the Aurora retention), and the page must still say it. A change to the
 stacks that moves one of them fails here until the page is updated with it.
 """
 
@@ -90,16 +91,45 @@ def test_no_secret_is_replicated_to_another_region(prod, page):
     assert "The CDK configures no replica regions" in page
 
 
-def test_aurora_keeps_the_default_one_day_of_backups(prod, page):
+@pytest.fixture(scope="module")
+def staging() -> dict:
+    """{stack name: resources} for the staging app."""
+    return {
+        s.stack_name: s.template.get("Resources", {}) for s in _synth("staging").stacks
+    }
+
+
+def test_aurora_keeps_35_days_of_backups_in_prod_and_staging(prod, staging, page):
+    """#391: prod and staging keep 35 days of backups, and the page says so.
+
+    Unset, ``BackupRetentionPeriod`` is CloudFormation's default of 1 day, so
+    the property is read without a default: a stack that stops passing
+    ``backup=`` fails here rather than reading as some value.
+    """
+    for name, resources in (("prod", prod), ("staging", staging)):
+        ((stack, cluster),) = _of_type(resources, "AWS::RDS::DBCluster")
+        assert _props(cluster).get("BackupRetentionPeriod") == 35, (name, stack)
+        assert not _of_type(resources, "AWS::RDS::GlobalCluster"), name
     ((stack, cluster),) = _of_type(prod, "AWS::RDS::DBCluster")
-    # Unset means CloudFormation's default, 1 day. Set it and this fails until
-    # the page's "1 day" figures (backup table, Scenarios 4 and 8) follow.
-    assert _props(cluster).get("BackupRetentionPeriod", 1) == 1, stack
     assert cluster.get("DeletionPolicy") == "Snapshot", stack
-    assert not _of_type(prod, "AWS::RDS::GlobalCluster")
-    assert "Aurora's default of **1 day** applies" in page
+
+    assert (
+        "The CDK sets a backup retention of **35 days** in prod and staging, "
+        "and 1 day in every other environment."
+    ) in page
+    assert "prod and staging 35 days, others 1 (automated)" in page
     assert "deleting the prod stack leaves a final snapshot" in page
-    assert "35 days" not in page
+    assert "aws rds describe-db-clusters" in page
+    assert "--query 'DBClusters[].BackupRetentionPeriod'" in page
+    assert "until its database stack is redeployed" in page
+    # The figures from when the stack set nothing: the backup table (and its
+    # Retention column) and the RPO lines of Scenarios 4 and 8.
+    for gone in (
+        "Aurora's default of **1 day** applies",
+        "| 1 day (automated);",
+        "1-day backup retention",
+    ):
+        assert gone not in page, gone
 
 
 def test_redis_snapshot_retention_and_failover(prod, page):

@@ -42,7 +42,7 @@ because Redis holds only cache and rate-limit state.
 
 | Data | What protects it | Retention | How it is recovered |
 |------|------------------|-----------|---------------------|
-| PostgreSQL (Aurora) | Continuous backup (PITR) and a daily automated snapshot. The CDK sets no backup retention, so Aurora's default of **1 day** applies. `deploy.yml` also takes a manual cluster snapshot before every deploy's migration (`pre-deploy-<env>-<tag>-<time>`), and deleting the prod stack leaves a final snapshot. | 1 day (automated); manual snapshots until you delete them | PITR or snapshot restore to a new cluster (Scenario 4) |
+| PostgreSQL (Aurora) | Continuous backup (PITR) and a daily automated snapshot. The CDK sets a backup retention of **35 days** in prod and staging, and 1 day in every other environment. `deploy.yml` also takes a manual cluster snapshot before every deploy's migration (`pre-deploy-<env>-<tag>-<time>`), and deleting the prod stack leaves a final snapshot. | prod and staging 35 days, others 1 (automated); manual snapshots until you delete them | PITR or snapshot restore to a new cluster (Scenario 4) |
 | Redis (ElastiCache) | A daily snapshot, 02:00–03:00 UTC. There is no append-only file. In prod, three nodes with automatic failover; in staging and dev, one node. | prod 7 days, staging 3, dev 1 | Automatic failover (prod), or let it refill: it is a cache |
 | Dashboard | Holds no data. It is the `frontend/Dockerfile` image, run as the ECS service `experimentation-dashboard-$ENV` behind the API's load balancer. The CDK creates no S3 bucket or CloudFront distribution for it. | Images in ECR (`experimentation-platform/web`) and, for releases, GHCR | Redeploy the image ([Rollback Runbook](rollback-runbook.md), "The dashboard is the opposite case") |
 | API | Holds no data. Its image is in ECR (`experimentation-platform/backend`) and, for releases, GHCR. | As above | Redeploy through CodeDeploy ([Rollback Runbook](rollback-runbook.md)) |
@@ -53,8 +53,18 @@ because Redis holds only cache and rate-limit state.
 | Alembic migration history | Git repository | Per commit | Check out the release |
 | CDK infrastructure definitions | Git repository | Per commit | `cdk deploy` (time not measured) |
 
-`infrastructure/tests/test_disaster_recovery_doc.py` synthesises the prod app and checks the
-retention, replication and log figures in this table against it.
+`infrastructure/tests/test_disaster_recovery_doc.py` synthesises the prod app (and staging, for
+the Aurora retention) and checks the retention, replication and log figures in this table
+against it.
+
+The Aurora retention is what the stack sets. A cluster deployed from an earlier version of
+the CDK app, which set no retention, keeps CloudFormation's default of one day until its
+database stack is redeployed. Check what a cluster actually keeps before you rely on it:
+
+```bash
+aws rds describe-db-clusters --db-cluster-identifier "$CLUSTER" \
+  --query 'DBClusters[].BackupRetentionPeriod'
+```
 
 ---
 
@@ -221,7 +231,8 @@ If the failover has not completed within 5 minutes, or no instance is available:
 
 **Detection:** `aws rds describe-db-clusters` returns status `failed`, and every database call in the application logs fails.
 **RTO:** about 30 minutes (restore; target).
-**RPO:** 5 minutes (PITR), and only within the 1-day backup retention period. Beyond that, the
+**RPO:** 5 minutes (PITR), and only within the backup retention period (35 days in prod and
+staging, 1 elsewhere; see Backup Strategy). Beyond that, the
 newest manual snapshot (`pre-deploy-...` or `pre-migration-...`) is the recovery point.
 
 ### Immediate Response
@@ -497,8 +508,8 @@ aws rds create-db-cluster-snapshot \
 ## Scenario 8: Complete Data Loss
 
 **Detection:** Database tables empty or corrupted; results API returning empty data; operator error confirmed.
-**RPO:** PITR to 5 minutes before the loss, if the loss is found within the 1-day backup
-retention period. After that, the newest manual snapshot is the recovery point.
+**RPO:** PITR to 5 minutes before the loss, if the loss is found within the backup retention
+period (35 days in prod and staging, 1 elsewhere). After that, the newest manual snapshot is the recovery point.
 
 ### Response
 
