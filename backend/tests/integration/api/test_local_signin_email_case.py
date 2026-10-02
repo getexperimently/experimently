@@ -18,6 +18,7 @@ what production writes, not what a fixture assumes.
 from __future__ import annotations
 
 import logging
+import re
 import uuid
 from typing import Iterator, List, Tuple
 
@@ -228,6 +229,44 @@ def test_every_ascii_casing_draws_on_one_budget(client, superuser):
     locked = [_login(client, s).status_code for s in spellings]
     locked += [_token(client, s).status_code for s in spellings]
     assert locked == [423] * (2 * len(spellings))
+
+
+def _key_queries(statements, value):
+    """The ``SELECT lower(:value)`` statements among *statements*."""
+    return [
+        sql
+        for sql, params in statements
+        if re.fullmatch(r"SELECT lower\(%\((\w+)\)s\) AS \w+", sql.strip())
+        and isinstance(params, dict)
+        and list(params.values()) == [value]
+    ]
+
+
+def test_the_counter_key_is_the_database_lower_of_the_typed_address(
+    client, superuser, statements
+):
+    """Pins the key query itself.
+
+    The budget tests alone cannot see a lost SQL ``lower()`` for A-Z: the
+    counter folds its keys with Python's ``lower()`` a second time.
+    """
+    stored = _admin_create(client, superuser, f"Key.Probe{_tag()}@acme.example")[
+        "email"
+    ]
+    typed = stored.swapcase()
+    statements.clear()
+    signed_in = _login(client, f"  {typed}  ")
+    assert signed_in.status_code == 200, signed_in.text
+    assert len(_key_queries(statements, typed)) == 1, [s for s, _ in statements]
+
+    statements.clear()
+    resp = client.post(
+        ME_PASSWORD,
+        json={"current_password": WRONG, "new_password": NEW_PASSWORD},
+        headers={"Authorization": f"Bearer {signed_in.json()['access_token']}"},
+    )
+    assert resp.status_code == 403, resp.text
+    assert len(_key_queries(statements, stored)) == 1, [s for s, _ in statements]
 
 
 def test_spellings_the_database_treats_as_equal_draw_on_one_budget(client, superuser):

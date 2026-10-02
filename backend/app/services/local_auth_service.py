@@ -103,7 +103,19 @@ class CurrentPasswordMissingError(Exception):
 
 
 def _normalise_email(email: str) -> str:
+    # A second fold on top of the database's lower() key: it hides a lost SQL
+    # lower() for A-Z, so the non-ASCII budget test is what guards the key.
     return (email or "").strip().lower()
+
+
+def _counter_key(value: object) -> str:
+    """The database's answer to ``SELECT lower(...)``, which must be a string.
+
+    An explicit check rather than ``assert``, so it holds under ``python -O``.
+    """
+    if not isinstance(value, str):
+        raise TypeError(f"lockout counter key must be str, got {type(value).__name__}")
+    return value
 
 
 @dataclass
@@ -253,8 +265,7 @@ class LocalAuthService:
         # The counter key is the database's own lower() of the typed address:
         # the same function the lookup applies, so every spelling that can
         # match one account lands on one key.
-        email_key = db.scalar(select(func.lower(typed)))
-        assert isinstance(email_key, str)
+        email_key = _counter_key(db.scalar(select(func.lower(typed))))
         status = self.tracker.status(email_key)
         if status.locked:
             raise AccountLockedError(status.retry_after_seconds)
@@ -330,8 +341,7 @@ class LocalAuthService:
         if user.email is None:
             email_key = "\x00id:" + str(user.id)
         else:
-            email_key = db.scalar(select(func.lower(user.email)))
-            assert isinstance(email_key, str)
+            email_key = _counter_key(db.scalar(select(func.lower(user.email))))
         status = self.tracker.status(email_key)
         if status.locked:
             raise AccountLockedError(status.retry_after_seconds)

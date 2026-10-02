@@ -315,7 +315,7 @@ class TestLocalAuthService:
         db = self._db_with(_user())
         db.scalar.side_effect = None  # a bare MagicMock again
         svc = LocalAuthService(LoginAttemptTracker(3, 60))
-        with pytest.raises(AssertionError):
+        with pytest.raises(TypeError):
             svc.authenticate(db, "alice@example.com", PASSWORD)
 
     def test_wrong_password(self, bcrypt_calls):
@@ -630,11 +630,9 @@ def http(local_provider):
         return [state.user] if state.user is not None else []
 
     db = _mock_db(_rows)
-
-    def _first():
-        return state.user
-
-    db.query.return_value.filter.return_value.first.side_effect = _first
+    # deps.get_current_user loads the token's user with .filter().first(); the
+    # /auth/me tests below go through it.
+    db.query.return_value.filter.return_value.first.side_effect = lambda: state.user
 
     def override_get_db():
         yield db
