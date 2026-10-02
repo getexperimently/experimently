@@ -158,7 +158,7 @@ export APP_ENV=test TESTING=true POSTGRES_SCHEMA=test_experimentation
 python -m alembic -c backend/app/db/alembic.ini heads
 ```
 
-It prints two, such as `271f03a31742 (head)` and
+It prints two, such as `<core head id> (head)` and
 `modules_0002_warehouse_analysis (modules) (head)`.
 The core head is the one without `(modules)`. Generate the revision on it, with your own
 message in place of `describe the change`:

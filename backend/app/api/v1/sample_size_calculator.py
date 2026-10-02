@@ -14,6 +14,10 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from backend.app.api import deps
 from backend.app.models.user import User
+from backend.app.services.power_calculator_service import (
+    TREATMENT_RATE_CEILING_MESSAGE,
+    sample_size_two_proportions,
+)
 
 # Create router
 router = APIRouter(prefix="/utils")
@@ -126,28 +130,26 @@ async def calculate_sample_size(
     alpha = request.significance_level
     is_one_sided = request.is_one_sided
 
-    # Calculate sample size using power analysis
-    # Get z-scores for alpha and beta
-    if is_one_sided:
-        z_alpha = abs(stats_z_score(alpha))
-    else:
-        z_alpha = abs(stats_z_score(alpha / 2))  # Two-sided test
+    # The treatment rate has to be a probability. Past 100% the formula takes
+    # the square root of a negative variance.
+    treatment_rate = baseline_rate + baseline_rate * mde
+    if baseline_rate * (1 + mde) >= 1 or treatment_rate >= 1:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=TREATMENT_RATE_CEILING_MESSAGE,
+        )
 
-    z_beta = abs(stats_z_score(1 - power))
-
-    # Calculate expected rate for treatment
-    treatment_rate = baseline_rate * (1 + mde)
-
-    # Calculate pooled standard error
-    pooled_variance = baseline_rate * (1 - baseline_rate) + treatment_rate * (
-        1 - treatment_rate
+    # Two arms through the same formula as the results page's Sample Size tab
+    # and the guided setup's estimate (pooled variance under H0, unpooled under
+    # H1), with no multiple-comparison correction; every variant needs this
+    # many users.
+    samples_per_variant = sample_size_two_proportions(
+        p1=baseline_rate,
+        p2=treatment_rate,
+        alpha=alpha,
+        power=power,
+        two_tailed=not is_one_sided,
     )
-
-    # Calculate required sample size per variant
-    numerator = (z_alpha + z_beta) ** 2 * pooled_variance
-    denominator = (treatment_rate - baseline_rate) ** 2
-
-    samples_per_variant = math.ceil(numerator / denominator)
 
     # Calculate total sample size
     total_samples = samples_per_variant * variant_count
@@ -197,70 +199,3 @@ async def calculate_sample_size(
         estimated_duration_days=estimated_duration_days,
         notes=notes,
     )
-
-
-def stats_z_score(p: float) -> float:
-    """
-    Calculate the z-score for a given probability.
-
-    This is an approximation of the inverse of the standard normal CDF.
-
-    Args:
-        p: Probability (0-1)
-
-    Returns:
-        float: Corresponding z-score
-    """
-    # Constants for the approximation
-    a1 = -39.6968302866538
-    a2 = 220.946098424521
-    a3 = -275.928510446969
-    a4 = 138.357751867269
-    a5 = -30.6647980661472
-    a6 = 2.50662827745924
-
-    b1 = -54.4760987982241
-    b2 = 161.585836858041
-    b3 = -155.698979859887
-    b4 = 66.8013118877197
-    b5 = -13.2806815528857
-
-    c1 = -0.00778489400243029
-    c2 = -0.322396458041136
-    c3 = -2.40075827716184
-    c4 = -2.54973253934373
-    c5 = 4.37466414146497
-    c6 = 2.93816398269878
-
-    d1 = 0.00778469570904146
-    d2 = 0.32246712907004
-    d3 = 2.445134137143
-    d4 = 3.75440866190742
-
-    # Determine which approximation to use based on p
-    if p <= 0 or p >= 1:
-        raise ValueError("Probability must be between 0 and 1")
-
-    if p < 0.02425:
-        # Lower region
-        q = math.sqrt(-2 * math.log(p))
-        z = (((((c1 * q + c2) * q + c3) * q + c4) * q + c5) * q + c6) / (
-            (((d1 * q + d2) * q + d3) * q + d4) * q + 1
-        )
-    elif p < 0.97575:
-        # Central region
-        q = p - 0.5
-        r = q * q
-        z = (
-            (((((a1 * r + a2) * r + a3) * r + a4) * r + a5) * r + a6)
-            * q
-            / (((((b1 * r + b2) * r + b3) * r + b4) * r + b5) * r + 1)
-        )
-    else:
-        # Upper region
-        q = math.sqrt(-2 * math.log(1 - p))
-        z = -(((((c1 * q + c2) * q + c3) * q + c4) * q + c5) * q + c6) / (
-            (((d1 * q + d2) * q + d3) * q + d4) * q + 1
-        )
-
-    return z

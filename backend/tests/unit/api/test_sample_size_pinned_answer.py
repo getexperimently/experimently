@@ -7,8 +7,11 @@ and the "Creating an Experiment" guide both quote the answer below, so a
 change to the formula has to change this test too.
 
 With the defaults (power 0.8, two-sided significance 0.05, two variants) the
-answer is 47,034 users per variant and 94,068 in total. Reading the MDE as an
-absolute change (``baseline_rate + mde``) gives 775 per variant instead.
+answer is 47,036 users per variant and 94,072 in total, from the same
+two-proportion formula the results page's Sample Size tab uses (pooled variance
+under the null, unpooled under the alternative). The unpooled-only formula the
+estimate used before #685 gave 47,034 and 94,068. Reading the MDE as an
+absolute change (``baseline_rate + mde``) gives 778 per variant instead.
 """
 
 from unittest.mock import MagicMock
@@ -54,5 +57,5 @@ def test_twelve_percent_baseline_five_percent_relative_mde(client):
     body = response.json()
     assert body["statistical_power"] == 0.8
     assert body["significance_level"] == 0.05
-    assert body["samples_per_variant"] == 47034
-    assert body["total_samples"] == 94068
+    assert body["samples_per_variant"] == 47036
+    assert body["total_samples"] == 94072

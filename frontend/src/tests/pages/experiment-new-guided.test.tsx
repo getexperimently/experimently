@@ -59,14 +59,14 @@ const mockedApiFetch = apiFetch as jest.MockedFunction<typeof apiFetch>;
 const mockedNavigateHard = navigateHard as jest.MockedFunction<typeof navigateHard>;
 
 const SAMPLE_SIZE_PATH = '/api/v1/experiments/analysis/sample-size';
-const ESTIMATE_47034 = {
+const ESTIMATE_47036 = {
   baseline_rate: 0.12,
   minimum_detectable_effect: 0.05,
   statistical_power: 0.8,
   significance_level: 0.05,
   is_one_sided: false,
-  samples_per_variant: 47034,
-  total_samples: 94068,
+  samples_per_variant: 47036,
+  total_samples: 94072,
   estimated_duration_days: null,
   notes: null,
 };
@@ -85,7 +85,7 @@ function api(extra: Route[] = []) {
   mockedApiFetch.mockImplementation(
     routedApi([
       { method: 'POST', path: '/api/v1/experiments', handler: () => ({ id: 'exp-9', status: 'draft' }) },
-      { method: 'GET', path: SAMPLE_SIZE_PATH, handler: () => ESTIMATE_47034 },
+      { method: 'GET', path: SAMPLE_SIZE_PATH, handler: () => ESTIMATE_47036 },
       ...extra,
     ]) as unknown as typeof apiFetch,
   );
@@ -576,8 +576,8 @@ describe('the Estimate step', () => {
     setValue('estimate-mde', '5');
     expect(mockedApiFetch).not.toHaveBeenCalled();
     fireEvent.click(screen.getByTestId('estimate-calculate'));
-    expect(await screen.findByTestId('estimate-per-variant')).toHaveTextContent('47,034 users per variant');
-    expect(screen.getByTestId('estimate-total')).toHaveTextContent('94,068 users in total across 2 variants');
+    expect(await screen.findByTestId('estimate-per-variant')).toHaveTextContent('47,036 users per variant');
+    expect(screen.getByTestId('estimate-total')).toHaveTextContent('94,072 users in total across 2 variants');
     expect(estimateCalls()).toHaveLength(1);
     const [p, options] = estimateCalls()[0];
     expect(p).toBe(SAMPLE_SIZE_PATH);
@@ -675,7 +675,7 @@ describe('the Estimate step', () => {
   it('treats an answer below one user per variant as an error', async () => {
     mockedApiFetch.mockImplementation(
       routedApi([
-        { method: 'GET', path: SAMPLE_SIZE_PATH, handler: () => ({ ...ESTIMATE_47034, samples_per_variant: -1 }) },
+        { method: 'GET', path: SAMPLE_SIZE_PATH, handler: () => ({ ...ESTIMATE_47036, samples_per_variant: -1 }) },
       ]) as unknown as typeof apiFetch,
     );
     await toEstimate();
@@ -739,11 +739,11 @@ describe('the Estimate step', () => {
     expect(screen.getByTestId('estimate-baseline')).toHaveValue(12);
     expect(screen.getByTestId('estimate-per-variant')).toBeInTheDocument();
     next();
-    expect(screen.getByTestId('review-estimate')).toHaveTextContent('47,034 users per variant');
+    expect(screen.getByTestId('review-estimate')).toHaveTextContent('47,036 users per variant');
     fireEvent.click(screen.getByTestId('wizard-create'));
     await waitFor(() => expect(mockRouter.push).toHaveBeenCalled());
     const text = JSON.stringify(postedBody());
-    expect(text).not.toMatch(/baseline|detectable|power|significance|daily|47034|5000/);
+    expect(text).not.toMatch(/baseline|detectable|power|significance|daily|47036|5000/);
   });
 
   it('makes exactly the calls it needs: one estimate, one create, nothing else', async () => {

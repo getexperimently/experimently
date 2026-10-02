@@ -893,7 +893,8 @@ class TestCalculateSampleSize:
 # the two-sided 5% value to a two-sided 10% test and to a one-sided 5% test,
 # and gave z_beta 0.67 at power 0.5 instead of 0. Each case below hit one of
 # those shortcuts; the answers are the exact norm.ppf ones at a 12% baseline
-# and a 5% relative MDE.
+# and a 5% relative MDE, through the pooled two-proportion formula the results
+# page uses (#685).
 # ---------------------------------------------------------------------------
 
 
@@ -902,11 +903,11 @@ class TestSampleSizeCriticalValues:
     @pytest.mark.parametrize(
         ("extra", "per_variant"),
         [
-            ({"significance_level": 0.1}, 37048),
-            ({"is_one_sided": True}, 37048),
-            ({"is_one_sided": True, "significance_level": 0.01}, 60140),
-            ({"is_one_sided": True, "significance_level": 0.1}, 27013),
-            ({"statistical_power": 0.5}, 23020),
+            ({"significance_level": 0.1}, 37050),
+            ({"is_one_sided": True}, 37050),
+            ({"is_one_sided": True, "significance_level": 0.01}, 60143),
+            ({"is_one_sided": True, "significance_level": 0.1}, 27014),
+            ({"statistical_power": 0.5}, 23022),
         ],
     )
     def test_formerly_shortcut_cases(self, admin_client, extra, per_variant):
