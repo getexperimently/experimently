@@ -69,6 +69,22 @@ describe('UserTable', () => {
     });
   });
 
+  it('renders an account with no email address, marked "No email" (#342)', async () => {
+    const users = [
+      makeUser({ id: '1', username: 'noemail', email: null }),
+      makeUser({ id: '2', username: 'dana', email: 'dana@example.com' }),
+    ];
+    mockListUsers.mockResolvedValue(makeResponse(users));
+    render(<UserTable />);
+    await waitFor(() => {
+      expect(screen.getByText('noemail')).toBeInTheDocument();
+    });
+    const row = screen.getByText('noemail').closest('tr') as HTMLElement;
+    expect(row).toHaveTextContent('No email');
+    expect(screen.getByText('dana@example.com')).toBeInTheDocument();
+    expect(screen.getAllByText('No email')).toHaveLength(1);
+  });
+
   it('shows role badge with correct text', async () => {
     const users = [makeUser({ role: 'ADMIN' })];
     mockListUsers.mockResolvedValue(makeResponse(users));

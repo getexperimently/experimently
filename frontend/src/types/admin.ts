@@ -5,7 +5,8 @@ export type UserRole = 'ADMIN' | 'DEVELOPER' | 'ANALYST' | 'VIEWER';
 export interface AdminUser {
   id: string;
   username: string;
-  email: string;
+  /** `null` for an account created without an email address (`UserResponse.email`). */
+  email: string | null;
   role: UserRole;
   is_active: boolean;
   created_at: string;

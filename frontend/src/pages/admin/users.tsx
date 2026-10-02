@@ -76,7 +76,7 @@ export function UserManagementPage() {
           <EffectivePermissionsModal
             isOpen={permissionsUser !== null}
             userId={permissionsUser?.id ?? null}
-            userEmail={permissionsUser?.email}
+            userEmail={permissionsUser?.email ?? undefined}
             onClose={() => setPermissionsUser(null)}
           />
         </RequiresModule>

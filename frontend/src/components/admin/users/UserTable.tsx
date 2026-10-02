@@ -120,7 +120,9 @@ export function UserTable() {
                 {data.items.map((user) => (
                   <tr key={user.id} className="hover:bg-slate-50">
                     <td className="px-6 py-4 font-medium text-slate-900">{user.username}</td>
-                    <td className="px-6 py-4 text-slate-600">{user.email}</td>
+                    <td className="px-6 py-4 text-slate-600">
+                      {user.email ?? <span className="text-slate-400 italic">No email</span>}
+                    </td>
                     <td className="px-6 py-4">
                       <span
                         className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${ROLE_COLORS[user.role]}`}

@@ -61,7 +61,9 @@ export function EditUserModal({ isOpen, user, onClose, onSave }: EditUserModalPr
         <h2 id="edit-modal-title" className="text-lg font-semibold text-slate-900 mb-1">
           Edit User
         </h2>
-        <p className="text-sm text-slate-500 mb-4">{user.email}</p>
+        <p className="text-sm text-slate-500 mb-4">
+          {user.email ?? <span className="text-slate-400 italic">No email</span>}
+        </p>
 
         {/* Role */}
         <div className="mb-4">

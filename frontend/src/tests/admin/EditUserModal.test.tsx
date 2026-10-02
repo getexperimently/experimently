@@ -35,6 +35,11 @@ describe('EditUserModal', () => {
     expect(screen.getByText('jdoe@example.com')).toBeInTheDocument();
   });
 
+  it('shows "No email" for an account with no email address (#342)', () => {
+    render(<EditUserModal {...defaultProps} user={{ ...mockUser, email: null }} />);
+    expect(screen.getByTestId('edit-user-modal')).toHaveTextContent('No email');
+  });
+
   it('role select shows current user role', () => {
     render(<EditUserModal {...defaultProps} />);
     const roleSelect = screen.getByTestId('edit-role-select') as HTMLSelectElement;
