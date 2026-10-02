@@ -10,7 +10,7 @@ import pytest
 from botocore.exceptions import ClientError
 
 from backend.app.core.config import settings
-from backend.app.services.auth_service import CognitoAuthService
+from backend.app.services.auth_service import CognitoAuthService, CognitoTokenRefused
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -32,7 +32,7 @@ def cognito_test_environment():
     original_env = os.environ.copy()
 
     # Set test environment
-    os.environ["COGNITO_USER_POOL_ID"] = "test-pool-id"
+    os.environ["COGNITO_USER_POOL_ID"] = "us-east-1_TestPool1"
     os.environ["COGNITO_CLIENT_ID"] = "test-client-id"
     os.environ["AWS_REGION"] = "us-east-1"
     os.environ["TESTING"] = "true"
@@ -96,8 +96,9 @@ def mock_cognito_jwt():
     header = {"kid": "mock-key-id", "alg": "HS256"}
     payload = {
         "sub": "test-user-id",
-        "iss": "https://cognito-idp.us-east-1.amazonaws.com/test-pool-id",
+        "iss": "https://cognito-idp.us-east-1.amazonaws.com/us-east-1_TestPool1",
         "client_id": "test-client-id",
+        "token_use": "access",
         "username": "testuser",
         "exp": int(time.time()) + 3600,
         "email": "test@example.com",
@@ -179,7 +180,7 @@ def test_init_with_environment_vars(cognito_test_environment):
         service = CognitoAuthService()
 
         # Verify values were loaded from environment
-        assert service.user_pool_id == "test-pool-id"
+        assert service.user_pool_id == "us-east-1_TestPool1"
         assert service.client_id == "test-client-id"
 
         # Logger should not warn about missing config
@@ -603,16 +604,18 @@ def test_refresh_token_errors(
     assert expected_message in str(exc_info.value)
 
 
-def test_get_user(auth_service, mock_boto3_client, mock_cognito_user_response):
+def test_get_user(
+    auth_service, mock_boto3_client, mock_cognito_jwt, mock_cognito_user_response
+):
     """Test getting user details from access token."""
     # Mock Cognito response
     mock_boto3_client.get_user.return_value = mock_cognito_user_response
 
     # Call get_user method
-    result = auth_service.get_user("access-token")
+    result = auth_service.get_user(mock_cognito_jwt)
 
     # Verify Cognito client was called correctly
-    mock_boto3_client.get_user.assert_called_once_with(AccessToken="access-token")
+    mock_boto3_client.get_user.assert_called_once_with(AccessToken=mock_cognito_jwt)
 
     # Verify result
     assert result["username"] == "testuser"
@@ -681,6 +684,7 @@ def test_auth_service_singleton_mock(mock_auth_service_singleton):
 def test_get_user_with_groups(
     auth_service,
     mock_boto3_client,
+    mock_cognito_jwt,
     mock_cognito_user_response,
     mock_cognito_groups_response,
 ):
@@ -692,15 +696,15 @@ def test_get_user_with_groups(
     )
 
     # Set up user pool ID
-    auth_service.user_pool_id = "test-pool-id"
+    auth_service.user_pool_id = "us-east-1_TestPool1"
 
     # Call get_user_with_groups method
-    result = auth_service.get_user_with_groups("test-token")
+    result = auth_service.get_user_with_groups(mock_cognito_jwt)
 
     # Verify Cognito client calls
-    mock_boto3_client.get_user.assert_called_once_with(AccessToken="test-token")
+    mock_boto3_client.get_user.assert_called_once_with(AccessToken=mock_cognito_jwt)
     mock_boto3_client.admin_list_groups_for_user.assert_called_once_with(
-        UserPoolId="test-pool-id", Username="testuser"
+        UserPoolId="us-east-1_TestPool1", Username="testuser"
     )
 
     # Verify result
@@ -711,26 +715,22 @@ def test_get_user_with_groups(
 
 
 def test_get_user_with_groups_no_pool_id(
-    auth_service, mock_boto3_client, mock_cognito_user_response
+    auth_service, mock_boto3_client, mock_cognito_jwt, mock_cognito_user_response
 ):
-    """Test getting user details when no user pool ID is configured."""
+    """With no user pool ID configured, a token Cognito accepts is still refused:
+    there is no pool to check its issuer against."""
     # Mock Cognito response
     mock_boto3_client.get_user.return_value = mock_cognito_user_response
 
     # Remove user pool ID
     auth_service.user_pool_id = None
 
-    # Call get_user_with_groups method
-    result = auth_service.get_user_with_groups("test-token")
+    with pytest.raises(CognitoTokenRefused) as refused:
+        auth_service.get_user_with_groups(mock_cognito_jwt)
 
-    # Verify Cognito client was called correctly
-    mock_boto3_client.get_user.assert_called_once_with(AccessToken="test-token")
+    assert refused.value.reason == "not_configured"
+    mock_boto3_client.get_user.assert_called_once_with(AccessToken=mock_cognito_jwt)
     mock_boto3_client.admin_list_groups_for_user.assert_not_called()
-
-    # Verify result
-    assert result["username"] == "testuser"
-    assert "attributes" in result
-    assert result["groups"] == []
 
 
 class TestCognitoClientIsLazy:
@@ -755,7 +755,10 @@ class TestCognitoClientIsLazy:
         assert len(created) == 1  # cached
 
     def test_a_fake_client_can_still_be_installed(self):
-        from backend.app.services.auth_service import CognitoAuthService
+        from backend.app.services.auth_service import (
+            CognitoAuthService,
+            CognitoTokenRefused,
+        )
 
         service = CognitoAuthService()
         fake = object()
