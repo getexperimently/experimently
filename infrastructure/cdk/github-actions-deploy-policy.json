@@ -46,6 +46,12 @@
       "Resource": "*"
     },
     {
+      "Sid": "TagClusterSnapshots",
+      "Effect": "Allow",
+      "Action": "rds:AddTagsToResource",
+      "Resource": "arn:aws:rds:*:*:cluster-snapshot:*"
+    },
+    {
       "Sid": "PassTaskRolesToEcs",
       "Effect": "Allow",
       "Action": "iam:PassRole",

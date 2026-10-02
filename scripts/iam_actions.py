@@ -10,8 +10,11 @@ workflows or actions run, every sibling module such a Python script imports,
 and `STAGED_SCRIPTS` (scripts the role will run that no workflow names yet).
 Each `aws <service> <verb>` in them becomes an IAM
 action; `docker push`/`docker pull` and the ECR login action add the registry
-actions they need; `register-task-definition` and `run-task` add
-`iam:PassRole` (scoped to ECS tasks in the policy); and a flag in
+actions they need; `IMPLIED` adds the actions AWS checks behind a call
+without the call naming them -- `register-task-definition` and `run-task`
+add `iam:PassRole` (scoped to ECS tasks in the policy) and
+`create-db-cluster-snapshot` adds `rds:AddTagsToResource` (scoped to cluster
+snapshots, #744); and a flag in
 `FLAG_IMPLIED`, in the same `run:` block or script as its call, adds the
 action that flag needs (`create-deployment --override-alarm-configuration`
 needs `codedeploy:UpdateDeploymentGroup`).
@@ -84,18 +87,70 @@ SPECIAL = {
     ("deploy", "wait deployment-successful"): ["codedeploy:GetDeployment"],
 }
 
-#: What a call needs beyond its own action.
+#: What a call needs beyond its own action: the actions AWS checks implicitly,
+#: which no `aws` command in the sources names (#744). The scan reads commands,
+#: so an action AWS authorizes behind one is invisible to it; this table is the
+#: only place such an action enters the role, and each entry cites where AWS
+#: documents it. The machine-readable source for all of them is the
+#: "AuthorizedActions" of the operation in
+#: https://servicereference.us-east-1.amazonaws.com/v1/<prefix>/<prefix>.json
+#: (the Service Authorization Reference's "API operations" table).
+#:
+#: That list also names actions an operation checks only conditionally. Each
+#: one below was audited against how the sources call the operation, and
+#: these are deliberately absent, because the condition never holds here:
+#:   ecs register-task-definition, run-task -> ecs:TagResource: only when the
+#:     request carries tags. register_task_definition.sh sends
+#:     `describe-task-definition --query taskDefinition`, which has no tags,
+#:     and no run-task passes --tags or --propagate-tags.
+#:   ecs update-service -> iam:PassRole: only for a role set on the service
+#:     (EBS volume or Service Connect TLS roles); ecs_rolling_rollout.sh
+#:     changes only the task definition.
+#:   deploy continue-deployment, stop-deployment ->
+#:     codedeploy:CreateCloudFormationDeployment: CloudFormation-driven
+#:     blue/green only; these deployments are ECS ones created directly.
+#:   deploy create-deployment -> codedeploy:GetApplicationRevision: AWS asks
+#:     for it OR RegisterApplicationRevision; the AppSpecContent revision is
+#:     registered, so the latter is the one granted.
+#:   cloudformation describe-stacks -> cloudformation:ListStacks: only without
+#:     a stack name; stack-outputs always passes --stack-name.
+#:   ecr batch-get-image, get-download-url-for-layer ->
+#:     ecr:BatchImportUpstreamImage, ecr:CreateRepository, ecr:TagResource:
+#:     pull-through cache only; the deploy pulls from its own repository.
+#:   logs get-log-events -> logs:Unmask: only with --unmask.
 IMPLIED = {
     # The task definition names an execution role (and the API's a task
     # role); registering or running it passes them to ECS.
+    # https://docs.aws.amazon.com/service-authorization/latest/reference/list_ecs.html#list_ecs-operations
     ("ecs", "register-task-definition"): ["iam:PassRole"],
     ("ecs", "run-task"): ["iam:PassRole"],
-    # An AppSpecContent revision is registered and its deployment config read
-    # as part of creating the deployment.
+    # "When you specify CreateDeployment permissions, you must also specify
+    # GetDeploymentConfig permissions for the deployment configuration and
+    # GetApplicationRevision or RegisterApplicationRevision permissions for
+    # the application revision."
+    # https://docs.aws.amazon.com/codedeploy/latest/userguide/auth-and-access-control-permissions-reference.html
     ("deploy", "create-deployment"): [
         "codedeploy:GetDeploymentConfig",
         "codedeploy:RegisterApplicationRevision",
     ],
+    # The CDK's Aurora cluster copies its tags to every snapshot, and AWS
+    # authorizes that copy as rds:AddTagsToResource on the new snapshot. The
+    # first staging deploy was refused at "Snapshot the database before
+    # migrating" without it: "not authorized to perform: rds:AddTagsToResource
+    # on resource: arn:aws:rds:...:cluster-snapshot:...".
+    # https://docs.aws.amazon.com/service-authorization/latest/reference/list_rds.html#list_rds-operations
+    # (CreateDBClusterSnapshot -> rds:AddTagsToResource, rds:CreateDBClusterSnapshot)
+    ("rds", "create-db-cluster-snapshot"): ["rds:AddTagsToResource"],
+}
+
+#: An implied action granted only on the resources the implying call creates,
+#: in a statement of its own, instead of on `*` with the rest. Tagging is
+#: needed on the snapshot the deploy takes, not on every RDS resource.
+SCOPED = {
+    "rds:AddTagsToResource": (
+        "TagClusterSnapshots",
+        "arn:aws:rds:*:*:cluster-snapshot:*",
+    ),
 }
 
 #: What a call needs because of a FLAG it is given (#148). The generator used
@@ -303,7 +358,7 @@ def calls(paths: list[Path] | None = None) -> dict[str, set[str]]:
 
 
 def policy(found: dict[str, set[str]]) -> dict:
-    actions = sorted(a for a in found if a != "iam:PassRole")
+    actions = sorted(a for a in found if a != "iam:PassRole" and a not in SCOPED)
     statements = [
         {
             "Sid": "DeployWorkflows",
@@ -312,6 +367,11 @@ def policy(found: dict[str, set[str]]) -> dict:
             "Resource": "*",
         }
     ]
+    for action, (sid, resource) in sorted(SCOPED.items()):
+        if action in found:
+            statements.append(
+                {"Sid": sid, "Effect": "Allow", "Action": action, "Resource": resource}
+            )
     if "iam:PassRole" in found:
         statements.append(
             {

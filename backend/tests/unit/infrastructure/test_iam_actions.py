@@ -129,8 +129,8 @@ def test_an_unmapped_service_is_refused():
     iam = _module()
     with pytest.raises(SystemExit, match="not mapped to an IAM prefix"):
         iam.iam_actions_for("iot", "create-thing")
-    assert iam.iam_actions_for("rds", "create-db-cluster-snapshot") == [
-        "rds:CreateDBClusterSnapshot"
+    assert iam.iam_actions_for("rds", "describe-db-cluster-snapshots") == [
+        "rds:DescribeDBClusterSnapshots"
     ]
 
 
@@ -314,3 +314,69 @@ def test_an_unmapped_service_in_operations_fails_generation(tmp_path):
     # Pairs outside OPERATIONS are still ignored.
     script.write_text('PAIRS = ("blue", "green")\n')
     assert dict(iam.calls([script])) == {}
+
+
+# --- actions AWS checks behind a call (#744) -----------------------------------
+
+
+@pytest.mark.regression
+@pytest.mark.parametrize("suffix", [".sh", ".yml"])
+def test_a_cluster_snapshot_implies_tagging_it(tmp_path, suffix):
+    """The CDK's Aurora cluster copies its tags to each snapshot, and AWS
+    authorizes the copy as rds:AddTagsToResource. No command names it, so the
+    scan alone left it out and the first staging deploy was refused at the
+    pre-migration snapshot."""
+    iam = _module()
+    script = (
+        "aws rds create-db-cluster-snapshot \\\n"
+        '  --db-cluster-identifier c --db-cluster-snapshot-identifier "$id"\n'
+    )
+    source = tmp_path / f"probe{suffix}"
+    if suffix == ".yml":
+        source.write_text(yaml.safe_dump({"jobs": {"j": {"steps": [{"run": script}]}}}))
+    else:
+        source.write_text(script)
+    found = iam.calls([source])
+    assert {"rds:CreateDBClusterSnapshot", "rds:AddTagsToResource"} <= set(found), dict(
+        found
+    )
+
+
+@pytest.mark.regression
+def test_the_snapshot_tagging_is_granted_on_cluster_snapshots_only():
+    """Both snapshot steps are what grants it, and the committed policy holds
+    it in a statement of its own, on cluster snapshots, not on `*`."""
+    found = _module().calls()
+    assert {p.split(":")[0] for p in found["rds:AddTagsToResource"]} == {
+        ".github/workflows/deploy.yml",
+        ".github/workflows/db-migrate.yml",
+    }, found["rds:AddTagsToResource"]
+    statements = json.loads(POLICY.read_text())["Statement"]
+    tagging = [s for s in statements if "rds:AddTagsToResource" in str(s["Action"])]
+    assert tagging == [
+        {
+            "Sid": "TagClusterSnapshots",
+            "Effect": "Allow",
+            "Action": "rds:AddTagsToResource",
+            "Resource": "arn:aws:rds:*:*:cluster-snapshot:*",
+        }
+    ], tagging
+
+
+@pytest.mark.regression
+def test_dropping_an_implied_action_makes_the_policy_stale(monkeypatch):
+    """The IMPLIED table is the only way such an action enters the role, so
+    losing an entry must fail the currency check rather than shrink the role
+    in silence."""
+    iam = _module()
+    committed = json.loads(POLICY.read_text())
+    assert iam.policy(iam.calls()) == committed
+    implied = {
+        k: v
+        for k, v in iam.IMPLIED.items()
+        if k != ("rds", "create-db-cluster-snapshot")
+    }
+    monkeypatch.setattr(iam, "IMPLIED", implied)
+    without = iam.policy(iam.calls())
+    assert without != committed
+    assert "rds:AddTagsToResource" not in json.dumps(without)
