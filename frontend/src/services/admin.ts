@@ -1,5 +1,6 @@
 import {
   AdminUser,
+  AdminUserPatch,
   AdminStats,
   AuditLogListResponse,
   CreateUserRequest,
@@ -58,14 +59,18 @@ export function toFlagSafetyStatus(
 
 export const AdminService = {
   // Users
+  /**
+   * `GET /admin/users` pages by `skip`/`limit` (an offset, not a page number)
+   * and filters by `search` over username, email, first and last name.
+   */
   async listUsers(params?: {
-    page?: number;
+    skip?: number;
     limit?: number;
     search?: string;
   }): Promise<UserListResponse> {
     return apiFetch<UserListResponse>('/api/v1/admin/users', {
       query: {
-        page: params?.page,
+        skip: params?.skip,
         limit: params?.limit,
         search: params?.search || undefined,
       },
@@ -81,8 +86,12 @@ export const AdminService = {
     return apiFetch<CreatedUser>('/api/v1/users/', { method: 'POST', json: data });
   },
 
-  async updateUser(id: string, data: Partial<AdminUser>): Promise<AdminUser> {
-    return apiFetch<AdminUser>(`/api/v1/admin/users/${id}`, { method: 'PUT', json: data });
+  /**
+   * `PATCH /api/v1/admin/users/{id}`: change another account's role and/or
+   * active status. Send only what changed.
+   */
+  async updateUser(id: string, data: AdminUserPatch): Promise<AdminUser> {
+    return apiFetch<AdminUser>(`/api/v1/admin/users/${id}`, { method: 'PATCH', json: data });
   },
 
   async deleteUser(id: string): Promise<void> {
@@ -95,15 +104,18 @@ export const AdminService = {
   },
 
   // Audit logs
+  /**
+   * `from_date`/`to_date` are ISO instants (see `localDayRange` in
+   * `@/utils/auditDates`, which turns the page's date pickers into them).
+   */
   async listAuditLogs(params?: {
     page?: number;
     limit?: number;
     user_id?: string;
     action_type?: string;
     entity_type?: string;
-    entity_name?: string;
-    start_date?: string;
-    end_date?: string;
+    from_date?: string;
+    to_date?: string;
   }): Promise<AuditLogListResponse> {
     return apiFetch<AuditLogListResponse>('/api/v1/audit-logs/', {
       query: {
@@ -112,9 +124,8 @@ export const AdminService = {
         user_id: params?.user_id || undefined,
         action_type: params?.action_type || undefined,
         entity_type: params?.entity_type || undefined,
-        entity_name: params?.entity_name || undefined,
-        start_date: params?.start_date || undefined,
-        end_date: params?.end_date || undefined,
+        from_date: params?.from_date || undefined,
+        to_date: params?.to_date || undefined,
       },
     });
   },

@@ -7,10 +7,25 @@ export interface AdminUser {
   username: string;
   /** `null` for an account created without an email address (`UserResponse.email`). */
   email: string | null;
-  role: UserRole;
+  /** `null` for a legacy account created before roles were required (`UserResponse.role`). */
+  role: UserRole | null;
   is_active: boolean;
+  /**
+   * What the admin area and every `/api/v1/admin` route check. Independent of
+   * `role`: an Admin need not be a superuser, and a superuser may have any role.
+   */
+  is_superuser?: boolean;
   created_at: string;
   last_login?: string;
+}
+
+/**
+ * Body of `PATCH /api/v1/admin/users/{id}` (`AdminUserPatch`). Send only the
+ * keys that change; at least one is required and `null` is refused.
+ */
+export interface AdminUserPatch {
+  role?: UserRole;
+  is_active?: boolean;
 }
 
 /** `UserCreate` — body of `POST /api/v1/users/` (superuser only). */
@@ -176,7 +191,8 @@ export interface AdminStats {
 export interface UserListResponse {
   items: AdminUser[];
   total: number;
-  page: number;
+  /** Offset of the first item, as sent. */
+  skip: number;
   limit: number;
 }
 

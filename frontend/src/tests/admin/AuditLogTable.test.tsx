@@ -146,6 +146,27 @@ describe('AuditLogTable', () => {
     });
   });
 
+  // #665: the page's days become the API's from_date/to_date, as the
+  // browser's local midnights, To running to the midnight after its day.
+  it('sends the picked days as local-midnight from_date and to_date', async () => {
+    mockListAuditLogs.mockResolvedValue(makePage());
+    render(
+      <AuditLogTable
+        filters={{ action_type: 'toggle_enable', start_date: '2024-06-14', end_date: '2024-06-15' }}
+      />,
+    );
+    await waitFor(() => expect(mockListAuditLogs).toHaveBeenCalled());
+    const params = mockListAuditLogs.mock.calls[mockListAuditLogs.mock.calls.length - 1][0];
+    expect(params).toEqual({
+      action_type: 'toggle_enable',
+      entity_type: undefined,
+      from_date: new Date(2024, 5, 14).toISOString(),
+      to_date: new Date(2024, 5, 16).toISOString(),
+      page: 1,
+      limit: 50,
+    });
+  });
+
   it('renders with data-testid="audit-log-table"', async () => {
     mockListAuditLogs.mockResolvedValue(makePage());
     render(<AuditLogTable />);

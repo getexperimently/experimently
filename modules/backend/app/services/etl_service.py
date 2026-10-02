@@ -7,8 +7,14 @@ Provides business logic for:
 - Adding Hive-style partitions to the Glue catalog
 - Starting and querying Glue crawlers
 
-All AWS clients use boto3. The region is read from the core settings; the
-Glue job and crawler names from the modules' settings.
+The Glue client is built with no region: botocore takes it from
+``AWS_DEFAULT_REGION`` (it never reads ``AWS_REGION``), which the CDK sets on
+the full-profile API task to the stacks' region. With it unset, building the
+client raises ``NoRegionError`` and the route answers 500. The Glue job and
+crawler names come from the modules' settings. The calls made here are exactly
+what the task role grants (``infrastructure/cdk/stacks/fargate_service_stack.py``);
+``modules/backend/tests/unit/services/test_etl_service_calls.py`` fails if
+another one appears.
 """
 
 import logging
@@ -17,7 +23,6 @@ from typing import Optional
 import boto3
 from fastapi import HTTPException, status
 
-from backend.app.core.config import settings
 from backend.app.core.logger import failure_detail
 from modules.backend.app.schemas.etl import (
     ETLJobRequest,
@@ -120,7 +125,9 @@ class ETLService:
 
     def _glue(self):
         if self._glue_client is None:
-            self._glue_client = boto3.client("glue", region_name=settings.AWS_REGION)
+            # No region_name: botocore reads AWS_DEFAULT_REGION, the region the
+            # CDK sets on the task. settings.AWS_REGION is not the Glue region.
+            self._glue_client = boto3.client("glue")
         return self._glue_client
 
     # ------------------------------------------------------------------
@@ -212,9 +219,13 @@ class ETLService:
         _require_configured_job(job_name)
         try:
             response = self._glue().get_job_run(JobName=job_name, RunId=job_run_id)
-        except self._glue().exceptions.EntityNotFoundException:
-            raise _not_found("Job run not found")
         except Exception as exc:
+            # Matched by class name, as the crawler routes do: evaluating
+            # ``self._glue().exceptions`` here would build the client a second
+            # time, and a client that cannot be built (no region) would escape
+            # this handler as an unhandled error.
+            if type(exc).__name__ == "EntityNotFoundException":
+                raise _not_found("Job run not found")
             logger.error(
                 "Glue job status failed (%s)", type(exc).__name__, exc_info=exc
             )

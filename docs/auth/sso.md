@@ -307,6 +307,7 @@ Rules:
 - The user's groups are read in the order the IdP sends them, and the **first** one that has a mapping decides the role. It is not the highest-privilege one, and the order of `role_mapping` does not matter.
 - A new user in no mapped group receives the `viewer` role.
 - An existing user's role changes only when one of their groups is in the mapping. A sign-in with no mapped group leaves the role as it is, so removing someone from every mapped group does not demote them: to demote someone through SSO, map one of their groups to `viewer`. Superuser status is never changed by a sign-in.
+- A role changed in the dashboard (Admin → Users → Edit) lasts until the user's next sign-in through a group in `role_mapping`, which replaces it.
 - Groups come from SAML assertions and from Okta. Google and GitHub send none, so for them the mapping never applies: new users are `viewer`, and existing users keep their role.
 
 ---

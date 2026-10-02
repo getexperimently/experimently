@@ -120,7 +120,9 @@ def flag(make_feature_flag):
 def test_a_flag_status_change_answers_the_fixed_message(
     as_user, developer_user, flag, monkeypatch, verb, sentence
 ):
-    monkeypatch.setattr(feature_flags_endpoints, "_invalidate_flag_cache", _async_boom)
+    # The last call inside each route's `try`, after the commit. (It was the
+    # flag cache invalidation until the flag cache was deleted, #630.)
+    monkeypatch.setattr(feature_flags_endpoints, "ToggleResponse", _boom)
     client = as_user(developer_user)
     response = client.post(
         f"/api/v1/feature-flags/{flag.id}/{verb}", json={}, headers=HEADERS

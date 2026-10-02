@@ -259,7 +259,8 @@ curl -X POST "http://localhost:8000/api/v1/users/" \
 - All list endpoints support pagination using `skip` and `limit` parameters
 
 ### Caching
-- Experiment and feature flag data is cached for 1 hour
+- Experiment data is cached for 1 hour when `CACHE_ENABLED` is on (it is off by default)
+- Feature flags are not cached: the flag list and a flag's detail are read from the database on every request, whatever `CACHE_ENABLED` says
 - Results data is cached for 5 minutes
 - Cache-Control headers are included in responses
 
@@ -1939,6 +1940,12 @@ name answers **404** with a fixed `detail`, and Glue is not called:
 configures nothing, so with it empty its routes answer 404 for every name, as
 does `jobs/run` for a job type whose job is unset. A run that Glue does not
 have answers 404 `"Job run not found"`.
+
+The API reaches Glue in the region named by `AWS_DEFAULT_REGION`, never
+`AWS_REGION`. With it unset, the job and crawler routes answer 500 (the
+partitions route does not report it, #656). `GLUE_EVENTS_TABLE` must
+be the table the crawler creates. See
+[AWS integration: Glue](../integrations/aws.md#glue-the-etl-routes).
 
 ---
 

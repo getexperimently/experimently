@@ -255,46 +255,6 @@ class TestCacheCounters:
         assert sample("cache_misses_total", hits) == m0 + 1
         assert sample("cache_hits_total", hits) == h0 + 2
 
-    def test_feature_flag_redis_cache_counts_hit_and_miss(
-        self, client, live_flag, monkeypatch
-    ):
-        """``GET /feature-flags/{id}`` counts a miss, then a hit, on the Redis cache."""
-        from backend.app.api import deps
-        from backend.app.main import app
-
-        store: dict = {}
-
-        class FakeRedis:  # async, as redis.asyncio is (#100)
-            async def get(self, key):
-                return store.get(key)
-
-            async def setex(self, key, ttl, value):
-                store[key] = value
-
-        class Control:
-            enabled = True
-            skip = False
-            redis = FakeRedis()
-
-        async def override_cache_control():
-            return Control()
-
-        app.dependency_overrides[deps.get_cache_control] = override_cache_control
-        try:
-            labels = {"cache_type": "feature_flag"}
-            h0 = sample("cache_hits_total", labels)
-            m0 = sample("cache_misses_total", labels)
-
-            first = client.get(f"/api/v1/feature-flags/{live_flag.id}")
-            assert first.status_code == 200, first.text
-            second = client.get(f"/api/v1/feature-flags/{live_flag.id}")
-            assert second.status_code == 200, second.text
-
-            assert sample("cache_misses_total", labels) == m0 + 1
-            assert sample("cache_hits_total", labels) == h0 + 1
-        finally:
-            app.dependency_overrides.pop(deps.get_cache_control, None)
-
 
 # ---------------------------------------------------------------------------
 # Experiment scheduler gauge and scheduler metrics helpers

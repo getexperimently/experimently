@@ -445,11 +445,8 @@ Invalidate results cache for an experiment:
 POST /api/v1/results/{id}/invalidate-cache
 ```
 
-Force fresh feature flag state:
-
-```bash
-GET /api/v1/feature-flags/evaluate/{flag_key}?skip_cache=true
-```
+Feature flags need no invalidation: the API reads the flag list, a flag's
+detail and its evaluation from the database on every request.
 
 ---
 

@@ -59,7 +59,7 @@ ROLE_CLIENT_FIXTURES = frozenset(
         "developer_client",
         "analyst_client",
         "viewer_client",
-        # test_experiment_cache_redis.py, test_flag_cache_redis.py
+        # test_experiment_cache_redis.py, test_flag_reads_after_writers.py
         "cached_client",
         "cached_superuser_client",
         "cached_unreadable_client",
