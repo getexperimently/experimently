@@ -45,6 +45,35 @@ class CognitoTokenRefused(Exception):
         self.reason = reason
 
 
+# The two answers to a sign-in Cognito met with a challenge instead of tokens.
+NEW_PASSWORD_REQUIRED_DETAIL = (
+    "This user must set a new password before signing in; an administrator "
+    "sets one with admin-set-user-password --permanent."
+)
+UNSUPPORTED_CHALLENGE_DETAIL = (
+    "This sign-in needs a step this API does not support ({challenge})."
+)
+
+
+class CognitoSignInChallenge(ValueError):
+    """A sign-in Cognito answered with a challenge, or without an access token.
+
+    ``challenge`` is the response's ``ChallengeName`` (one of Cognito's fixed
+    set, for example ``NEW_PASSWORD_REQUIRED`` or ``SOFTWARE_TOKEN_MFA``), or
+    ``"none"`` when the response carries neither a challenge nor an access
+    token. A ``ValueError`` so ``POST /auth/token`` answers it with 401 and the
+    message, which names the challenge and never the challenge's ``Session``.
+    """
+
+    def __init__(self, challenge: str) -> None:
+        if challenge == "NEW_PASSWORD_REQUIRED":
+            message = NEW_PASSWORD_REQUIRED_DETAIL
+        else:
+            message = UNSUPPORTED_CHALLENGE_DETAIL.format(challenge=challenge)
+        super().__init__(message)
+        self.challenge = challenge
+
+
 def log_token_refused(refusal: CognitoTokenRefused, path: str) -> None:
     """Record a refused sign-in on the ``backend.app.auth.cognito_sign_in`` logger."""
     sign_in_logger.warning(
@@ -193,7 +222,12 @@ class CognitoAuthService:
             raise ValueError(str(e))
 
     def sign_in(self, username: str, password: str) -> Dict[str, Any]:
-        """Authenticate a user and get tokens."""
+        """Authenticate a user and get tokens.
+
+        Raises :class:`CognitoSignInChallenge` when Cognito answers with a
+        challenge (``NEW_PASSWORD_REQUIRED``, an MFA step, ...) or with no
+        access token, and ``ValueError`` when Cognito refuses the credentials.
+        """
         try:
             response = self.client.initiate_auth(
                 ClientId=self.client_id,
@@ -203,19 +237,6 @@ class CognitoAuthService:
                     "PASSWORD": password,
                 },
             )
-
-            auth_result = response.get("AuthenticationResult", {})
-
-            logger.info(f"Sign-in successful for user: {username}")
-
-            return {
-                "access_token": auth_result.get("AccessToken"),
-                "id_token": auth_result.get("IdToken"),
-                "refresh_token": auth_result.get("RefreshToken"),
-                "expires_in": auth_result.get("ExpiresIn", 3600),
-                "token_type": auth_result.get("TokenType", "Bearer"),
-            }
-
         except ClientError as e:
             logger.error(f"Sign-in error: {e!s}")
             raise ValueError(str(e))
@@ -223,6 +244,28 @@ class CognitoAuthService:
             logger.error(f"Unexpected error during sign-in: {e!s}")
             # Pass through the original error message
             raise ValueError(str(e))
+
+        # Checked outside the try above, so a challenge is not reported as an
+        # unexpected error. The challenge's Session is never logged or returned.
+        challenge = response.get("ChallengeName")
+        auth_result = response.get("AuthenticationResult") or {}
+        if challenge or not auth_result.get("AccessToken"):
+            refusal = CognitoSignInChallenge(str(challenge) if challenge else "none")
+            logger.warning(
+                f"Sign-in for user {username} stopped at Cognito challenge "
+                f"{refusal.challenge}"
+            )
+            raise refusal
+
+        logger.info(f"Sign-in successful for user: {username}")
+
+        return {
+            "access_token": auth_result.get("AccessToken"),
+            "id_token": auth_result.get("IdToken"),
+            "refresh_token": auth_result.get("RefreshToken"),
+            "expires_in": auth_result.get("ExpiresIn", 3600),
+            "token_type": auth_result.get("TokenType", "Bearer"),
+        }
 
     def forgot_password(self, username: str) -> Dict[str, Any]:
         """Initiate the forgot password flow."""

@@ -10,7 +10,12 @@ import pytest
 from botocore.exceptions import ClientError
 
 from backend.app.core.config import settings
-from backend.app.services.auth_service import CognitoAuthService, CognitoTokenRefused
+from backend.app.services import auth_service as auth_service_module
+from backend.app.services.auth_service import (
+    CognitoAuthService,
+    CognitoSignInChallenge,
+    CognitoTokenRefused,
+)
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -360,45 +365,37 @@ def test_sign_in_success(auth_service, mock_boto3_client, mock_cognito_auth_resp
     )
 
 
+@pytest.mark.regression
 def test_sign_in_with_challenge(
-    auth_service, mock_boto3_client, mock_cognito_challenge_response
+    auth_service, mock_boto3_client, mock_cognito_challenge_response, caplog
 ):
-    """Test sign in requiring additional challenge."""
-    # Mock Cognito challenge response
+    """A NEW_PASSWORD_REQUIRED answer raises the challenge refusal.
+
+    It used to return a token dict of ``None`` values, which ``/auth/token``
+    turned into a 500 when the response model rejected it.
+    """
     mock_boto3_client.initiate_auth.return_value = mock_cognito_challenge_response
 
-    # Adding monkey patch to handle challenge responses
-    original_sign_in = auth_service.sign_in
+    # Not caplog.at_level: the autouse fixture in tests/unit/conftest.py patches
+    # logging.getLogger, which at_level calls. Set the service logger directly.
+    service_logger = auth_service_module.logger
+    previous_level = service_logger.level
+    service_logger.setLevel(logging.DEBUG)
+    try:
+        with pytest.raises(CognitoSignInChallenge) as raised:
+            auth_service.sign_in(username="testuser", password="Password123!")
+    finally:
+        service_logger.setLevel(previous_level)
 
-    def patched_sign_in(username, password):
-        response = original_sign_in(username, password)
-        # If we get a challenge response from Cognito
-        if "ChallengeName" in mock_boto3_client.initiate_auth.return_value:
-            # Add challenge information to the response
-            response["challenge_name"] = mock_boto3_client.initiate_auth.return_value[
-                "ChallengeName"
-            ]
-            response["session"] = mock_boto3_client.initiate_auth.return_value[
-                "Session"
-            ]
-            response["challenge_parameters"] = (
-                mock_boto3_client.initiate_auth.return_value["ChallengeParameters"]
-            )
-        return response
-
-    # Apply the patch for this test
-    auth_service.sign_in = patched_sign_in
-
-    # Call sign_in method
-    result = auth_service.sign_in(username="testuser", password="Password123!")
-
-    # Verify challenge response was handled
-    assert "challenge_name" in result
-    assert result["challenge_name"] == "NEW_PASSWORD_REQUIRED"
-    assert result["session"] == "test-session-token"
-
-    # Restore the original method
-    auth_service.sign_in = original_sign_in
+    assert raised.value.challenge == "NEW_PASSWORD_REQUIRED"
+    assert str(raised.value) == (
+        "This user must set a new password before signing in; an administrator "
+        "sets one with admin-set-user-password --permanent."
+    )
+    assert "Sign-in successful" not in caplog.text
+    assert "Unexpected error" not in caplog.text
+    assert "test-session-token" not in caplog.text
+    assert "NEW_PASSWORD_REQUIRED" in caplog.text
 
 
 @pytest.mark.parametrize(
