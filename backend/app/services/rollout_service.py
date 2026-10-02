@@ -659,6 +659,32 @@ class RolloutService:
                 f"Cannot advance stage for schedule in {schedule.status.value} status"
             )
 
+        # Take the flag lock, then read the schedule again from the database
+        # and lock it (#629). The check above used an unlocked read: a pause
+        # committed since then, possibly by a writer holding this flag lock,
+        # is seen here. ``populate_existing`` replaces the copy in the
+        # session rather than trusting it. Nothing is changed before this
+        # point, so a refusal leaves nothing pending.
+        feature_flag = (
+            db.query(FeatureFlag)
+            .filter(FeatureFlag.id == schedule.feature_flag_id)
+            .with_for_update()
+            .first()
+        )
+        schedule = (
+            db.query(RolloutSchedule)
+            .filter(RolloutSchedule.id == stage.rollout_schedule_id)
+            .populate_existing()
+            .with_for_update()
+            .one_or_none()
+        )
+        if not schedule:
+            raise ValueError("Schedule not found")
+        if schedule.status != RolloutScheduleStatus.ACTIVE:
+            raise ValueError(
+                f"Cannot advance stage for schedule in {schedule.status.value} status"
+            )
+
         current_time = datetime.now(timezone.utc)
 
         if stage.status == RolloutStageStatus.PENDING:
@@ -667,13 +693,6 @@ class RolloutService:
             stage.updated_at = current_time
 
             # Update feature flag percentage
-            feature_flag = (
-                db.query(FeatureFlag)
-                .filter(FeatureFlag.id == schedule.feature_flag_id)
-                .with_for_update()
-                .first()
-            )
-
             if feature_flag:
                 feature_flag.rollout_percentage = stage.target_percentage
                 feature_flag.updated_at = current_time
@@ -706,13 +725,6 @@ class RolloutService:
                 db.add(next_stage)
 
                 # Update feature flag percentage
-                feature_flag = (
-                    db.query(FeatureFlag)
-                    .filter(FeatureFlag.id == schedule.feature_flag_id)
-                    .with_for_update()
-                    .first()
-                )
-
                 if feature_flag:
                     feature_flag.rollout_percentage = next_stage.target_percentage
                     feature_flag.updated_at = current_time

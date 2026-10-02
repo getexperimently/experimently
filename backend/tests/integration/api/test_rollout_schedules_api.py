@@ -826,6 +826,55 @@ class TestRolloutStages:
         )
         assert response.status_code == 400, response.text
 
+    @pytest.mark.regression
+    def test_advance_stage_on_paused_schedule_returns_400_and_changes_nothing(
+        self, shared_client, flag_id, _module_factory
+    ):
+        """A manual stage of a PAUSED schedule is not advanced (#629): 400
+        with main's refusal text, the stage stays pending and the flag's
+        percentage is unchanged."""
+        data = _create_schedule_via_api(shared_client, flag_id, "Advance Paused")
+        schedule_id = data["id"]
+        manual_stage = next(s for s in data["stages"] if s["trigger_type"] == "manual")
+        assert (
+            shared_client.post(
+                f"/api/v1/rollout-schedules/{schedule_id}/activate"
+            ).status_code
+            == 200
+        )
+        assert (
+            shared_client.post(
+                f"/api/v1/rollout-schedules/{schedule_id}/pause"
+            ).status_code
+            == 200
+        )
+
+        def percentage():
+            session = _module_factory()
+            try:
+                return session.get(FeatureFlag, uuid.UUID(flag_id)).rollout_percentage
+            finally:
+                session.close()
+
+        before = percentage()
+        response = shared_client.post(
+            f"/api/v1/rollout-schedules/stages/{manual_stage['id']}/advance"
+        )
+
+        assert response.status_code == 400, response.text
+        assert (
+            response.json()["detail"]
+            == "Cannot advance stage for schedule in paused status"
+        )
+        assert percentage() == before
+        stages = shared_client.get(f"/api/v1/rollout-schedules/{schedule_id}").json()[
+            "stages"
+        ]
+        assert (
+            next(s for s in stages if s["id"] == manual_stage["id"])["status"]
+            == "pending"
+        )
+
     def test_advance_stage_on_inactive_schedule_returns_error(
         self, shared_client, flag_id
     ):
