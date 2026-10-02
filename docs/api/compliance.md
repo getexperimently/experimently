@@ -1,19 +1,58 @@
-# Compliance Audit Logging API
+# Compliance Audit Trail API
 
-!!! info "Part of the `compliance` module"
-    Compliance reporting is one of the optional modules -- present in the **full profile**, absent from the core one. A core deployment does not serve these routes. See [Modules and profiles](../getting-started/modules.md) for what each profile includes and how to run the full one.
+!!! info "Partly in the `compliance` module"
+    The event listing, `GET /api/v1/compliance/audit-events`, is core and answers in every
+    profile. The SOC 2 / ISO 27001 reports and the export are the **compliance module's**:
+    a core deployment still declares those two routes but answers them `501`, after the
+    role check. HMAC signing of new events is also the module's; in a core deployment
+    events are recorded unsigned. See [Modules and profiles](../getting-started/modules.md)
+    for what each profile includes and how to run the full one.
 
-This document describes the compliance audit logging endpoints. The system provides audit trails with HMAC-SHA256 tamper-evident signing for platform events, as evidence for a customer's SOC 2 or ISO 27001 program (the platform itself holds no certification).
+The compliance audit trail is an append-only table of changes to experiments, feature flags
+and (in the full profile) warehouse connections and sources. It is evidence for a
+customer's SOC 2 or ISO 27001 program; the platform itself holds no certification.
+
+It is a separate record from the [audit log](audit-logging.md) at `/api/v1/audit-logs`,
+which records feature-flag status changes (toggle, enable, disable, bulk toggle). A flag
+toggled on or off is written there, not here.
 
 ---
 
-## Overview
+## What is recorded
 
-Every create, update, delete, login, permission change, and data export action performed through the platform is recorded as a signed `AuditEvent`. Each event carries an `X-Audit-Signature` header (HMAC-SHA256) so that downstream consumers can verify that logs have not been altered in transit or at rest.
+Each row is a `ComplianceAuditEvent` with `outcome` `SUCCESS`. These are the only actions
+that write one in this release:
 
-**Base path**: `/api/v1/compliance`
+| Action | `resource_type` | Written when | Profile |
+|---|---|---|---|
+| `CREATE` | `feature_flag` | `POST /api/v1/feature-flags/` | every |
+| `UPDATE` | `feature_flag` | `PUT /api/v1/feature-flags/{id}` | every |
+| `DELETE` | `feature_flag` | `DELETE /api/v1/feature-flags/{id}` | every |
+| `CREATE` | `experiment` | `POST /api/v1/experiments/` | every |
+| `UPDATE` | `experiment` | `PUT /api/v1/experiments/{id}` | every |
+| `DELETE` | `experiment` | `DELETE /api/v1/experiments/{id}` | every |
+| `CREATE`, `UPDATE`, `DELETE` | `warehouse_connection` | creating, changing or deleting a warehouse connection | full |
+| `KEY_CREATE` | `warehouse_connection` | a new key is generated (`/regenerate-key`), or a pending key becomes current after a passing connection test | full |
+| `CREATE`, `UPDATE`, `DELETE` | `warehouse_source` | creating, changing, validating or deleting a warehouse source | full |
 
-**Authentication**: All compliance endpoints require a valid Bearer token. Minimum role: **ANALYST** for read access; **ADMIN** for export.
+Each event carries the actor's id, the resource id, and a snapshot of a few fields in
+`old_value` and `new_value`: for a flag update, its key, name, status and rollout percentage;
+for an experiment update, its name, status and targeting rules; a create records the new
+key and name (a flag) or name (an experiment), and a delete the old key, name and status (a
+flag) or name, status and owner (an experiment). Field names containing `password`, `token`,
+`api_key` or `secret` are replaced with `[REDACTED]`.
+
+Not recorded here: logins and logouts, failed logins, role changes, API key changes, flag
+status changes (they go to the [audit log](audit-logging.md)), experiment start, pause and
+completion, and reading, reporting on or exporting this trail. `AuditAction` defines `READ`,
+`LOGIN`, `LOGOUT`, `LOGIN_FAILED`, `ROLE_GRANT`, `ROLE_REVOKE`, `KEY_REVOKE`, `EXPORT` and
+`REPORT_GENERATED`, and you can filter on them, but nothing in this release writes them.
+
+For flags and experiments, a failure to write the event does not fail the request that made
+the change: the change is kept and the failure is logged as a warning.
+
+**Base path**: `/api/v1/compliance`. Every route needs a Bearer token; without one it
+answers `401`.
 
 ---
 
@@ -21,29 +60,30 @@ Every create, update, delete, login, permission change, and data export action p
 
 ### List Audit Events
 
-```
+```text
 GET /api/v1/compliance/audit-events
 ```
 
-Returns a paginated list of audit events, optionally filtered by action type, resource type, actor, or time range.
+Core, every profile. ADMIN or ANALYST (or a superuser); DEVELOPER and VIEWER get `403`.
+Events are listed most recent first.
 
 **Query Parameters**
 
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `page` | `int` | No | Page number (1-indexed, default: `1`) |
-| `page_size` | `int` | No | Items per page (default: `50`, max: `500`) |
-| `action` | `string` | No | Filter by `AuditAction` enum value (e.g., `CREATE`, `DELETE`) |
-| `resource_type` | `string` | No | Filter by resource type (e.g., `experiment`, `feature_flag`, `user`) |
-| `actor_id` | `string` | No | Filter by the UUID of the user who performed the action |
-| `start_date` | `datetime` | No | ISO 8601 UTC start of time window (inclusive) |
-| `end_date` | `datetime` | No | ISO 8601 UTC end of time window (inclusive) |
+| Parameter | Type | Description |
+|---|---|---|
+| `page` | int | Page number, from 1 (default `1`) |
+| `limit` | int | Page size (default `50`, max `200`; more answers `422`) |
+| `action` | string | An `AuditAction` value, e.g. `CREATE`; an unknown value answers `422` |
+| `resource_type` | string | e.g. `experiment`, `feature_flag` |
+| `actor_id` | UUID | The user who made the change |
+| `start_time` | datetime | Events at or after this time (ISO 8601) |
+| `end_time` | datetime | Events at or before this time (ISO 8601) |
 
 **Example Request**
 
 ```bash
-curl -X GET "https://your-platform.example.com/api/v1/compliance/audit-events?action=DELETE&resource_type=experiment&page=1&page_size=20" \
-  -H "Authorization: Bearer your_access_token"
+curl -s "localhost:8000/api/v1/compliance/audit-events?action=UPDATE&resource_type=experiment&limit=20" \
+  -H "Authorization: Bearer $TOKEN"
 ```
 
 **Response: 200 OK**
@@ -52,264 +92,133 @@ curl -X GET "https://your-platform.example.com/api/v1/compliance/audit-events?ac
 {
   "items": [
     {
-      "id": "ae1c3f22-7b4d-4e1a-9b2c-0f3d5e6a7b8c",
-      "action": "DELETE",
+      "id": "a5fd175e-7579-4cf8-92cf-832fa8dfe0b6",
+      "timestamp": "2026-10-02T07:59:23.446805Z",
+      "actor_id": "a5a661c7-2d02-46da-bf61-03e23b709ab6",
+      "actor_ip": null,
+      "actor_user_agent": null,
+      "session_id": null,
+      "request_id": null,
+      "action": "UPDATE",
       "resource_type": "experiment",
-      "resource_id": "exp-uuid-here",
-      "actor_id": "usr-uuid-here",
-      "actor_username": "jane.smith",
-      "timestamp": "2026-01-15T10:30:00Z",
-      "ip_address": "203.0.113.45",
-      "user_agent": "Mozilla/5.0 ...",
-      "details": {
-        "experiment_name": "Button Color Test",
-        "previous_status": "DRAFT"
-      },
-      "signature": "sha256=a1b2c3d4e5f6..."
+      "resource_id": "15bdc848-21c5-4fb8-aa9f-462a34e375a6",
+      "old_value": {"name": "Checkout Button Color", "status": "active", "targeting_rules": {}},
+      "new_value": {"name": "Checkout Button Color", "status": "active", "targeting_rules": {}},
+      "outcome": "SUCCESS",
+      "hmac_signature": "09f48eec6ee1388d942b1a7a73eb2e08d4d4e4cfe78cec0121f4c7f6a7b480b2",
+      "archived_at": null,
+      "retention_expires_at": "2027-10-02T07:59:23.446828Z"
     }
   ],
-  "total": 142,
+  "total": 2,
   "page": 1,
-  "page_size": 20,
-  "pages": 8
+  "limit": 20
 }
 ```
 
+`hmac_signature` is `null` for an event written without the compliance module.
+
 ---
 
-### SOC 2 Compliance Report
+### Compliance Report
 
+```text
+GET /api/v1/compliance/reports/{standard}
 ```
-GET /api/v1/compliance/reports/soc2
-```
 
-Returns a rolling 365-day compliance summary covering all audit events relevant to SOC 2 Trust Service Criteria (Security, Availability, Confidentiality, Processing Integrity, Privacy).
-
-**Authentication**: ADMIN role required.
-
-**Example Request**
+Compliance module. ADMIN or ANALYST (or a superuser). `standard` is `soc2` or `iso27001`;
+any other value answers `400`. `start_time` and `end_time` (ISO 8601) set the period; by
+default it ends now and starts `AUDIT_RETENTION_DAYS_SOC2` (365) or
+`AUDIT_RETENTION_DAYS_ISO27001` (730) days earlier.
 
 ```bash
-curl -X GET "https://your-platform.example.com/api/v1/compliance/reports/soc2" \
-  -H "Authorization: Bearer your_admin_token"
+curl -s localhost:8000/api/v1/compliance/reports/soc2 \
+  -H "Authorization: Bearer $TOKEN"
 ```
 
 **Response: 200 OK**
 
 ```json
 {
-  "report_type": "SOC2",
-  "generated_at": "2026-03-02T00:00:00Z",
-  "period_start": "2025-03-02T00:00:00Z",
-  "period_end": "2026-03-02T00:00:00Z",
-  "summary": {
-    "total_events": 58341,
-    "by_action": {
-      "CREATE": 12450,
-      "UPDATE": 28901,
-      "DELETE": 3210,
-      "READ": 9800,
-      "LOGIN": 2100,
-      "LOGOUT": 1880,
-      "PERMISSION_CHANGE": 320,
-      "CONFIG_CHANGE": 154,
-      "EXPORT": 526
-    },
-    "unique_actors": 47,
-    "flagged_events": 3,
-    "failed_login_attempts": 18
-  },
-  "controls": [
-    {
-      "control_id": "CC6.1",
-      "description": "Logical and physical access controls",
-      "status": "COMPLIANT",
-      "evidence_count": 2420
-    }
-  ]
+  "standard": "soc2",
+  "period_start": "2025-10-02T07:59:24.089800Z",
+  "period_end": "2026-10-02T07:59:24.089800Z",
+  "generated_at": "2026-10-02T07:59:24.095773Z",
+  "total_events": 5,
+  "events_by_action": {"UPDATE": 3, "CREATE": 1, "DELETE": 1},
+  "events_by_outcome": {"SUCCESS": 5},
+  "events_by_resource_type": {"experiment": 2, "feature_flag": 3},
+  "integrity_checks": 5,
+  "tampered_events": 0,
+  "integrity_pass_rate": 1.0,
+  "unsigned_events": 0,
+  "integrity_coverage": 1.0,
+  "signing_enabled": true
 }
 ```
 
----
+The report counts the events in the period and checks each signature:
 
-### ISO 27001 Compliance Report
-
-```
-GET /api/v1/compliance/reports/iso27001
-```
-
-Returns a rolling 730-day compliance summary aligned with ISO/IEC 27001:2022 Annex A controls.
-
-**Authentication**: ADMIN role required.
-
-**Example Request**
-
-```bash
-curl -X GET "https://your-platform.example.com/api/v1/compliance/reports/iso27001" \
-  -H "Authorization: Bearer your_admin_token"
-```
-
-**Response: 200 OK**
-
-```json
-{
-  "report_type": "ISO27001",
-  "generated_at": "2026-03-02T00:00:00Z",
-  "period_start": "2024-03-02T00:00:00Z",
-  "period_end": "2026-03-02T00:00:00Z",
-  "summary": {
-    "total_events": 119882,
-    "unique_actors": 63,
-    "flagged_events": 7,
-    "by_action": {
-      "CREATE": 24900,
-      "UPDATE": 57802,
-      "DELETE": 6420,
-      "LOGIN": 4200,
-      "LOGOUT": 3760,
-      "PERMISSION_CHANGE": 640,
-      "CONFIG_CHANGE": 308,
-      "EXPORT": 1052,
-      "READ": 20800
-    }
-  },
-  "controls": [
-    {
-      "control_id": "A.9.4.1",
-      "description": "Information access restriction",
-      "status": "COMPLIANT",
-      "evidence_count": 4840
-    },
-    {
-      "control_id": "A.12.4.1",
-      "description": "Event logging",
-      "status": "COMPLIANT",
-      "evidence_count": 119882
-    }
-  ]
-}
-```
+| Field | Meaning |
+|---|---|
+| `integrity_checks` | Events that carry a signature, all of which were checked |
+| `tampered_events` | Signed events whose signature no longer matches |
+| `integrity_pass_rate` | `(integrity_checks - tampered_events) / integrity_checks`; `1.0` when nothing was checked |
+| `unsigned_events` | Events with no signature, which cannot be checked |
+| `integrity_coverage` | `integrity_checks / total_events`: `1.0` only when every event in the period is signed |
+| `signing_enabled` | Whether this process signs new events |
 
 ---
 
 ### Export Audit Events
 
-```
+```text
 GET /api/v1/compliance/export
 ```
 
-Streams the full audit log (or a filtered subset) as either JSON or CSV. Suitable for ingestion into SIEM tools or long-term archival storage.
-
-**Authentication**: ADMIN role required.
-
-**Query Parameters**
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `format` | `string` | No | `json` or `csv` (default: `json`) |
-| `action` | `string` | No | Filter by `AuditAction` value |
-| `resource_type` | `string` | No | Filter by resource type |
-| `actor_id` | `string` | No | Filter by actor UUID |
-| `start_date` | `datetime` | No | ISO 8601 UTC start (inclusive) |
-| `end_date` | `datetime` | No | ISO 8601 UTC end (inclusive) |
-
-**Example Requests**
-
-JSON export — last 30 days:
+Compliance module. ADMIN (or a superuser) only; ANALYST gets `403`. `format` is `json`
+(default) or `csv`, and `start_time` / `end_time` narrow it. The response is a download
+(`Content-Disposition: attachment; filename=audit_export.json` or `.csv`) of every matching
+event, oldest first, with the fields `id`, `timestamp`, `action`, `resource_type`,
+`resource_id`, `actor_id`, `outcome` and `hmac_signature`. `old_value` and `new_value` are
+not included.
 
 ```bash
-curl -X GET "https://your-platform.example.com/api/v1/compliance/export?format=json&start_date=2026-02-01T00:00:00Z" \
-  -H "Authorization: Bearer your_admin_token" \
-  --output audit_export.json
-```
-
-CSV export — all DELETE events:
-
-```bash
-curl -X GET "https://your-platform.example.com/api/v1/compliance/export?format=csv&action=DELETE" \
-  -H "Authorization: Bearer your_admin_token" \
-  --output deletes.csv
-```
-
-**Response**: `200 OK` with `Content-Type: application/json` (or `text/csv`) and `Transfer-Encoding: chunked` for streaming.
-
----
-
-## HMAC-SHA256 Signing
-
-Every audit event is signed server-side before it is persisted. The `signature` field on each event can be independently verified by consumers.
-
-### Signature Header
-
-For API responses that include a collection of audit events, the HTTP response also carries the header:
-
-```
-X-Audit-Signature: sha256=<hex-encoded HMAC>
-```
-
-The HMAC covers the JSON-serialised response body (UTF-8 encoded, compact form without trailing whitespace).
-
-### Per-Event Payload Format
-
-The HMAC input for each individual event is a canonical JSON string containing the following fields in this exact order:
-
-```json
-{
-  "id": "<uuid>",
-  "action": "<AuditAction>",
-  "resource_type": "<string>",
-  "resource_id": "<string>",
-  "actor_id": "<string>",
-  "timestamp": "<ISO8601-UTC>",
-  "details": { ... }
-}
-```
-
-The HMAC secret is an environment secret (`AUDIT_HMAC_SECRET`) stored in AWS Secrets Manager and rotated quarterly. The algorithm is **HMAC-SHA256** with hex encoding (lowercase).
-
-### Verification Example (Python)
-
-```python
-import hmac
-import hashlib
-import json
-
-def verify_audit_event(event: dict, secret: str) -> bool:
-    payload = json.dumps({
-        "id": event["id"],
-        "action": event["action"],
-        "resource_type": event["resource_type"],
-        "resource_id": event["resource_id"],
-        "actor_id": event["actor_id"],
-        "timestamp": event["timestamp"],
-        "details": event["details"],
-    }, separators=(",", ":"), sort_keys=False)
-
-    expected = hmac.new(
-        secret.encode("utf-8"),
-        payload.encode("utf-8"),
-        hashlib.sha256,
-    ).hexdigest()
-
-    provided = event["signature"].removeprefix("sha256=")
-    return hmac.compare_digest(expected, provided)
+curl -s "localhost:8000/api/v1/compliance/export?format=csv&start_time=2026-09-01T00:00:00Z" \
+  -H "Authorization: Bearer $TOKEN" \
+  --output audit_export.csv
 ```
 
 ---
 
-## `AuditAction` Enum
+## Signing
 
-| Value | Description |
+With the compliance module installed, every new event is signed with HMAC-SHA256 before it
+is stored, and the hex digest (64 characters) is kept in `hmac_signature`. The signature
+covers the event's `id`, `timestamp`, `action`, `resource_type`, `resource_id`, `actor_id`
+and `outcome`; `old_value` and `new_value` are not covered. The key is the `AUDIT_HMAC_KEY`
+setting. In staging and production the API refuses to start with the development default
+or with a key shorter than the minimum secret length.
+
+The signatures are checked by the platform, in the compliance report above
+(`integrity_checks`, `tampered_events`). Responses carry no signature header, and the
+canonical form signed is not a published format, so check integrity through the report
+rather than by recomputing a signature yourself.
+
+---
+
+## `AuditAction` Values
+
+| Value | Written in this release |
 |---|---|
-| `CREATE` | A new resource was created (experiment, flag, user, integration, etc.) |
-| `UPDATE` | An existing resource was modified |
-| `DELETE` | A resource was deleted or deactivated |
-| `READ` | A sensitive resource was accessed (e.g., audit log export, PII read) |
-| `LOGIN` | A user successfully authenticated |
-| `LOGOUT` | A user session was terminated |
-| `PERMISSION_CHANGE` | A user's role or permissions were modified |
-| `CONFIG_CHANGE` | A platform-level configuration was updated (safety settings, scheduler config) |
-| `EXPORT` | Data was exported (compliance report, CSV/JSON export) |
+| `CREATE` | Yes, see [What is recorded](#what-is-recorded) |
+| `UPDATE` | Yes |
+| `DELETE` | Yes |
+| `KEY_CREATE` | Yes, warehouse connections only (full profile) |
+| `READ`, `LOGIN`, `LOGOUT`, `LOGIN_FAILED`, `ROLE_GRANT`, `ROLE_REVOKE`, `KEY_REVOKE`, `EXPORT`, `REPORT_GENERATED` | No |
+
+`outcome` is one of `SUCCESS`, `FAILURE` and `DENIED`; every event written in this release
+is `SUCCESS`.
 
 ---
 
@@ -317,13 +226,14 @@ def verify_audit_event(event: dict, secret: str) -> bool:
 
 | Status | Meaning |
 |---|---|
+| `400 Bad Request` | Unknown report `standard` |
 | `401 Unauthorized` | Missing or invalid Bearer token |
-| `403 Forbidden` | Authenticated user lacks required role (ANALYST / ADMIN) |
-| `422 Unprocessable Entity` | Invalid query parameter value (e.g., bad date format) |
-| `500 Internal Server Error` | Unexpected server error |
+| `403 Forbidden` | The caller's role may not use the route (see each route) |
+| `422 Unprocessable Entity` | An invalid query parameter, e.g. an unknown `action`, a `limit` over 200, a bad date |
+| `501 Not Implemented` | The report or export, on a deployment without the compliance module |
 
 ```json
 {
-  "detail": "Not enough permissions to access compliance endpoints"
+  "detail": "Compliance audit logs require ADMIN or ANALYST role"
 }
 ```

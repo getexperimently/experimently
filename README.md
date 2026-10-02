@@ -34,7 +34,9 @@ production deployment we cannot show you:
   with a DB-backed test that drives the public API. CUPED is beta: its covariate is not yet a
   pre-experiment metric, so it reduces almost no variance today
   ([#217](https://github.com/getexperimently/experimently/issues/217))
-- **5,400+ backend tests, 640+ dashboard tests, 15 SDKs** verified against a live backend in CI
+- **5,400+ backend tests, 640+ dashboard tests**, and 13 of the 16 SDKs run against a live backend in
+  CI (the `SDK Live Contract` job of `pr-qa-gate.yml`); Flutter, Elixir
+  and iOS are covered by their unit tests, nightly and whenever they change
 
 ---
 

@@ -600,8 +600,9 @@ jobs:
 
   # Live SDK contract: every SDK's contract_smoke against a real backend.
   # Proves the SDKs call endpoints the backend actually serves (the golden-vector
-  # job above only covers hashing). Toolchains not available on ubuntu-latest
-  # (Android, Flutter, Elixir, iOS) are exercised by their unit tests only.
+  # job above only covers hashing). Android runs through its JVM variant (see
+  # _platform.yml); Flutter, Elixir and iOS have no toolchain on ubuntu-latest
+  # and are exercised by their unit tests only.
   # Every SDK against a real API, through the shared boot in _platform.yml so
   # the sequence lives in one place (this is its only caller today).
   #

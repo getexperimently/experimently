@@ -220,9 +220,13 @@ experiment's method is stored as `always_valid`, the notice adds that it is an a
 ## Permissions
 
 Any logged-in user can read the results. Changing an experiment's sequential testing
-settings is a change to the experiment: an ADMIN can make it on any experiment, while a
-DEVELOPER, ANALYST or VIEWER gets `403` on the demo experiment, which another user
-created.
+settings is a change to the experiment, decided by role and by the experiment's state, not
+by who created it. ANALYST and VIEWER cannot change any experiment: the `PUT` above answers
+`403` with `"You don't have permission to update experiments"`. ADMIN and DEVELOPER may
+change experiments, but only a superuser may change one that is no longer a draft, and the
+demo experiment is running: for a DEVELOPER (or an ADMIN who is not a superuser) the `PUT`
+above answers `403` with `"Cannot update experiments in active status"`. The demo's
+`admin@demo.com` is a superuser, which is why it gets `200`.
 
 ---
 

@@ -8,6 +8,11 @@ assigning a role, are not written to it yet
 demo data includes entries of those kinds, written by the seed script, not by the
 platform.
 
+Creating, changing and deleting a feature flag or an experiment is recorded in a separate
+table, the compliance audit trail, which `GET /api/v1/compliance/audit-events` lists in
+every profile; see [Compliance Audit Trail](compliance.md#what-is-recorded) for what it
+holds. Logging in and assigning a role are recorded in neither.
+
 Run the commands on this page in one terminal, in order, against the stack from the
 [Quick Start](../getting-started/quick-start.md). Each uses the shell variables set by the
 ones before it. Log in first:
