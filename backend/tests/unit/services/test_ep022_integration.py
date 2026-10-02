@@ -1,14 +1,12 @@
 """
 Integration tests for EP-022: Mutual Exclusion Groups + Global Holdout cross-cutting behavior.
 
-Tests the interaction between the MutualExclusionService, GlobalHoldoutService, and the
-Lambda AssignmentService to verify that holdout exclusion, mutual exclusion, deterministic
-hashing, traffic allocation edge cases, and activation flows all work correctly together.
+Tests the interaction between the MutualExclusionService and the GlobalHoldoutService to
+verify that mutual exclusion, deterministic hashing, traffic allocation edge cases, holdout
+distribution, and activation flows all work correctly together.
 """
 
-import sys
 from collections import Counter
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 from uuid import UUID, uuid4
 
@@ -25,29 +23,6 @@ from backend.app.services.global_holdout_service import (
     GlobalHoldoutService,
 )
 from backend.app.services.mutual_exclusion_service import MutualExclusionService
-
-# ---------------------------------------------------------------------------
-# Lambda module path setup
-# ---------------------------------------------------------------------------
-_lambda_base = Path(__file__).resolve().parents[3] / "lambda"
-_lambda_shared = str(_lambda_base / "shared")
-_lambda_assignment = str(_lambda_base / "assignment")
-
-for _p in (_lambda_shared, _lambda_assignment):
-    if _p not in sys.path:
-        sys.path.insert(0, _p)
-
-from assignment_service import AssignmentService
-from consistent_hash import ConsistentHasher
-from models import (
-    ExperimentConfig,
-    GlobalHoldoutConfig,
-    MutualExclusionGroupConfig,
-    VariantConfig,
-)
-from models import (
-    ExperimentStatus as LambdaExperimentStatus,
-)
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -82,25 +57,6 @@ def _make_holdout(holdout_id=None, percentage=10, is_active=True):
     return holdout
 
 
-def _make_lambda_experiment_config(experiment_id=None, key=None):
-    """Create an ExperimentConfig suitable for the Lambda AssignmentService."""
-    return ExperimentConfig(
-        experiment_id=experiment_id or str(uuid4()),
-        key=key or f"exp_{uuid4().hex[:8]}",
-        status=LambdaExperimentStatus.ACTIVE,
-        variants=[
-            VariantConfig(key="control", allocation=0.5),
-            VariantConfig(key="treatment", allocation=0.5),
-        ],
-        traffic_allocation=1.0,
-    )
-
-
-def _make_assignment_service():
-    """Create an AssignmentService instance (no real AWS resources needed)."""
-    return AssignmentService()
-
-
 def _setup_db_for_selection(mock_db, group, experiments):
     """Wire mock_db so get_group returns `group` and get_active_group_experiments returns `experiments`."""
     call_count = [0]
@@ -118,105 +74,7 @@ def _setup_db_for_selection(mock_db, group, experiments):
 
 
 # ---------------------------------------------------------------------------
-# 1. Holdout + Exclusion interaction
-# ---------------------------------------------------------------------------
-
-
-class TestHoldoutExcludesFromAllExperiments:
-    """A user in the global holdout should be excluded from ALL experiments,
-    even those inside mutual exclusion groups."""
-
-    def test_holdout_user_excluded_from_standalone_experiment(self):
-        """Users in holdout get no variant from the Lambda assignment service."""
-        hasher = ConsistentHasher()
-
-        # Pick users who ARE in a 20% holdout
-        holdout_users = []
-        for i in range(500):
-            uid = f"holdout_check_{i}"
-            bucket = hasher.get_bucket(uid, "global_holdout_v1", num_buckets=100)
-            if bucket < 20:
-                holdout_users.append(uid)
-            if len(holdout_users) >= 5:
-                break
-
-        assert len(holdout_users) > 0, "Could not find a user in holdout"
-
-        holdout_config = GlobalHoldoutConfig(holdout_percentage=20, is_active=True)
-        exp_config = _make_lambda_experiment_config()
-
-        svc = _make_assignment_service()
-        for uid in holdout_users:
-            variant = svc.assign_variant(uid, exp_config, holdout_config=holdout_config)
-            assert variant is None, f"User {uid} should be excluded by holdout"
-
-    def test_holdout_user_excluded_from_mutual_exclusion_group_experiment(self):
-        """Even if a user would be selected for an experiment in a mutual exclusion
-        group, holdout takes priority."""
-        hasher = ConsistentHasher()
-
-        group_id = str(uuid4())
-        exp_ids = sorted([str(uuid4()) for _ in range(3)])
-        exclusion_config = MutualExclusionGroupConfig(
-            group_id=group_id,
-            traffic_allocation=1.0,
-            experiment_ids=exp_ids,
-        )
-        holdout_config = GlobalHoldoutConfig(holdout_percentage=20, is_active=True)
-
-        # Find users in holdout
-        holdout_users = []
-        for i in range(500):
-            uid = f"combo_test_{i}"
-            bucket = hasher.get_bucket(uid, "global_holdout_v1", num_buckets=100)
-            if bucket < 20:
-                holdout_users.append(uid)
-            if len(holdout_users) >= 3:
-                break
-
-        assert len(holdout_users) > 0
-
-        svc = _make_assignment_service()
-        for uid in holdout_users:
-            for exp_id in exp_ids:
-                exp_config = _make_lambda_experiment_config(experiment_id=exp_id)
-                variant = svc.assign_variant(
-                    uid,
-                    exp_config,
-                    holdout_config=holdout_config,
-                    exclusion_config=exclusion_config,
-                )
-                assert variant is None, (
-                    f"User {uid} in holdout must be excluded from experiment {exp_id}"
-                )
-
-    def test_non_holdout_user_can_be_assigned(self):
-        """Users NOT in holdout should still be assignable."""
-        hasher = ConsistentHasher()
-
-        holdout_config = GlobalHoldoutConfig(holdout_percentage=5, is_active=True)
-        exp_config = _make_lambda_experiment_config()
-
-        # Find a user not in holdout
-        non_holdout_user = None
-        for i in range(500):
-            uid = f"non_holdout_{i}"
-            bucket = hasher.get_bucket(uid, "global_holdout_v1", num_buckets=100)
-            if bucket >= 5:
-                non_holdout_user = uid
-                break
-
-        assert non_holdout_user is not None
-
-        svc = _make_assignment_service()
-        variant = svc.assign_variant(
-            non_holdout_user, exp_config, holdout_config=holdout_config
-        )
-        assert variant is not None, "Non-holdout user should be assigned a variant"
-
-
-# ---------------------------------------------------------------------------
-# 2. Multi-group consistency (deterministic hashing)
+# 1. Multi-group consistency (deterministic hashing)
 # ---------------------------------------------------------------------------
 
 
@@ -262,7 +120,7 @@ class TestMultiGroupConsistency:
 
 
 # ---------------------------------------------------------------------------
-# 3. Cross-group independence
+# 2. Cross-group independence
 # ---------------------------------------------------------------------------
 
 
@@ -310,7 +168,7 @@ class TestCrossGroupIndependence:
 
 
 # ---------------------------------------------------------------------------
-# 4. Traffic allocation edge cases
+# 3. Traffic allocation edge cases
 # ---------------------------------------------------------------------------
 
 
@@ -353,27 +211,9 @@ class TestTrafficAllocationEdgeCases:
 
         assert none_count == 0, "100% traffic should assign everyone"
 
-    def test_lambda_zero_traffic_mutual_exclusion(self):
-        """Lambda AssignmentService: 0% group traffic excludes all users."""
-        exclusion_config = MutualExclusionGroupConfig(
-            group_id=str(uuid4()),
-            traffic_allocation=0.0,
-            experiment_ids=[str(uuid4()), str(uuid4())],
-        )
-        exp_config = _make_lambda_experiment_config(
-            experiment_id=exclusion_config.experiment_ids[0]
-        )
-
-        svc = _make_assignment_service()
-        for i in range(50):
-            variant = svc.assign_variant(
-                f"zero_traffic_{i}", exp_config, exclusion_config=exclusion_config
-            )
-            assert variant is None
-
 
 # ---------------------------------------------------------------------------
-# 5. Holdout percentage distribution
+# 4. Holdout percentage distribution
 # ---------------------------------------------------------------------------
 
 
@@ -413,7 +253,7 @@ class TestHoldoutPercentageDistribution:
 
 
 # ---------------------------------------------------------------------------
-# 6. Mutual exclusion fairness
+# 5. Mutual exclusion fairness
 # ---------------------------------------------------------------------------
 
 
@@ -499,7 +339,7 @@ class TestMutualExclusionFairness:
 
 
 # ---------------------------------------------------------------------------
-# 7. Activation / deactivation flows
+# 6. Activation / deactivation flows
 # ---------------------------------------------------------------------------
 
 
@@ -558,7 +398,7 @@ class TestActivationDeactivationFlows:
 
 
 # ---------------------------------------------------------------------------
-# 8. Adding / removing experiments from groups
+# 7. Adding / removing experiments from groups
 # ---------------------------------------------------------------------------
 
 
@@ -634,31 +474,3 @@ class TestAddRemoveExperimentsFromGroups:
         # No user should be unassigned (traffic=1.0, experiments exist)
         for uid in users:
             assert phase2[uid] is not None
-
-    def test_lambda_mutual_exclusion_redistributes_on_new_experiment(self):
-        """Lambda AssignmentService: adding a third experiment changes some outcomes."""
-        group_id = str(uuid4())
-        exp_ids_2 = sorted([str(uuid4()), str(uuid4())])
-        exp_ids_3 = sorted(exp_ids_2 + [str(uuid4())])
-
-        config_2 = MutualExclusionGroupConfig(
-            group_id=group_id, traffic_allocation=1.0, experiment_ids=exp_ids_2
-        )
-        config_3 = MutualExclusionGroupConfig(
-            group_id=group_id, traffic_allocation=1.0, experiment_ids=exp_ids_3
-        )
-
-        svc = _make_assignment_service()
-        changed = 0
-        for i in range(300):
-            uid = f"lambda_redist_{i}"
-            # With 2 experiments: is user excluded from first experiment?
-            excluded_2 = svc.check_mutual_exclusion(uid, exp_ids_2[0], config_2)
-            # With 3 experiments: is user excluded from first experiment?
-            excluded_3 = svc.check_mutual_exclusion(uid, exp_ids_3[0], config_3)
-            if excluded_2 != excluded_3:
-                changed += 1
-
-        assert changed > 0, (
-            "Adding a third experiment should change some exclusion outcomes"
-        )

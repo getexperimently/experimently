@@ -195,7 +195,7 @@ Refer to the documentation for:
 - **Data Retention**: Configurable policies (90 days to 7 years)
 
 ### Real-time Processing
-- **Lambda Functions**: Assignment, event processing and flag evaluation
+- **Lambda code**: event processing and flag evaluation under `backend/lambda/`, not deployed by any stack (assignment and evaluation run in the API)
 - **Kinesis Streams**: Event ingestion into OpenSearch
 - **OpenSearch**: Real-time analytics queries
 

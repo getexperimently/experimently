@@ -157,7 +157,7 @@ The core profile creates no table and sets neither variable.
 | `AnalyticsLambda` | `experimentation-analytics-<env>` (full profile) | A placeholder on the Kinesis stream. Its inline code returns 200 and processes nothing |
 | `ETLTriggerLambda` | `experimentation-glue-etl-<env>` (full profile) | Starts the Glue ETL jobs, from a daily EventBridge rule |
 
-The repository has Lambda code for assignment, event processing and flag evaluation under
+The repository has Lambda code for event processing and flag evaluation under
 `backend/lambda/`, but no stack deploys it. SDKs call the API (`/api/v1/tracking/*`,
 `/api/v1/feature-flags/evaluate/*`) for assignment and evaluation.
 `infrastructure/tests/test_lambda_functions_doc.py` pins this list against a synth.

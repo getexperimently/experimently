@@ -10,7 +10,6 @@
 # contract is that nothing that ships in the core image reaches it.
 [importlinter]
 root_packages =
-    assignment
     event_processor
     feature_flag_evaluation
     shared
@@ -20,7 +19,6 @@ include_external_packages = True
 name = Lambda functions never import the modules package
 type = forbidden
 source_modules =
-    assignment
     event_processor
     feature_flag_evaluation
     shared

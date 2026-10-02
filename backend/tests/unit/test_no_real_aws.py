@@ -112,7 +112,6 @@ def test_a_test_that_prepends_its_own_fake_aws_wins(
 # backend/tests is this session. modules/ is absent from a core build.
 _ROOTS = [
     ("modules/backend/tests", []),
-    ("backend/lambda/assignment", []),
     ("backend/lambda/event_processor", []),
     ("backend/lambda/feature_flag_evaluation", []),
     ("backend/lambda/shared", []),

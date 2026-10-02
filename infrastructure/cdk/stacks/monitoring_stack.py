@@ -337,10 +337,10 @@ class MonitoringStack(Stack):
         # ones this stack used to carry did not, and sat in INSUFFICIENT_DATA
         # for ever: an API Gateway 5xx alarm (no API Gateway is deployed; the
         # API's 5xx alarms are the fargate stack's, on the load balancer), two
-        # Lambda alarms on `AssignmentLambda` (no stack deploys
-        # backend/lambda/assignment), a throttling alarm on the literal table
-        # `AssignmentsTable` (the table is experimentation-assignments-<env>,
-        # used only by that undeployed Lambda), three alarms on the
+        # Lambda alarms on `AssignmentLambda` (a Lambda no stack ever
+        # deployed, and whose code has since been deleted, #480), a
+        # throttling alarm on the literal table `AssignmentsTable` (the table
+        # is experimentation-assignments-<env>, which nothing uses), three alarms on the
         # `ExperimentationPlatform/Prometheus` namespace (nothing publishes
         # to it), and an ERROR filter on `/experimentation/<env>/application`,
         # a log group nothing writes to -- the API's tasks log to

@@ -68,7 +68,7 @@ IGNORE_FILE = ROOT / "security" / "dependency-audit.toml"
 #: even though no image contains them (.dockerignore excludes backend/lambda).
 #: They were in neither tier, so nothing audited them at all.
 #:
-#: Note what that is worth today: all three Lambda files are comments only --
+#: Note what that is worth today: both Lambda files are comments only --
 #: the handlers use the standard library and the boto3 the runtime provides.
 #: So the audit of them currently reports zero packages because there are zero
 #: packages, which is not the same statement as "clean". Listing them is still
@@ -77,7 +77,6 @@ IGNORE_FILE = ROOT / "security" / "dependency-audit.toml"
 SHIPPED_FILES = (
     Path("backend/requirements/runtime.lock"),
     Path("modules/requirements.lock"),
-    Path("backend/lambda/assignment/requirements.txt"),
     Path("backend/lambda/event_processor/requirements.txt"),
     Path("backend/lambda/feature_flag_evaluation/requirements.txt"),
 )

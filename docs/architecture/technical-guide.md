@@ -334,28 +334,20 @@ Default: 95% confidence, 80% power, 5% MDE.
 
 ## Lambda Functions
 
-Three AWS Lambda functions handle real-time operations:
+**No stack deploys the code under `backend/lambda/`.** It holds two functions and the
+package they share, each with its own tests, which CI runs:
 
-### 1. Assignment Lambda (`backend/lambda/assignment/`)
+- `backend/lambda/event_processor/`: event-stream processing code (validation,
+  enrichment, aggregation, S3 archiving). No stack deploys it or connects a stream to it.
+- `backend/lambda/feature_flag_evaluation/`: flag-evaluation code with a local cache. No
+  stack deploys it; SDKs evaluate flags through the API
+  (`GET /api/v1/feature-flags/evaluate/{key}`).
+- `backend/lambda/shared/`: the hashing, models and helpers both of them use.
 
-- Triggered by: API Gateway (tracking API)
-- Purpose: High-throughput variant assignment
-- DynamoDB for fast assignment storage
-- Falls back to REST API for rules evaluation
-
-### 2. Event Processor Lambda (`backend/lambda/event_processor/`)
-
-- Triggered by: Kinesis Data Stream
-- Purpose: Process event stream, aggregate metrics
-- Feeds data into OpenSearch for analytics
-- Handles deduplication and late-arriving events
-
-### 3. Feature Flag Evaluation Lambda (`backend/lambda/feature_flag_evaluation/`)
-
-- Triggered by: API Gateway (evaluation API)
-- Purpose: Sub-10ms feature flag evaluation at scale
-- 71 tests covering the handler, the cache and the evaluation path
-- Local Redis cache for rule compilation
+Experiment assignment happens only in the API: `POST /api/v1/tracking/assign` calls
+`AssignmentService`, which applies the global holdout, mutual exclusion groups and
+targeting. The functions the stacks do deploy (two placeholders and the Glue ETL
+trigger) are listed in [AWS Integration](../integrations/aws.md#lambda-functions).
 
 ---
 
@@ -766,7 +758,7 @@ The safety monitor automatically sets `rollout_percentage=0` and creates a rollb
 | Aurora PostgreSQL | Primary database |
 | ElastiCache Redis | Caching layer |
 | Kinesis Data Streams | Event ingestion |
-| Lambda | Real-time assignment + evaluation |
+| Lambda | Two placeholder functions and the Glue ETL trigger; the code under `backend/lambda/` is not deployed |
 | Cognito | User authentication |
 | CloudWatch | Monitoring + alerting |
 | Secrets Manager | Credentials storage |
