@@ -1,5 +1,8 @@
 # @getexperimently/openfeature-provider
 
+**0.x beta.** The API may change between 0.x minor versions; pin the exact version
+you test against.
+
 [OpenFeature](https://openfeature.dev) provider for Experimently
 (`@openfeature/server-sdk`, Node >= 18). Every evaluation is delegated to
 [`@getexperimently/js-sdk`](../js/README.md) and **decided by the server**; successful

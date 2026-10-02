@@ -1,5 +1,8 @@
 # experimently-openfeature (Python)
 
+**0.x beta.** The API may change between 0.x minor versions; pin the exact version
+you test against.
+
 [OpenFeature](https://openfeature.dev) provider for Experimently. Flags are
 evaluated **by the server** through the [`experimentation`](../python) Python SDK
 (`GET /api/v1/feature-flags/evaluate/{flag_key}?user_id=<targeting_key>`) and cached per

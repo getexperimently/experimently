@@ -17,7 +17,7 @@ This means you can:
 
 ## TypeScript / Node.js Provider
 
-`@getexperimently/openfeature-provider` (v0.2, source `sdk/openfeature`) implements the
+`@getexperimently/openfeature-provider` (v0.1.0 beta, source `sdk/openfeature`) implements the
 `@openfeature/server-sdk` `Provider` interface by delegating every evaluation to the
 [JavaScript SDK](javascript.md) (`@getexperimently/js-sdk`), which calls
 `GET /api/v1/feature-flags/evaluate/{flag_key}?user_id=<targetingKey>` and caches the answer per
@@ -192,7 +192,7 @@ npm run build
 
 ## Python Provider
 
-`experimently-openfeature` (v1.0.0, source `sdk/openfeature-python`) delegates every
+`experimently-openfeature` (v0.1.0 beta, source `sdk/openfeature-python`) delegates every
 evaluation to the [`experimentation` Python SDK](python.md), which calls
 `GET /api/v1/feature-flags/evaluate/{flag_key}?user_id=<targeting_key>` and caches the answer per
 user + flag. Flags are decided **by the server**; nothing is bucketed locally and no flag
