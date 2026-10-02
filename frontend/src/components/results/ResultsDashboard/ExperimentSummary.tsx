@@ -4,6 +4,8 @@ import { WinnerIndicator } from '@/components/results/shared/WinnerIndicator';
 
 interface ExperimentSummaryProps {
   experiment: ExperimentResultsResponse;
+  /** Opens the Sample Size tab; the link to it is shown only when given. */
+  onOpenSampleSize?: () => void;
 }
 
 const RECOMMENDATION_CONFIG: Record<
@@ -43,7 +45,7 @@ function StatusBadge({ status }: { status: string }) {
   );
 }
 
-export function ExperimentSummary({ experiment }: ExperimentSummaryProps) {
+export function ExperimentSummary({ experiment, onOpenSampleSize }: ExperimentSummaryProps) {
   const { summary } = experiment;
   const rec = RECOMMENDATION_CONFIG[summary.recommendation];
 
@@ -97,14 +99,28 @@ export function ExperimentSummary({ experiment }: ExperimentSummaryProps) {
         <Stat label="Total Users" value={summary.total_users.toLocaleString()} />
         <Stat label="Total Events" value={summary.total_events.toLocaleString()} />
         <Stat label="Duration" value={`${summary.duration_days}d`} />
+        {/* The minimum per variant that the recommendation requires, not the
+            planned sample size: that one is on the Sample Size tab (#666). */}
         <Stat
-          label="Sample Size"
-          value={experiment.sample_size_adequate ? 'Adequate' : 'Insufficient'}
+          label="Minimum sample"
+          value={experiment.sample_size_adequate ? 'Reached' : 'Not reached'}
           valueClass={
             experiment.sample_size_adequate ? 'text-green-700' : 'text-amber-700'
           }
+          testId="minimum-sample"
         />
       </div>
+
+      {onOpenSampleSize && (
+        <button
+          type="button"
+          onClick={onOpenSampleSize}
+          className="text-sm text-blue-700 underline hover:text-blue-800"
+          data-testid="open-sample-size-tab"
+        >
+          See the Sample Size tab for the planned sample.
+        </button>
+      )}
 
       {/* Why: the engine's own sentence, so the pill is never unexplained. */}
       {summary.recommendation_reason && (
@@ -135,13 +151,15 @@ function Stat({
   label,
   value,
   valueClass = 'text-slate-800',
+  testId,
 }: {
   label: string;
   value: string;
   valueClass?: string;
+  testId?: string;
 }) {
   return (
-    <div>
+    <div data-testid={testId}>
       <p className="text-xs text-slate-500 uppercase tracking-wide">{label}</p>
       <p className={`text-lg font-semibold ${valueClass}`}>{value}</p>
     </div>
