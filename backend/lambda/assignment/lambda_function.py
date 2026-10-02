@@ -1,1 +1,0 @@
-# Experiment assignment Lambda function

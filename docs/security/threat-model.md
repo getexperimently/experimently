@@ -101,8 +101,8 @@ BOUNDARY 3: Application Layer — Trusted with Auth
     and the analytics module's AnalyticsLambda are placeholders whose
     inline code returns 200 and does nothing; the Glue ETL module's
     ETLTriggerLambda starts the Glue jobs on a schedule. The code under
-    backend/lambda/ (assignment, event processor, flag evaluation) is
-    not deployed by any stack.
+    backend/lambda/ (event processor, flag evaluation) is not deployed
+    by any stack.
 
          |
          | VPC subnets, security groups

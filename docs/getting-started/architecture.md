@@ -107,7 +107,7 @@ Redis serves two purposes:
 The stacks deploy three functions: `DatabaseAccessLambda` (compute stack) and
 `AnalyticsLambda` (analytics stack, full profile) are placeholders whose inline code returns
 200 and does nothing, and `ETLTriggerLambda` (Glue ETL stack, full profile) starts the Glue
-jobs daily. The assignment, event-processor and flag-evaluation code under `backend/lambda/`
+jobs daily. The event-processor and flag-evaluation code under `backend/lambda/`
 is not deployed by any stack. See [AWS Integration](../integrations/aws.md#lambda-functions).
 
 ---

@@ -112,12 +112,13 @@ jobs:
       - name: No workflow or statistical-gate test was skipped
         run: python3 scripts/check_junit_skips.py unit-junit.xml backend/tests/unit/infrastructure backend/tests/unit/stats_validation
 
-      # The Lambda functions (assignment, event processor, flag evaluation) carry
-      # 301 tests of their own that ran nowhere in CI. Each function's tests/ dir
+      # The Lambda functions (event processor, flag evaluation) and their
+      # shared package carry tests of their own (240 collected) that ran
+      # nowhere in CI. Each function's tests/ dir
       # must run in its own pytest invocation (they all define `tests.conftest`).
       - name: Run Lambda tests
         run: |
-          for d in backend/lambda/assignment backend/lambda/event_processor backend/lambda/feature_flag_evaluation backend/lambda/shared; do
+          for d in backend/lambda/event_processor backend/lambda/feature_flag_evaluation backend/lambda/shared; do
             python -m pytest "$d" -p no:cov -q --tb=short || exit 1
           done
 

@@ -141,3 +141,35 @@ class TestDependabotCoverage:
             if not candidates & directories:
                 uncovered.append(str(relative))
         assert not uncovered, f"no Dependabot pip entry covers: {uncovered}"
+
+
+@pytest.mark.regression
+@pytest.mark.skipif(
+    not DEPENDABOT.is_file(), reason="this tree has no .github/dependabot.yml"
+)
+def test_every_dependabot_directory_exists():
+    """Every `directory`/`directories` entry, in every ecosystem, names a
+    directory that exists. A stale entry is silent: Dependabot reports the
+    missing manifest in its own log and opens nothing, so a deleted package
+    (`/backend/lambda/assignment`, #480) would stay listed for ever.
+
+    Only modules/ may be absent, and only when modules/ itself is absent (the
+    core build), the same rule as `_ROOTS` in test_no_real_aws.py.
+    """
+    config = yaml.safe_load(DEPENDABOT.read_text())
+    modules_present = (REPO_ROOT / "modules").is_dir()
+    missing = []
+    for update in config["updates"]:
+        entries = list(update.get("directories", []))
+        if "directory" in update:
+            entries.append(update["directory"])
+        assert entries, f"{update['package-ecosystem']} entry names no directory"
+        for entry in entries:
+            relative = entry.strip("/")
+            if not modules_present and (
+                relative == "modules" or relative.startswith("modules/")
+            ):
+                continue
+            if not (REPO_ROOT / relative).is_dir():
+                missing.append(f"{update['package-ecosystem']}: {entry}")
+    assert not missing, f"Dependabot watches directories that do not exist: {missing}"

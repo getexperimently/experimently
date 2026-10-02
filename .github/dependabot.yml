@@ -161,7 +161,6 @@ updates:
   # Lambda functions: each has its own requirements.txt (backend/lambda/<fn>).
   - package-ecosystem: "pip"
     directories:
-      - "/backend/lambda/assignment"
       - "/backend/lambda/event_processor"
       - "/backend/lambda/feature_flag_evaluation"
     commit-message:

@@ -37,7 +37,7 @@ The architecture is designed to provide high-performance experiment evaluation, 
               ▼                                  ▼                                ▼
 ┌───────────────────────────┐     ┌───────────────────────────┐     ┌─────────────────────────┐
 │  Next.js dashboard        │     │   ECS/Fargate Containers  │     │   Lambda Functions      │
-│  (ECS, behind the ALB)    │     │   (Core Backend Services) │     │   (Real-time Services)  │
+│  (ECS, behind the ALB)    │     │   (Core Backend Services) │     │   (not deployed)        │
 └─────────────┬─────────────┘     └──────────────┬────────────┘     └────────────┬────────────┘
               │                                  │                                │
               │                                  │                                │
@@ -91,10 +91,11 @@ The architecture is designed to provide high-performance experiment evaluation, 
     -   Segmentation Service
     -   Analysis Service
     -   User Management Service
--   **Real-time Services (Lambda)**:
-    -   Feature Flag Evaluation
-    -   Experiment Assignment
-    -   Event Processing
+    -   Assignment Service: assigns users to experiments (`POST /api/v1/tracking/assign`),
+        applying the global holdout, mutual exclusion groups and targeting
+-   **Lambda code (not deployed)**: `backend/lambda/` holds flag-evaluation and
+    event-processing code that no stack deploys. Flags are evaluated by the API
+    (`GET /api/v1/feature-flags/evaluate/{key}`).
 
 ### 3. Data Storage Layer
 
@@ -126,7 +127,7 @@ The architecture is designed to provide high-performance experiment evaluation, 
 ### 5. Supporting Services
 
 -   **Amazon Cognito**: User authentication and authorization
--   **AWS Lambda**: Serverless compute for real-time evaluation and event processing
+-   **AWS Lambda**: Two placeholder functions and the Glue ETL trigger; the code under `backend/lambda/` is not deployed by any stack (see [AWS Integration](../integrations/aws.md#lambda-functions))
 -   **Amazon CloudWatch**: Monitoring, logging, and alerting
 -   **AWS WAF**: Web application firewall for security
 -   **AWS Secrets Manager**: Secure credential storage
@@ -158,15 +159,15 @@ The architecture is designed to provide high-performance experiment evaluation, 
                   │
                   ▼
 ┌───────────────────────────────────────┐
-│   Assignment Service (Lambda)         │
+│   API: /tracking/assign, /evaluate    │
 │   - User-to-experiment assignment     │
 │   - Feature flag evaluation           │
-│   - Traffic allocation                │
+│   - Holdout, exclusion, traffic       │
 └─────────────────┬─────────────────────┘
                   │
                   ▼
 ┌───────────────────────────────────────┐
-│   DynamoDB + ElastiCache              │
+│   PostgreSQL + ElastiCache            │
 │   - Assignment storage                │
 │   - Configuration cache               │
 └───────────────────────────────────────┘
@@ -196,9 +197,9 @@ The architecture is designed to provide high-performance experiment evaluation, 
                   │
                   ▼
 ┌───────────────────────────────────────┐
-│   Lambda Event Processors             │
-│   - Event enrichment                  │
-│   - Metric calculation                │
+│   Event processing (Lambda code under │
+│   backend/lambda/, deployed by no     │
+│   stack)                              │
 └─────────────────┬─────────────────────┘
                   │
         ┌─────────┴─────────┐
@@ -229,7 +230,7 @@ The architecture is designed to provide high-performance experiment evaluation, 
 
 ### 1. Real-Time Feature Flag & Experiment Evaluation
 
--   **Lambda-based evaluation service** with <50ms p99 latency
+-   **API evaluation endpoint** (`GET /api/v1/feature-flags/evaluate/{key}`), served by the ECS service
 -   **Consistent hashing algorithm** for stable user assignment
 -   **Redis caching layer** for configuration data
 -   **SDK implementations** for web, mobile, and server environments
