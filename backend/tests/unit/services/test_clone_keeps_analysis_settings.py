@@ -140,6 +140,17 @@ def test_a_clone_of_an_experiment_with_no_analysis_settings_has_none():
         assert getattr(clone, name) is None, name
 
 
+@pytest.mark.regression
+def test_a_clone_gets_a_generated_key_of_its_own():
+    """The tracking API finds an experiment by key; a clone had none (#609)."""
+    source = _source(key="checkout-button-abc123")
+    clone = _clone(source)
+
+    assert clone.key
+    assert clone.key != source.key
+    assert clone.key.startswith("copy-of-checkout-button-")
+
+
 # Copied by ``clone_experiment`` outside ``CLONED_ANALYSIS_FIELDS``.
 COPIED_ELSEWHERE = {
     "name",  # as "Copy of <name>"
@@ -153,7 +164,7 @@ COPIED_ELSEWHERE = {
 # Not copied, each for a reason.
 NOT_COPIED = {
     "id": "the clone's own",
-    "key": "unique; the clone gets its own",
+    "key": "unique; the clone gets a generated key of its own (#609)",
     "status": "a clone starts in DRAFT",
     "owner_id": "the user who cloned it",
     "created_at": "the clone's own",
