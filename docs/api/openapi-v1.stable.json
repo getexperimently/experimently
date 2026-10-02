@@ -21990,7 +21990,7 @@
     },
     "/api/v1/results/{experiment_id}/post-stratification": {
       "post": {
-        "description": "Compute Horvitz-Thompson post-stratification variance-reduced treatment effect estimates. More powerful than CUPED when stratum sizes differ between control and treatment groups.",
+        "description": "Not available yet: this route answers 501 for every existing experiment. Post-stratification needs one metric value and the stratum attributes per assigned user, and nothing builds those rows from an experiment's recorded assignments and events yet. The route reports no numbers until it can compute them from that data.",
         "operationId": "compute_post_stratification_api_v1_results__experiment_id__post_stratification_post",
         "parameters": [
           {
@@ -22025,6 +22025,9 @@
             },
             "description": "Successful Response"
           },
+          "404": {
+            "description": "No experiment with this ID"
+          },
           "422": {
             "content": {
               "application/json": {
@@ -22034,6 +22037,9 @@
               }
             },
             "description": "Validation Error"
+          },
+          "501": {
+            "description": "Post-stratification is not available yet"
           }
         },
         "security": [
@@ -22041,11 +22047,12 @@
             "OAuth2PasswordBearer": []
           }
         ],
-        "summary": "Post-stratification variance reduction",
+        "summary": "Post-stratification variance reduction (not available yet)",
         "tags": [
           "Results",
           "Results"
-        ]
+        ],
+        "x-stability": "beta"
       }
     },
     "/api/v1/results/{experiment_id}/sample-size": {

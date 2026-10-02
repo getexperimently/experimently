@@ -3,7 +3,7 @@ Post-Stratification & BH FDR Correction endpoints — EP-043.
 
 Provides:
   POST /results/{experiment_id}/post-stratification
-      Compute Horvitz-Thompson post-stratification variance-reduced estimates.
+      Not available yet: answers 501 (no per-user stratum data exists).
 
   POST /results/{experiment_id}/fdr-correction
       Apply Benjamini-Hochberg FDR correction to a set of per-metric p-values.
@@ -13,8 +13,7 @@ import logging
 from typing import List
 from uuid import UUID
 
-import pandas as pd
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from backend.app.api.deps import get_current_active_user, get_db
@@ -28,12 +27,14 @@ from backend.app.schemas.post_stratification import (
     PostStratResultResponse,
 )
 from backend.app.services.fdr_correction_service import BenjaminiHochbergService
-from backend.app.services.post_stratification_service import PostStratificationService
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
-POST_STRAT_FAILED = "Could not compute the post-stratification results"
+POST_STRAT_UNAVAILABLE_DETAIL = (
+    "Post-stratification is not available yet: it is not computed from an "
+    "experiment's recorded data."
+)
 
 
 # ---------------------------------------------------------------------------
@@ -52,78 +53,6 @@ def _get_experiment_or_404(experiment_id: UUID, db: Session) -> Experiment:
     return experiment
 
 
-def _build_mock_data_from_db(
-    experiment: Experiment,
-    db: Session,
-    metric_col: str,
-    stratum_cols: List[str],
-) -> tuple:
-    """
-    Build minimal control/treatment DataFrames from assignment data.
-
-    In a production system this would query a time-series or event store
-    for per-user metric values tagged with stratum attributes.
-    Here we build a synthetic DataFrame from assignment counts so that the
-    endpoint always returns a valid (if illustrative) result.
-
-    Returns:
-        (control_df, treatment_df) as pandas DataFrames.
-    """
-    import numpy as np
-
-    from backend.app.models.assignment import Assignment
-
-    # Identify control / treatment variants
-    control_variant = next((v for v in experiment.variants if v.is_control), None)
-    treatment_variant = next((v for v in experiment.variants if not v.is_control), None)
-
-    if control_variant is None or treatment_variant is None:
-        raise HTTPException(
-            status_code=422,
-            detail="Experiment must have at least one control and one treatment variant",
-        )
-
-    def _get_assignments(variant_id):
-        return (
-            db.query(Assignment)
-            .filter(
-                Assignment.experiment_id == experiment.id,
-                Assignment.variant_id == variant_id,
-            )
-            .all()
-        )
-
-    ctrl_assignments = _get_assignments(control_variant.id)
-    trt_assignments = _get_assignments(treatment_variant.id)
-
-    if not ctrl_assignments or not trt_assignments:
-        # Return empty DataFrames when no assignment data is available
-        empty_df = pd.DataFrame({metric_col: [], **{col: [] for col in stratum_cols}})
-        return empty_df, empty_df
-
-    # Build synthetic per-user metric values (assignment order as proxy)
-    rng = np.random.default_rng(42)
-    n_ctrl = len(ctrl_assignments)
-    n_trt = len(trt_assignments)
-
-    # Default stratum: "A" for first half, "B" for second half
-    strata = ["A", "B"]
-
-    ctrl_stratum = [strata[i % len(strata)] for i in range(n_ctrl)]
-    trt_stratum = [strata[i % len(strata)] for i in range(n_trt)]
-
-    ctrl_values = rng.normal(5.0, 1.0, n_ctrl)
-    trt_values = rng.normal(5.2, 1.0, n_trt)
-
-    ctrl_data: dict = {metric_col: ctrl_values}
-    trt_data: dict = {metric_col: trt_values}
-    for col in stratum_cols:
-        ctrl_data[col] = ctrl_stratum
-        trt_data[col] = trt_stratum
-
-    return pd.DataFrame(ctrl_data), pd.DataFrame(trt_data)
-
-
 # ---------------------------------------------------------------------------
 # Endpoint 1 — POST /results/{experiment_id}/post-stratification
 # ---------------------------------------------------------------------------
@@ -132,13 +61,22 @@ def _build_mock_data_from_db(
 @router.post(
     "/{experiment_id}/post-stratification",
     response_model=PostStratResultResponse,
-    summary="Post-stratification variance reduction",
+    summary="Post-stratification variance reduction (not available yet)",
     description=(
-        "Compute Horvitz-Thompson post-stratification variance-reduced treatment "
-        "effect estimates. More powerful than CUPED when stratum sizes differ "
-        "between control and treatment groups."
+        "Not available yet: this route answers 501 for every existing "
+        "experiment. Post-stratification needs one metric value and the "
+        "stratum attributes per assigned user, and nothing builds those rows "
+        "from an experiment's recorded assignments and events yet. The route "
+        "reports no numbers until it can compute them from that data."
     ),
+    responses={
+        status.HTTP_404_NOT_FOUND: {"description": "No experiment with this ID"},
+        status.HTTP_501_NOT_IMPLEMENTED: {
+            "description": "Post-stratification is not available yet",
+        },
+    },
     tags=["Results"],
+    openapi_extra={"x-stability": "beta"},
 )
 def compute_post_stratification(
     experiment_id: UUID,
@@ -147,67 +85,21 @@ def compute_post_stratification(
     current_user: User = Depends(get_current_active_user),
 ) -> PostStratResultResponse:
     """
-    Apply post-stratification to compute variance-reduced effect estimates.
+    Refuse with 501: post-stratification is not available yet.
 
-    The Horvitz-Thompson estimator reweights stratum-specific means by their
-    population proportions (estimated from the combined sample), removing bias
-    introduced when stratum sizes differ between the two groups.
-
-    Body parameters:
-    - **stratum_cols**: Column name(s) defining strata (e.g. ["country", "device"]).
-    - **metric_col**: Name of the outcome column (default "metric_value").
-    - **alpha**: Significance level for the confidence interval (default 0.05).
-
-    Returns a PostStratResultResponse with effect estimate, SE, p-value,
-    CI, and variance reduction percentage.
+    ``PostStratificationService`` computes the Horvitz-Thompson estimate from
+    per-user rows (one metric value and the stratum attributes per user).
+    Nothing builds those rows from an experiment's assignments and events
+    yet (which metric, which aggregation, and where a stratum attribute comes
+    from are all undecided), and this route used to fill the gap with
+    randomly generated values -- a result that looked like an analysis of the
+    experiment and was not.  Until a real data source exists the route says
+    so instead.
     """
-    # Verify experiment exists
-    experiment = _get_experiment_or_404(experiment_id, db)
-
-    # Build data from DB (or synthetic if no events recorded yet)
-    try:
-        control_df, treatment_df = _build_mock_data_from_db(
-            experiment=experiment,
-            db=db,
-            metric_col=request.metric_col,
-            stratum_cols=request.stratum_cols,
-        )
-    except HTTPException:
-        raise
-    except Exception as exc:
-        raise unexpected_failure(
-            exc, "Post-stratification", POST_STRAT_FAILED, db=db, logger=logger
-        )
-
-    # Run post-stratification
-    service = PostStratificationService()
-    try:
-        result = service.compute(
-            control_data=control_df,
-            treatment_data=treatment_df,
-            stratum_cols=request.stratum_cols,
-            metric_col=request.metric_col,
-            alpha=request.alpha,
-        )
-    except (ValueError, KeyError) as exc:
-        raise HTTPException(status_code=422, detail=str(exc))
-    except Exception as exc:
-        raise unexpected_failure(
-            exc, "Post-stratification", POST_STRAT_FAILED, db=db, logger=logger
-        )
-
-    return PostStratResultResponse(
-        metric_name=result.metric_name,
-        control_mean=result.control_mean,
-        treatment_mean=result.treatment_mean,
-        effect_size=result.effect_size,
-        effect_size_relative=result.effect_size_relative,
-        variance_reduction=result.variance_reduction,
-        adjusted_se=result.adjusted_se,
-        p_value=result.p_value,
-        confidence_interval=result.confidence_interval,
-        n_strata=result.n_strata,
-        strata_sizes=result.strata_sizes,
+    _get_experiment_or_404(experiment_id, db)
+    raise HTTPException(
+        status_code=status.HTTP_501_NOT_IMPLEMENTED,
+        detail=POST_STRAT_UNAVAILABLE_DETAIL,
     )
 
 

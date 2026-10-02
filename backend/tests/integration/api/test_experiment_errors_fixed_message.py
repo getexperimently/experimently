@@ -32,7 +32,6 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from backend.app.api import deps
 from backend.app.api.v1.endpoints import experiments as experiments_endpoints
-from backend.app.api.v1.endpoints import post_stratification as post_strat_endpoints
 from backend.app.api.v1.endpoints import results as results_endpoints
 from backend.app.api.v1.endpoints.auth import create_local_access_token
 from backend.app.core.config import settings
@@ -42,7 +41,6 @@ from backend.app.models.user import User, UserRole
 from backend.app.services.analysis_service import AnalysisService
 from backend.app.services.experiment_service import ExperimentService
 from backend.app.services.fdr_correction_service import BenjaminiHochbergService
-from backend.app.services.post_stratification_service import PostStratificationService
 
 pytestmark = [pytest.mark.integration]
 
@@ -401,7 +399,6 @@ EXPERIMENT_CASES = {
 }
 
 RESULTS = "Could not compute the experiment's results"
-POST_STRAT = "Could not compute the post-stratification results"
 
 RESULTS_CASES = {
     "results": Case(
@@ -485,24 +482,6 @@ RESULTS_CASES = {
         ExperimentStatus.ACTIVE,
         _plant_bayesian,
         "Could not compute the Bayesian results",
-    ),
-    "post_strat_data": Case(
-        "POST",
-        "/results/{id}/post-stratification",
-        "viewer",
-        ExperimentStatus.ACTIVE,
-        _patch(post_strat_endpoints, "_build_mock_data_from_db"),
-        POST_STRAT,
-        body={"stratum_cols": ["country"]},
-    ),
-    "post_strat_compute": Case(
-        "POST",
-        "/results/{id}/post-stratification",
-        "viewer",
-        ExperimentStatus.ACTIVE,
-        _patch(PostStratificationService, "compute"),
-        POST_STRAT,
-        body={"stratum_cols": ["country"]},
     ),
     "fdr": Case(
         "POST",
@@ -596,23 +575,6 @@ def test_a_missing_experiment_on_cuped_is_still_404(client, people):
 
     assert response.status_code == 404
     assert response.json() == {"detail": "Experiment not found"}
-
-
-def test_a_missing_stratum_column_is_still_422(client, db_session, people, monkeypatch):
-    def fail(self, *args: Any, **kwargs: Any) -> Any:
-        raise KeyError("Stratum column 'country' not found in control_data")
-
-    experiment_id = _experiment(client, db_session, people, ExperimentStatus.ACTIVE)
-    monkeypatch.setattr(PostStratificationService, "compute", fail)
-
-    response = client.post(
-        f"/api/v1/results/{experiment_id}/post-stratification",
-        json={"stratum_cols": ["country"]},
-        headers=_auth(people["viewer"]),
-    )
-
-    assert response.status_code == 422
-    assert "Stratum column 'country' not found" in response.json()["detail"]
 
 
 # --- the database's own refusal on update -------------------------------------

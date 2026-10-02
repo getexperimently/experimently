@@ -431,10 +431,6 @@ GEMINI = (
     "GeminiError: the Gemini client's own sentences (HTTP status, finish "
     "reason, missing key), pinned by test_llm_experiments_api.py"
 )
-POST_STRAT = (
-    "authored messages naming the caller's own columns; the service builds "
-    "dataclasses, not pydantic models"
-)
 POWER = "the power calculator's authored range refusals for the caller's numbers"
 PASSWORD_RULE = "check_password_strength's fixed sentences; none carries the value"
 WIZARD_SUBMIT = (
@@ -524,11 +520,6 @@ ALLOWED: Dict[Tuple[str, str, str], Tuple[int, str]] = {
         1,
         SERVICE_VALUEERROR,
     ),
-    (
-        f"{E}/post_stratification.py",
-        "compute_post_stratification",
-        "KeyError|ValueError",
-    ): (1, POST_STRAT),
     (f"{E}/power_calculator.py", "compute_mde", "ValueError"): (1, POWER),
     (f"{E}/power_calculator.py", "compute_runtime", "ValueError"): (1, POWER),
     (f"{E}/power_calculator.py", "compute_sample_size", "ValueError"): (1, POWER),
