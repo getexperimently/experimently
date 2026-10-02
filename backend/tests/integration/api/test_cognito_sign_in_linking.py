@@ -49,6 +49,7 @@ from backend.app.core.config import settings
 from backend.app.db.session import get_db as session_get_db
 from backend.app.main import app
 from backend.app.models.user import User, UserRole
+from backend.app.services import cognito_accounts
 from backend.tests.integration.cognito_identity import identity
 from backend.tests.integration.conftest import HASHED_PASSWORD
 from backend.tests.integration.email_lower_index import (
@@ -751,6 +752,39 @@ def test_an_unexpected_error_is_rolled_back_and_answers_the_same_401(
     assert not signin.db.dirty
     signin.db.commit()
     assert signin.rows.snapshot(linked.id) == before
+
+
+def test_a_refusal_after_a_change_is_rolled_back(signin, caplog, monkeypatch):
+    """The refusal handler rolls back: a resolver that changes a row and then
+    refuses leaves nothing in the session, and nothing is saved by a later
+    commit. (The real resolver decides every refusal before writing, so only
+    a planted one reaches the handler with a change pending.)"""
+    sfx = _suffix()
+    sub = str(uuid.uuid4())
+    linked = _add_user(
+        signin.db,
+        username=f"undo_{sfx}",
+        email=f"undo.{sfx}@example.com",
+        external_id=f"cognito:{sub}",
+        role=UserRole.VIEWER,
+    )
+    before = {linked.id: signin.rows.snapshot(linked.id)}
+    count = signin.rows.count()
+
+    def change_then_refuse(db, user_data):
+        row = db.query(User).filter(User.id == linked.id).one()
+        row.role = UserRole.ADMIN
+        row.is_superuser = True
+        raise cognito_accounts.CognitoSignInRefused(
+            cognito_accounts.REASON_LOCAL_PASSWORD, row_id=linked.id
+        )
+
+    monkeypatch.setattr(deps, "resolve_cognito_user", change_then_refuse)
+    signin.use(identity(linked.username, sub, linked.email))
+
+    response = _sign_in(signin, caplog)
+
+    _assert_refused(signin, response, caplog, "local_password", before, count)
 
 
 # --------------------------------------------------------------------------
