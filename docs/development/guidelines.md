@@ -284,7 +284,17 @@ request cannot merge until every one reports success:
 | `Base Requirements Only` | `Docker Smoke` |
 | `lint` | `regression-guard` |
 | `Security Scan Summary` | `Release Gate Summary` |
-| `Export Sweep` | `DCO` |
+| `Leak Guard` | `DCO` |
+
+As of 2026-10-01 each of the 20 is pinned to the GitHub Actions app,
+`strict` ("require branches to be up to date") is off, and no review is
+required. To compare that
+with what `scripts/configure-repo.sh` would write, run
+`scripts/check_required_checks.sh` with your own `gh` login (the Actions token
+cannot read branch protection). It prints every difference in check names,
+`strict`, the review rule and each check's app. `configure-repo.sh` runs the
+same comparison first, and refuses to write anything if live protection
+differs in more than check names.
 
 `lint` is the composite gate: ruff (format + lint), import-linter for the
 core/modules boundary, `reuse lint` for licence headers, the requirements-lock
