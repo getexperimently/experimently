@@ -614,6 +614,31 @@ curl -X POST "http://localhost:8000/api/v1/users/" \
   }
   ```
 
+### Archived Flags
+An archived flag stays archived until it is unarchived:
+
+| Request | On an archived flag |
+|---|---|
+| `PUT /api/v1/feature-flags/{id}` with `"is_active": true` | 400, flag unchanged |
+| `POST /api/v1/feature-flags/{id}/activate` | 400, flag unchanged |
+| `POST /api/v1/feature-flags/{id}/enable` | 400, flag unchanged |
+| `POST /api/v1/feature-flags/{id}/toggle` | 400, flag unchanged |
+| `POST /api/v1/feature-flags/bulk-toggle`, `"action": "enable"` | 200; that flag's result has `"success": false` and the same sentence in `error`; the other flags are processed |
+| `PUT` with `"is_active": false`, `/deactivate`, `/disable`, bulk `disable` | 200, still archived |
+| `POST /api/v1/feature-flags/{id}/unarchive` | 200, now inactive |
+
+Each 400 carries the detail `This flag is archived. Unarchive it before turning it on.`
+
+### Unarchive Feature Flag (beta)
+- **Endpoint**: `POST /api/v1/feature-flags/{flag_id}/unarchive`
+- **Description**: Move an archived flag to inactive. It is not turned on; do that
+  separately. A flag that is not archived is returned unchanged. Written to the audit
+  log as `feature_flag_update` (`ARCHIVED` to `INACTIVE`).
+- **Headers**: Authorization: Bearer {token}
+- **Permissions**: ADMIN and DEVELOPER; ANALYST and VIEWER get 403
+- **Response**: 200 OK, the flag (the same shape as `GET /api/v1/feature-flags/{flag_id}`)
+- **Errors**: 403 without permission to change flags, 404 for an unknown flag
+
 ## Tracking Endpoints
 
 All tracking endpoints use API-key authentication (`X-API-Key`) and address experiments and flags by their
@@ -1882,7 +1907,8 @@ GET  /api/v1/audit-logs/entity/{entity_type}/{entity_id}
 GET  /api/v1/audit-logs/user/{user_id}    — Entries for one actor
 GET  /api/v1/audit-logs/stats             — Aggregate stats (ADMIN, ANALYST)
 GET  /api/v1/audit-logs/stream            — SSE real-time stream
-POST /api/v1/feature-flags/bulk-toggle    — Bulk enable/disable/archive (DEVELOPER+)
+POST /api/v1/feature-flags/bulk-toggle    — Bulk enable/disable/archive (DEVELOPER+);
+                                            enable refuses archived flags one by one
 GET  /api/v1/feature-flags/{id}/history   — Flag change history
 ```
 

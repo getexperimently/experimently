@@ -16,6 +16,7 @@ from backend.app.schemas.feature_flag import (
     FeatureFlagCreate,
     FeatureFlagUpdate,
 )
+from backend.app.services.feature_flag_service import FlagVerb, transition
 
 
 class CRUDFeatureFlag(CRUDBase[FeatureFlag, FeatureFlagCreate, FeatureFlagUpdate]):
@@ -110,11 +111,10 @@ class CRUDFeatureFlag(CRUDBase[FeatureFlag, FeatureFlagCreate, FeatureFlagUpdate
             if k in model_fields and k not in READ_ONLY_FIELDS
         }
         if is_active is not None:
-            update_data["status"] = (
-                FeatureFlagStatus.ACTIVE.value
-                if is_active
-                else FeatureFlagStatus.INACTIVE.value
-            )
+            # The one status rule (#631): an archived flag stays archived when
+            # sent false, and is refused when sent true.
+            verb = FlagVerb.ON if is_active else FlagVerb.OFF
+            update_data["status"] = transition(db_obj.status, verb).value
 
         return super().update(db, db_obj=db_obj, obj_in=update_data)
 
@@ -144,8 +144,11 @@ class CRUDFeatureFlag(CRUDBase[FeatureFlag, FeatureFlagCreate, FeatureFlagUpdate
 
         Returns:
             The activated feature flag
+
+        Raises:
+            ArchivedFlagError: the flag is archived.
         """
-        db_obj.status = FeatureFlagStatus.ACTIVE.value
+        db_obj.status = transition(db_obj.status, FlagVerb.ON).value
         db.add(db_obj)
         db.commit()
         db.refresh(db_obj)
@@ -162,7 +165,7 @@ class CRUDFeatureFlag(CRUDBase[FeatureFlag, FeatureFlagCreate, FeatureFlagUpdate
         Returns:
             The deactivated feature flag
         """
-        db_obj.status = FeatureFlagStatus.INACTIVE.value
+        db_obj.status = transition(db_obj.status, FlagVerb.OFF).value
         db.add(db_obj)
         db.commit()
         db.refresh(db_obj)

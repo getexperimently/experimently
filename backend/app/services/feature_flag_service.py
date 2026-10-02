@@ -1,5 +1,6 @@
 # Feature flag management service
 # backend/app/services/feature_flag_service.py
+import enum
 import hashlib
 import logging
 import time
@@ -16,7 +17,12 @@ from backend.app.core.targeting_adapter import (
     match_targeting_rule,
     normalise_targeting_rules,
 )
-from backend.app.models.feature_flag import FeatureFlag, FeatureFlagStatus
+from backend.app.models.feature_flag import (
+    ArchivedFlagError,
+    FeatureFlag,
+    FeatureFlagStatus,
+    flag_status_name,
+)
 from backend.app.schemas.feature_flag import (
     READ_ONLY_FIELDS,
     FeatureFlagCreate,
@@ -67,6 +73,47 @@ def _check_sent_status(
     sent = flag_data.status
     if not (isinstance(sent, str) and sent.upper() == _status_value(expected)):
         raise FlagStatusReadOnly()
+
+
+class FlagVerb(enum.Enum):
+    """What a request asks of a flag's status (#631)."""
+
+    ON = "on"
+    OFF = "off"
+    ARCHIVE = "archive"
+    UNARCHIVE = "unarchive"
+
+
+def transition(current: Any, verb: FlagVerb) -> FeatureFlagStatus:
+    """The status a flag in *current* moves to for *verb* (#631).
+
+    The one rule every route that changes a flag's status follows:
+
+    * ON: ACTIVE, except that an ARCHIVED flag is refused with
+      :class:`ArchivedFlagError` -- it has to be unarchived first;
+    * OFF: INACTIVE, except that an ARCHIVED flag stays ARCHIVED (off is
+      already what an archived flag serves, so this succeeds and changes
+      nothing);
+    * ARCHIVE: ARCHIVED, from any status;
+    * UNARCHIVE: an ARCHIVED flag becomes INACTIVE; any other flag keeps its
+      status.
+
+    *current* may be the enum or its string value. Nothing is written here, so
+    a caller can refuse before it changes anything.
+    """
+    stored = FeatureFlagStatus(flag_status_name(current))
+    archived = stored is FeatureFlagStatus.ARCHIVED
+    if verb is FlagVerb.ON:
+        if archived:
+            raise ArchivedFlagError()
+        return FeatureFlagStatus.ACTIVE
+    if verb is FlagVerb.OFF:
+        return stored if archived else FeatureFlagStatus.INACTIVE
+    if verb is FlagVerb.ARCHIVE:
+        return FeatureFlagStatus.ARCHIVED
+    if verb is FlagVerb.UNARCHIVE:
+        return FeatureFlagStatus.INACTIVE if archived else stored
+    raise ValueError(f"unknown verb {verb!r}")  # pragma: no cover
 
 
 class FeatureFlagService:
@@ -187,14 +234,14 @@ class FeatureFlagService:
         removed here (see ``create_feature_flag``), and a sent ``status`` must
         equal the stored one.
 
-        ``is_active`` sets the status: true makes the flag ACTIVE; false makes
-        it INACTIVE, except that an ARCHIVED flag stays ARCHIVED, so the GET body
-        of an archived flag can be sent back unchanged.  That is a rule of this
-        update only; the other routes that turn a flag off are unchanged
-        (archive semantics across them are #631).
+        ``is_active`` sets the status through :func:`transition`: true turns
+        the flag on and false turns it off.  An ARCHIVED flag sent false stays
+        ARCHIVED, so its GET body can be sent back unchanged; sent true, it is
+        refused before anything is written.
 
         Raises:
             FlagStatusReadOnly: a sent ``status`` differs from the stored one.
+            ArchivedFlagError: ``is_active: true`` on an archived flag.
         """
         # Handle if a FeatureFlag object was passed instead of an ID
         if isinstance(flag_id, FeatureFlag):
@@ -210,12 +257,8 @@ class FeatureFlagService:
 
         update_data = flag_data.model_dump(exclude_unset=True, exclude=READ_ONLY_FIELDS)
         if "is_active" in update_data:
-            if update_data.pop("is_active"):
-                update_data["status"] = FeatureFlagStatus.ACTIVE
-            elif stored is FeatureFlagStatus.ARCHIVED:
-                update_data["status"] = FeatureFlagStatus.ARCHIVED
-            else:
-                update_data["status"] = FeatureFlagStatus.INACTIVE
+            verb = FlagVerb.ON if update_data.pop("is_active") else FlagVerb.OFF
+            update_data["status"] = transition(stored, verb)
 
         try:
             for field, value in update_data.items():
@@ -255,8 +298,11 @@ class FeatureFlagService:
 
         Returns:
             The updated feature flag's response representation
+
+        Raises:
+            ArchivedFlagError: the flag is archived.
         """
-        flag.status = FeatureFlagStatus.ACTIVE.value
+        flag.status = transition(flag.status, FlagVerb.ON).value
         flag.updated_at = datetime.now(timezone.utc)
 
         self.db.commit()
@@ -275,7 +321,11 @@ class FeatureFlagService:
         Returns:
             The updated feature flag's response representation
         """
-        flag.status = FeatureFlagStatus.INACTIVE.value
+        new_status = transition(flag.status, FlagVerb.OFF)
+        if flag_status_name(flag.status) == new_status.value:
+            # Already off, or archived: nothing to write.
+            return flag_to_read(flag)
+        flag.status = new_status.value
         flag.updated_at = datetime.now(timezone.utc)
 
         self.db.commit()

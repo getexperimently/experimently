@@ -47,6 +47,7 @@ INVENTORY = {
     ("POST", "/api/v1/feature-flags/{flag_id}/toggle"): FLAG_RULE,
     ("POST", "/api/v1/feature-flags/{flag_id}/enable"): FLAG_RULE,
     ("POST", "/api/v1/feature-flags/{flag_id}/disable"): FLAG_RULE,
+    ("POST", "/api/v1/feature-flags/{flag_id}/unarchive"): FLAG_RULE,
     ("POST", "/api/v1/rollout-schedules/"): ROLLOUT_RULE,
     ("PUT", "/api/v1/rollout-schedules/{schedule_id}"): ROLLOUT_RULE,
     ("DELETE", "/api/v1/rollout-schedules/{schedule_id}"): ROLLOUT_RULE,
@@ -100,7 +101,7 @@ def test_the_inventory_is_exact():
         f"unclassified: {sorted(found - set(INVENTORY))}; "
         f"gone: {sorted(set(INVENTORY) - found)}"
     )
-    assert len(INVENTORY) == 24
+    assert len(INVENTORY) == 25
 
 
 @pytest.mark.parametrize("key", sorted(INVENTORY), ids=lambda k: f"{k[0]} {k[1]}")

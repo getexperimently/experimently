@@ -38,7 +38,13 @@ from backend.app.core.permissions import (
 from backend.app.crud import crud_feature_flag
 from backend.app.models.audit_log import ActionType, EntityType
 from backend.app.models.compliance_audit_event import AuditAction, AuditOutcome
-from backend.app.models.feature_flag import FeatureFlag, FeatureFlagStatus
+from backend.app.models.feature_flag import (
+    ARCHIVED_FLAG_DETAIL,
+    ArchivedFlagError,
+    FeatureFlag,
+    FeatureFlagStatus,
+    flag_status_name,
+)
 from backend.app.models.user import User
 from backend.app.schemas.audit_log import ToggleRequest, ToggleResponse
 from backend.app.schemas.feature_flag import (
@@ -54,6 +60,8 @@ from backend.app.services.audit_service import AuditService
 from backend.app.services.feature_flag_service import (
     FeatureFlagService,
     FlagStatusReadOnly,
+    FlagVerb,
+    transition,
 )
 
 # Setup logger
@@ -115,6 +123,25 @@ def _status_read_only() -> RequestValidationError:
     return RequestValidationError(
         [{"type": "read_only", "loc": ("body", "status"), "msg": STATUS_READ_ONLY}]
     )
+
+
+def _archived_refusal() -> HTTPException:
+    """The 400 for a request that would turn an archived flag on (#631).
+
+    A state refusal answers 400, as elsewhere in the API (409 is for a taken
+    key only). The way out is ``POST /feature-flags/{id}/unarchive``.
+    """
+    return HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST, detail=ARCHIVED_FLAG_DETAIL
+    )
+
+
+#: The documented 400 of every route that can turn a flag on.
+_ARCHIVED_400 = {
+    status.HTTP_400_BAD_REQUEST: {
+        "description": "The flag is archived: unarchive it before turning it on",
+    }
+}
 
 
 async def _skip_cache_ignored(skip_cache: bool = False) -> None:
@@ -402,7 +429,10 @@ async def get_feature_flag(
     response_model=FeatureFlagRead,
     summary="Update feature flag",
     response_description="Returns the updated feature flag",
-    responses={409: {"description": "Another feature flag already has this key"}},
+    responses={
+        **_ARCHIVED_400,
+        409: {"description": "Another feature flag already has this key"},
+    },
 )
 async def update_feature_flag(
     flag_id: UUID = Path(..., description="The ID of the feature flag to update"),
@@ -421,8 +451,9 @@ async def update_feature_flag(
 
     Only the fields sent change. They include:
     - Key, name and description
-    - `is_active`, which turns the flag on or off (an archived flag sent
-      `is_active: false` stays archived)
+    - `is_active`, which turns the flag on or off. An archived flag sent
+      `is_active: false` stays archived; sent `is_active: true` it answers
+      400, and nothing is changed: unarchive it first
     - Targeting rules
     - Rollout percentage
 
@@ -436,6 +467,7 @@ async def update_feature_flag(
         FeatureFlagRead: The updated feature flag
 
     Raises:
+        HTTPException 400: `is_active: true` on an archived flag
         HTTPException 403: If the user doesn't have permission to update this feature flag
         HTTPException 409: Another flag already has the key
         HTTPException 422: The body is not a valid update
@@ -483,6 +515,8 @@ async def update_feature_flag(
         updated_row = feature_flag_service.update_feature_flag(flag, feature_flag_in)
     except FlagStatusReadOnly:
         raise _status_read_only() from None
+    except ArchivedFlagError:
+        raise _archived_refusal() from None
     except IntegrityError as e:
         # A concurrent write took the key after the check above.
         _raise_if_key_conflict(db, e, feature_flag_in.key, flag_id)
@@ -643,6 +677,7 @@ async def delete_feature_flag(
     response_model=FeatureFlagRead,
     summary="Activate feature flag",
     response_description="Returns the activated feature flag",
+    responses=_ARCHIVED_400,
 )
 async def activate_feature_flag(
     flag_id: UUID = Path(..., description="The ID of the feature flag to activate"),
@@ -655,12 +690,14 @@ async def activate_feature_flag(
 
     This endpoint activates a feature flag, changing its status to ACTIVE.
     Activating a feature flag makes it available for use in applications.
+    An archived flag is refused with 400 and left archived: unarchive it
+    first (`POST /feature-flags/{id}/unarchive`).
 
     Returns:
         FeatureFlagRead: The feature flag, now ACTIVE
 
     Raises:
-        HTTPException 400: If the feature flag cannot be activated
+        HTTPException 400: The flag is archived
         HTTPException 403: If the user doesn't have permission to activate this feature flag
     """
     # Get feature flag
@@ -677,8 +714,13 @@ async def activate_feature_flag(
             detail="Not enough permissions to activate this feature flag",
         )
 
+    try:
+        new_status = transition(flag.status, FlagVerb.ON)
+    except ArchivedFlagError:
+        raise _archived_refusal() from None
+
     # Check if feature flag is already active
-    if flag.status in (FeatureFlagStatus.ACTIVE, FeatureFlagStatus.ACTIVE.value):
+    if flag_status_name(flag.status) == new_status.value:
         return FeatureFlagRead.model_validate(flag)
 
     # Create feature flag service
@@ -707,12 +749,12 @@ async def deactivate_feature_flag(
 
     This endpoint deactivates a feature flag, changing its status to INACTIVE.
     Deactivating a feature flag makes it unavailable for use in applications.
+    An archived flag is already off: it answers 200 and stays archived.
 
     Returns:
-        FeatureFlagRead: The feature flag, now INACTIVE
+        FeatureFlagRead: The feature flag, now INACTIVE (or still ARCHIVED)
 
     Raises:
-        HTTPException 400: If the feature flag cannot be deactivated
         HTTPException 403: If the user doesn't have permission to deactivate this feature flag
     """
     # Get feature flag
@@ -729,8 +771,8 @@ async def deactivate_feature_flag(
             detail="Not enough permissions to deactivate this feature flag",
         )
 
-    # Check if feature flag is already inactive
-    if flag.status in (FeatureFlagStatus.INACTIVE, FeatureFlagStatus.INACTIVE.value):
+    # Already inactive, or archived (which stays archived): nothing to change.
+    if flag_status_name(flag.status) == transition(flag.status, FlagVerb.OFF).value:
         return FeatureFlagRead.model_validate(flag)
 
     # Create feature flag service
@@ -740,6 +782,76 @@ async def deactivate_feature_flag(
     deactivated_flag = feature_flag_service.deactivate_feature_flag(flag)
 
     return deactivated_flag
+
+
+@router.post(
+    "/{flag_id}/unarchive",
+    response_model=FeatureFlagRead,
+    summary="Unarchive feature flag (beta)",
+    response_description="Returns the feature flag, now INACTIVE",
+    openapi_extra={"x-stability": "beta"},
+)
+async def unarchive_feature_flag(
+    flag_id: UUID = Path(..., description="The ID of the feature flag to unarchive"),
+    db: Session = Depends(deps.get_db),
+    current_user: User = Depends(deps.get_current_active_user),
+) -> FeatureFlagRead:
+    """
+    Unarchive a feature flag (beta).
+
+    An archived flag is retired: it is never served, and every request that
+    would turn it on answers 400. This is the way back. The flag becomes
+    INACTIVE, never ACTIVE, so turning it on is a separate, deliberate step.
+
+    A flag that is not archived is returned unchanged.
+
+    **Permissions**: ADMIN and DEVELOPER may unarchive any flag; ANALYST and
+    VIEWER may not.
+
+    Returns:
+        FeatureFlagRead: The feature flag
+
+    Raises:
+        HTTPException 403: If the user doesn't have permission to change this feature flag
+        HTTPException 404: If the feature flag doesn't exist
+    """
+    flag = db.query(FeatureFlag).filter(FeatureFlag.id == flag_id).first()
+    if not flag:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Feature flag not found"
+        )
+
+    if not can_act_on_feature_flag(current_user, flag.owner_id, Action.UPDATE):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not enough permissions to unarchive this feature flag",
+        )
+
+    old_status = flag_status_name(flag.status)
+    new_status = transition(old_status, FlagVerb.UNARCHIVE).value
+    if new_status == old_status:
+        return FeatureFlagRead.model_validate(flag)
+
+    flag.status = new_status
+    db.commit()
+    db.refresh(flag)
+
+    # log_action does not raise: a failed audit write leaves the change in
+    # place, as on the other status routes.
+    await AuditService.log_action(
+        db=db,
+        user_id=current_user.id,
+        user_email=current_user.email,
+        action_type=ActionType.FEATURE_FLAG_UPDATE,
+        entity_type=EntityType.FEATURE_FLAG,
+        entity_id=flag.id,
+        entity_name=flag.name,
+        old_value=old_status,
+        new_value=new_status,
+        reason="unarchive",
+    )
+
+    return FeatureFlagRead.model_validate(flag)
 
 
 CONTEXT_QUERY_DESCRIPTION = (
@@ -956,6 +1068,7 @@ async def get_user_flags(
     response_model=ToggleResponse,
     summary="Toggle feature flag",
     response_description="Returns the toggled feature flag with audit log ID",
+    responses=_ARCHIVED_400,
 )
 async def toggle_feature_flag(
     flag_id: UUID = Path(..., description="The ID of the feature flag to toggle"),
@@ -973,7 +1086,8 @@ async def toggle_feature_flag(
     determining whether to activate or deactivate based on the current status.
 
     The toggle operation includes:
-    - Status change (ACTIVE ↔ INACTIVE)
+    - Status change (ACTIVE ↔ INACTIVE). An archived flag would be turned on,
+      so it answers 400 and stays archived: unarchive it first
     - Complete audit logging with user information and optional reason
     - Response with new status and audit log ID
 
@@ -985,6 +1099,7 @@ async def toggle_feature_flag(
         ToggleResponse: Updated feature flag details with audit log ID
 
     Raises:
+        HTTPException 400: The flag is archived
         HTTPException 403: If user doesn't have permission to toggle this feature flag
         HTTPException 404: If feature flag doesn't exist
         HTTPException 500: If toggle operation fails
@@ -1003,22 +1118,21 @@ async def toggle_feature_flag(
             detail="Not enough permissions to toggle this feature flag",
         )
 
+    # Determine new status based on current status. The column loads as
+    # FeatureFlagStatus; a writer may have left a plain string. Normalise to
+    # the string so the comparison and the audit row agree. Refused before
+    # the try below, whose handler would turn the refusal into a 500.
+    old_status = flag_status_name(flag.status)
+    if old_status == FeatureFlagStatus.ACTIVE.value:
+        verb, action_type = FlagVerb.OFF, ActionType.TOGGLE_DISABLE
+    else:
+        verb, action_type = FlagVerb.ON, ActionType.TOGGLE_ENABLE
     try:
-        # Determine new status based on current status. The column loads as
-        # FeatureFlagStatus; a writer may have left a plain string. Normalise
-        # to the string so the comparison and the audit row agree.
-        old_status = (
-            flag.status.value
-            if isinstance(flag.status, FeatureFlagStatus)
-            else flag.status
-        )
-        if old_status == FeatureFlagStatus.ACTIVE.value:
-            new_status = FeatureFlagStatus.INACTIVE.value
-            action_type = ActionType.TOGGLE_DISABLE
-        else:
-            new_status = FeatureFlagStatus.ACTIVE.value
-            action_type = ActionType.TOGGLE_ENABLE
+        new_status = transition(old_status, verb).value
+    except ArchivedFlagError:
+        raise _archived_refusal() from None
 
+    try:
         # Update feature flag status
         flag.status = new_status
         db.commit()
@@ -1069,6 +1183,7 @@ async def toggle_feature_flag(
     response_model=ToggleResponse,
     summary="Enable feature flag",
     response_description="Returns the enabled feature flag with audit log ID",
+    responses=_ARCHIVED_400,
 )
 async def enable_feature_flag(
     flag_id: UUID = Path(..., description="The ID of the feature flag to enable"),
@@ -1082,7 +1197,8 @@ async def enable_feature_flag(
     """
     Enable a feature flag (set to ACTIVE status).
 
-    This endpoint explicitly enables a feature flag, regardless of current status.
+    This endpoint explicitly enables a feature flag. An archived flag answers
+    400 and stays archived: unarchive it first.
     Includes complete audit logging with user information and optional reason.
 
     **Authentication**: Requires valid user authentication.
@@ -1092,6 +1208,7 @@ async def enable_feature_flag(
         ToggleResponse: Updated feature flag details with audit log ID
 
     Raises:
+        HTTPException 400: The flag is archived
         HTTPException 403: If user doesn't have permission to enable this feature flag
         HTTPException 404: If feature flag doesn't exist
         HTTPException 500: If enable operation fails
@@ -1110,10 +1227,14 @@ async def enable_feature_flag(
             detail="Not enough permissions to enable this feature flag",
         )
 
+    # Refused before the try below, whose handler would make it a 500.
+    old_status = flag.status
     try:
-        old_status = flag.status
-        new_status = FeatureFlagStatus.ACTIVE.value
+        new_status = transition(old_status, FlagVerb.ON).value
+    except ArchivedFlagError:
+        raise _archived_refusal() from None
 
+    try:
         # Update feature flag status
         flag.status = new_status
         db.commit()
@@ -1170,7 +1291,8 @@ async def disable_feature_flag(
     """
     Disable a feature flag (set to INACTIVE status).
 
-    This endpoint explicitly disables a feature flag, regardless of current status.
+    This endpoint explicitly disables a feature flag. An archived flag is
+    already off: it answers 200 and stays archived.
     Includes complete audit logging with user information and optional reason.
 
     **Authentication**: Requires valid user authentication.
@@ -1200,12 +1322,13 @@ async def disable_feature_flag(
 
     try:
         old_status = flag.status
-        new_status = FeatureFlagStatus.INACTIVE.value
+        new_status = transition(old_status, FlagVerb.OFF).value
 
-        # Update feature flag status
-        flag.status = new_status
-        db.commit()
-        db.refresh(flag)
+        # An archived flag stays archived, and is not written.
+        if flag_status_name(old_status) != new_status:
+            flag.status = new_status
+            db.commit()
+            db.refresh(flag)
 
         # Log the disable operation
         audit_log_id = await AuditService.log_action(

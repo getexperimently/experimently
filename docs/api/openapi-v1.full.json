@@ -23644,7 +23644,7 @@
     },
     "/api/v1/feature-flags/bulk-toggle": {
       "post": {
-        "description": "Toggle multiple feature flags in a single operation.\nEach flag's result is reported individually.\nRequires UPDATE permission on feature_flag resource.\nCreates one audit log entry per successfully-processed flag.\nThe operation is partial-success by design: if some flags fail,\nthe endpoint still returns 200 with per-flag results.",
+        "description": "Toggle multiple feature flags in a single operation.\nEach flag's result is reported individually.\nRequires UPDATE permission on feature_flag resource.\nCreates one audit log entry per successfully-processed flag.\nThe operation is partial-success by design: if some flags fail,\nthe endpoint still returns 200 with per-flag results.\n\nAn archived flag is never turned on: with ``enable`` it is reported with\n``success: false`` and left archived, and the other flags are processed.\nWith ``disable`` it succeeds and stays archived.",
         "operationId": "bulk_toggle_flags_api_v1_feature_flags_bulk_toggle_post",
         "requestBody": {
           "content": {
@@ -24229,7 +24229,7 @@
         ]
       },
       "put": {
-        "description": "Update a feature flag.\n\nThis endpoint allows users to update an existing feature flag.\nThe user must have access to the feature flag (be the owner or have permission).\n\nOnly the fields sent change. They include:\n- Key, name and description\n- `is_active`, which turns the flag on or off (an archived flag sent\n  `is_active: false` stays archived)\n- Targeting rules\n- Rollout percentage\n\nA field the API does not read answers 422, and so does an explicit null on\n`key`, `name`, `is_active`, `rollout_percentage` or `default_value`. The\nread-only fields of a flag response (`id`, `owner_id`, `created_at`,\n`updated_at`, `status`) are accepted and ignored, so a GET body can be sent\nback; a `status` must equal the flag's.\n\nReturns:\n    FeatureFlagRead: The updated feature flag\n\nRaises:\n    HTTPException 403: If the user doesn't have permission to update this feature flag\n    HTTPException 409: Another flag already has the key\n    HTTPException 422: The body is not a valid update",
+        "description": "Update a feature flag.\n\nThis endpoint allows users to update an existing feature flag.\nThe user must have access to the feature flag (be the owner or have permission).\n\nOnly the fields sent change. They include:\n- Key, name and description\n- `is_active`, which turns the flag on or off. An archived flag sent\n  `is_active: false` stays archived; sent `is_active: true` it answers\n  400, and nothing is changed: unarchive it first\n- Targeting rules\n- Rollout percentage\n\nA field the API does not read answers 422, and so does an explicit null on\n`key`, `name`, `is_active`, `rollout_percentage` or `default_value`. The\nread-only fields of a flag response (`id`, `owner_id`, `created_at`,\n`updated_at`, `status`) are accepted and ignored, so a GET body can be sent\nback; a `status` must equal the flag's.\n\nReturns:\n    FeatureFlagRead: The updated feature flag\n\nRaises:\n    HTTPException 400: `is_active: true` on an archived flag\n    HTTPException 403: If the user doesn't have permission to update this feature flag\n    HTTPException 409: Another flag already has the key\n    HTTPException 422: The body is not a valid update",
         "operationId": "update_feature_flag_api_v1_feature_flags__flag_id__put",
         "parameters": [
           {
@@ -24276,6 +24276,9 @@
               }
             },
             "description": "Returns the updated feature flag"
+          },
+          "400": {
+            "description": "The flag is archived: unarchive it before turning it on"
           },
           "401": {
             "content": {
@@ -24344,7 +24347,7 @@
     },
     "/api/v1/feature-flags/{flag_id}/activate": {
       "post": {
-        "description": "Activate a feature flag.\n\nThis endpoint activates a feature flag, changing its status to ACTIVE.\nActivating a feature flag makes it available for use in applications.\n\nReturns:\n    FeatureFlagRead: The feature flag, now ACTIVE\n\nRaises:\n    HTTPException 400: If the feature flag cannot be activated\n    HTTPException 403: If the user doesn't have permission to activate this feature flag",
+        "description": "Activate a feature flag.\n\nThis endpoint activates a feature flag, changing its status to ACTIVE.\nActivating a feature flag makes it available for use in applications.\nAn archived flag is refused with 400 and left archived: unarchive it\nfirst (`POST /feature-flags/{id}/unarchive`).\n\nReturns:\n    FeatureFlagRead: The feature flag, now ACTIVE\n\nRaises:\n    HTTPException 400: The flag is archived\n    HTTPException 403: If the user doesn't have permission to activate this feature flag",
         "operationId": "activate_feature_flag_api_v1_feature_flags__flag_id__activate_post",
         "parameters": [
           {
@@ -24380,6 +24383,9 @@
               }
             },
             "description": "Returns the activated feature flag"
+          },
+          "400": {
+            "description": "The flag is archived: unarchive it before turning it on"
           },
           "401": {
             "content": {
@@ -24445,7 +24451,7 @@
     },
     "/api/v1/feature-flags/{flag_id}/deactivate": {
       "post": {
-        "description": "Deactivate a feature flag.\n\nThis endpoint deactivates a feature flag, changing its status to INACTIVE.\nDeactivating a feature flag makes it unavailable for use in applications.\n\nReturns:\n    FeatureFlagRead: The feature flag, now INACTIVE\n\nRaises:\n    HTTPException 400: If the feature flag cannot be deactivated\n    HTTPException 403: If the user doesn't have permission to deactivate this feature flag",
+        "description": "Deactivate a feature flag.\n\nThis endpoint deactivates a feature flag, changing its status to INACTIVE.\nDeactivating a feature flag makes it unavailable for use in applications.\nAn archived flag is already off: it answers 200 and stays archived.\n\nReturns:\n    FeatureFlagRead: The feature flag, now INACTIVE (or still ARCHIVED)\n\nRaises:\n    HTTPException 403: If the user doesn't have permission to deactivate this feature flag",
         "operationId": "deactivate_feature_flag_api_v1_feature_flags__flag_id__deactivate_post",
         "parameters": [
           {
@@ -24546,7 +24552,7 @@
     },
     "/api/v1/feature-flags/{flag_id}/disable": {
       "post": {
-        "description": "Disable a feature flag (set to INACTIVE status).\n\nThis endpoint explicitly disables a feature flag, regardless of current status.\nIncludes complete audit logging with user information and optional reason.\n\n**Authentication**: Requires valid user authentication.\n**Permissions**: User must own the feature flag or be a superuser.\n\nReturns:\n    ToggleResponse: Updated feature flag details with audit log ID\n\nRaises:\n    HTTPException 403: If user doesn't have permission to disable this feature flag\n    HTTPException 404: If feature flag doesn't exist\n    HTTPException 500: If disable operation fails",
+        "description": "Disable a feature flag (set to INACTIVE status).\n\nThis endpoint explicitly disables a feature flag. An archived flag is\nalready off: it answers 200 and stays archived.\nIncludes complete audit logging with user information and optional reason.\n\n**Authentication**: Requires valid user authentication.\n**Permissions**: User must own the feature flag or be a superuser.\n\nReturns:\n    ToggleResponse: Updated feature flag details with audit log ID\n\nRaises:\n    HTTPException 403: If user doesn't have permission to disable this feature flag\n    HTTPException 404: If feature flag doesn't exist\n    HTTPException 500: If disable operation fails",
         "operationId": "disable_feature_flag_api_v1_feature_flags__flag_id__disable_post",
         "parameters": [
           {
@@ -24658,7 +24664,7 @@
     },
     "/api/v1/feature-flags/{flag_id}/enable": {
       "post": {
-        "description": "Enable a feature flag (set to ACTIVE status).\n\nThis endpoint explicitly enables a feature flag, regardless of current status.\nIncludes complete audit logging with user information and optional reason.\n\n**Authentication**: Requires valid user authentication.\n**Permissions**: User must own the feature flag or be a superuser.\n\nReturns:\n    ToggleResponse: Updated feature flag details with audit log ID\n\nRaises:\n    HTTPException 403: If user doesn't have permission to enable this feature flag\n    HTTPException 404: If feature flag doesn't exist\n    HTTPException 500: If enable operation fails",
+        "description": "Enable a feature flag (set to ACTIVE status).\n\nThis endpoint explicitly enables a feature flag. An archived flag answers\n400 and stays archived: unarchive it first.\nIncludes complete audit logging with user information and optional reason.\n\n**Authentication**: Requires valid user authentication.\n**Permissions**: User must own the feature flag or be a superuser.\n\nReturns:\n    ToggleResponse: Updated feature flag details with audit log ID\n\nRaises:\n    HTTPException 400: The flag is archived\n    HTTPException 403: If user doesn't have permission to enable this feature flag\n    HTTPException 404: If feature flag doesn't exist\n    HTTPException 500: If enable operation fails",
         "operationId": "enable_feature_flag_api_v1_feature_flags__flag_id__enable_post",
         "parameters": [
           {
@@ -24705,6 +24711,9 @@
               }
             },
             "description": "Returns the enabled feature flag with audit log ID"
+          },
+          "400": {
+            "description": "The flag is archived: unarchive it before turning it on"
           },
           "401": {
             "content": {
@@ -24842,7 +24851,7 @@
     },
     "/api/v1/feature-flags/{flag_id}/toggle": {
       "post": {
-        "description": "Toggle a feature flag between enabled and disabled states.\n\nThis endpoint provides a unified way to toggle feature flags, automatically\ndetermining whether to activate or deactivate based on the current status.\n\nThe toggle operation includes:\n- Status change (ACTIVE ↔ INACTIVE)\n- Complete audit logging with user information and optional reason\n- Response with new status and audit log ID\n\n**Authentication**: Requires valid user authentication.\n**Permissions**: ADMIN and DEVELOPER may toggle any flag; ANALYST and\nVIEWER may not.\n\nReturns:\n    ToggleResponse: Updated feature flag details with audit log ID\n\nRaises:\n    HTTPException 403: If user doesn't have permission to toggle this feature flag\n    HTTPException 404: If feature flag doesn't exist\n    HTTPException 500: If toggle operation fails",
+        "description": "Toggle a feature flag between enabled and disabled states.\n\nThis endpoint provides a unified way to toggle feature flags, automatically\ndetermining whether to activate or deactivate based on the current status.\n\nThe toggle operation includes:\n- Status change (ACTIVE ↔ INACTIVE). An archived flag would be turned on,\n  so it answers 400 and stays archived: unarchive it first\n- Complete audit logging with user information and optional reason\n- Response with new status and audit log ID\n\n**Authentication**: Requires valid user authentication.\n**Permissions**: ADMIN and DEVELOPER may toggle any flag; ANALYST and\nVIEWER may not.\n\nReturns:\n    ToggleResponse: Updated feature flag details with audit log ID\n\nRaises:\n    HTTPException 400: The flag is archived\n    HTTPException 403: If user doesn't have permission to toggle this feature flag\n    HTTPException 404: If feature flag doesn't exist\n    HTTPException 500: If toggle operation fails",
         "operationId": "toggle_feature_flag_api_v1_feature_flags__flag_id__toggle_post",
         "parameters": [
           {
@@ -24889,6 +24898,9 @@
               }
             },
             "description": "Returns the toggled feature flag with audit log ID"
+          },
+          "400": {
+            "description": "The flag is archived: unarchive it before turning it on"
           },
           "401": {
             "content": {
@@ -24950,6 +24962,98 @@
           "Feature Flags",
           "Feature Flags"
         ]
+      }
+    },
+    "/api/v1/feature-flags/{flag_id}/unarchive": {
+      "post": {
+        "description": "Unarchive a feature flag (beta).\n\nAn archived flag is retired: it is never served, and every request that\nwould turn it on answers 400. This is the way back. The flag becomes\nINACTIVE, never ACTIVE, so turning it on is a separate, deliberate step.\n\nA flag that is not archived is returned unchanged.\n\n**Permissions**: ADMIN and DEVELOPER may unarchive any flag; ANALYST and\nVIEWER may not.\n\nReturns:\n    FeatureFlagRead: The feature flag\n\nRaises:\n    HTTPException 403: If the user doesn't have permission to change this feature flag\n    HTTPException 404: If the feature flag doesn't exist",
+        "operationId": "unarchive_feature_flag_api_v1_feature_flags__flag_id__unarchive_post",
+        "parameters": [
+          {
+            "description": "The ID of the feature flag to unarchive",
+            "in": "path",
+            "name": "flag_id",
+            "required": true,
+            "schema": {
+              "description": "The ID of the feature flag to unarchive",
+              "format": "uuid",
+              "title": "Flag Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FeatureFlagRead"
+                }
+              }
+            },
+            "description": "Returns the feature flag, now INACTIVE"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": {
+                    "message": "Could not validate credentials",
+                    "status_code": 401
+                  }
+                }
+              }
+            },
+            "description": "Authentication failed"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": {
+                    "message": "Not enough permissions",
+                    "status_code": 403
+                  }
+                }
+              }
+            },
+            "description": "Permission denied"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": {
+                    "message": "Internal server error",
+                    "status_code": 500
+                  }
+                }
+              }
+            },
+            "description": "Internal server error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Unarchive feature flag (beta)",
+        "tags": [
+          "Feature Flags",
+          "Feature Flags"
+        ],
+        "x-stability": "beta"
       }
     },
     "/api/v1/hipaa/audit-logs": {

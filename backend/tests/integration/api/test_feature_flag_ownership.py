@@ -48,6 +48,8 @@ ACTIONS = {
     "toggle": ("POST", "/toggle", {"reason": "qa"}, FeatureFlagStatus.INACTIVE, 200),
     "enable": ("POST", "/enable", {"reason": "qa"}, FeatureFlagStatus.INACTIVE, 200),
     "disable": ("POST", "/disable", {"reason": "qa"}, FeatureFlagStatus.ACTIVE, 200),
+    # beta (#631): the way out of ARCHIVED, under the same rule as the others
+    "unarchive": ("POST", "/unarchive", None, FeatureFlagStatus.ARCHIVED, 200),
 }
 MUTATIONS = [a for a in ACTIONS if a != "get"]
 
@@ -81,7 +83,7 @@ CASES = [
     for own in OWNERSHIP
     for action in ACTIONS
 ]
-assert len(CASES) == 5 * 3 * 8 == 120, len(CASES)
+assert len(CASES) == 5 * 3 * 9 == 135, len(CASES)
 
 
 @pytest.fixture(autouse=True)
@@ -246,5 +248,5 @@ class TestCreatePersistsOwner:
 
 def test_matrix_case_count_is_exact():
     """Collected count, not just list length: guards a filter/skip creeping in."""
-    assert len(CASES) == 120
-    assert sum(1 for c in CASES if expected_status(*c.values) == 403) == 2 * 3 * 7
+    assert len(CASES) == 135
+    assert sum(1 for c in CASES if expected_status(*c.values) == 403) == 2 * 3 * 8

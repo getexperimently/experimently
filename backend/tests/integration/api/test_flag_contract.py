@@ -13,8 +13,9 @@ What these pin, through the real routes and a real database:
   accepted (D40); evaluation is unchanged;
 * an explicit null on a NOT NULL field answers 422 (it was a 500, or a silent
   switch-off for ``is_active``);
-* ``is_active: false`` on an archived flag keeps it archived, through PUT only;
-  the other routes that turn a flag off are pinned unchanged here (#631).
+* ``is_active: false`` on an archived flag keeps it archived, and
+  ``is_active: true`` answers 400 (#631; every other status route is pinned in
+  test_archived_flag_verbs.py).
 """
 
 from __future__ import annotations
@@ -437,7 +438,7 @@ def test_the_service_refuses_a_disagreeing_status(db_session, make_feature_flag)
     assert _row(db_session, flag.id).status == FeatureFlagStatus.INACTIVE
 
 
-# --- archived: PUT keeps it archived; the other routes are unchanged --------
+# --- archived: PUT keeps it archived; nothing turns it on (#631) -----------
 
 
 @pytest.mark.regression
@@ -453,40 +454,47 @@ def test_put_is_active_false_keeps_an_archived_flag_archived(
     assert _row(db_session, flag.id).status == FeatureFlagStatus.ARCHIVED
 
 
-def test_put_is_active_true_turns_an_archived_flag_on(
+@pytest.mark.regression
+def test_put_is_active_true_on_an_archived_flag_answers_400(
     admin_client, db_session, make_feature_flag
 ):
-    """Unchanged by #94 (#631 decides archive semantics)."""
+    """Inverted by #631: this pin said 200 and ACTIVE; Rule S refuses it."""
     flag = make_feature_flag(status=FeatureFlagStatus.ARCHIVED)
 
     response = admin_client.put(f"{COLLECTION}/{flag.id}", json={"is_active": True})
 
-    assert response.status_code == 200, response.text
-    assert _row(db_session, flag.id).status == FeatureFlagStatus.ACTIVE
+    assert response.status_code == 400, response.text
+    assert response.json()["detail"] == (
+        "This flag is archived. Unarchive it before turning it on."
+    )
+    assert _row(db_session, flag.id).status == FeatureFlagStatus.ARCHIVED
 
 
+@pytest.mark.regression
 @pytest.mark.parametrize(
-    "route, body, expected",
+    "route, body, code",
     [
-        ("{id}/deactivate", None, FeatureFlagStatus.INACTIVE),
-        ("{id}/disable", {}, FeatureFlagStatus.INACTIVE),
-        ("bulk-toggle", {"action": "disable"}, FeatureFlagStatus.INACTIVE),
-        ("{id}/toggle", {}, FeatureFlagStatus.ACTIVE),
+        ("{id}/deactivate", None, 200),
+        ("{id}/disable", {}, 200),
+        ("bulk-toggle", {"action": "disable"}, 200),
+        ("{id}/toggle", {}, 400),
     ],
     ids=["deactivate", "disable", "bulk_disable", "toggle"],
 )
-def test_the_other_routes_on_an_archived_flag_are_unchanged(
-    admin_client, db_session, make_feature_flag, route, body, expected
+def test_the_other_routes_leave_an_archived_flag_archived(
+    admin_client, db_session, make_feature_flag, route, body, code
 ):
-    """M1: pinned as they are; #631 changes them, and changes these pins."""
+    """Inverted by #631: these took the flag out of ARCHIVED (three to INACTIVE,
+    toggle to ACTIVE). An off-verb now succeeds and changes nothing; toggle
+    would turn it on, so it answers 400."""
     flag = make_feature_flag(status=FeatureFlagStatus.ARCHIVED)
     if route == "bulk-toggle":
         body = {**body, "flag_ids": [str(flag.id)]}
 
     response = admin_client.post(f"{COLLECTION}/{route.format(id=flag.id)}", json=body)
 
-    assert response.status_code == 200, response.text
-    assert _row(db_session, flag.id).status == expected
+    assert response.status_code == code, response.text
+    assert _row(db_session, flag.id).status == FeatureFlagStatus.ARCHIVED
 
 
 # --- D39-3: one name for targeting -----------------------------------------
