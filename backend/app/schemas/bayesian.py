@@ -32,7 +32,10 @@ class BayesianConfig(BaseModel):
         prior_family: Conjugate prior family (beta, normal, or gamma).
         alpha: Alpha hyperparameter for the prior (must be > 0).
         beta: Beta hyperparameter for the prior (must be > 0).
-        loss_threshold: Expected loss threshold below which we stop (must be > 0).
+        loss_threshold: Expected loss the leading variant must be below for
+            STOP_WINNER (must be > 0).  STOP_WINNER also needs that variant's
+            probability to be best to be at least 0.975, a fixed threshold
+            that is not configurable (#242).
         rope: Region of Practical Equivalence as [lower, upper]; if the
             posterior difference falls inside ROPE, the experiment is deemed
             equivalent and stopped.
@@ -48,7 +51,13 @@ class BayesianConfig(BaseModel):
     alpha: float = Field(1.0, gt=0, description="Prior alpha hyperparameter (> 0)")
     beta: float = Field(1.0, gt=0, description="Prior beta hyperparameter (> 0)")
     loss_threshold: float = Field(
-        0.001, gt=0, description="Expected loss threshold for stopping"
+        0.001,
+        gt=0,
+        description=(
+            "Expected loss the leading variant must be below for STOP_WINNER. "
+            "STOP_WINNER also needs that variant's probability to be best to "
+            "be at least 0.975, a fixed threshold that is not configurable."
+        ),
     )
     rope: Optional[List[float]] = Field(
         None,

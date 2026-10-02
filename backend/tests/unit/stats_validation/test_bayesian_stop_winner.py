@@ -208,6 +208,20 @@ def test_power_at_one_quarter_relative_lift():
     assert _winners(sims) - treatment_wins <= MAX_FALSE_WINNERS
 
 
+def test_power_gate_rejects_a_stricter_rule(monkeypatch):
+    """242b planted: a 0.98 threshold on the same simulations falls below 1,809.
+
+    ``MIN_POWER_WINNERS`` is derived from the power measured at 0.975, so this
+    pins that a modest loss of power (0.975 -> 0.98) fails the gate, not only
+    a large one. The count includes winners on either arm, so it can only
+    overstate the treatment's.
+    """
+    sims = power_sims()  # analysed and cached at the real threshold first
+    monkeypatch.setattr(bayesian_service, "PROB_BEST_THRESHOLD", 0.98)
+    winners = _redecided_winners(sims)
+    assert winners < MIN_POWER_WINNERS, winners
+
+
 # ---------------------------------------------------------------------------
 # The cases from the issue
 # ---------------------------------------------------------------------------

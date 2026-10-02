@@ -235,6 +235,10 @@ Two things follow:
   experiment you want to monitor continuously, use the sequential analysis
   ([`GET /results/{id}/sequential`](sequential-testing.md)), which is built for repeated
   looks.
+- **The 0.975 threshold is deliberately not configurable.** It is what holds the
+  false-winner rate near 5%; a per-experiment setting would let one experiment lower it
+  back to the level that called identical variants winners. `bayesian_config` has no field
+  for it.
 - **`loss_threshold` rarely decides on its own.** At the default 0.001 it never vetoed a
   variant that had reached 0.975 in any of the single-look simulations above. A smaller value makes the
   rule stricter; a larger one cannot make it looser than the 0.975 probability allows.

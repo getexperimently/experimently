@@ -452,7 +452,8 @@ def should_stop(
 
     # Rule 1: STOP_WINNER when the variant most likely to be best is likely
     # enough (#242) and choosing it is cheap enough.  With the threshold above
-    # 0.5 at most one variant can qualify.
+    # 0.5 at most one variant can qualify.  The leader here is argmax P(best);
+    # the ROPE rule below compares against argmin expected loss, as before.
     leader = max(range(len(ptbb)), key=ptbb.__getitem__)
     if ptbb[leader] >= PROB_BEST_THRESHOLD and losses[leader] < config.loss_threshold:
         return BayesianDecision.STOP_WINNER
