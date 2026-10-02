@@ -15,11 +15,14 @@ from sqlalchemy.orm import Session
 
 from backend.app.api import deps
 from backend.app.api.v1.endpoints.users import (
+    OWN_DEACTIVATION_REFUSED,
+    OWN_ROLE_REFUSED,
     apply_password_change,
     changed_email,
     changed_username,
     commit_user_write,
     refuse_if_email_held,
+    refuse_if_own_access_removed,
     refuse_if_username_held,
 )
 from backend.app.core.config import settings
@@ -150,6 +153,9 @@ async def update_user(
     # is refused (your own: use POST /api/v1/users/me/password). The loop
     # below cannot set it: the model has no ``password`` attribute.
     apply_password_change(user, current_user, update_data)
+    # Your own superuser access or active status is not removed here (400,
+    # #652); another superuser does it. Before anything is written.
+    refuse_if_own_access_removed(user, current_user, update_data)
 
     # Another account holding the new address in any letter case is a 409
     # "Email already registered". Re-casing the account's own address is not.
@@ -171,10 +177,10 @@ async def update_user(
     return user
 
 
-#: Refusals of ``PATCH /admin/users/{user_id}``. The dashboard shows them as
-#: they are, so they are written for the person at the screen.
-OWN_ROLE_REFUSED = "You can't change your own role. Ask another administrator to do it."
-OWN_DEACTIVATION_REFUSED = "You can't deactivate your own account."
+#: Refusal of ``PATCH /admin/users/{user_id}``. The dashboard shows it as it
+#: is, so it is written for the person at the screen. ``OWN_ROLE_REFUSED`` and
+#: ``OWN_DEACTIVATION_REFUSED`` are defined in the users endpoints, which both
+#: PUT routes share.
 ROLE_FROM_COGNITO_REFUSED = (
     "Roles on this deployment come from Cognito groups and are updated on every "
     "request. Change this user's group in Cognito instead."

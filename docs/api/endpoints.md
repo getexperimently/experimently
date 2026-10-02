@@ -456,8 +456,18 @@ curl -X POST "http://localhost:8000/api/v1/users/" \
   one; sending your own `password` here is a 403 for every caller,
   superusers included. `PUT /api/v1/admin/users/{user_id}` treats `password`
   the same way.
+- **Your own access**: a superuser cannot remove their own superuser access or
+  deactivate their own account here; another superuser does it. The request is
+  refused when it would change your own `is_superuser` or `is_active` from
+  `true` to `false`, and nothing in it is written, other fields included.
+  Resending the stored values (`true`) is accepted, so a client that reads the
+  account and sends it back with an edit is not refused.
 - **Response**: 200 OK, the user as in Get User
-- **Errors**: 403 "Only an administrator can change an account's email address
+- **Errors**: 400 "You can't remove your own superuser access. Ask another
+  administrator to do it." when a superuser's request would turn off their own
+  `is_superuser`. 400 "You can't deactivate your own account." when it would
+  turn off their own `is_active`; when both would change, the answer is the
+  first. 403 "Only an administrator can change an account's email address
   or username." when a user who is not a superuser sends a different email
   address or username. Administrators change them with
   `PUT /api/v1/admin/users/{user_id}`. 403 "To change your own password, use
@@ -468,6 +478,16 @@ curl -X POST "http://localhost:8000/api/v1/users/" \
   the account's own address is accepted, and resending the stored address
   unchanged is never refused. 409 "Username already registered" when a
   superuser sets a username another account has.
+
+### Delete User
+- **Endpoint**: `DELETE /api/v1/users/{user_id}`
+- **Description**: A superuser deletes any account but their own. Anyone else
+  deletes only their own account (another user's is a 403).
+- **Headers**: Authorization: Bearer {token}
+- **Response**: 204 No Content
+- **Errors**: 400 "Superusers cannot delete themselves" when a superuser
+  deletes their own account. 403 "Not enough permissions" when anyone else
+  deletes another account. 404 "User not found".
 
 ### Change Your Password
 - **Endpoint**: `POST /api/v1/users/me/password`
@@ -728,8 +748,18 @@ public `key`. They share the per-IP `SDK_RATE_LIMIT_PER_MINUTE` ceiling (default
 - **Description**: Update any user, including `is_superuser` (superuser only)
 - **Headers**: Authorization: Bearer {token}
 - **Request Body**: as Update User; `password` is treated the same way
+- **Your own access**: a superuser cannot remove their own superuser access or
+  deactivate their own account here; another superuser does it. The request is
+  refused when it would change your own `is_superuser` or `is_active` from
+  `true` to `false`, and nothing in it is written, other fields included.
+  Resending the stored values (`true`) is accepted, so a client that reads the
+  account and sends it back with an edit is not refused.
 - **Response**: 200 OK, the user
-- **Errors**: 404 "User not found". 409 "Email already registered" when the
+- **Errors**: 400 "You can't remove your own superuser access. Ask another
+  administrator to do it." when the request would turn off your own
+  `is_superuser`. 400 "You can't deactivate your own account." when it would
+  turn off your own `is_active`; when both would change, the answer is the
+  first. 404 "User not found". 409 "Email already registered" when the
   request sets an email address that another account holds in any letter
   case. Changing only the letter case of the account's own address is
   accepted, and resending the stored address unchanged is never refused.
@@ -783,6 +813,8 @@ public `key`. They share the per-IP `SDK_RATE_LIMIT_PER_MINUTE` ceiling (default
 - **Path Parameters**:
   - user_id: string (UUID)
 - **Response**: 204 No Content
+- **Errors**: 400 "Cannot delete your own user account" when the account is
+  your own. 404 "User not found".
 
 ## Error Responses
 

@@ -51,6 +51,17 @@ OWN_PASSWORD_DETAIL = (
     "which asks for your current password."
 )
 
+#: Refusals when a superuser's request would change their OWN account's role,
+#: superuser access or active status. ``PATCH /admin/users/{id}`` gives the
+#: first and the last; both PUT routes give the last two
+#: (``refuse_if_own_access_removed``). The dashboard shows them as they are,
+#: so they are written for the person at the screen.
+OWN_ROLE_REFUSED = "You can't change your own role. Ask another administrator to do it."
+OWN_SUPERUSER_REFUSED = (
+    "You can't remove your own superuser access. Ask another administrator to do it."
+)
+OWN_DEACTIVATION_REFUSED = "You can't deactivate your own account."
+
 #: Answers of ``POST /api/v1/users/me/password``.
 CURRENT_PASSWORD_INCORRECT_DETAIL = "The current password is incorrect."
 CURRENT_PASSWORD_MISSING_DETAIL = (
@@ -146,6 +157,38 @@ def apply_password_change(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
         ) from None
     update_data["hashed_password"] = get_password_hash(plain)
+
+
+def refuse_if_own_access_removed(
+    target: User, caller: User, update_data: Dict[str, Any]
+) -> None:
+    """Refuse a request that takes away the caller's OWN superuser access or
+    deactivates the caller's OWN account, with 400 (#652).
+
+    Shared by ``PUT /api/v1/users/{id}`` and ``PUT /api/v1/admin/users/{id}``.
+    Call it after ``apply_password_change`` (and, on the users route, after a
+    non-superuser's ``is_superuser``/``is_active`` have been dropped) and
+    before anything is set on *target*, so a refused request writes nothing.
+
+    A key counts only when its value differs from the stored one: resending
+    the stored values (a client that GETs the account and PUTs it back) is
+    not refused. When both would change, the superuser text is the answer.
+    Another account is not affected: one superuser can still demote or
+    deactivate another, and that is how access is removed.
+    """
+    if str(target.id) != str(caller.id):
+        return
+    if (
+        "is_superuser" in update_data
+        and update_data["is_superuser"] != target.is_superuser
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=OWN_SUPERUSER_REFUSED
+        )
+    if "is_active" in update_data and update_data["is_active"] != target.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=OWN_DEACTIVATION_REFUSED
+        )
 
 
 def email_held_by_another(
@@ -638,6 +681,10 @@ async def update_user(
         # Regular users cannot change is_superuser or is_active
         update_data.pop("is_superuser", None)
         update_data.pop("is_active", None)
+
+    # A superuser's own superuser access or active status is not removed
+    # here (400, #652); another superuser does it. Before anything is written.
+    refuse_if_own_access_removed(user, current_user, update_data)
 
     # Another account holding the new address in any letter case is a 409.
     # Re-casing the account's own address is not refused.

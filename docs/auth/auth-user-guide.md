@@ -186,6 +186,11 @@ Rules the page and the API both apply:
 
 - You can't change your own role or deactivate yourself; ask another
   administrator. You can't delete your own account either.
+- Through the API (`PUT /api/v1/admin/users/{user_id}` or
+  `PUT /api/v1/users/{user_id}`) you also can't remove your own superuser
+  access, so keep at least two superusers; with Cognito role sync on, though,
+  a superuser removed from the admin group in Cognito loses superuser access
+  on their next request, and nothing here stops that.
 - Deactivating a user stops them signing in, refuses requests with a token they
   already hold, and **stops the API keys they created, including keys your
   applications use**. Check which keys a user created before deactivating them.
