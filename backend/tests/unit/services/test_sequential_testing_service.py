@@ -202,8 +202,24 @@ class TestAlwaysValidCI:
         assert cs.lower < 0.0 < cs.upper
 
     def test_ci_width_decreases_with_more_data(self):
-        """Width of the CI should shrink as sample size grows."""
+        """The CI is the normal-mixture closed form, so it shrinks with n.
+
+        The pre-#231 interval also shrank here (0.084 -> 0.078) while stalling
+        at 0.0774 however much data arrived, so ``<`` alone proved nothing:
+        the widths are pinned to the closed form (#231).
+        """
         service = _make_service()
+
+        def closed_form_width(c_s, c_n, t_s, t_n, tau_squared=0.001, alpha=0.05):
+            p_c, p_t = c_s / c_n, t_s / t_n
+            v = p_c * (1 - p_c) / c_n + p_t * (1 - p_t) / t_n
+            return 2 * math.sqrt(
+                v
+                * (v + tau_squared)
+                / tau_squared
+                * (2 * math.log(1 / alpha) + math.log((v + tau_squared) / v))
+            )
+
         cs_small = service.compute_always_valid_ci(
             control_successes=10,
             control_total=100,
@@ -216,7 +232,21 @@ class TestAlwaysValidCI:
             treatment_successes=150,
             treatment_total=1000,
         )
+        assert cs_small.width == pytest.approx(
+            closed_form_width(10, 100, 15, 100), rel=1e-9
+        )
+        assert cs_large.width == pytest.approx(
+            closed_form_width(100, 1000, 150, 1000), rel=1e-9
+        )
         assert cs_large.width < cs_small.width
+        # A hundred times the data: the width keeps falling (old: stalled).
+        cs_huge = service.compute_always_valid_ci(
+            control_successes=10_000,
+            control_total=100_000,
+            treatment_successes=15_000,
+            treatment_total=100_000,
+        )
+        assert cs_huge.width < cs_large.width / 4
 
     def test_ci_contains_true_parameter(self):
         """For a known effect (5%), the CI should contain the true value."""
