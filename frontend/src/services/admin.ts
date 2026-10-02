@@ -1,5 +1,6 @@
 import {
   AdminUser,
+  AdminUserPatch,
   AdminStats,
   AuditLogListResponse,
   CreateUserRequest,
@@ -85,8 +86,12 @@ export const AdminService = {
     return apiFetch<CreatedUser>('/api/v1/users/', { method: 'POST', json: data });
   },
 
-  async updateUser(id: string, data: Partial<AdminUser>): Promise<AdminUser> {
-    return apiFetch<AdminUser>(`/api/v1/admin/users/${id}`, { method: 'PUT', json: data });
+  /**
+   * `PATCH /api/v1/admin/users/{id}`: change another account's role and/or
+   * active status. Send only what changed.
+   */
+  async updateUser(id: string, data: AdminUserPatch): Promise<AdminUser> {
+    return apiFetch<AdminUser>(`/api/v1/admin/users/${id}`, { method: 'PATCH', json: data });
   },
 
   async deleteUser(id: string): Promise<void> {

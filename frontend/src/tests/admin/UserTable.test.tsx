@@ -374,6 +374,108 @@ describe('UserTable', () => {
     expect(input).toHaveAttribute('placeholder', 'Search by username, email, first or last name');
   });
 
+  it('a failed delete shows an inline message on the table, never alert()', async () => {
+    const alertSpy = jest.spyOn(window, 'alert').mockImplementation(() => {});
+    mockListUsers.mockResolvedValue(makeResponse([makeUser({ id: 'user-7', username: 'gina' })]));
+    mockDeleteUser.mockRejectedValue(new Error('Cannot delete your own user account'));
+    render(<UserTable />);
+    await waitFor(() => screen.getByText('gina'));
+    fireEvent.click(screen.getByTestId('delete-user-user-7'));
+    const message = await screen.findByTestId('delete-error-message');
+    expect(message).toHaveAttribute('role', 'alert');
+    expect(message).toHaveTextContent("Couldn't delete gina: Cannot delete your own user account");
+    expect(alertSpy).not.toHaveBeenCalled();
+    alertSpy.mockRestore();
+  });
+
+  it('each row has an Edit button, named for the user, before Delete', async () => {
+    const onEdit = jest.fn();
+    const alice = makeUser({ id: 'a1', username: 'alice' });
+    mockListUsers.mockResolvedValue(makeResponse([alice, makeUser({ id: 'b2', username: 'bob' })]));
+    render(<UserTable onEdit={onEdit} />);
+    await waitFor(() => screen.getByText('alice'));
+    const edit = screen.getByTestId('edit-user-a1');
+    expect(edit).toHaveAccessibleName('Edit alice');
+    expect(screen.getByTestId('edit-user-b2')).toHaveAccessibleName('Edit bob');
+    const cell = edit.closest('td') as HTMLElement;
+    const buttons = Array.from(cell.querySelectorAll('button')).map((b) => b.dataset.testid);
+    expect(buttons).toStrictEqual(['edit-user-a1', 'delete-user-a1']);
+    fireEvent.click(edit);
+    expect(onEdit).toHaveBeenCalledWith(alice);
+  });
+
+  it('without onEdit there is no Edit button', async () => {
+    mockListUsers.mockResolvedValue(makeResponse([makeUser({ id: 'a1', username: 'alice' })]));
+    render(<UserTable />);
+    await waitFor(() => screen.getByText('alice'));
+    expect(screen.queryByTestId('edit-user-a1')).not.toBeInTheDocument();
+  });
+
+  it('shows a Superuser column, and "No role" for an account with no role', async () => {
+    mockListUsers.mockResolvedValue(
+      makeResponse([
+        makeUser({ id: 's1', username: 'root', role: 'DEVELOPER', is_superuser: true }),
+        makeUser({ id: 'n1', username: 'legacy', role: null, is_superuser: false }),
+      ]),
+    );
+    render(<UserTable />);
+    await waitFor(() => screen.getByText('root'));
+    expect(screen.getByRole('columnheader', { name: 'Superuser' })).toBeInTheDocument();
+    expect(screen.getByTestId('superuser-s1')).toHaveTextContent('Superuser');
+    expect(screen.getByTestId('superuser-n1')).toHaveTextContent('No');
+    const legacyRow = screen.getByText('legacy').closest('tr') as HTMLElement;
+    expect(legacyRow).toHaveTextContent('No role');
+  });
+
+  it('a reload from the page keeps the current page and search term', async () => {
+    mockListUsers.mockImplementation(pagedList(120));
+    const { rerender } = render(<UserTable reloadToken={0} />);
+    await waitFor(() => expect(screen.getByTestId('user-page-next')).toBeEnabled());
+    fireEvent.change(screen.getByTestId('user-search'), { target: { value: 'user' } });
+    act(() => {
+      jest.advanceTimersByTime(300);
+    });
+    await waitFor(() => expect(lastListCall()).toEqual(expect.objectContaining({ search: 'user' })));
+    await waitFor(() => expect(screen.getByTestId('user-page-next')).toBeEnabled());
+    fireEvent.click(screen.getByTestId('user-page-next'));
+    await waitFor(() => expect(screen.getByTestId('user-page-info')).toHaveTextContent('Showing 51–100 of 120'));
+    const callsBefore = mockListUsers.mock.calls.length;
+
+    rerender(<UserTable reloadToken={1} />);
+    await waitFor(() => expect(mockListUsers.mock.calls.length).toBe(callsBefore + 1));
+    expect(lastListCall()).toStrictEqual({ skip: 50, limit: 50, search: 'user' });
+    expect(screen.getByTestId('user-search')).toHaveValue('user');
+  });
+
+  it("after a reload, focus goes to the edited row's Edit button", async () => {
+    mockListUsers.mockResolvedValue(makeResponse([makeUser({ id: 'a1', username: 'alice' })]));
+    const onFocusHandled = jest.fn();
+    const props = { onEdit: jest.fn(), onFocusHandled };
+    const { rerender } = render(<UserTable {...props} reloadToken={0} />);
+    await waitFor(() => screen.getByText('alice'));
+    let finish!: (v: UserListResponse) => void;
+    mockListUsers.mockImplementationOnce(() => new Promise((r) => (finish = r)));
+
+    rerender(<UserTable {...props} reloadToken={1} focusUserId="a1" />);
+    // Still loading: nothing is focused yet, and the request is not reported handled.
+    expect(onFocusHandled).not.toHaveBeenCalled();
+    await act(async () => {
+      finish(makeResponse([makeUser({ id: 'a1', username: 'alice' })]));
+    });
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByTestId('edit-user-a1')));
+    expect(onFocusHandled).toHaveBeenCalledTimes(1);
+  });
+
+  it('when the row is gone after a reload, focus goes to the search box', async () => {
+    mockListUsers.mockResolvedValue(makeResponse([makeUser({ id: 'a1', username: 'alice' })]));
+    const props = { onEdit: jest.fn(), onFocusHandled: jest.fn() };
+    const { rerender } = render(<UserTable {...props} reloadToken={0} />);
+    await waitFor(() => screen.getByText('alice'));
+    mockListUsers.mockResolvedValue(makeResponse([makeUser({ id: 'b2', username: 'bob' })]));
+    rerender(<UserTable {...props} reloadToken={1} focusUserId="a1" />);
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByTestId('user-search')));
+  });
+
   it('renders with data-testid="user-table"', () => {
     mockListUsers.mockImplementation(() => new Promise(() => {}));
     render(<UserTable />);

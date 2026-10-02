@@ -157,6 +157,48 @@ async function refreshTokens() {
 }
 ```
 
+## Managing users in the dashboard
+
+The dashboard's **Admin → Users** page (`/admin/users`) lists every account and
+lets you invite, edit and delete them. Opening it needs a **superuser** account,
+whatever its role; the table's **Superuser** column shows who has one. An Admin
+role on its own does not open the admin area, and the dashboard cannot make an
+account a superuser.
+
+- **Invite User** creates an account with a temporary password, shown once. An
+  account invited with the Admin role is also made a superuser.
+- **Edit** changes an account's role, whether it is active, or both. Save is
+  available once something has changed, and only what changed is sent
+  (`PATCH /api/v1/admin/users/{user_id}`, see the
+  [API reference](../api/endpoints.md)). After a save the list reloads on the
+  page and search you were on.
+- **Delete** removes the account after you confirm it.
+
+The four roles are Admin, Developer, Analyst and Viewer. A legacy account with no
+role shows "No role" in the table; pick one in the Edit dialog. Custom roles in
+the full edition are assigned on the **Roles** page, not here.
+
+Rules the page and the API both apply:
+
+- You can't change your own role or deactivate yourself; ask another
+  administrator. You can't delete your own account either.
+- Deactivating a user stops them signing in, refuses requests with a token they
+  already hold, and **stops the API keys they created, including keys your
+  applications use**. Check which keys a user created before deactivating them.
+- With `AUTH_PROVIDER=cognito` and `SYNC_ROLES_ON_LOGIN` on (the default), roles
+  come from Cognito groups and are rewritten on every request, so a role change
+  is refused with "Roles on this deployment come from Cognito groups and are
+  updated on every request. Change this user's group in Cognito instead."
+  Deactivating still works.
+- With SSO (full edition), a role set here lasts until the user's next SSO
+  sign-in with a group in the configuration's `role_mapping`, which replaces it
+  (see [Group-to-Role Mapping](sso.md#group-to-role-mapping)).
+
+When a save fails, the dialog stays open with your choices and says why. "You
+don't have permission to change users" means your account is no longer a
+superuser; sign in again to check. "This user no longer exists" means someone
+deleted the account; closing the dialog refreshes the list.
+
 ## Common Error Scenarios and Solutions
 
 ### Registration Errors

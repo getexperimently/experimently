@@ -86,17 +86,22 @@ describe('AdminService', () => {
   });
 
   describe('updateUser', () => {
-    it('calls PUT with correct data', async () => {
-      mockOk({ id: '1', username: 'admin', email: 'admin@test.com', role: 'ADMIN', is_active: true, created_at: '' });
+    it('sends PATCH (upper case) with only the fields given', async () => {
+      mockOk({ id: '1', username: 'admin', email: 'admin@test.com', role: 'ADMIN', is_active: false, created_at: '' });
       await AdminService.updateUser('1', { is_active: false });
-      expect(mockFetch).toHaveBeenCalledWith(
-        `${BASE}/api/v1/admin/users/1`,
-        expect.objectContaining({
-          method: 'PUT',
-          headers: expect.objectContaining({ 'Content-Type': 'application/json' }),
-          body: JSON.stringify({ is_active: false }),
-        })
-      );
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+      const [url, init] = mockFetch.mock.calls[0];
+      expect(url).toBe(`${BASE}/api/v1/admin/users/1`);
+      // Exact: browsers do not upper-case PATCH, and the API answers 405 to `patch`.
+      expect(init.method).toBe('PATCH');
+      expect(init.headers['Content-Type']).toBe('application/json');
+      expect(init.body).toBe(JSON.stringify({ is_active: false }));
+    });
+
+    it('sends a role change as {role}', async () => {
+      mockOk({ id: '1', username: 'a', email: null, role: 'ANALYST', is_active: true, created_at: '' });
+      await AdminService.updateUser('1', { role: 'ANALYST' });
+      expect(mockFetch.mock.calls[0][1].body).toBe('{"role":"ANALYST"}');
     });
   });
 
