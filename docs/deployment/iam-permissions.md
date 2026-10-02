@@ -237,7 +237,7 @@ alarms", before anything is built, snapshotted or migrated.
 | `ecr:UploadLayerPart` | `.github/workflows/deploy.yml: docker push` |
 | `ecs:DescribeClusters` | `.github/workflows/deploy.yml: aws ecs describe-clusters` |
 | `ecs:DescribeServices` | `.github/workflows/db-migrate.yml: aws ecs describe-services`<br>`.github/workflows/deploy.yml: aws ecs describe-services`<br>`.github/workflows/rollback.yml: aws ecs describe-services`<br>`scripts/check_dashboard_image.py: aws ecs describe-services`<br>`scripts/check_live_target_group.py: aws ecs describe-services`<br>`scripts/ecs_rolling_rollout.sh: aws ecs describe-services`<br>`scripts/shift_traffic.py: aws ecs describe-services` |
-| `ecs:DescribeTaskDefinition` | `.github/workflows/db-migrate.yml: aws ecs describe-task-definition`<br>`.github/workflows/deploy.yml: aws ecs describe-task-definition`<br>`.github/workflows/rollback.yml: aws ecs describe-task-definition`<br>`scripts/check_dashboard_image.py: aws ecs describe-task-definition`<br>`scripts/ecs_rolling_rollout.sh: aws ecs describe-task-definition`<br>`scripts/refuse_migrating_api_revision.py: aws ecs describe-task-definition`<br>`scripts/register_task_definition.sh: aws ecs describe-task-definition` |
+| `ecs:DescribeTaskDefinition` | `.github/workflows/db-migrate.yml: aws ecs describe-task-definition`<br>`.github/workflows/deploy.yml: aws ecs describe-task-definition`<br>`.github/workflows/rollback.yml: aws ecs describe-task-definition`<br>`scripts/check_dashboard_image.py: aws ecs describe-task-definition`<br>`scripts/check_task_secrets.py: aws ecs describe-task-definition`<br>`scripts/ecs_rolling_rollout.sh: aws ecs describe-task-definition`<br>`scripts/refuse_migrating_api_revision.py: aws ecs describe-task-definition`<br>`scripts/register_task_definition.sh: aws ecs describe-task-definition` |
 | `ecs:DescribeTasks` | `scripts/ecs_rolling_rollout.sh: aws ecs describe-tasks`<br>`scripts/run_migration_task.sh: aws ecs describe-tasks` |
 | `ecs:ListTasks` | `scripts/ecs_rolling_rollout.sh: aws ecs list-tasks` |
 | `ecs:RegisterTaskDefinition` | `scripts/register_task_definition.sh: aws ecs register-task-definition` |
@@ -250,7 +250,7 @@ alarms", before anything is built, snapshotted or migrated.
 | `logs:GetLogEvents` | `scripts/run_migration_task.sh: aws logs get-log-events` |
 | `rds:CreateDBClusterSnapshot` | `.github/workflows/db-migrate.yml: aws rds create-db-cluster-snapshot`<br>`.github/workflows/deploy.yml: aws rds create-db-cluster-snapshot` |
 | `rds:DescribeDBClusterSnapshots` | `.github/workflows/db-migrate.yml: aws rds wait db-cluster-snapshot-available`<br>`.github/workflows/deploy.yml: aws rds wait db-cluster-snapshot-available` |
-| `secretsmanager:DescribeSecret` | `.github/workflows/deploy.yml: aws secretsmanager describe-secret` |
+| `secretsmanager:DescribeSecret` | `scripts/check_task_secrets.py: aws secretsmanager describe-secret` |
 <!-- END GENERATED -->
 
 ### GitHub side

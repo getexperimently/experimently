@@ -179,9 +179,15 @@ aws secretsmanager list-secrets \
   --output table
 ```
 
-`Deploy to Production` checks for `jwt-secret` and
-`first-superuser-password`, plus `audit-hmac-key` for the `full` profile,
-before it builds anything ("Required secrets exist for this profile").
+Deploy checks the secrets by the references ECS will use, before it builds
+anything ("Every secret the task definitions reference exists"). It reads
+every `valueFrom` in the API's, the migration's and the dashboard's task
+definitions, refuses any that is not a complete ARN in the environment's
+account and region (a partial ARN, one that stops at the name, is refused
+before any Secrets Manager call), requires the API and migration task
+definitions to reference `jwt-secret` and `first-superuser-password`, plus
+`audit-hmac-key` for the `full` profile, and then runs `describe-secret` on
+each complete ARN. Its log names each secret by name only, never by ARN.
 `cognito-config` may also be listed; nothing in the deployment reads it. The
 database credentials are not under this prefix: they are the database stack's
 `experimentation-database-<env>-aurora-credentials`. Nor is Redis: see

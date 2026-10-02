@@ -253,12 +253,27 @@ def _stack_secret_names() -> set[str]:
     return names
 
 
+CHECK_TASK_SECRETS = REPO_ROOT / "scripts" / "check_task_secrets.py"
+
+
 def _preflight_secret_names() -> tuple[set[str], set[str]]:
-    """``(always, full-only)`` from the deploy pre-flight's ``required`` arrays."""
+    """``(always, full-only)``: what the deploy pre-flight requires (#636).
+
+    The pre-flight is ``scripts/check_task_secrets.py``, which reads each task
+    definition's ``valueFrom`` and requires the app families to reference
+    ``APP_SECRETS`` (and ``FULL_ONLY_SECRETS`` on the full profile). The
+    workflow must run that script for exactly those families.
+    """
     text = DEPLOY_WORKFLOW.read_text()
-    (always,) = re.findall(r"^\s*required=\(([^)]*)\)", text, re.M)
-    (full,) = re.findall(r"^\s*required\+=\(([^)]*)\)", text, re.M)
-    return set(always.split()), set(full.split())
+    assert "python3 scripts/check_task_secrets.py" in text
+    for flag in (
+        '--app-family "$ECS_BACKEND_TASK_FAMILY"',
+        '--app-family "$MIGRATE_TASK_FAMILY"',
+        '--profile "$PROFILE"',
+    ):
+        assert flag in text, f"deploy.yml's secrets pre-flight lost {flag}"
+    script = runpy.run_path(str(CHECK_TASK_SECRETS))
+    return set(script["APP_SECRETS"]), set(script["FULL_ONLY_SECRETS"])
 
 
 @pytest.mark.unit

@@ -443,33 +443,31 @@ jobs:
       # no .env file: they are the only way the container gets a real value for
       # a setting whose default the production settings classes REFUSE. A
       # missing one is not a degraded deployment, it is a container that exits
-      # before uvicorn binds. One describe-secret each turns that into a name.
-      - name: Required secrets exist for this profile
+      # before uvicorn binds.
+      #
+      # Checked by the reference ECS will use, not by name (#636): each
+      # family's newest revision is what register_task_definition.sh copies,
+      # and its secrets[].valueFrom is what ECS hands to GetSecretValue. A
+      # partial ARN (one that stops at the name) is refused before any
+      # Secrets Manager call; every other reference is described by its
+      # complete ARN. Only secret NAMES are printed: a reference carries the
+      # account ID, and the script masks every one before printing anything.
+      # The profile's secrets (jwt-secret and first-superuser-password, plus
+      # audit-hmac-key on full) must be referenced by both app families. No
+      # db-password: the database credentials are the secret the database
+      # stack generated for Aurora (#78), checked here like any other
+      # reference. No Redis secret: the API task takes REDIS_HOST/REDIS_PORT
+      # from the Redis stack (#147).
+      - name: Every secret the task definitions reference exists
         run: |
           set -euo pipefail
-          # No db-password: the database credentials are the secret the
-          # database stack generated for Aurora, read by the task definitions
-          # directly (#78). No Redis secret: the API task takes
-          # REDIS_HOST/REDIS_PORT from the Redis stack (#147).
-          required=(jwt-secret first-superuser-password)
-          if [ "${PROFILE}" = "full" ]; then
-            # Only the modules read it, and modules.register(hooks) builds
-            # their settings first: without it the registration fails, the API
-            # refuses to start (abort_if_modules_broken) and every alembic
-            # command fails with it (require_modules_or_absent).
-            required+=(audit-hmac-key)
-          fi
-          missing=()
-          for name in "${required[@]}"; do
-            aws secretsmanager describe-secret \
-              --secret-id "${SECRETS_PREFIX}/${name}" >/dev/null 2>&1 \
-              || missing+=("${SECRETS_PREFIX}/${name}")
-          done
-          if [ "${#missing[@]}" -gt 0 ]; then
-            echo "::error::profile=${PROFILE} needs these AWS Secrets Manager secrets and they do not exist: ${missing[*]}. Create them first: docs/deployment/secrets-management.md."
-            exit 1
-          fi
-          echo "profile=${PROFILE}: all ${#required[@]} required secrets exist"
+          python3 scripts/check_task_secrets.py \
+            --secrets-prefix "$SECRETS_PREFIX" \
+            --profile "$PROFILE" \
+            --region "$AWS_REGION" \
+            --app-family "$ECS_BACKEND_TASK_FAMILY" \
+            --app-family "$MIGRATE_TASK_FAMILY" \
+            --family "$ECS_DASHBOARD_TASK_FAMILY"
 
       # Nothing in the CDK creates these repositories -- the stacks import them
       # by name -- so each is created once per account by hand (deployment
