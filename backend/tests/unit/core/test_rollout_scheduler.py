@@ -70,6 +70,7 @@ class TestRolloutScheduler:
         mock_query = MagicMock()
         mock_session.query.return_value = mock_query
         mock_query.filter.return_value = mock_query
+        mock_query.order_by.return_value = mock_query
         mock_query.all.return_value = []
 
         # Create scheduler and process
@@ -109,6 +110,7 @@ class TestRolloutScheduler:
         mock_schedules_query = MagicMock()
         mock_session.query.return_value = mock_schedules_query
         mock_schedules_query.filter.return_value = mock_schedules_query
+        mock_schedules_query.order_by.return_value = mock_schedules_query
         mock_schedules_query.all.return_value = [mock_schedule]
 
         mock_active_stage_query = MagicMock()
@@ -202,6 +204,7 @@ class TestRolloutScheduler:
         mock_schedules_query = MagicMock()
         mock_session.query.return_value = mock_schedules_query
         mock_schedules_query.filter.return_value = mock_schedules_query
+        mock_schedules_query.order_by.return_value = mock_schedules_query
         mock_schedules_query.all.return_value = [mock_schedule]
 
         mock_active_stage_query = MagicMock()
@@ -292,6 +295,7 @@ class TestRolloutScheduler:
         mock_schedules_query = MagicMock()
         mock_session.query.return_value = mock_schedules_query
         mock_schedules_query.filter.return_value = mock_schedules_query
+        mock_schedules_query.order_by.return_value = mock_schedules_query
         mock_schedules_query.all.return_value = [mock_schedule]
 
         mock_active_stage_query = MagicMock()

@@ -142,6 +142,11 @@ class RolloutScheduler:
                         ),
                     )
                 )
+                # A fixed processing order, oldest schedule first: the logs of
+                # one tick read the same way every time, and a schedule's turn
+                # does not depend on the table's physical row order.
+                # created_at has a server default; id breaks ties.
+                .order_by(RolloutSchedule.created_at, RolloutSchedule.id)
                 .all()
             )
 

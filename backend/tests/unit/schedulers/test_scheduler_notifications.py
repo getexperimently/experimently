@@ -396,6 +396,7 @@ class TestRolloutSchedulerNotifications:
 
         schedules_query = MagicMock()
         schedules_query.filter.return_value = schedules_query
+        schedules_query.order_by.return_value = schedules_query
         schedules_query.all.return_value = [mock_schedule]
         active_query = MagicMock()
         active_query.filter.return_value = active_query

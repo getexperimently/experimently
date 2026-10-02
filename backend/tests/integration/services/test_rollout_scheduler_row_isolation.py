@@ -18,8 +18,8 @@ start of the active stage, before anything is changed.
 The refusal below is a real constraint error from PostgreSQL: a
 ``before_update`` listener, scoped to the test, puts an out-of-range
 ``target_percentage`` on a stage of the first of this test's schedules the
-tick reaches (``check_target_percentage``). It picks the first one at run
-time because the scheduler's query has no ORDER BY.
+tick reaches (``check_target_percentage``). The scheduler processes
+schedules oldest first; the tests that need an order set ``created_at``.
 
 The database is shared with other tests, so the tick's own counts are not
 asserted; each test reads back the rows it created.
@@ -76,6 +76,7 @@ def _schedule(
     stages: List[dict],
     min_stage_duration: Optional[int] = None,
     flag_percentage: int = 10,
+    created_at: Optional[datetime] = None,
 ):
     """Create a flag, an ACTIVE schedule for it and its stages.
 
@@ -98,6 +99,8 @@ def _schedule(
             status=RolloutScheduleStatus.ACTIVE,
             min_stage_duration=min_stage_duration,
         )
+        if created_at is not None:
+            schedule.created_at = created_at
         session.add(schedule)
         session.flush()
         stage_rows = []
@@ -120,11 +123,12 @@ def _schedule(
         session.close()
 
 
-def _completing(db_session):
+def _completing(db_session, **kwargs):
     """A schedule whose only stage is due to complete, which completes the
     schedule. Its changes are committed by the per-schedule commit."""
     return _schedule(
         db_session,
+        **kwargs,
         stages=[
             {
                 "percentage": 100,
@@ -135,11 +139,12 @@ def _completing(db_session):
     )
 
 
-def _two_stage(db_session, *, min_stage_duration):
+def _two_stage(db_session, *, min_stage_duration, **kwargs):
     """Stage 1 (10%) started 30 hours ago and is due to complete; stage 2
     (50%) is pending with no start date, so it may start at once."""
     return _schedule(
         db_session,
+        **kwargs,
         min_stage_duration=min_stage_duration,
         stages=[
             {
@@ -310,9 +315,19 @@ def test_one_refused_stage_start_rolls_back_only_that_schedule(
 def test_a_schedule_waiting_for_min_stage_duration_changes_nothing(db_session):
     """Two schedules that must wait (stage 1 started 30 hours ago, 48 hours
     required), then one that completes and commits. The waiting schedules'
-    stage 1 is not marked COMPLETED by that later commit."""
-    waiting = [_two_stage(db_session, min_stage_duration=48) for _ in range(2)]
-    committer = _completing(db_session)
+    stage 1 is not marked COMPLETED by that later commit.
+
+    The committer is the newest of the three, so the scheduler (oldest first)
+    reaches it after the waiting ones: the order the old code needed to show
+    the defect."""
+    now = datetime.now(timezone.utc)
+    waiting = [
+        _two_stage(
+            db_session, min_stage_duration=48, created_at=now - timedelta(hours=2)
+        )
+        for _ in range(2)
+    ]
+    committer = _completing(db_session, created_at=now - timedelta(hours=1))
 
     _tick(db_session)
 
@@ -346,19 +361,17 @@ def test_a_met_min_stage_duration_advances_in_one_tick(db_session):
     )
 
 
-def test_a_schedule_whose_commit_fails_leaves_nothing_for_the_next_commit(
-    db_session,
-):
-    """The database accepts a schedule's writes but its commit fails. Its
-    changes are rolled back, not committed by the next schedule's commit."""
+def _tick_with_failing_commit(db_session, schedule_ids):
+    """One tick in which the commit of the first of these schedules the tick
+    writes fails after the database accepted its writes. Returns that
+    schedule's id and the notification mock."""
     from backend.app.core.rollout_scheduler import RolloutScheduler
 
-    rows = [_completing(db_session) for _ in range(3)]
-    by_schedule = {schedule_id: (f, schedule_id, s) for f, schedule_id, s in rows}
+    ours = set(schedule_ids)
     state = {"target": None, "raised": False}
 
     def before_update(mapper, connection, target):
-        if target.rollout_schedule_id in by_schedule and state["target"] is None:
+        if target.rollout_schedule_id in ours and state["target"] is None:
             state["target"] = target.rollout_schedule_id
 
     make_session = _factory(db_session)
@@ -389,7 +402,19 @@ def test_a_schedule_whose_commit_fails_leaves_nothing_for_the_next_commit(
         event.remove(RolloutStage, "before_update", before_update)
 
     assert state["raised"], "the tick never reached this test's schedules"
-    target = state["target"]
+    return state["target"], scheduler._notification_service
+
+
+def test_a_schedule_whose_commit_fails_leaves_nothing_for_the_next_commit(
+    db_session,
+):
+    """The database accepts a schedule's writes but its commit fails. Its
+    changes are rolled back, not committed by the next schedule's commit."""
+    rows = [_completing(db_session) for _ in range(3)]
+    by_schedule = {schedule_id: (f, schedule_id, s) for f, schedule_id, s in rows}
+
+    target, _ = _tick_with_failing_commit(db_session, by_schedule)
+
     for schedule_id, row in by_schedule.items():
         if schedule_id == target:
             assert _state(db_session, *row) == (
@@ -402,4 +427,35 @@ def test_a_schedule_whose_commit_fails_leaves_nothing_for_the_next_commit(
                 10,
                 RolloutScheduleStatus.COMPLETED,
                 [RolloutStageStatus.COMPLETED],
+            )
+
+
+def test_a_stage_start_whose_commit_fails_sends_no_notification(db_session):
+    """Stage 2 is started (flag 10 -> 50) but the schedule's commit fails. No
+    "rollout advanced" notification goes out for it, and nothing of it is
+    kept; the other schedules advance and are notified."""
+    rows = [_two_stage(db_session, min_stage_duration=None) for _ in range(3)]
+    by_schedule = {schedule_id: (f, schedule_id, s) for f, schedule_id, s in rows}
+
+    target, notifications = _tick_with_failing_commit(db_session, by_schedule)
+
+    notified = {
+        c.kwargs["feature_flag_id"]
+        for c in notifications.notify_rollout_advanced.call_args_list
+    }
+    for schedule_id, row in by_schedule.items():
+        flag_id = str(row[0])
+        if schedule_id == target:
+            assert flag_id not in notified, "notified for an uncommitted change"
+            assert _state(db_session, *row) == (
+                10,
+                RolloutScheduleStatus.ACTIVE,
+                [RolloutStageStatus.IN_PROGRESS, RolloutStageStatus.PENDING],
+            )
+        else:
+            assert flag_id in notified
+            assert _state(db_session, *row) == (
+                50,
+                RolloutScheduleStatus.ACTIVE,
+                [RolloutStageStatus.COMPLETED, RolloutStageStatus.IN_PROGRESS],
             )
