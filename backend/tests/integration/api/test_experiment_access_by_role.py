@@ -105,6 +105,7 @@ ROUTES = {
     # holds for everyone the role check admits.
     "delete_active": ("DELETE", "?experiment_key={id}", None, ExperimentStatus.ACTIVE),
     "schedule_active": ("PUT", "/schedule", _schedule_body, ExperimentStatus.ACTIVE),
+    "update_active": ("PUT", "", {"name": "renamed"}, ExperimentStatus.ACTIVE),
 }
 
 
@@ -149,11 +150,15 @@ EXPECTED = {
     # (DELETE_ACTIVE_DETAIL), so a refusal from the wrong check fails there.
     "delete_active": _row(400),
     "schedule_active": _row(400),
+    # The same for an update outside DRAFT (#602), except that the superuser
+    # passes the non-draft guard and renames it.
+    "update_active": {**_row(400), "superuser": 200},
 }
 
 NOT_DRAFT = "Cannot delete experiments that are not in DRAFT status"
 CANNOT_DELETE = "You don't have permission to delete experiments"
 CANNOT_VIEW = "You don't have permission to view experiments"
+CANNOT_UPDATE = "You don't have permission to update experiments"
 
 #: delete_active: the refusal each signed-in caller gets.
 DELETE_ACTIVE_DETAIL = {
@@ -167,6 +172,25 @@ DELETE_ACTIVE_DETAIL = {
     "viewer_own": CANNOT_DELETE,
     "viewer_other": CANNOT_DELETE,
     "analyst_own_without_read": CANNOT_VIEW,
+}
+
+#: update_active: the refusal each signed-in caller but the superuser gets.
+UPDATE_ACTIVE_DETAIL = {
+    "admin_own": "Cannot update experiments in active status",
+    "admin_other": "Cannot update experiments in active status",
+    "developer_own": "Cannot update experiments in active status",
+    "developer_other": "Cannot update experiments in active status",
+    "analyst_own": CANNOT_UPDATE,
+    "analyst_other": CANNOT_UPDATE,
+    "viewer_own": CANNOT_UPDATE,
+    "viewer_other": CANNOT_UPDATE,
+    "analyst_own_without_read": CANNOT_VIEW,
+}
+
+#: row -> the detail asserted in each of its cells that has one.
+ROW_DETAIL = {
+    "delete_active": DELETE_ACTIVE_DETAIL,
+    "update_active": UPDATE_ACTIVE_DETAIL,
 }
 
 READ_ROUTES = ["results", "daily_results", "segmented_results"]
@@ -366,13 +390,14 @@ def _without_read(monkeypatch, column):
 
 
 def test_the_matrix_is_the_size_it_says():
-    """15 routes by 11 callers, and 3 by 11 with the cache on."""
-    assert len(ROUTES) == len(EXPECTED) == 15
+    """16 routes by 11 callers, and 3 by 11 with the cache on."""
+    assert len(ROUTES) == len(EXPECTED) == 16
     assert all(list(cells) == COLUMNS for cells in EXPECTED.values())
     assert len(COLUMNS) == 11
-    assert len(CELLS) == 165
+    assert len(CELLS) == 176
     assert len(CACHED_CELLS) == 33
     assert set(DELETE_ACTIVE_DETAIL) == set(CALLERS)
+    assert set(UPDATE_ACTIVE_DETAIL) == set(CALLERS) - {"superuser"}
 
 
 @pytest.mark.parametrize(("row", "column"), CELLS, ids=[f"{r}-{c}" for r, c in CELLS])
@@ -387,8 +412,8 @@ def test_status_by_route_and_caller(
     response = _request(client, row, experiment_id, headers)
 
     assert response.status_code == EXPECTED[row][column], response.text
-    if row == "delete_active" and column in DELETE_ACTIVE_DETAIL:
-        assert response.json()["detail"] == DELETE_ACTIVE_DETAIL[column]
+    if column in ROW_DETAIL.get(row, {}):
+        assert response.json()["detail"] == ROW_DETAIL[row][column]
     _assert_effect(db_session, row, experiment_id, response, caller, owner)
 
 
@@ -404,6 +429,12 @@ def _assert_effect(db_session, row, experiment_id, response, caller, owner):
         assert audit is not None, "no audit record of the delete"
         assert audit.actor_id == caller.id
         assert audit.old_value["owner_id"] == str(owner.id)
+    elif row == "update_active":
+        renamed = stored.name == "renamed"
+        assert renamed == (response.status_code == 200), (
+            response.status_code,
+            stored.name,
+        )
     elif row in ("schedule", "schedule_active", "delete", "delete_active"):
         # A refusal changes nothing.
         assert stored is not None

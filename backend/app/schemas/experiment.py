@@ -526,6 +526,13 @@ NOT_NULL_UPDATE_FIELDS = (
 )
 
 
+#: The one message for a ``schedule`` sent to ``PUT /experiments/{id}`` (#595).
+SCHEDULE_ON_UPDATE_REFUSED = (
+    "schedule is not applied by this endpoint; use "
+    "PUT /api/v1/experiments/{experiment_id}/schedule"
+)
+
+
 class ExperimentUpdate(BaseModel):
     """Model for updating an experiment.
 
@@ -563,8 +570,17 @@ class ExperimentUpdate(BaseModel):
         None, description="Experiment variants"
     )
     metrics: Optional[List[MetricBase]] = Field(None, description="Metrics to track")
+    # Declared only so a request carrying it is refused (#595). Without the
+    # declaration pydantic's default ``extra="ignore"`` would drop the key and
+    # answer 200, which is the defect: the update never applied a schedule.
     schedule: Optional[ScheduleConfig] = Field(
-        None, description="Scheduling configuration for automatic activation/completion"
+        None,
+        description=(
+            "Not accepted. A request that contains `schedule`, with any value "
+            "including null, is refused with 422. Schedule an experiment with "
+            "`PUT /api/v1/experiments/{experiment_id}/schedule`."
+        ),
+        json_schema_extra={"deprecated": True},
     )
 
     # EP-021: Sequential testing
@@ -628,6 +644,18 @@ class ExperimentUpdate(BaseModel):
                 "null_not_allowed", f"{info.field_name} cannot be null"
             )
         return value
+
+    @field_validator("schedule", mode="before")
+    @classmethod
+    def refuse_schedule(cls, value: Any) -> Any:
+        """Refuse ``schedule`` on presence, whatever its value (#595).
+
+        A ``before`` validator runs before ``ScheduleConfig`` is validated, so
+        a valid schedule, an invalid one, ``{}`` and null all get this one
+        message, and nothing in it comes from the value. It does not run when
+        the key is absent: pydantic does not validate a default.
+        """
+        raise PydanticCustomError("value_error", SCHEDULE_ON_UPDATE_REFUSED)
 
     @field_validator("targeting_rules")
     @classmethod
