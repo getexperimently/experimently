@@ -1,6 +1,6 @@
 # AWS Integration
 
-The platform is designed to run natively on AWS. This document describes how each AWS service is used and how to configure the integration.
+Experimently works with AWS. This document describes how each AWS service is used and how to configure the integration.
 
 ---
 

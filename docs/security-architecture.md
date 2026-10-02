@@ -88,7 +88,7 @@ Not in that picture, because nothing deploys it:
 
 ### At Rest
 - **Aurora PostgreSQL**: AES-256 encryption via AWS KMS
-- **DynamoDB**: AWS-managed encryption (AES-256)
+- **DynamoDB**: encrypted at rest (AES-256) with an AWS owned key, the DynamoDB default; the CDK stack sets no table encryption
 - **S3 Data Lake**: SSE-S3 or SSE-KMS encryption
 - **Redis (ElastiCache)**: At-rest encryption enabled
 

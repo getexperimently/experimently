@@ -9,7 +9,7 @@
 
 ## 1. System Overview
 
-Experimently is an AWS-hosted A/B testing and feature flag management service. It enables product teams to run controlled experiments, gradually roll out features, and evaluate results through a statistical engine.
+Experimently is self-hosted A/B testing and feature-flag software. Its reference deployment is a CDK app that runs in the operator's own AWS account (ECS Fargate, Aurora PostgreSQL, ElastiCache); it also runs as a Docker Compose stack. It enables product teams to run controlled experiments, gradually roll out features, and evaluate results through a statistical engine.
 
 ### Primary Assets
 

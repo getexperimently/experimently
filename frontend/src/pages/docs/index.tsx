@@ -6,9 +6,9 @@ const sections = [
   {
     category: 'Getting Started',
     icon: '🚀',
-    description: 'Get up and running in under 10 minutes.',
+    description: 'Run the stack and create your first experiment.',
     links: [
-      { label: 'Quick Start', href: docsUrl('getting-started/quick-start'), desc: 'Create your first experiment in minutes' },
+      { label: 'Quick Start', href: docsUrl('getting-started/quick-start'), desc: 'Run the stack and create your first experiment' },
       { label: 'Core Concepts', href: docsUrl('getting-started/concepts'), desc: 'Feature flags, experiments, variants, and metrics' },
       { label: 'Architecture Overview', href: docsUrl('getting-started/architecture'), desc: 'How Experimently works under the hood' },
       { label: 'FAQ', href: docsUrl('getting-started/faq'), desc: 'Common questions answered' },
@@ -32,12 +32,12 @@ const sections = [
     description: 'Design, run, and analyze experiments with statistical rigour.',
     links: [
       { label: 'Running Experiments', href: docsUrl('guides/user-guide'), desc: 'End-to-end experiment lifecycle' },
-      { label: 'Statistical Methods', href: docsUrl('api/sequential-testing'), desc: 'Frequentist, Bayesian, sequential testing' },
+      { label: 'Statistical Methods', href: docsUrl('api/sequential-testing'), desc: 'Sequential testing with mSPRT' },
       { label: 'CUPED Variance Reduction', href: docsUrl('api/cuped'), desc: 'Beta: variance reduction; the covariate is not yet a pre-experiment metric' },
       { label: 'Multi-Armed Bandits', href: docsUrl('api/multi-armed-bandit'), desc: 'Thompson Sampling, UCB1, Epsilon-Greedy' },
-      { label: 'Split URL Testing', href: docsUrl('api/split-url'), desc: 'Server-side URL splitting via Lambda@Edge' },
+      { label: 'Split URL Testing', href: docsUrl('api/split-url'), desc: 'Full profile: send each variant to a different URL. The Lambda@Edge router is a construct you deploy yourself.' },
       { label: 'Mutual Exclusion Groups', href: docsUrl('api/mutual-exclusion-groups'), desc: 'Prevent cross-experiment contamination' },
-      { label: 'Live Results Streaming', href: docsUrl('websocket-streaming'), desc: 'Real-time experiment results via WebSocket — p-values, lift, and significance updated live.' },
+      { label: 'Live Results Streaming', href: docsUrl('websocket-streaming'), desc: 'Experiment results pushed over WebSocket every 30 seconds by default: p-values, lift and significance.' },
     ],
   },
   {
@@ -46,30 +46,30 @@ const sections = [
     description: 'Compare prompt versions, model variants, and agent configs against real business metrics.',
     links: [
       { label: 'Overview', href: docsUrl('llm-evaluation/overview'), desc: 'What LLM evaluation is and why it matters' },
-      { label: 'Quick Start', href: docsUrl('llm-evaluation/quickstart'), desc: 'Compare GPT-4o vs Claude Sonnet in 5 minutes' },
+      { label: 'Quick Start', href: docsUrl('llm-evaluation/quickstart'), desc: 'Compare GPT-4o with Claude 3.5 Sonnet (steps 3–5 need provider API keys)' },
     ],
   },
   {
     category: 'SDKs',
     icon: '📦',
-    description: 'Client libraries for 14 languages and frameworks — from web to mobile to server.',
+    description: 'MIT-licensed client libraries for web, mobile and server.',
     links: [
       { label: 'JavaScript SDK', href: docsUrl('sdk/javascript'), desc: 'Browser and Node.js' },
       { label: 'Python SDK', href: docsUrl('sdk-guide'), desc: 'Server-side Python integration' },
-      { label: 'Java SDK', href: docsUrl('sdk/java'), desc: 'Spring Boot auto-configuration, consistent hash bucketing' },
+      { label: 'Java SDK', href: docsUrl('sdk/java'), desc: 'Spring Boot 3 auto-configuration starter; thread-safe client with a TTL cache' },
       { label: 'React SDK', href: docsUrl('sdk/react'), desc: 'Hooks, HOC, SSR support via ServerClient' },
       { label: 'Go SDK', href: docsUrl('sdk/go'), desc: 'Native Go client for microservices and CLIs. Zero dependencies, context-aware, goroutine-safe.' },
       { label: 'iOS Swift SDK', href: docsUrl('sdk/ios'), desc: 'Native Swift SDK for iOS 14+ and macOS 11+. Async/await API, offline fallback.' },
       { label: 'Android Kotlin SDK', href: docsUrl('sdk/android'), desc: 'Native Kotlin SDK for Android (minSdk 21). Coroutines, OkHttp, Compose examples.' },
-      { label: 'Flutter SDK', href: docsUrl('sdk/flutter'), desc: 'Dart SDK for Flutter (iOS, Android, Web, Desktop). Offline fallback, consistent hashing.' },
+      { label: 'Flutter SDK', href: docsUrl('sdk/flutter'), desc: 'Dart SDK for Flutter (iOS, Android, web and desktop). Results are decided by the server, with an offline fallback.' },
       { label: 'React Native SDK', href: docsUrl('sdk/react-native'), desc: 'useFlag and useExperiment hooks, Provider, AsyncStorage offline support.' },
-      { label: 'MCP Server', href: docsUrl('mcp-server'), desc: 'AI-powered experiment design via Model Context Protocol' },
-      { label: 'OpenFeature Provider', href: docsUrl('sdk/openfeature'), desc: 'CNCF-standard OpenFeature provider for TypeScript and Python — swap vendors without changing app code' },
-      { label: 'Edge SDK', href: docsUrl('sdk/edge'), desc: 'Sub-millisecond evaluation for Cloudflare Workers, Vercel Edge, and Deno Deploy — zero Node.js dependencies, pure-JS MD5 consistent hash' },
-      { label: 'Ruby SDK', href: docsUrl('sdk/ruby'), desc: 'Native Ruby gem, zero runtime dependencies, thread-safe Mutex TTL cache, Net::HTTP, consistent MD5 hash.' },
-      { label: 'PHP SDK', href: docsUrl('sdk/php'), desc: 'Composer package (ext-json + ext-curl only), PSR-compatible, consistent MD5 hash bucketing.' },
+      { label: 'MCP tool manifest', href: docsUrl('mcp-server'), desc: "Describes the API's tools for AI assistants." },
+      { label: 'OpenFeature Provider', href: docsUrl('sdk/openfeature'), desc: 'OpenFeature (a CNCF project) providers for TypeScript and Python — change flag vendors without changing app code' },
+      { label: 'Edge SDK', href: docsUrl('sdk/edge'), desc: 'For Cloudflare Workers, Vercel Edge and Deno Deploy. Zero runtime dependencies; results cached in memory or KV.' },
+      { label: 'Ruby SDK', href: docsUrl('sdk/ruby'), desc: 'Ruby gem with zero runtime dependencies, a thread-safe TTL cache and Net::HTTP.' },
+      { label: 'PHP SDK', href: docsUrl('sdk/php'), desc: 'Composer package (ext-json and ext-curl only) with PSR-4 autoloading.' },
       { label: '.NET SDK', href: docsUrl('sdk/dotnet'), desc: 'netstandard2.1 + net6.0, System.Text.Json, HttpClient, LRU cache with TTL, xUnit-tested.' },
-      { label: 'Elixir SDK', href: docsUrl('sdk/elixir'), desc: 'Hex package with :httpc + Jason, GenServer-backed ETS cache, OTP-compatible, 93 ExUnit tests.' },
+      { label: 'Elixir SDK', href: docsUrl('sdk/elixir'), desc: "Hex package using OTP's :httpc and Jason, with a GenServer-backed ETS cache." },
     ],
   },
   {
@@ -80,7 +80,7 @@ const sections = [
       { label: 'Authentication', href: docsUrl('api/auth'), desc: 'API keys and JWT tokens' },
       { label: 'Experiments', href: docsUrl('api/endpoints'), desc: 'CRUD, scheduling, results' },
       { label: 'Feature Flags', href: docsUrl('api/endpoints'), desc: 'Flags, rollouts, evaluation' },
-      { label: 'Compliance & Audit', href: docsUrl('api/compliance'), desc: 'Audit events, SOC 2 / ISO 27001 reports, export' },
+      { label: 'Compliance & Audit', href: docsUrl('api/compliance'), desc: 'Full profile: signed audit events and evidence-report export' },
       { label: 'Integrations', href: docsUrl('api/integrations'), desc: 'Jira, Salesforce, GitHub webhooks' },
       { label: 'All Endpoints', href: docsUrl('api/endpoints'), desc: 'Complete endpoint reference' },
     ],
@@ -90,7 +90,7 @@ const sections = [
     icon: '🔌',
     description: 'Connect Experimently to your existing data stack.',
     links: [
-      { label: 'AWS', href: docsUrl('integrations/aws'), desc: 'ECS, Lambda, CloudFront, DynamoDB' },
+      { label: 'AWS', href: docsUrl('integrations/aws'), desc: 'ECS Fargate, Aurora, ElastiCache, DynamoDB and Lambda' },
       { label: 'Jira', href: docsUrl('api/integrations'), desc: 'Sync experiment status, auto-create issues' },
       { label: 'Salesforce', href: docsUrl('integrations/salesforce'), desc: 'OAuth2 integration, webhook sync' },
       { label: 'GitHub', href: docsUrl('integrations/github'), desc: 'HMAC-signed webhooks, PR linking' },
@@ -103,20 +103,20 @@ const sections = [
     description: 'Security, audit logging, and compliance reports.',
     links: [
       { label: 'Compliance audit logging', href: docsUrl('api/compliance'), desc: 'Signed audit events and report export' },
-      { label: 'ISO 27001', href: docsUrl('api/compliance'), desc: 'ISO 27001 compliance report export' },
-      { label: 'Audit Logging', href: docsUrl('api/audit-logging'), desc: 'HMAC-SHA256 tamper-proof audit trail' },
+      { label: 'Compliance evidence', href: docsUrl('api/compliance'), desc: 'Full profile: evidence reports for your own audit programme' },
+      { label: 'Audit Logging', href: docsUrl('api/audit-logging'), desc: 'Append-only record of feature-flag status changes' },
       { label: 'RBAC', href: docsUrl('api/rbac'), desc: 'Role-based access control: Admin, Developer, Analyst, Viewer' },
-      { label: 'API Key Management', href: docsUrl('security/api-keys'), desc: 'Scoped keys, rotation, revocation' },
+      { label: 'API Key Management', href: docsUrl('security/api-keys'), desc: 'Create, expire and delete keys; the sdk:ruleset scope for local evaluation' },
       { label: 'SSO / SAML / OIDC', href: docsUrl('auth/sso'), desc: 'OIDC/OAuth2 for Okta, Google Workspace and GitHub. SAML 2.0 sign-in is not available yet; use OIDC.' },
-      { label: 'HIPAA Compliance', href: docsUrl('hipaa/overview'), desc: 'PHI encryption (Fernet AES-128-CBC), 6-year audit retention, BAA management, data residency.' },
+      { label: 'HIPAA controls', href: docsUrl('hipaa/overview'), desc: 'Full profile: PHI encryption (Fernet), a 6-year retention marker on PHI audit records, BAA records and a data-residency region check.' },
     ],
   },
   {
     category: 'Self-Hosting',
     icon: '🏗️',
-    description: 'Deploy Experimently to your own AWS account.',
+    description: 'Run Experimently yourself: a CDK app that works with AWS, or Docker Compose on one machine.',
     links: [
-      { label: 'AWS CDK Deployment', href: docsUrl('self-hosting/cdk'), desc: 'One-command CDK deploy to ECS Fargate' },
+      { label: 'AWS CDK Deployment', href: docsUrl('self-hosting/cdk'), desc: 'CDK app for ECS Fargate, Aurora and ElastiCache' },
       { label: 'Docker Compose', href: docsUrl('getting-started/docker-guide'), desc: 'Local development setup' },
       { label: 'Environment Variables', href: docsUrl('getting-started/environment-setup'), desc: 'Configuration reference' },
       { label: 'Database Migrations', href: docsUrl('self-hosting/migrations'), desc: 'Alembic migration guide' },
@@ -149,14 +149,14 @@ const sections = [
     icon: 'W',
     description: 'Group members into teams, projects or product areas with workspace roles. Workspaces do not limit access to experiments or flags; that is by platform role.',
     links: [
-      { label: 'Workspace Overview', href: docsUrl('workspaces/overview'), desc: 'What workspaces do and do not do, workspace roles, plan limits' },
+      { label: 'Workspace Overview', href: docsUrl('workspaces/overview'), desc: 'What workspaces do and do not do, workspace roles, member and API-key limits' },
       { label: 'Quickstart', href: docsUrl('workspaces/quickstart'), desc: 'Create a workspace, invite your team, and connect an SDK' },
     ],
   },
 ];
 
 const quickLinks = [
-  { label: '5-minute Quick Start', href: docsUrl('getting-started/quick-start'), color: 'bg-blue-600 hover:bg-blue-700 text-white' },
+  { label: 'Quick Start', href: docsUrl('getting-started/quick-start'), color: 'bg-blue-600 hover:bg-blue-700 text-white' },
   { label: 'API Reference', href: docsUrl('api/endpoints'), color: 'bg-gray-900 hover:bg-gray-800 text-white' },
   { label: 'SDK Guides', href: docsUrl('sdk/javascript'), color: 'bg-white hover:bg-gray-50 text-gray-900 border border-gray-200' },
 ];
@@ -166,7 +166,7 @@ export default function DocsIndex() {
     <>
       <PageTitle
         title="Documentation"
-        description="Experimently documentation: quick start, 14 SDK guides, API reference, integrations, HIPAA compliance, and self-hosting."
+        description="Experimently documentation: quick start, a guide for every SDK, API reference, integrations, HIPAA controls and self-hosting."
       />
 
       <div className="flex-1 bg-white">
@@ -202,7 +202,7 @@ export default function DocsIndex() {
             <svg className="w-4 h-4 text-gray-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
             </svg>
-            <a href={docsUrl('')} target="_blank" rel="noreferrer" className="text-sm text-gray-500 hover:text-gray-700">Search the documentation site →</a>
+            <a href={docsUrl('')} target="_blank" rel="noreferrer" className="text-sm text-gray-500 hover:text-gray-700">Browse the documentation →</a>
           </div>
         </div>
 
@@ -261,7 +261,7 @@ export default function DocsIndex() {
             </div>
             <div className="border-t border-gray-800 mt-8 pt-8">
               <p className="text-gray-500 text-sm text-center">
-                © 2026 Experimently. All rights reserved.
+                © 2024–2026 Experimently. Apache-2.0; SDKs MIT.
               </p>
             </div>
           </div>
