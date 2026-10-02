@@ -36,13 +36,14 @@ def _function(name: str) -> str:
 def test_this_prs_revisions_are_read_by_image_id_before_the_pull():
     body = _function("do_upgrade_previous")
     read_this = body.find('revisions "$this_api" >"$WORK/revisions-this"')
-    first_pull = body.find("docker pull")
+    # The pull is pull_anonymously (test_chart_kind_previous_public.py).
+    first_pull = body.find("pull_anonymously ")
     assert read_this != -1, (
         "this PR's revisions are not read from the recorded image ID"
     )
     assert first_pull != -1, "the N-1 pull is gone: re-check what this test pins"
     assert read_this < first_pull, (
-        "this PR's revisions are read after `docker pull`, which can move the "
+        "this PR's revisions are read after the N-1 pull, which can move the "
         "tag they would be read through onto N-1's image"
     )
     assert "sed -n 's/^api=//p' \"$WORK/images.txt\"" in body

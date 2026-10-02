@@ -8,7 +8,8 @@ name: Compose Production
 # On a pull request the images are THIS change's core builds, retagged to the
 # published names the compose file resolves to. That proves the file's shape
 # and the images' behaviour under it, not the published bytes: nothing here
-# pulls from ghcr.io (`--pull never`), and the packages are private until D19.
+# pulls from ghcr.io (`--pull never`), by design, since the published images
+# are the previous release's and this job tests this change's.
 #
 # Not a required check (yet): it is path-filtered, and a required check that
 # does not report blocks a pull request for ever.
