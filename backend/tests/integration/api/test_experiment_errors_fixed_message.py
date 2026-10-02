@@ -247,10 +247,6 @@ def _plant_bayesian(monkeypatch):
     monkeypatch.setattr(AnalysisService, "compute_bayesian_results", _boom)
 
 
-def _plant_sample_size_service(monkeypatch):
-    monkeypatch.setattr(AnalysisService, "get_sample_size_status", _boom, raising=False)
-
-
 def _patch(target: Any, name: str) -> Callable:
     def plant(monkeypatch):
         monkeypatch.setattr(target, name, _boom)
@@ -449,12 +445,13 @@ RESULTS_CASES = {
         _patch(results_endpoints, "SampleSizeResult"),
         "Could not compute the sample size",
     ),
-    "sample_size_service": Case(
+    # A fault while working out the plan, past the existence check.
+    "sample_size_counts": Case(
         "GET",
         "/results/{id}/sample-size",
         "viewer",
         ExperimentStatus.ACTIVE,
-        _plant_sample_size_service,
+        _patch(AnalysisService, "_ordered_metrics"),
         "Could not compute the sample size",
     ),
     "cuped": Case(
