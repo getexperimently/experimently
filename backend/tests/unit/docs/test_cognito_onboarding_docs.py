@@ -26,6 +26,7 @@ Walks the filesystem rather than asking git, so it also runs in the
 
 from __future__ import annotations
 
+import ast
 import json
 import os
 import re
@@ -43,6 +44,7 @@ pytestmark = [pytest.mark.unit, pytest.mark.regression]
 REPO_ROOT = Path(__file__).resolve().parents[4]
 DOCS = REPO_ROOT / "docs"
 PAGE = DOCS / "cognito_integration.md"
+AUTH_SERVICE = "backend/app/services/auth_service.py"
 
 SETTING = "COGNITO_SELF_SIGNUP_ENABLED"
 ADDING = "Adding a user"
@@ -163,17 +165,38 @@ def test_the_section_keeps_its_heading_and_says_what_it_is():
     assert "adding-a-user" in {slugify(t) for _, t in headings(PAGE.read_text())}
 
 
+def _new_password_detail() -> str:
+    """``NEW_PASSWORD_REQUIRED_DETAIL`` from auth_service.py, read with ``ast``
+    (this test imports no application code)."""
+    tree = ast.parse((REPO_ROOT / AUTH_SERVICE).read_text(encoding="utf-8"))
+    for node in tree.body:
+        if (
+            isinstance(node, ast.Assign)
+            and [getattr(t, "id", None) for t in node.targets]
+            == ["NEW_PASSWORD_REQUIRED_DETAIL"]
+            and isinstance(node.value, ast.Constant)
+        ):
+            return node.value.value
+    raise AssertionError(f"no NEW_PASSWORD_REQUIRED_DETAIL in {AUTH_SERVICE}")
+
+
 def test_the_section_explains_the_setting_and_the_temporary_password():
     text = " ".join(section(ADDING).split())
     assert f"`{SETTING}=true`" in text
     assert "`--permanent` is required." in text
-    assert "A temporary password cannot sign in through the API." in text
+    assert "A temporary password cannot sign in through the API:" in text
     assert "issues/699" in text
 
 
+def test_the_section_quotes_the_401_a_temporary_password_gets():
+    """Step 6 quotes what ``POST /auth/token`` answers, word for word."""
+    text = " ".join(section(ADDING).split())
+    detail = _new_password_detail()
+    assert f"`POST /api/v1/auth/token` answers `401` with `{detail}`" in text
+
+
 def test_the_section_names_no_server_error_status():
-    """What a temporary password gets from /token today is not the contract;
-    the procedure says it cannot sign in and names no status code."""
+    """A sign-in with a temporary password is refused with 401, not 5xx."""
     assert not re.search(r"\b5\d\d\b", section(ADDING))
 
 

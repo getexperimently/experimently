@@ -136,7 +136,9 @@ their account on the platform.
 
 6. **If the user cannot sign in with the password you set,** they still have a temporary
    password: step 3 was skipped or run without `--permanent`, or Cognito sent an invitation
-   email. A temporary password cannot sign in through the API. Run step 3 again with
+   email. A temporary password cannot sign in through the API: `POST /api/v1/auth/token`
+   answers `401` with `This user must set a new password before signing in; an
+   administrator sets one with admin-set-user-password --permanent.` Run step 3 again with
    `--permanent`. Handling the new-password step at sign-in is tracked in
    [#699](https://github.com/getexperimently/experimently/issues/699).
 
