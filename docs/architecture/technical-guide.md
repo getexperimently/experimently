@@ -734,6 +734,10 @@ POST /api/v1/tracking/track
 ```
 
 The safety monitor automatically sets `rollout_percentage=0` and creates a rollback record if the error threshold is breached.
+The rollback changes only the global rollout percentage: users matched by a targeting rule keep the rule's
+percentage, and deactivating the flag is what stops it for everyone. See
+[What a rollback changes](../feature-flags/safety.md#what-a-rollback-changes) and
+[#629](https://github.com/getexperimently/experimently/issues/629).
 
 ---
 
