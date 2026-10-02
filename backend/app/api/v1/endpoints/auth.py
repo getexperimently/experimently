@@ -44,7 +44,11 @@ from backend.app.schemas.auth import (
     UserInfoResponse,
     UserMe,
 )
-from backend.app.services.auth_service import CognitoAuthService
+from backend.app.services.auth_service import (
+    CognitoAuthService,
+    CognitoTokenRefused,
+    log_token_refused,
+)
 from backend.app.services.local_auth_service import (
     AccountLockedError,
     InvalidCredentialsError,
@@ -355,6 +359,13 @@ def get_user_info(
     try:
         response = auth_service.get_user(access_token=cognito_token)
         return response
+    except CognitoTokenRefused as refusal:
+        log_token_refused(refusal, "/auth/me")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Could not validate credentials",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,

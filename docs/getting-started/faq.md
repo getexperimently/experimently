@@ -168,15 +168,15 @@ See [Split URL Testing API](../api/split-url.md) for setup and the CDK construct
 
 The platform holds no certifications. It provides audit-trail controls that customers use as evidence in their own **SOC 2** or **ISO/IEC 27001** programs; the `compliance` module adds tamper-evident signing and report packs.
 
-Every create, update, delete, login, permission change, and data export action is recorded as a tamper-evident audit event signed with HMAC-SHA256. The signing secret is stored in AWS Secrets Manager and rotated quarterly.
+Creating, changing and deleting experiments and feature flags (and, in the full profile, warehouse connections, sources and analysis runs) is recorded in the compliance audit trail. With the `compliance` module each event is signed with HMAC-SHA256 under the `AUDIT_HMAC_KEY` setting; without it events are recorded unsigned. Logins, role changes and exports are not recorded yet.
 
 Pre-built compliance reports are available at:
-- `GET /api/v1/compliance/reports/soc2` — rolling 365-day SOC 2 report
-- `GET /api/v1/compliance/reports/iso27001` — rolling 730-day ISO 27001 report
+- `GET /api/v1/compliance/reports/soc2` — SOC 2 report, by default over the last 365 days
+- `GET /api/v1/compliance/reports/iso27001` — ISO 27001 report, by default over the last 730 days
 
 Full audit log export (JSON or CSV) is available for SIEM ingestion at `GET /api/v1/compliance/export`.
 
-See [Compliance Audit Logging API](../api/compliance.md) for full documentation.
+See [Compliance Audit Trail API](../api/compliance.md) for full documentation.
 
 ---
 

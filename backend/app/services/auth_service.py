@@ -6,13 +6,83 @@ This module provides a service for handling authentication operations using AWS 
 
 import logging
 import os
-from typing import Any, Dict
+import re
+from typing import Any, Dict, Mapping, Optional
 
 import boto3
+import jwt
 from botocore.exceptions import ClientError
 
 # Configure logging
 logger = logging.getLogger(__name__)
+
+# The record of a refused Cognito sign-in. A stdlib logger (not loguru) so the
+# refusal reason is a field on the record that operators and tests can read.
+sign_in_logger = logging.getLogger("backend.app.auth.cognito_sign_in")
+
+# A user pool ID is "<region>_<id>", for example "us-west-2_AbC123xyZ"; AWS caps
+# it at 55 characters. The region is the part before the underscore.
+_USER_POOL_ID_MAX_LENGTH = 55
+_USER_POOL_ID = re.compile(r"([a-z]{2}(?:-[a-z]+){1,3}-[0-9]{1,2})_([0-9A-Za-z]{1,50})")
+
+REASON_NOT_CONFIGURED = "not_configured"
+REASON_WRONG_ISSUER = "wrong_issuer"
+
+
+class CognitoTokenRefused(Exception):
+    """An access token Cognito accepted, refused because it was not issued to
+    this deployment's user pool and app client.
+
+    ``reason`` is ``not_configured`` (``COGNITO_USER_POOL_ID`` or
+    ``COGNITO_CLIENT_ID`` unset) or ``wrong_issuer`` (the pool ID is malformed,
+    or the token's ``iss``, ``token_use`` or ``client_id`` does not match).
+    Deliberately not a ``ValueError``: callers answer a refusal with the generic
+    401 and log the reason, rather than returning the exception's text.
+    """
+
+    def __init__(self, reason: str) -> None:
+        super().__init__(reason)
+        self.reason = reason
+
+
+def log_token_refused(refusal: CognitoTokenRefused, path: str) -> None:
+    """Record a refused sign-in on the ``backend.app.auth.cognito_sign_in`` logger."""
+    sign_in_logger.warning(
+        "Cognito sign-in refused (%s) on %s",
+        refusal.reason,
+        path,
+        extra={"reason": refusal.reason},
+    )
+
+
+def expected_issuer(user_pool_id: Optional[str]) -> Optional[str]:
+    """The ``iss`` claim Cognito puts in tokens from ``user_pool_id``, or
+    ``None`` when the pool ID is not of the form ``<region>_<id>``."""
+    if not user_pool_id or len(user_pool_id) > _USER_POOL_ID_MAX_LENGTH:
+        return None
+    match = _USER_POOL_ID.fullmatch(user_pool_id)
+    if match is None:
+        return None
+    return f"https://cognito-idp.{match.group(1)}.amazonaws.com/{user_pool_id}"
+
+
+def validate_access_token_claims(
+    claims: Mapping[str, Any],
+    user_pool_id: Optional[str],
+    client_id: Optional[str],
+) -> None:
+    """Require the token to be an access token from ``user_pool_id`` issued to
+    ``client_id``; raise :class:`CognitoTokenRefused` otherwise."""
+    if not user_pool_id or not client_id:
+        raise CognitoTokenRefused(REASON_NOT_CONFIGURED)
+    issuer = expected_issuer(user_pool_id)
+    if (
+        issuer is None
+        or claims.get("iss") != issuer
+        or claims.get("token_use") != "access"
+        or claims.get("client_id") != client_id
+    ):
+        raise CognitoTokenRefused(REASON_WRONG_ISSUER)
 
 
 class CognitoAuthService:
@@ -213,10 +283,33 @@ class CognitoAuthService:
             logger.error(f"Unexpected error during token refresh: {e!s}")
             raise ValueError("An unexpected error occurred during token refresh")
 
+    def _check_token_audience(self, access_token: str) -> None:
+        """Refuse a token not issued to this deployment's pool and app client.
+
+        Called only after ``GetUser`` has accepted the token, so the token is
+        authentic and unexpired and its claims can be read without verifying
+        the signature again.
+        """
+        if not self.user_pool_id or not self.client_id:
+            raise CognitoTokenRefused(REASON_NOT_CONFIGURED)
+        try:
+            # GetUser has already accepted this access token; only its iss,
+            # token_use and client_id claims are compared with configuration.
+            claims = jwt.decode(access_token, options={"verify_signature": False})  # nosemgrep: python.jwt.security.unverified-jwt-decode.unverified-jwt-decode  # fmt: skip
+        except jwt.PyJWTError:
+            raise CognitoTokenRefused(REASON_WRONG_ISSUER) from None
+        validate_access_token_claims(claims, self.user_pool_id, self.client_id)
+
     def get_user(self, access_token: str) -> Dict[str, Any]:
-        """Get user details from the access token."""
+        """Get user details from the access token.
+
+        Raises :class:`CognitoTokenRefused` when the token was not issued to
+        this deployment's user pool and app client, and ``ValueError`` when
+        Cognito does not accept it.
+        """
         try:
             response = self.client.get_user(AccessToken=access_token)
+            self._check_token_audience(access_token)
 
             # Extract user attributes
             user_attributes = {
@@ -230,6 +323,8 @@ class CognitoAuthService:
 
             return {"username": response.get("Username"), "attributes": user_attributes}
 
+        except CognitoTokenRefused:
+            raise
         except ClientError as e:
             logger.error(f"Get user error: {e!s}")
             raise ValueError(str(e))
@@ -246,10 +341,16 @@ class CognitoAuthService:
 
         Returns:
             Dict with user info and groups
+
+        Raises:
+            CognitoTokenRefused: the token was not issued to this deployment's
+                user pool and app client.
+            ValueError: Cognito did not accept the token.
         """
         try:
             # Get basic user details
             response = self.client.get_user(AccessToken=access_token)
+            self._check_token_audience(access_token)
 
             # Extract user attributes
             user_attributes = {
@@ -284,6 +385,8 @@ class CognitoAuthService:
                 "attributes": user_attributes,
                 "groups": groups,
             }
+        except CognitoTokenRefused:
+            raise
         except ClientError as e:
             logger.error(f"Get user with groups error: {e!s}")
             raise ValueError(str(e))

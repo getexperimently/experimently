@@ -1,6 +1,6 @@
 # Python SDK
 
-`experimently` (v1.1.0) is a synchronous, dependency-free Python client for the
+`experimently` (v0.1.0) is a synchronous, dependency-free Python client for the
 Experimently public API: experiment assignment, feature-flag evaluation and event
 tracking. Requires Python 3.9+; HTTP goes through the standard library (`urllib`).
 

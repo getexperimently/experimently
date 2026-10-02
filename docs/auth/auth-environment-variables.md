@@ -14,6 +14,17 @@ The following environment variables are essential for connecting to and working 
 | `AWS_REGION` | The AWS region where your Cognito User Pool is deployed | Yes | `us-west-2` |
 | `COGNITO_DOMAIN` | Your Cognito domain for hosted UI (if used) | No | None |
 
+Under `AUTH_PROVIDER=cognito`, both `COGNITO_USER_POOL_ID` and `COGNITO_CLIENT_ID` are
+required. A sign-in, and a call to `/api/v1/auth/me`, is accepted only for an access token
+issued to this deployment's user pool (the one `COGNITO_USER_POOL_ID` names) and app client
+(`COGNITO_CLIENT_ID`). An ID token, or an access token issued to a different app client, is
+refused with a 401. With either setting unset, every sign-in is refused. Keep the pool ID in
+the form Cognito gives it, `<region>_<id>` (for example `us-west-2_abcDEF123`): the token
+issuer the platform expects is built from it, and a pool ID in any other form refuses every
+sign-in. Each refused sign-in is logged at WARNING on the `backend.app.auth.cognito_sign_in`
+logger with a `reason` field: `not_configured` when a setting is unset, `wrong_issuer` when
+the token was not issued to the configured user pool and app client.
+
 ## User pool requirements
 
 The user pool that `COGNITO_USER_POOL_ID` names must require an email address:

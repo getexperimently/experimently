@@ -51,11 +51,15 @@ def _make_glue_client():
 
 @pytest.fixture
 def mock_settings(monkeypatch):
-    """Patch settings with test values."""
-    monkeypatch.setattr(
-        "modules.backend.app.services.etl_service.settings",
-        MagicMock(AWS_REGION=AWS_REGION),
-    )
+    """Patch settings with test values, and put the service in moto's region.
+
+    The service builds its Glue client with no region, so botocore takes it
+    from ``AWS_DEFAULT_REGION`` (never ``AWS_REGION``). Set here rather than
+    inherited: CI's module job sets no region, and another test file setting
+    one at import time must not decide whether these pass.
+    """
+    monkeypatch.delenv("AWS_REGION", raising=False)
+    monkeypatch.setenv("AWS_DEFAULT_REGION", AWS_REGION)
     monkeypatch.setattr(
         "modules.backend.app.services.etl_service.modules_settings",
         MagicMock(

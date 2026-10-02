@@ -524,6 +524,304 @@ def test_the_core_api_is_given_no_counters_table(core_synths, route, env):
     )
 
 
+
+# --- the etl module's Glue access (#487) --------------------------------------
+#
+# The API task's role carried no glue action, so every ETL route was refused,
+# and the Glue client looked in settings.AWS_REGION (us-east-1 by default)
+# rather than the region the stacks deploy to. The grant is three statements,
+# each on this environment's objects alone. Every expected name is read from
+# what the glue-etl stack SYNTHESISED -- its job, crawler and database names,
+# its account and region -- not from stacks/names.py, so the producer and the
+# consumer are each checked against the other.
+
+ETL_SERVICE = REPO_ROOT / "modules" / "backend" / "app" / "services" / "etl_service.py"
+
+#: Attributes of a Glue client that are not operations, and so need no grant.
+#: Anything else reached on ``self._glue()`` must be a Glue operation.
+GLUE_CLIENT_NON_OPERATIONS = frozenset({"exceptions"})
+
+
+def _glue_created(synth: Synth) -> dict:
+    """What the glue-etl stack creates: names, plus its account and region."""
+    stack = f"experimentation-glue-etl-{synth.env}"
+    resources = list(synth.templates[stack]["Resources"].values())
+
+    def names(rtype: str, path: str) -> list[str]:
+        found = [_get(r["Properties"], path) for r in resources if r["Type"] == rtype]
+        assert all(isinstance(name, str) for name in found), (rtype, found)
+        return found
+
+    jobs = names("AWS::Glue::Job", "Name")
+    (crawler,) = names("AWS::Glue::Crawler", "Name")
+    (database,) = names("AWS::Glue::Database", "DatabaseInput.Name")
+    (crawled,) = names("AWS::Glue::Crawler", "DatabaseName")
+    assert crawled == database, (crawled, database)
+    assert len(jobs) == 2, jobs
+    account, region = synth.locations[stack]
+    return {
+        "jobs": jobs,
+        "crawler": crawler,
+        "database": database,
+        "account": account,
+        "region": region,
+    }
+
+
+def _expected_glue_statements(synth: Synth) -> set[tuple[frozenset, frozenset]]:
+    """G1-G3 as ``(actions, rendered resources)`` pairs, from the glue-etl template."""
+    created = _glue_created(synth)
+    arn = f"arn:aws:glue:{created['region']}:{created['account']}"
+    database = created["database"]
+    return {
+        (
+            frozenset({"glue:StartJobRun", "glue:GetJobRun"}),
+            frozenset(f"{arn}:job/{job}" for job in created["jobs"]),
+        ),
+        (
+            frozenset({"glue:StartCrawler", "glue:GetCrawler"}),
+            frozenset({f"{arn}:crawler/{created['crawler']}"}),
+        ),
+        (
+            frozenset({"glue:GetTable", "glue:BatchCreatePartition"}),
+            frozenset(
+                {
+                    f"{arn}:catalog",
+                    f"{arn}:database/{database}",
+                    f"{arn}:table/{database}/*",
+                }
+            ),
+        ),
+    }
+
+
+def _actions(statement: dict) -> list[str]:
+    return [str(a) for a in _as_list(statement.get("Action", []))]
+
+
+def _glue_statements(synth: Synth) -> list[dict]:
+    return [
+        statement
+        for statement in _task_role_statements(synth)
+        if any(a.lower().startswith("glue:") for a in _actions(statement))
+    ]
+
+
+def _rendered(synth: Synth, statement: dict) -> list[str | None]:
+    account, region = synth.locations[f"experimentation-fargate-{synth.env}"]
+    return [_render(r, account, region) for r in _as_list(statement.get("Resource", []))]
+
+
+def _role_statements(synth: Synth, arn_property: str) -> list[dict]:
+    """Every policy statement attached to one of the backend task definition's roles."""
+    role_arn = _backend_task_definition(synth)["Properties"][arn_property]
+    role_id, attribute = role_arn["Fn::GetAtt"]
+    assert attribute == "Arn", role_arn
+    fargate = synth.templates[f"experimentation-fargate-{synth.env}"]["Resources"]
+    statements = [
+        statement
+        for policy in fargate[role_id]["Properties"].get("Policies", [])
+        for statement in _as_list(policy["PolicyDocument"]["Statement"])
+    ]
+    for resource in fargate.values():
+        if resource["Type"] == "AWS::IAM::Policy" and {"Ref": role_id} in resource[
+            "Properties"
+        ].get("Roles", []):
+            statements += _as_list(resource["Properties"]["PolicyDocument"]["Statement"])
+    return statements
+
+
+def _glue_calls_in_etl_service() -> set[str]:
+    """The IAM actions ``etl_service.py`` needs, read from its source.
+
+    Every ``self._glue().<attribute>`` is mapped through botocore's offline
+    Glue model to ``glue:<Operation>``. ``exceptions`` is the one attribute
+    that is not an operation; any other name that is not one fails here, so a
+    typo or an unmodelled attribute cannot drop out of the comparison. A call
+    through a client held in a variable is not seen by this walk: the
+    recording fake in test_etl_service_calls.py sees every call however the
+    client is reached.
+    """
+    import ast
+
+    import botocore.session
+    from botocore import xform_name
+
+    model = botocore.session.get_session().get_service_model("glue")
+    operations = {xform_name(op): op for op in model.operation_names}
+    source = ETL_SERVICE.read_text()
+    tree = ast.parse(source)
+
+    found: set[str] = set()
+    unmapped: set[str] = set()
+    for node in ast.walk(tree):
+        if (
+            isinstance(node, ast.Attribute)
+            and isinstance(node.value, ast.Call)
+            and isinstance(node.value.func, ast.Attribute)
+            and node.value.func.attr == "_glue"
+            and isinstance(node.value.func.value, ast.Name)
+            and node.value.func.value.id == "self"
+        ):
+            if node.attr in operations:
+                found.add(f"glue:{operations[node.attr]}")
+            elif node.attr not in GLUE_CLIENT_NON_OPERATIONS:
+                unmapped.add(node.attr)
+    assert not unmapped, (
+        f"self._glue().{sorted(unmapped)} is neither a Glue operation nor in "
+        f"{sorted(GLUE_CLIENT_NON_OPERATIONS)}"
+    )
+
+    # The client is built in one place, so every call goes through _glue().
+    builders = [
+        function.name
+        for function in ast.walk(tree)
+        if isinstance(function, (ast.FunctionDef, ast.AsyncFunctionDef))
+        for node in ast.walk(function)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and isinstance(node.func.value, ast.Name)
+        and node.func.value.id == "boto3"
+    ]
+    assert builders == ["_glue"], f"boto3 is called in {builders}, not only in _glue"
+    assert source.count("boto3.client(") == 1, "boto3.client( outside _glue"
+    return found
+
+
+@pytest.mark.regression
+@pytest.mark.parametrize("env", ENVIRONMENTS)
+def test_the_api_task_role_may_use_this_environments_glue_objects(synths, env):
+    """#487: the task role carried no glue action, so every ETL route was refused.
+
+    Exactly three statements -- the jobs, the crawler, the catalog objects --
+    compared as a set of (actions, rendered resources) pairs, so neither their
+    order nor the policy minimiser's merging can hide a change.
+    """
+    if not MODULES_PRESENT:
+        pytest.skip("core checkout: no etl module")
+    synth = synths[env]
+    statements = _glue_statements(synth)
+    for statement in statements:
+        assert set(statement) == {"Action", "Effect", "Resource"}, statement
+        assert statement["Effect"] == "Allow", statement
+    granted = {
+        (frozenset(_actions(s)), frozenset(_rendered(synth, s))) for s in statements
+    }
+    assert granted == _expected_glue_statements(synth), (
+        f"{env}: task role glue statements {statements}"
+    )
+    assert len(statements) == 3, statements
+
+
+@pytest.mark.parametrize("env", ENVIRONMENTS)
+def test_the_glue_grant_is_the_calls_the_etl_service_makes(synths, env):
+    """No grant the service does not use, and no call the role does not grant."""
+    if not MODULES_PRESENT:
+        pytest.skip("core checkout: no etl module")
+    granted = {a for s in _glue_statements(synths[env]) for a in _actions(s)}
+    calls = _glue_calls_in_etl_service()
+    assert granted == calls, (
+        f"{env}: granted but not called {sorted(granted - calls)}; "
+        f"called but not granted {sorted(calls - granted)}"
+    )
+
+
+@pytest.mark.parametrize("env", ENVIRONMENTS)
+def test_the_glue_grant_names_exact_arns(synths, env):
+    """The exact names keep each environment's ETL routes on that environment's Glue objects.
+
+    No bare ``*``, no ``job/*`` or ``crawler/*``, nothing that does not render
+    to a plain ARN. The one wildcard is the tables of this environment's
+    database.
+    """
+    if not MODULES_PRESENT:
+        pytest.skip("core checkout: no etl module")
+    synth = synths[env]
+    database = _glue_created(synth)["database"]
+    statements = _glue_statements(synth)
+    assert statements, f"{env}: no glue statements to check"
+    for statement in statements:
+        for action in _actions(statement):
+            assert "*" not in action, statement
+        for arn in _rendered(synth, statement):
+            assert arn is not None, statement
+            assert arn != "*" and arn.startswith("arn:aws:glue:"), arn
+            resource = arn.split(":", 5)[5]
+            if "*" in resource:
+                assert resource == f"table/{database}/*", arn
+            assert resource == "catalog" or env in resource, arn
+
+
+@pytest.mark.parametrize("env", ENVIRONMENTS)
+def test_the_glue_grant_names_what_the_api_is_told(synths, env):
+    """The exact names keep each environment's ETL routes on that environment's Glue objects.
+
+    The job, crawler and database in the granted ARNs are the values of the
+    task's ``GLUE_*`` variables.
+    """
+    if not MODULES_PRESENT:
+        pytest.skip("core checkout: no etl module")
+    synth = synths[env]
+    told = dict(_backend_environment(synth))
+    named: dict[str, set[str]] = {"job": set(), "crawler": set(), "database": set()}
+    for statement in _glue_statements(synth):
+        for arn in _rendered(synth, statement):
+            kind, _, name = arn.split(":", 5)[5].partition("/")
+            if kind in named:
+                named[kind].add(name)
+            elif kind == "table":
+                named["database"].add(name.split("/")[0])
+    assert named == {
+        "job": {told["GLUE_ETL_JOB_NAME"], told["GLUE_METRICS_JOB_NAME"]},
+        "crawler": {told["GLUE_CRAWLER_NAME"]},
+        "database": {told["GLUE_DATABASE"]},
+    }, (named, told)
+
+
+@pytest.mark.parametrize("env", ENVIRONMENTS)
+def test_the_task_role_has_no_athena_s3_or_sts_and_the_execution_role_no_glue(
+    synths, env
+):
+    """Athena, S3 and STS are not granted to the API task's role (T54/D25)."""
+    synth = synths[env]
+    task_actions = {
+        a.lower() for s in _role_statements(synth, "TaskRoleArn") for a in _actions(s)
+    }
+    assert task_actions, "the task role's statements were not found"
+    assert "*" not in task_actions, task_actions
+    assert not {
+        a for a in task_actions if a.startswith(("athena:", "s3:", "sts:", "glue:*"))
+    }, task_actions
+    execution_actions = {
+        a.lower()
+        for s in _role_statements(synth, "ExecutionRoleArn")
+        for a in _actions(s)
+    }
+    assert execution_actions, "the execution role's statements were not found"
+    assert not {a for a in execution_actions if a.startswith("glue:")}, (
+        execution_actions
+    )
+
+
+@pytest.mark.parametrize("route", ["copy", "variable"])
+@pytest.mark.parametrize("env", ENVIRONMENTS)
+def test_the_core_api_is_given_no_glue_access(core_synths, route, env):
+    """A core deployment has no Glue, so its API gets no Glue name and no grant."""
+    synth = core_synths[(route, env)]
+    told = {name for name, _ in _backend_environment(synth)}
+    assert not {name for name in told if name.startswith("GLUE_")}, told
+    actions = {
+        a.lower()
+        for arn_property in ("TaskRoleArn", "ExecutionRoleArn")
+        for s in _role_statements(synth, arn_property)
+        for a in _actions(s)
+    }
+    assert actions, "no role statements found"
+    assert not {a for a in actions if a.startswith("glue:")}, actions
+    fargate = f"experimentation-fargate-{env}"
+    assert '"glue:' not in json.dumps(synth.templates[fargate]).lower()
+
+
 # --- retention ----------------------------------------------------------------
 
 #: Every resource that carries a DeletionPolicy, by (stack, type, logical id),

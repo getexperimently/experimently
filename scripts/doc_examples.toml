@@ -426,8 +426,8 @@ reason = "run on a kind cluster by the chart-kind workflow (scripts/chart_kind.s
 [pending]
 "backend/lambda/README.md" = { comments = 0, unlabelled = 1, syntax = 0 }
 "backend/lambda/event_processor/README.md" = { comments = 0, unlabelled = 1, syntax = 0 }
-"docs/api/compliance.md" = { comments = 0, unlabelled = 5, syntax = 0 }
-"docs/api/endpoints.md" = { comments = 0, unlabelled = 22, syntax = 0 }
+"docs/api/compliance.md" = { comments = 0, unlabelled = 0, syntax = 0 }
+"docs/api/endpoints.md" = { comments = 0, unlabelled = 21, syntax = 0 }
 "docs/api/integrations.md" = { comments = 0, unlabelled = 8, syntax = 0 }
 "docs/api/rbac.md" = { comments = 0, unlabelled = 12, syntax = 0 }
 "docs/api/split-url.md" = { comments = 0, unlabelled = 3, syntax = 0 }

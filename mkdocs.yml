@@ -11,7 +11,7 @@
 # pull request (.github/workflows/docs.yml). Fix the link; do not relax it.
 site_name: Experimently
 site_description: 'Open-source experimentation platform: A/B testing, feature flags, sequential and Bayesian
-  statistics, fifteen SDKs.'
+  statistics, sixteen SDKs.'
 site_url: https://getexperimently.github.io/experimently/
 repo_url: https://github.com/getexperimently/experimently
 repo_name: getexperimently/experimently
