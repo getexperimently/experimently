@@ -3,8 +3,16 @@ import { useRouter } from 'next/router';
 import Link from 'next/link';
 import { TargetingRuleBuilder } from '@/components/targeting';
 import { TargetingRules } from '@/types/targeting';
-import { createEmptyRules } from '@/utils/targeting';
-import { FeatureFlagsService } from '@/services/featureFlags';
+import { FLAG_OPERATOR_OPTIONS, createEmptyRules } from '@/utils/targeting';
+import { SaveAlert } from '@/components/experiments/TargetingSection';
+import { checkTargeting } from '@/components/experiments/new/formState';
+import {
+  TARGETING_SAVE_INCOMPLETE,
+  TargetingSaveError,
+  describeTargetingSaveError,
+} from '@/utils/experimentTargeting';
+import { targetingToSend } from '@/utils/flagTargeting';
+import { CreateFeatureFlagRequest, FeatureFlagsService } from '@/services/featureFlags';
 import { PageTitle } from '@/components/PageTitle';
 
 function generateKey(name: string): string {
@@ -25,6 +33,7 @@ export default function NewFeatureFlagPage() {
   const [rules, setRules] = useState<TargetingRules>(createEmptyRules());
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [targetingError, setTargetingError] = useState<TargetingSaveError | null>(null);
 
   const handleNameChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const newName = e.target.value;
@@ -42,22 +51,38 @@ export default function NewFeatureFlagPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
-    setIsSubmitting(true);
+    setTargetingError(null);
 
+    const problems = checkTargeting(rules);
+    if (problems.length > 0) {
+      setTargetingError({ message: TARGETING_SAVE_INCOMPLETE, problems });
+      return;
+    }
+
+    const body: CreateFeatureFlagRequest = {
+      name,
+      key: key || generateKey(name),
+      description: description || undefined,
+      // `FeatureFlagCreate.is_active` defaults to true server-side; new flags
+      // start off so turning them on is an explicit, audited action.
+      is_active: false,
+      rollout_percentage: rolloutPercentage,
+    };
+    // A new flag has no stored rules: rules are sent only when the builder has some.
+    const targeting = targetingToSend(rules, null, false);
+    if (targeting !== undefined) body.targeting_rules = targeting;
+
+    setIsSubmitting(true);
     try {
-      const created = await FeatureFlagsService.create({
-        name,
-        key: key || generateKey(name),
-        description: description || undefined,
-        // `FeatureFlagCreate.is_active` defaults to true server-side; new flags
-        // start off so turning them on is an explicit, audited action.
-        is_active: false,
-        rollout_percentage: rolloutPercentage,
-        targeting_rules: rules.groups.length > 0 ? rules : null,
-      });
+      const created = await FeatureFlagsService.create(body);
       router.push(`/feature-flags/${created.id}`);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to create feature flag');
+      const described = describeTargetingSaveError(err);
+      if (described.problems) {
+        setTargetingError(described);
+      } else {
+        setError(err instanceof Error ? err.message : 'Failed to create feature flag');
+      }
     } finally {
       setIsSubmitting(false);
     }
@@ -81,10 +106,11 @@ export default function NewFeatureFlagPage() {
             <h2 className="text-base font-semibold text-slate-800">Basic Information</h2>
 
             <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">
+              <label htmlFor="flag-name" className="block text-sm font-medium text-slate-700 mb-1">
                 Name <span className="text-red-500">*</span>
               </label>
               <input
+                id="flag-name"
                 type="text"
                 required
                 value={name}
@@ -96,10 +122,11 @@ export default function NewFeatureFlagPage() {
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">
+              <label htmlFor="flag-key" className="block text-sm font-medium text-slate-700 mb-1">
                 Key <span className="text-red-500">*</span>
               </label>
               <input
+                id="flag-key"
                 type="text"
                 required
                 value={key}
@@ -114,10 +141,11 @@ export default function NewFeatureFlagPage() {
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">
+              <label htmlFor="flag-description" className="block text-sm font-medium text-slate-700 mb-1">
                 Description
               </label>
               <textarea
+                id="flag-description"
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
                 rows={2}
@@ -128,8 +156,9 @@ export default function NewFeatureFlagPage() {
           </section>
 
           {/* Targeting Rules */}
-          <section className="bg-white rounded-lg border border-slate-200 p-6">
-            <TargetingRuleBuilder value={rules} onChange={setRules} />
+          <section className="bg-white rounded-lg border border-slate-200 p-6" data-testid="flag-targeting-section">
+            <TargetingRuleBuilder value={rules} onChange={setRules} operatorOptions={FLAG_OPERATOR_OPTIONS} />
+            {targetingError && <SaveAlert error={targetingError} />}
           </section>
 
           {/* Rollout */}
@@ -137,7 +166,7 @@ export default function NewFeatureFlagPage() {
             <h2 className="text-base font-semibold text-slate-800">Rollout</h2>
             <div>
               <div className="flex items-center justify-between mb-2">
-                <label className="text-sm font-medium text-slate-700">
+                <label htmlFor="rollout-percentage" className="text-sm font-medium text-slate-700">
                   Rollout percentage
                 </label>
                 <span className="text-sm font-semibold text-slate-900">
@@ -145,6 +174,7 @@ export default function NewFeatureFlagPage() {
                 </span>
               </div>
               <input
+                id="rollout-percentage"
                 type="range"
                 min={0}
                 max={100}
@@ -162,7 +192,11 @@ export default function NewFeatureFlagPage() {
 
           {/* Error message */}
           {error && (
-            <div className="rounded-lg bg-red-50 border border-red-200 p-3 text-sm text-red-700">
+            <div
+              role="alert"
+              className="rounded-lg bg-red-50 border border-red-200 p-3 text-sm text-red-700"
+              data-testid="create-error"
+            >
               {error}
             </div>
           )}

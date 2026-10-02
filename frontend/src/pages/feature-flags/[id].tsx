@@ -1,15 +1,24 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useRouter } from 'next/router';
 import Link from 'next/link';
 import { TargetingRuleBuilder } from '@/components/targeting';
+import { OUTSIDE_BUILDER_NOTE, SaveAlert } from '@/components/experiments/TargetingSection';
+import { checkTargeting } from '@/components/experiments/new/formState';
 import { TargetingRules } from '@/types/targeting';
-import { jsonToRules } from '@/utils/targeting';
+import { FLAG_OPERATOR_OPTIONS, createEmptyRules } from '@/utils/targeting';
+import {
+  TARGETING_SAVE_INCOMPLETE,
+  TargetingSaveError,
+  describeTargetingSaveError,
+} from '@/utils/experimentTargeting';
+import { isEditableFlagTargeting, rulesFromStored, targetingToSend } from '@/utils/flagTargeting';
+import { docsUrl } from '@/services/docs';
 import { isApiError } from '@/services/api';
 import {
   FeatureFlag,
   FeatureFlagsService,
   RolloutSchedule,
-  flagRules,
+  UpdateFeatureFlagRequest,
   isFlagOn,
 } from '@/services/featureFlags';
 import type { SafetyCheckResponse } from '@/types/safety';
@@ -68,6 +77,15 @@ export function unmeasuredErrorRate(
   return { errors, minutes };
 }
 
+/**
+ * The flag's stored `targeting_rules` exactly as the API returned them, under
+ * either key the detail and list shapes use. Unlike `flagRules`, a value that
+ * is not an object is kept, so it is shown rather than read as "no rules".
+ */
+function storedRules(flag: Pick<FeatureFlag, 'targeting_rules' | 'rules'>): unknown {
+  return flag.targeting_rules ?? flag.rules ?? null;
+}
+
 /** Pick the schedule worth showing: active > paused > draft > most recent. */
 export function pickSchedule(items: RolloutSchedule[]): RolloutSchedule | null {
   if (items.length === 0) return null;
@@ -95,9 +113,29 @@ export default function FeatureFlagDetailPage() {
   const [toggling, setToggling] = useState(false);
   const [toggleError, setToggleError] = useState<string | null>(null);
 
-  // Editable fields
+  // Editable fields. `stored` is the flag's targeting_rules as last loaded or
+  // saved: the baseline a save compares the builder against. `rules` is the
+  // builder's state, or null while stored rules the builder cannot show are
+  // displayed read-only; `replaced` is set once the user confirms replacing them.
+  const [stored, setStored] = useState<unknown>(null);
   const [rules, setRules] = useState<TargetingRules | null>(null);
+  const [replaced, setReplaced] = useState(false);
+  const [confirmingReplace, setConfirmingReplace] = useState(false);
+  const [targetingError, setTargetingError] = useState<TargetingSaveError | null>(null);
   const [rolloutPercentage, setRolloutPercentage] = useState(0);
+  const saveErrorRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (saveError) saveErrorRef.current?.focus();
+  }, [saveError]);
+
+  /** Show `value` as the stored rules: in the builder when it can, read-only otherwise. */
+  const loadRules = useCallback((value: unknown) => {
+    setStored(value);
+    setRules(isEditableFlagTargeting(value) ? rulesFromStored(value) : null);
+    setReplaced(false);
+    setConfirmingReplace(false);
+  }, []);
 
   // Rollout schedule
   const [schedules, setSchedules] = useState<RolloutSchedule[] | null>(null);
@@ -143,8 +181,7 @@ export default function FeatureFlagDetailPage() {
         const data = await FeatureFlagsService.get(id);
         if (cancelled) return;
         setFlag(data);
-        const json = flagRules(data);
-        setRules(json ? jsonToRules(json) : null);
+        loadRules(storedRules(data));
         setRolloutPercentage(data.rollout_percentage ?? 0);
         // Secondary panels load in parallel; their failures are non-fatal.
         void loadSchedules(id);
@@ -164,7 +201,7 @@ export default function FeatureFlagDetailPage() {
     return () => {
       cancelled = true;
     };
-  }, [id, loadSchedules, loadSafety]);
+  }, [id, loadSchedules, loadSafety, loadRules]);
 
   const handleToggle = async (next: boolean) => {
     if (!flag) return;
@@ -190,19 +227,38 @@ export default function FeatureFlagDetailPage() {
   const handleSave = async () => {
     if (!flag) return;
     setSaveError(null);
+    setTargetingError(null);
     setSaveSuccess(false);
-    setIsSaving(true);
 
+    // Rules are sent only when they were changed (or replaced), so a save
+    // that moves only the rollout leaves the stored rules exactly as they are.
+    const targeting = targetingToSend(rules, stored, replaced);
+    if (targeting !== undefined && rules) {
+      const problems = checkTargeting(rules);
+      if (problems.length > 0) {
+        setTargetingError({ message: TARGETING_SAVE_INCOMPLETE, problems });
+        return;
+      }
+    }
+
+    const body: UpdateFeatureFlagRequest = { rollout_percentage: rolloutPercentage };
+    if (targeting !== undefined) body.targeting_rules = targeting;
+
+    setIsSaving(true);
     try {
-      const updated = await FeatureFlagsService.update(flag.id, {
-        targeting_rules: rules && rules.groups.length > 0 ? rules : null,
-        rollout_percentage: rolloutPercentage,
-      });
+      const updated = await FeatureFlagsService.update(flag.id, body);
       setFlag((current) => ({ ...(current ?? updated), ...updated }));
+      const answered = 'targeting_rules' in updated || 'rules' in updated;
+      loadRules(answered ? storedRules(updated) : (targeting ?? stored));
       setSaveSuccess(true);
       setTimeout(() => setSaveSuccess(false), 3000);
     } catch (err) {
-      setSaveError(err instanceof Error ? err.message : 'Failed to save changes');
+      const described = describeTargetingSaveError(err);
+      if (described.problems) {
+        setTargetingError(described);
+      } else {
+        setSaveError(err instanceof Error ? err.message : 'Failed to save changes');
+      }
     } finally {
       setIsSaving(false);
     }
@@ -479,12 +535,105 @@ export default function FeatureFlagDetailPage() {
 
         <div className="space-y-6">
           {/* Targeting Rules */}
-          <section className="bg-white rounded-lg border border-slate-200 p-6">
-            <TargetingRuleBuilder
-              value={rules}
-              onChange={setRules}
-              data-testid="targeting-rule-builder"
-            />
+          <section className="bg-white rounded-lg border border-slate-200 p-6" data-testid="flag-targeting-section">
+            {rules !== null ? (
+              <>
+                <TargetingRuleBuilder
+                  value={rules}
+                  onChange={setRules}
+                  operatorOptions={FLAG_OPERATOR_OPTIONS}
+                  data-testid="targeting-rule-builder"
+                />
+                {replaced && (
+                  <div
+                    className="mt-3 flex flex-wrap items-center gap-3 text-sm text-amber-900"
+                    data-testid="targeting-replacing"
+                  >
+                    <p>The stored rules are replaced when you save. Until then, nothing changes.</p>
+                    <button
+                      type="button"
+                      onClick={() => loadRules(stored)}
+                      className="px-3 py-1.5 rounded-md text-sm font-medium text-slate-600 border border-slate-300 bg-white hover:bg-slate-50"
+                      data-testid="targeting-keep-stored"
+                    >
+                      Keep the stored rules
+                    </button>
+                  </div>
+                )}
+              </>
+            ) : (
+              <div data-testid="targeting-raw">
+                <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
+                  <h3 className="text-sm font-semibold text-slate-700">Targeting Rules</h3>
+                  {!confirmingReplace && (
+                    <button
+                      type="button"
+                      onClick={() => setConfirmingReplace(true)}
+                      className="px-3 py-1.5 rounded-md text-sm font-medium bg-white text-slate-700 border border-slate-300 hover:bg-slate-50"
+                      data-testid="targeting-replace"
+                    >
+                      Replace rules
+                    </button>
+                  )}
+                </div>
+                <p className="text-sm text-amber-900 mb-2" data-testid="targeting-raw-note">
+                  {OUTSIDE_BUILDER_NOTE}{' '}
+                  <a
+                    href={docsUrl('api/endpoints', 'targeting-rules')}
+                    className="text-blue-600 hover:underline"
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    Read about targeting rules
+                  </a>
+                  .
+                </p>
+                <pre
+                  role="region"
+                  aria-label="Stored targeting rules"
+                  tabIndex={0}
+                  className="bg-slate-50 border border-slate-200 text-xs text-slate-800 rounded-md p-3 overflow-x-auto focus:outline-none focus:ring-2 focus:ring-blue-600"
+                  data-testid="targeting-raw-json"
+                >
+                  {JSON.stringify(stored, null, 2)}
+                </pre>
+                {confirmingReplace && (
+                  <div
+                    role="dialog"
+                    aria-label="Replace rules"
+                    className="mt-3 rounded-lg border border-amber-200 bg-amber-50 p-3"
+                    data-testid="targeting-replace-confirm"
+                  >
+                    <p className="text-sm text-amber-900">
+                      These rules will be discarded when you save new ones. Until you save, nothing changes.
+                    </p>
+                    <div className="mt-3 flex gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setConfirmingReplace(false)}
+                        className="px-3 py-1.5 rounded-md text-sm font-medium text-slate-600 border border-slate-300 bg-white hover:bg-slate-50"
+                        data-testid="targeting-replace-cancel"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setConfirmingReplace(false);
+                          setReplaced(true);
+                          setRules(createEmptyRules());
+                        }}
+                        className="px-3 py-1.5 rounded-md text-sm font-medium bg-amber-600 text-white hover:bg-amber-700"
+                        data-testid="targeting-replace-yes"
+                      >
+                        Start with no rules
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+            {targetingError && <SaveAlert error={targetingError} />}
           </section>
 
           {/* Rollout Percentage */}
@@ -519,8 +668,10 @@ export default function FeatureFlagDetailPage() {
 
           {saveError && (
             <div
+              ref={saveErrorRef}
               role="alert"
-              className="rounded-lg bg-red-50 border border-red-200 p-3 text-sm text-red-700"
+              tabIndex={-1}
+              className="rounded-lg bg-red-50 border border-red-200 p-3 text-sm text-red-700 focus:outline-none focus:ring-2 focus:ring-blue-600"
               data-testid="save-error"
             >
               {saveError}

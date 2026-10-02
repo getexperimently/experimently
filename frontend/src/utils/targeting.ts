@@ -144,7 +144,31 @@ export function getAttributeType(attribute: string): string {
   return found ? found.type : 'string';
 }
 
-export function getOperatorsForAttribute(attribute: string): OperatorType[] {
+/**
+ * How a page's rule builder offers operators. Pages differ only here, and the
+ * same options decide what a page treats as editable (`isEditableTargeting`),
+ * so the dropdown and the editability check cannot disagree.
+ */
+export interface OperatorOptions {
+  /**
+   * Also offer the version operators (`semver_*`) for an attribute that is not
+   * one of `COMMON_ATTRIBUTES`, such as `os_version` or `app_version`.
+   * `app.version` offers them either way. The flag pages turn this on; the
+   * experiment pages do not.
+   */
+  semverOnCustomAttributes?: boolean;
+}
+
+/** The flag pages' builder: version operators on any attribute outside `COMMON_ATTRIBUTES`. */
+export const FLAG_OPERATOR_OPTIONS: OperatorOptions = { semverOnCustomAttributes: true };
+
+/** The operators the builder offers for `attribute`, under a page's options. */
+export function getOperatorsForAttribute(attribute: string, options: OperatorOptions = {}): OperatorType[] {
   const type = getAttributeType(attribute);
-  return OPERATORS_BY_TYPE[type] || OPERATORS_BY_TYPE['string'];
+  const operators = OPERATORS_BY_TYPE[type] || OPERATORS_BY_TYPE['string'];
+  const custom = !COMMON_ATTRIBUTES.some((a) => a.value === attribute);
+  if (options.semverOnCustomAttributes && custom) {
+    return [...operators, ...OPERATORS_BY_TYPE['semver']];
+  }
+  return operators;
 }

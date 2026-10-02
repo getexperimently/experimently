@@ -302,7 +302,7 @@ describe('FeatureFlagDetailPage', () => {
     }
   });
 
-  it('saves rollout percentage + targeting rules through PUT /feature-flags/{id}', async () => {
+  it('saves the rollout percentage through PUT /feature-flags/{id}, leaving untouched rules out', async () => {
     install([
       ...happyRoutes(),
       {
@@ -320,8 +320,34 @@ describe('FeatureFlagDetailPage', () => {
 
     expect(await screen.findByTestId('save-success')).toBeInTheDocument();
     const call = mockedApiFetch.mock.calls.find(([p, o]) => p === '/api/v1/feature-flags/flag-1' && o?.method === 'PUT');
-    expect(call?.[1]?.json).toMatchObject({ rollout_percentage: 60 });
-    expect((call?.[1]?.json as { targeting_rules: unknown }).targeting_rules).toMatchObject({ logical_operator: 'AND' });
+    // The rules were not touched, so they are not sent: the stored ones stay as they are.
+    expect(call?.[1]?.json).toEqual({ rollout_percentage: 60 });
+  });
+
+  it('sends the targeting rules with the rollout when they were changed', async () => {
+    install([
+      ...happyRoutes(),
+      {
+        method: 'PUT',
+        path: '/api/v1/feature-flags/flag-1',
+        handler: (_p, options) => ({ ...flag(), ...(options.json as object) }),
+      },
+    ]);
+    render(<FeatureFlagDetailPage />);
+    await screen.findByTestId('flag-detail');
+
+    fireEvent.change(screen.getByDisplayValue('US'), { target: { value: 'CA' } });
+    fireEvent.click(screen.getByTestId('save-flag'));
+
+    expect(await screen.findByTestId('save-success')).toBeInTheDocument();
+    const call = mockedApiFetch.mock.calls.find(([p, o]) => p === '/api/v1/feature-flags/flag-1' && o?.method === 'PUT');
+    expect(call?.[1]?.json).toEqual({
+      rollout_percentage: 25,
+      targeting_rules: {
+        logical_operator: 'AND',
+        groups: [{ logical_operator: 'AND', conditions: [{ attribute: 'country', operator: 'equals', value: 'CA' }] }],
+      },
+    });
   });
 
   it('renders a 404 view for a missing flag', async () => {

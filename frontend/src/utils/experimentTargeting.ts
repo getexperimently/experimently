@@ -11,9 +11,10 @@
 import { ApiError } from '@/services/api';
 import { describeTargetingIssue } from '@/components/experiments/new/createErrors';
 import { OPERATOR_LABELS, OperatorType, TargetingRules } from '@/types/targeting';
-import { getOperatorsForAttribute, rulesToJson } from '@/utils/targeting';
+import { getOperatorsForAttribute, OperatorOptions, rulesToJson } from '@/utils/targeting';
 
-type Stored = Record<string, unknown> | null | undefined;
+/** A stored `targeting_rules` value, as the API returned it: any JSON. */
+type Stored = unknown;
 
 /**
  * `id` is the rule's id: a rule admitting only part of the users it matches
@@ -91,11 +92,15 @@ export function isNoRules(value: Stored): boolean {
  * has no NOT), every operator is one the builder offers for that attribute,
  * and every value is one it keeps exactly (see `builderValue`).
  *
+ * `options` are the page's builder options (`OperatorOptions`): the same ones
+ * its dropdown is given, so "an operator the builder offers" means the same
+ * thing in both places.
+ *
  * Not editable, among others: a top-level `rollout_percentage` (the API
  * accepts it, the builder has no control for it and would drop it), the
  * native `{"rules": [...]}` shape, and a flat `{"country": ["US"]}`.
  */
-export function isEditableTargeting(value: Stored): boolean {
+export function isEditableTargeting(value: Stored, options: OperatorOptions = {}): boolean {
   if (isNoRules(value)) return true;
   if (!isPlainObject(value) || !keysWithin(value, TOP_KEYS)) return false;
   if (!builderRuleId(value.id)) return false;
@@ -108,7 +113,7 @@ export function isEditableTargeting(value: Stored): boolean {
       if (!isPlainObject(condition) || !keysWithin(condition, CONDITION_KEYS)) return false;
       const { attribute, operator, value: conditionValue } = condition;
       if (typeof attribute !== 'string' || typeof operator !== 'string') return false;
-      if (!getOperatorsForAttribute(attribute).includes(operator as OperatorType)) return false;
+      if (!getOperatorsForAttribute(attribute, options).includes(operator as OperatorType)) return false;
       return builderValue(operator, conditionValue);
     });
   });

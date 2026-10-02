@@ -48,7 +48,7 @@ export interface CreateFeatureFlagRequest {
   description?: string;
   is_active?: boolean;
   rollout_percentage?: number;
-  targeting_rules?: TargetingRules | null;
+  targeting_rules?: TargetingRules | Record<string, unknown> | null;
   tags?: string[];
 }
 
@@ -59,7 +59,7 @@ export interface UpdateFeatureFlagRequest {
   description?: string;
   is_active?: boolean;
   rollout_percentage?: number;
-  targeting_rules?: TargetingRules | null;
+  targeting_rules?: TargetingRules | Record<string, unknown> | null;
   tags?: string[];
 }
 

@@ -5,7 +5,7 @@ import {
   COMMON_ATTRIBUTES,
   OPERATOR_LABELS,
 } from '@/types/targeting';
-import { getOperatorsForAttribute } from '@/utils/targeting';
+import { getOperatorsForAttribute, OperatorOptions } from '@/utils/targeting';
 
 interface ConditionRowProps {
   condition: TargetingCondition;
@@ -17,6 +17,8 @@ interface ConditionRowProps {
    * ("Group 1, condition 2 attribute"). Labels only; it changes no behaviour.
    */
   label?: string;
+  /** Which operators the dropdown offers; see `OperatorOptions`. */
+  operatorOptions?: OperatorOptions;
 }
 
 const NO_VALUE_OPERATORS: OperatorType[] = ['is_null', 'is_not_null'];
@@ -28,14 +30,15 @@ export function ConditionRow({
   onRemove,
   readOnly = false,
   label = 'Condition',
+  operatorOptions,
 }: ConditionRowProps) {
-  const availableOperators = getOperatorsForAttribute(condition.attribute);
+  const availableOperators = getOperatorsForAttribute(condition.attribute, operatorOptions);
   const showValueInput = !NO_VALUE_OPERATORS.includes(condition.operator);
   const isMultiValue = MULTI_VALUE_OPERATORS.includes(condition.operator);
 
   const handleAttributeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const newAttribute = e.target.value;
-    const newOperators = getOperatorsForAttribute(newAttribute);
+    const newOperators = getOperatorsForAttribute(newAttribute, operatorOptions);
     // If current operator is not in new operator list, reset to first available
     const newOperator = newOperators.includes(condition.operator)
       ? condition.operator
