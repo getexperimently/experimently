@@ -45,6 +45,16 @@ logger = logging.getLogger(__name__)
 #: Monte Carlo samples per variant used by the results API.
 DEFAULT_N_SAMPLES: int = 100_000
 
+#: The best variant's probability to be best must reach this before
+#: ``STOP_WINNER`` is reported (#242).  An expected-loss threshold alone is
+#: crossed by two identical arms once there is modest traffic at a low base
+#: rate.  Under an A/A test the best arm's probability to be best is roughly
+#: uniform on [0.5, 1], so this threshold puts a single-look false winner near
+#: 2 x (1 - 0.975) = 5%.  The value was chosen by a 2,000-simulation A/A run
+#: per cell (base rate 1%, 10%, 50% x 5,000 and 20,000 users per arm), and is
+#: held there by ``backend/tests/unit/stats_validation/test_bayesian_stop_winner.py``.
+PROB_BEST_THRESHOLD: float = 0.975
+
 #: Namespace for the fallback seed used when a caller passes ``seed=None``.
 _FALLBACK_SEED_NAMESPACE = "bayesian_service"
 
@@ -388,19 +398,23 @@ def should_stop(
     *,
     samples: Optional[np.ndarray] = None,
     losses: Optional[List[float]] = None,
+    ptbb: Optional[List[float]] = None,
 ) -> BayesianDecision:
     """Apply Bayesian stopping rules to determine whether to stop the experiment.
 
     Stopping rules (evaluated in order):
-    1. STOP_WINNER: min(expected_loss) < config.loss_threshold, meaning one
-       variant is clearly better than all others.
+    1. STOP_WINNER: the variant most likely to be best has a probability to
+       be best of at least :data:`PROB_BEST_THRESHOLD` **and** an expected
+       loss below ``config.loss_threshold``.  The probability condition is
+       what keeps two identical arms from being called a winner (#242); the
+       loss condition lets a caller ask for more than the default.
     2. STOP_EQUIVALENT (ROPE): If config.rope is set and the posterior
        probability that the difference between the best and worst variant
        falls within ROPE is > 0.95, stop as equivalent.
     3. CONTINUE: Otherwise, keep running.
 
-    One sample matrix is enough for both rules: the ROPE comparison reuses
-    the draws the expected loss was computed from.
+    One sample matrix is enough for every rule: the probability to be best,
+    the expected loss and the ROPE comparison all come from the same draws.
 
     Args:
         posteriors: List of posterior dicts (alpha, beta per variant).
@@ -411,8 +425,9 @@ def should_stop(
         samples: Posterior draws already made for these posteriors, shape
             ``[n_variants, n_samples]``.
         losses: Expected loss per variant already computed from ``samples``.
-            Supply both from :meth:`BayesianService.analyze`, which has them;
-            supply neither and the function draws once itself.
+        ptbb: Probability to be best per variant already computed from
+            ``samples``.  Supply all three from :meth:`BayesianService.analyze`,
+            which has them; supply none and the function draws once itself.
 
     Returns:
         BayesianDecision enum value.
@@ -427,14 +442,19 @@ def should_stop(
         )
 
     # Draw only when something below still needs the samples.
-    if samples is None and (losses is None or config.rope is not None):
+    if samples is None and (losses is None or ptbb is None or config.rope is not None):
         samples = _draw_posterior_samples(posteriors, n_samples, seed)
     if losses is None:
         losses = _expected_loss_from_samples(samples)
+    if ptbb is None:
+        ptbb = _ptbb_from_samples(samples)
     min_loss = min(losses)
 
-    # Rule 1: STOP_WINNER when expected loss of the best arm is below threshold
-    if min_loss < config.loss_threshold:
+    # Rule 1: STOP_WINNER when the variant most likely to be best is likely
+    # enough (#242) and choosing it is cheap enough.  With the threshold above
+    # 0.5 at most one variant can qualify.
+    leader = max(range(len(ptbb)), key=ptbb.__getitem__)
+    if ptbb[leader] >= PROB_BEST_THRESHOLD and losses[leader] < config.loss_threshold:
         return BayesianDecision.STOP_WINNER
 
     # Rule 2: STOP_EQUIVALENT via ROPE (same draws as the loss above)
@@ -540,6 +560,7 @@ class BayesianService:
             seed=seed,
             samples=samples,
             losses=losses,
+            ptbb=ptbb,
         )
 
         return {
