@@ -8,7 +8,7 @@ for feature flags.
 from typing import Any, Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
 from backend.app.api.deps import get_current_active_user, get_current_superuser, get_db
@@ -117,7 +117,7 @@ async def rollback_feature_flag(
     *,
     db: Session = Depends(get_db),
     feature_flag_id: UUID,
-    percentage: Optional[int] = 0,
+    percentage: Optional[int] = Query(0, ge=0, le=100),
     reason: Optional[str] = "Manual rollback",
     current_user: User = Depends(get_current_superuser),
 ) -> Any:

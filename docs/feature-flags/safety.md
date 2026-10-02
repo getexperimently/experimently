@@ -143,7 +143,7 @@ It prints the stored thresholds:
 |-------|------|----------|-------------|
 | `enabled` | boolean | No | Whether the monitor checks this flag (default `true`) |
 | `metrics` | object | No | Map of metric name → threshold (see above). An empty map means nothing is checked |
-| `rollback_percentage` | int | No | Global rollout percentage the automatic rollback sets the flag to (default `0`). Set it to e.g. `5` to keep a small slice of users on the flag. Users matched by a targeting rule are not affected (see [What a rollback changes](#what-a-rollback-changes)); manual rollbacks take the percentage as a query parameter |
+| `rollback_percentage` | int | No | Global rollout percentage the automatic rollback sets the flag to, 0–100 (default `0`); any other value answers 422. A value stored before that bound is clamped to 0–100 when the monitor uses it. Set it to e.g. `5` to keep a small slice of users on the flag. Users matched by a targeting rule are not affected (see [What a rollback changes](#what-a-rollback-changes)); manual rollbacks take the percentage as a query parameter |
 
 The response (the same shape as `GET .../config`) also carries the configuration's `id`,
 `feature_flag_id`, `enabled`, `rollback_percentage`, `created_at` and `updated_at`.
@@ -322,7 +322,8 @@ record's id as `rollback_record_id`. There is no list endpoint yet; query the ta
 
 ## Manual Rollback
 
-Requires a superuser. Roll a flag down to a percentage (default `0`), with a reason. The
+Requires a superuser. Roll a flag down to a percentage from 0 to 100 (default `0`; any
+other value answers 422), with a reason. The
 reason is a query parameter, so its spaces are written `%20`:
 
 ```{.bash exec}

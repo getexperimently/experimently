@@ -92,8 +92,14 @@ class FeatureFlagSafetyConfigCreate(BaseModel):
     metrics: Dict[str, MetricThreshold] = Field(
         {}, description="Metrics to monitor with thresholds for this feature flag"
     )
+    # Bounded on the request schemas only. The base and the response stay
+    # unbounded so that a row stored before the bound (say 150) still reads
+    # back; the monitor clamps it when it uses it (#629).
     rollback_percentage: int = Field(
-        0, description="Percentage to roll back to if automatic rollback is triggered"
+        0,
+        ge=0,
+        le=100,
+        description="Percentage to roll back to if automatic rollback is triggered",
     )
 
 
@@ -102,7 +108,7 @@ class FeatureFlagSafetyConfigUpdate(BaseModel):
 
     enabled: Optional[bool] = None
     metrics: Optional[Dict[str, MetricThreshold]] = None
-    rollback_percentage: Optional[int] = None
+    rollback_percentage: Optional[int] = Field(None, ge=0, le=100)
 
 
 class FeatureFlagSafetyConfigResponse(FeatureFlagSafetyConfigBase):

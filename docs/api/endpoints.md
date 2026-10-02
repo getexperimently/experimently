@@ -2002,9 +2002,9 @@ See [Safety Monitoring](../feature-flags/safety.md).
 GET  /api/v1/safety/settings                              — Global settings (superuser)
 POST /api/v1/safety/settings                              — Create/update global settings (superuser)
 GET  /api/v1/safety/feature-flags/{flag_id}/config        — Per-flag safety config (defaults when none)
-POST /api/v1/safety/feature-flags/{flag_id}/config        — Create/update per-flag config
+POST /api/v1/safety/feature-flags/{flag_id}/config        — Create/update per-flag config (rollback_percentage 0–100, else 422)
 GET  /api/v1/safety/feature-flags/{flag_id}/check         — Run the safety check now
-POST /api/v1/safety/feature-flags/{flag_id}/rollback      — Manual rollback (?percentage=0&reason=...) (superuser)
+POST /api/v1/safety/feature-flags/{flag_id}/rollback      — Manual rollback (?percentage=0&reason=...; percentage 0–100, else 422) (superuser)
 ```
 
 ---

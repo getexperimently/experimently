@@ -6731,6 +6731,8 @@
           "rollback_percentage": {
             "anyOf": [
               {
+                "maximum": 100,
+                "minimum": 0,
                 "type": "integer"
               },
               {
@@ -30624,6 +30626,8 @@
             "schema": {
               "anyOf": [
                 {
+                  "maximum": 100,
+                  "minimum": 0,
                   "type": "integer"
                 },
                 {
