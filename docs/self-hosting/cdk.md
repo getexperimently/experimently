@@ -173,6 +173,83 @@ CDK will display a diff of all resources to be created and prompt for confirmati
 
 The first full deployment takes approximately 20–40 minutes (Aurora and OpenSearch provisioning are the slowest steps).
 
+### Point the hostname at the load balancer
+
+**No stack creates a DNS record.** After `cdk deploy` the load balancer is up,
+but the host in `PUBLIC_BASE_URL` (`app.<domain>`) does not resolve until you
+add an alias record for it in your Route 53 hosted zone. Until then `curl`
+reports `000`, and the Deploy workflow's smoke test cannot reach the platform.
+Do this once per environment, after the first `cdk deploy` of the Fargate stack.
+
+Add a record for every hostname the platform answers on: the host in
+`PUBLIC_BASE_URL` always, and any other name on the certificate that clients
+use (the commands below also add `api.<domain>`; leave that entry out if you
+do not use it).
+
+Set the hosted zone's name and the two hostnames:
+
+```{.bash skip reason="aws: reads the hosted zone and the load balancer of a deployed environment"}
+ZONE_NAME=example.com
+APP_HOST=${PUBLIC_BASE_URL#https://}
+API_HOST=api.example.com
+```
+
+Look up the zone, and the load balancer by its name. The Fargate stack names
+it `experimentation-<env>`, so this finds the right one in an account with
+more than one load balancer; do not take the first internet-facing one. Both
+commands must print exactly one value:
+
+```{.bash skip reason="aws: reads the hosted zone and the load balancer of a deployed environment"}
+ZONE_ID=$(aws route53 list-hosted-zones-by-name --dns-name "$ZONE_NAME" \
+  --query "HostedZones[?Name=='$ZONE_NAME.' && Config.PrivateZone==\`false\`].Id" --output text)
+ZONE_ID=${ZONE_ID#/hostedzone/}
+read -r ALB_DNS ALB_ZONE < <(aws elbv2 describe-load-balancers \
+  --names "experimentation-$ENVIRONMENT" \
+  --query 'LoadBalancers[0].[DNSName,CanonicalHostedZoneId]' --output text)
+printf 'zone %s\nalb  %s %s\n' "$ZONE_ID" "$ALB_DNS" "$ALB_ZONE"
+```
+
+`ALB_DNS` is also the `ALBDnsName` output of `experimentation-fargate-<env>`.
+`ALB_ZONE` is the load balancer's own hosted zone id, which the alias needs; it
+is not the id of your zone.
+
+Create, or update, an alias A record for each hostname, and wait for Route 53
+to apply the change:
+
+```{.bash skip reason="aws: changes records in the hosted zone"}
+cat > alias.json <<EOF
+{"Changes": [
+  {"Action": "UPSERT", "ResourceRecordSet": {"Name": "$APP_HOST", "Type": "A",
+    "AliasTarget": {"HostedZoneId": "$ALB_ZONE", "DNSName": "$ALB_DNS", "EvaluateTargetHealth": false}}},
+  {"Action": "UPSERT", "ResourceRecordSet": {"Name": "$API_HOST", "Type": "A",
+    "AliasTarget": {"HostedZoneId": "$ALB_ZONE", "DNSName": "$ALB_DNS", "EvaluateTargetHealth": false}}}
+]}
+EOF
+CHANGE_ID=$(aws route53 change-resource-record-sets --hosted-zone-id "$ZONE_ID" \
+  --change-batch file://alias.json --query ChangeInfo.Id --output text)
+aws route53 wait resource-record-sets-changed --id "$CHANGE_ID"
+```
+
+Check that each hostname reaches the platform:
+
+```{.bash skip reason="aws: needs a deployed environment and its DNS records"}
+curl -s -o /dev/null -w '%{http_code}\n' "https://$APP_HOST/health"
+curl -s -o /dev/null -w '%{http_code}\n' "https://$API_HOST/health"
+```
+
+Each prints `200`. `000` means the name does not resolve yet, or resolves to
+something other than this load balancer: check the record and the zone id, and
+allow for DNS caches that still hold an earlier answer.
+
+`UPSERT` makes the commands safe to run again. Run them again whenever the load
+balancer is replaced (for example after destroying and redeploying the Fargate
+stack), because its DNS name changes with it.
+
+`cdk destroy` does not remove these records: the stacks did not create them.
+When you tear an environment down, delete them (the same change with
+`"Action": "DELETE"`), or they are deleted with the hosted zone if you delete
+the zone itself.
+
 ### `cdk deploy` does not create the schema
 
 The API tasks never run database migrations: their task definition sets
@@ -182,8 +259,9 @@ migration task, which the **Deploy** workflow runs before it shifts traffic
 `cdk deploy` of an environment the API runs against an empty database until the
 first Deploy:
 
-- `/health` answers 200, because it checks that the database answers, and the
-  load balancer's health checks pass;
+- `/health` answers 200 through the hostname once its alias record exists
+  (above), because it checks that the database answers, and the load
+  balancer's health checks pass;
 - real requests answer 500, and the API logs errors. This is expected until
   the first Deploy creates the schema.
 
@@ -475,6 +553,7 @@ is yours to remove.
 | Data-lake, Athena-results and Glue-scripts buckets | RETAIN | prod (full) | storage, every object version | empty (all versions), then `aws s3 rb` |
 | Kinesis stream and OpenSearch domain | RETAIN | prod (full) | per shard-hour; per instance-hour | `aws kinesis delete-stream`; `aws opensearch delete-domain` |
 | `pre-migration-*` and `pre-deploy-*` Aurora cluster snapshots | taken by the deploy and migrate workflows, not by CloudFormation | every environment they ran against | snapshot storage | `aws rds delete-db-cluster-snapshot`. Outside prod the KMS key they are encrypted with is deleted with the stack, so they cannot be restored afterwards |
+| The alias A records for `app.<domain>` (and `api.<domain>`) | created by hand after the first deploy ([Point the hostname at the load balancer](#point-the-hostname-at-the-load-balancer)) | every environment | nothing for the records; the hosted zone is billed per month | the same `change-resource-record-sets` with `"Action": "DELETE"`, or delete the hosted zone |
 | The secrets under `/<env>/experimentation/` | created by hand before the first deploy ([Secrets Management](../deployment/secrets-management.md)) | every environment | per secret per month | `aws secretsmanager delete-secret` |
 | ECR repositories `experimentation-platform/backend` and `experimentation-platform/web`, and their images | created by hand once per account ([Deployment Guide](../deployment/deployment-guide.md)) | shared by all environments | image storage | `aws ecr delete-repository --force`, once no environment needs them |
 | The CDK bootstrap stack `CDKToolkit`: its `cdk-*-assets-<account>-<region>` bucket and `cdk-*-container-assets-*` repository | `cdk bootstrap`, once per account and region | shared by all environments | storage | `aws cloudformation delete-stack --stack-name CDKToolkit`, after emptying the bucket |

@@ -59,9 +59,12 @@ aws acm describe-certificate --certificate-arn "$CERTIFICATE_ARN" \
 
 It must print `"ISSUED"`. If it prints anything else, stop here.
 
-After the Fargate stack exists, point `app.<domain>` at the load balancer
-(output `ALBDnsName` of `experimentation-fargate-<env>`). Nothing in the CDK
-creates that DNS record.
+Nothing in the CDK creates a DNS record. After the first `cdk deploy`, add an
+alias A record for `app.<domain>` (and `api.<domain>` if you use it) pointing at
+the load balancer `experimentation-<env>`; until then the hostname does not
+resolve and `curl` reports `000`.
+[AWS CDK Deployment, "Point the hostname at the load balancer"](../self-hosting/cdk.md#point-the-hostname-at-the-load-balancer)
+has the commands and the check.
 
 ### 1.3 ECR repositories and the bootstrap images
 
@@ -194,7 +197,8 @@ has the commands).
 `RUN_MIGRATIONS=false` and `SEED=` (empty); only the migration task, which the
 Deploy workflow runs before it shifts traffic, writes the schema. Until the
 first Deploy (section 2) the API runs against an empty database: `/health`
-answers 200 and the load balancer's health checks pass, while real requests
+answers 200 (through the hostname, once its alias record exists; section 1.2)
+and the load balancer's health checks pass, while real requests
 answer 500 and the API logs errors. Expect that, and run the first Deploy soon
 after the stacks are up. If a request in that window has put
 `experimentation-api-5xx-blue-<env>` or `-green-<env>` into ALARM, Deploy
