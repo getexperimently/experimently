@@ -33,7 +33,7 @@ from __future__ import annotations
 import json
 import logging
 import re
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from pydantic import ValidationError
 
@@ -269,6 +269,9 @@ _DASHBOARD_TOP_KEYS = frozenset(
 _DASHBOARD_GROUP_KEYS = frozenset({"id", "logical_operator", "conditions"})
 _DASHBOARD_CONDITION_KEYS = frozenset({"id", "attribute", "operator", "value"})
 _NATIVE_TOP_KEYS = frozenset(TargetingRules.model_fields)
+_NATIVE_RULE_KEYS = frozenset(TargetingRule.model_fields)
+_NATIVE_GROUP_KEYS = frozenset(RuleGroup.model_fields)
+_NATIVE_CONDITION_KEYS = frozenset(Condition.model_fields)
 _LOGICAL_OPERATOR_NAMES = frozenset({"and", "or", "not"})
 _MAX_RULE_ID_LENGTH = 100
 
@@ -351,7 +354,16 @@ def validate_flag_targeting(value: Any) -> Optional[TargetingRules]:
       ``default_rule``, which :func:`normalise_targeting_rules` does not read
       without ``rules``. It is checked after the unknown-key check, so a flat
       object still answers ``unknown key``;
-    * a problem with no path reads ``targeting rules: <reason>``.
+    * a problem with no path reads ``targeting rules: <reason>``;
+    * native rules: a key outside the schema is refused at every level --
+      the rule (``rules[0]: unknown key``), its condition group
+      (``rules[0].rule``), nested groups at any depth
+      (``rules[0].rule.groups[1]``), conditions, and ``default_rule`` and
+      ``default_rule.rule`` -- where the model would otherwise ignore it;
+    * ``rollout_percentage``, on dashboard rules and on a native rule, must be
+      an integer from 0 to 100. A float with no fractional part (``100.0``)
+      is accepted, as the native model accepts it; ``33.5``, ``true`` and
+      text are refused.
 
     For every value it accepts, what it returns is what
     :func:`normalise_targeting_rules` gives the flag evaluator (``None`` and
@@ -410,7 +422,9 @@ def _validated_dashboard(raw: Dict[str, Any], kind: str) -> TargetingRules:
     _check_logical_operator(raw, "logical_operator")
     if "rollout_percentage" in raw:
         percentage = raw["rollout_percentage"]
-        if (
+        if kind == _FLAG:
+            _check_flag_percentage(percentage, "rollout_percentage")
+        elif (
             isinstance(percentage, bool)
             or not isinstance(percentage, (int, float))
             or not 0 <= percentage <= 100
@@ -496,6 +510,8 @@ def _validated_native(raw: Dict[str, Any], kind: str) -> TargetingRules:
         # The flag evaluator reads native rules only when ``rules`` is present
         # (``normalise_targeting_rules``); a lone ``default_rule`` is ignored.
         raise TargetingRulesError("rules", "required")
+    if kind == _FLAG:
+        _check_native_flag_rules(raw)
     try:
         return TargetingRules.model_validate(raw)
     except ValidationError as exc:
@@ -534,6 +550,69 @@ _NATIVE_PATH_WORDS = frozenset(
         "validation_schema",
     }
 )
+
+
+def _check_flag_percentage(value: Any, path: str) -> None:
+    """A flag's rollout percentage is an integer from 0 to 100.
+
+    ``100.0`` is accepted (the native model reads it as ``100``); ``33.5``
+    would be applied as 33 and ``true`` as 1, so both are refused, as is text.
+    """
+    whole = isinstance(value, int) or (isinstance(value, float) and value.is_integer())
+    if isinstance(value, bool) or not whole or not 0 <= value <= 100:
+        raise TargetingRulesError(path, "must be an integer from 0 to 100")
+
+
+def _check_native_flag_rules(raw: Dict[str, Any]) -> None:
+    """Refuse a key outside the schema at every native level, for flags.
+
+    ``TargetingRules.model_validate`` ignores unknown nested keys, so a
+    misspelt ``rollout_percentage`` or ``priority`` would take its default and
+    a misspelt ``conditions`` would leave an empty group. Paths are built from
+    indices and schema words only; a value of the wrong type is left to the
+    model, which reports it. Groups are walked with an explicit stack rather
+    than by recursion, so this walk adds no Python call depth per level.
+    """
+    rule_paths: List[Tuple[str, Any]] = []
+    rules = raw.get("rules")
+    if isinstance(rules, list):
+        rule_paths += [(f"rules[{index}]", rule) for index, rule in enumerate(rules)]
+    if "default_rule" in raw:
+        rule_paths.append(("default_rule", raw["default_rule"]))
+
+    for path, rule in rule_paths:
+        if not isinstance(rule, dict):
+            continue
+        if any(key not in _NATIVE_RULE_KEYS for key in rule):
+            raise TargetingRulesError(path, "unknown key")
+        if "rollout_percentage" in rule:
+            _check_flag_percentage(
+                rule["rollout_percentage"], f"{path}.rollout_percentage"
+            )
+        # Depth first, in document order: a group, its conditions, then its
+        # nested groups.
+        stack: List[Tuple[str, Any]] = [(f"{path}.rule", rule.get("rule"))]
+        while stack:
+            gpath, group = stack.pop()
+            if not isinstance(group, dict):
+                continue
+            if any(key not in _NATIVE_GROUP_KEYS for key in group):
+                raise TargetingRulesError(gpath, "unknown key")
+            conditions = group.get("conditions")
+            if isinstance(conditions, list):
+                for ci, condition in enumerate(conditions):
+                    if isinstance(condition, dict) and any(
+                        key not in _NATIVE_CONDITION_KEYS for key in condition
+                    ):
+                        raise TargetingRulesError(
+                            f"{gpath}.conditions[{ci}]", "unknown key"
+                        )
+            nested = group.get("groups")
+            if isinstance(nested, list):
+                stack += [
+                    (f"{gpath}.groups[{gi}]", child)
+                    for gi, child in reversed(list(enumerate(nested)))
+                ]
 
 
 def _check_logical_operator(container: Dict[str, Any], path: str) -> None:
