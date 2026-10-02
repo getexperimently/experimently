@@ -1115,8 +1115,10 @@ class ExperimentService:
             },
         )
 
-        self.db.add(new_experiment)
-        self.db.flush()  # Flush to get the new experiment ID
+        # A key of its own, generated as create does and with the same bounded
+        # retry: the tracking API finds an experiment by key, so a clone with
+        # none could never be assigned (#609).
+        self._insert_with_generated_key(new_experiment)
 
         # Clone variants
         for variant in experiment.variants:
