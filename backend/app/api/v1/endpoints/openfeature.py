@@ -91,7 +91,9 @@ def _flag_to_definition(flag: FeatureFlag) -> FeatureFlagDefinition:
                 )
             )
 
-    rules_raw = flag.targeting_rules or []
+    # Only the legacy list shape carries rules here. A dict (the dashboard's
+    # shape) or a stored scalar such as 42 yields none, as in edge.py.
+    rules_raw = flag.targeting_rules if isinstance(flag.targeting_rules, list) else []
     rules = []
     for r in rules_raw:
         if isinstance(r, dict):
