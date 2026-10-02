@@ -30,11 +30,24 @@ def _rollback_target_percentage(config: Any) -> int:
 
     Reads ``rollback_percentage`` from the flag's safety config and clamps it to
     0-100; anything missing or non-numeric rolls back to 0 (fully off).
+
+    The API refuses a value outside 0-100 (#629), but a row stored before that
+    still reads back as it is. Clamping it here, with a warning naming the
+    flag, keeps the monitor rolling that flag back instead of skipping it.
     """
     value = getattr(config, "rollback_percentage", None)
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         return 0
-    return max(0, min(100, int(value)))
+    clamped = max(0, min(100, int(value)))
+    if not 0 <= value <= 100:
+        logger.warning(
+            "Stored rollback_percentage %s for feature flag %s is outside 0-100; "
+            "using %s",
+            value,
+            getattr(config, "feature_flag_id", None),
+            clamped,
+        )
+    return clamped
 
 
 class SafetyScheduler:

@@ -93,6 +93,7 @@ Stable operations changed this way, before any user depended on them:
 | Operations | Changed by | What changed |
 |---|---|---|
 | `POST /api/v1/feature-flags/`, `GET /api/v1/feature-flags/`, `GET`/`PUT /api/v1/feature-flags/{flag_id}`, `POST /api/v1/feature-flags/{flag_id}/activate`, `POST /api/v1/feature-flags/{flag_id}/deactivate` | #94 | The request schemas refuse unknown fields and explicit nulls, a new flag is off unless `is_active: true` is sent, and `default_value` accepts only `false`. Every one of these operations answers with one documented flag schema, `FeatureFlagRead`, which names targeting `targeting_rules` and no longer carries `rules`, `variants`, `metrics` or `last_evaluated`. See [Creating Feature Flags](../feature-flags/create.md). |
+| `POST /api/v1/safety/feature-flags/{feature_flag_id}/config`, `POST /api/v1/safety/feature-flags/{feature_flag_id}/rollback` | #629 | The config request's `rollback_percentage` and the rollback's `percentage` query parameter accept 0–100; any other value answers 422. A value stored before the change still reads back unchanged, and the safety monitor clamps it to 0–100 when it rolls the flag back. See [Safety Monitoring](../feature-flags/safety.md). |
 
 ## Deprecated operations
 
