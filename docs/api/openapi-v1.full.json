@@ -20271,18 +20271,25 @@
     },
     "/api/v1/etl/crawler/run": {
       "post": {
-        "description": "Start the Glue crawler to discover new partitions and update the catalog. Requires ADMIN role.",
+        "description": "Start the Glue crawler to discover new partitions and update the catalog. Requires ADMIN role. `crawler_name` may be omitted; if given it must be the configured `GLUE_CRAWLER_NAME`, and any other name answers 404 \"Unknown crawler\".",
         "operationId": "run_crawler_api_v1_etl_crawler_run_post",
         "parameters": [
           {
-            "description": "Glue crawler name (defaults to settings.GLUE_CRAWLER_NAME)",
+            "description": "Glue crawler name: GLUE_CRAWLER_NAME (the default)",
             "in": "query",
             "name": "crawler_name",
             "required": false,
             "schema": {
-              "description": "Glue crawler name (defaults to settings.GLUE_CRAWLER_NAME)",
-              "title": "Crawler Name",
-              "type": "string"
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Glue crawler name: GLUE_CRAWLER_NAME (the default)",
+              "title": "Crawler Name"
             }
           }
         ],
@@ -20299,6 +20306,9 @@
           },
           "403": {
             "description": "Insufficient permissions"
+          },
+          "404": {
+            "description": "Unknown crawler"
           },
           "409": {
             "description": "Crawler already running"
@@ -20330,18 +20340,25 @@
     },
     "/api/v1/etl/crawler/status": {
       "get": {
-        "description": "Return the current state of the Glue crawler. Any authenticated user can read.",
+        "description": "Return the current state of the Glue crawler. Any authenticated user can read. `crawler_name` may be omitted; if given it must be the configured `GLUE_CRAWLER_NAME`, and any other name answers 404 \"Unknown crawler\".",
         "operationId": "get_crawler_status_api_v1_etl_crawler_status_get",
         "parameters": [
           {
-            "description": "Glue crawler name (defaults to settings.GLUE_CRAWLER_NAME)",
+            "description": "Glue crawler name: GLUE_CRAWLER_NAME (the default)",
             "in": "query",
             "name": "crawler_name",
             "required": false,
             "schema": {
-              "description": "Glue crawler name (defaults to settings.GLUE_CRAWLER_NAME)",
-              "title": "Crawler Name",
-              "type": "string"
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Glue crawler name: GLUE_CRAWLER_NAME (the default)",
+              "title": "Crawler Name"
             }
           }
         ],
@@ -20357,7 +20374,7 @@
             "description": "Crawler status returned"
           },
           "404": {
-            "description": "Crawler not found"
+            "description": "Unknown crawler, or crawler not found"
           },
           "422": {
             "content": {
@@ -20409,6 +20426,9 @@
           "403": {
             "description": "Insufficient permissions"
           },
+          "404": {
+            "description": "The job type's Glue job is not configured"
+          },
           "422": {
             "description": "Invalid request parameters"
           },
@@ -20429,7 +20449,7 @@
     },
     "/api/v1/etl/jobs/{run_id}/status": {
       "get": {
-        "description": "Retrieve the current status of a Glue job run. Any authenticated user can read.",
+        "description": "Retrieve the current status of a Glue job run. Any authenticated user can read. `job_name` must be one of the configured jobs (`GLUE_ETL_JOB_NAME` or `GLUE_METRICS_JOB_NAME`); any other name answers 404 \"Unknown ETL job\".",
         "operationId": "get_job_status_api_v1_etl_jobs__run_id__status_get",
         "parameters": [
           {
@@ -20442,12 +20462,12 @@
             }
           },
           {
-            "description": "Glue job name",
+            "description": "Glue job name: GLUE_ETL_JOB_NAME or GLUE_METRICS_JOB_NAME",
             "in": "query",
             "name": "job_name",
             "required": true,
             "schema": {
-              "description": "Glue job name",
+              "description": "Glue job name: GLUE_ETL_JOB_NAME or GLUE_METRICS_JOB_NAME",
               "title": "Job Name",
               "type": "string"
             }
@@ -20483,7 +20503,7 @@
             "description": "Job status returned"
           },
           "404": {
-            "description": "Job run not found"
+            "description": "Unknown ETL job, or job run not found"
           },
           "422": {
             "content": {
@@ -20509,27 +20529,27 @@
     },
     "/api/v1/etl/partitions/add": {
       "post": {
-        "description": "Register 24 hourly Hive-style partitions for a given date. Requires ADMIN role.",
+        "description": "Register 24 hourly Hive-style partitions for a given date. Requires ADMIN role. `database` and `table` must be the configured `GLUE_DATABASE` and `GLUE_EVENTS_TABLE`; anything else answers 404 \"Unknown Glue table\".",
         "operationId": "add_partitions_api_v1_etl_partitions_add_post",
         "parameters": [
           {
-            "description": "Glue database name",
+            "description": "Glue database name: GLUE_DATABASE",
             "in": "query",
             "name": "database",
             "required": true,
             "schema": {
-              "description": "Glue database name",
+              "description": "Glue database name: GLUE_DATABASE",
               "title": "Database",
               "type": "string"
             }
           },
           {
-            "description": "Glue table name",
+            "description": "Glue table name: GLUE_EVENTS_TABLE",
             "in": "query",
             "name": "table",
             "required": true,
             "schema": {
-              "description": "Glue table name",
+              "description": "Glue table name: GLUE_EVENTS_TABLE",
               "title": "Table",
               "type": "string"
             }
@@ -20563,6 +20583,9 @@
           },
           "403": {
             "description": "Insufficient permissions"
+          },
+          "404": {
+            "description": "Unknown Glue table"
           },
           "422": {
             "content": {

@@ -4,6 +4,9 @@ Each used to put the client error's text in ``detail``. Now each answers a
 fixed sentence with the request ID, and the full error goes to the server log
 under that ID. The deliberate 404 and 409 answers are unchanged.
 
+The routes accept only the configured job and crawler names (#565), so these
+requests name the configured ones.
+
 The Glue client is a real botocore client with a ``Stubber``: no network, no
 credentials.
 """
@@ -22,12 +25,23 @@ from backend.app.api import deps
 from backend.app.main import app
 from backend.app.models.user import User, UserRole
 from modules.backend.app.api.v1.endpoints.etl import get_etl_service
+from modules.backend.app.services import etl_service as etl_service_module
 from modules.backend.app.services.etl_service import ETLService
 
 pytestmark = [pytest.mark.regression]
 
 CANARY = "CANARY glue-says-no zq540"
 REQUEST_ID = "etl-fixed-540"
+JOB = "experimentation-events-etl"
+CRAWLER = "experimentation-crawler"
+
+
+@pytest.fixture(autouse=True)
+def _configured_names(monkeypatch):
+    monkeypatch.setattr(etl_service_module.modules_settings, "GLUE_ETL_JOB_NAME", JOB)
+    monkeypatch.setattr(
+        etl_service_module.modules_settings, "GLUE_CRAWLER_NAME", CRAWLER
+    )
 
 
 def _service(
@@ -81,7 +95,7 @@ def call():
             UserRole.VIEWER,
             "get_job_run",
             "GET",
-            "/api/v1/etl/jobs/jr_1/status?job_name=experimently-events-to-parquet",
+            f"/api/v1/etl/jobs/jr_1/status?job_name={JOB}",
             None,
             "Could not read the ETL job's status",
         ),
@@ -89,7 +103,7 @@ def call():
             UserRole.VIEWER,
             "get_crawler",
             "GET",
-            "/api/v1/etl/crawler/status?crawler_name=c1",
+            f"/api/v1/etl/crawler/status?crawler_name={CRAWLER}",
             None,
             "Could not read the crawler's status",
         ),
@@ -105,7 +119,7 @@ def call():
             UserRole.ADMIN,
             "start_crawler",
             "POST",
-            "/api/v1/etl/crawler/run?crawler_name=c1",
+            f"/api/v1/etl/crawler/run?crawler_name={CRAWLER}",
             None,
             "Could not start the crawler",
         ),
@@ -128,10 +142,10 @@ def test_a_running_crawler_is_still_a_409(call):
         UserRole.ADMIN,
         _service("start_crawler", code="CrawlerRunningException"),
         "POST",
-        "/api/v1/etl/crawler/run?crawler_name=c1",
+        f"/api/v1/etl/crawler/run?crawler_name={CRAWLER}",
     )
     assert response.status_code == 409
-    assert response.json() == {"detail": "Crawler 'c1' is already running."}
+    assert response.json() == {"detail": f"Crawler '{CRAWLER}' is already running."}
 
 
 def test_an_unknown_crawler_is_still_a_404(call):
@@ -139,7 +153,7 @@ def test_an_unknown_crawler_is_still_a_404(call):
         UserRole.VIEWER,
         _service("get_crawler", code="EntityNotFoundException"),
         "GET",
-        "/api/v1/etl/crawler/status?crawler_name=c1",
+        f"/api/v1/etl/crawler/status?crawler_name={CRAWLER}",
     )
     assert response.status_code == 404
-    assert response.json() == {"detail": "Crawler 'c1' not found."}
+    assert response.json() == {"detail": f"Crawler '{CRAWLER}' not found."}
