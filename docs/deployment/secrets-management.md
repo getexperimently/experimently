@@ -186,17 +186,71 @@ before it builds anything ("Required secrets exist for this profile").
 database credentials are not under this prefix: they are the database stack's
 `experimentation-database-<env>-aurora-credentials`. Nor is Redis: see
 [Redis: nothing to create](#redis-nothing-to-create).
+
+### Give the CDK each secret's complete ARN
+
+The task definitions name each secret by its **complete ARN**, which ends in a
+six-character suffix Secrets Manager adds when the secret is created
+(`.../secret:/<env>/experimentation/jwt-secret-<suffix>`). The suffix cannot be
+worked out from the name, so `cdk synth`, `cdk diff`, `cdk deploy` and
+`cdk destroy` take the three ARNs from the environment, in **every**
+environment (`dev` and `demo` too):
+
+| Variable | Secret | Needed |
+|----------|--------|--------|
+| `JWT_SECRET_ARN` | `/<env>/experimentation/jwt-secret` | always |
+| `FIRST_SUPERUSER_PASSWORD_SECRET_ARN` | `/<env>/experimentation/first-superuser-password` | always |
+| `AUDIT_HMAC_KEY_SECRET_ARN` | `/<env>/experimentation/audit-hmac-key` | `profile: full` only |
+
+Read them (read-only) and export them in the shell that runs the CDK, with
+the region the stacks deploy to. The third is for `profile: full` only:
+
+```bash
+ENV=staging
+export JWT_SECRET_ARN=$(aws secretsmanager describe-secret \
+  --secret-id "/$ENV/experimentation/jwt-secret" --query ARN --output text)
+export FIRST_SUPERUSER_PASSWORD_SECRET_ARN=$(aws secretsmanager describe-secret \
+  --secret-id "/$ENV/experimentation/first-superuser-password" --query ARN --output text)
+export AUDIT_HMAC_KEY_SECRET_ARN=$(aws secretsmanager describe-secret \
+  --secret-id "/$ENV/experimentation/audit-hmac-key" --query ARN --output text)
+```
+
+Synth refuses a value that is missing, that stops at the name (a *partial*
+ARN, which ECS cannot resolve), that names another environment's secret,
+another region or account than the stack's, or another of the three secrets.
+The refusal names the variable and prints the command above; it never prints
+the value, because an ARN carries the account ID. For the same reason, keep
+these values out of issues, pull requests and chat.
+
+**Recreating a secret changes its ARN.** Deleting and re-creating
+`/<env>/experimentation/jwt-secret` gives it a new suffix: update the input and
+run `cdk deploy` again, or the next task start fails with
+`ResourceNotFoundException`. Changing a secret's *value*
+(`put-secret-value`, or rotation) keeps its ARN and needs nothing here.
 ---
 
 ## How Secrets Are Injected at Runtime
 
-The ECS task definition references secrets by ARN. At container start, ECS fetches the current secret value from Secrets Manager and injects it as an environment variable. The container process reads the environment variable normally — it never calls Secrets Manager directly.
+The ECS task definition references secrets by their complete ARN. At container start, ECS fetches the current secret value from Secrets Manager and sets it as an environment variable. The container process reads the environment variable normally — it never calls Secrets Manager directly.
 
-Example CDK task definition configuration (from `infrastructure/cdk/stacks/compute_stack.py`):
+A shortened version of the API task definition in
+`infrastructure/cdk/stacks/fargate_service_stack.py` (the migration task in
+`migration_task_stack.py` imports the same secrets the same way). The ARNs are
+the synth inputs [above](#give-the-cdk-each-secrets-complete-arn), which
+`app.py` checks and passes in as `secret_arns`:
 
 ```python
-# The ECS task role must have:
-#   secretsmanager:GetSecretValue on arn:aws:secretsmanager:*:*:secret:/prod/experimentation/*
+# Each secret by its COMPLETE ARN. A secret imported by name renders a partial
+# ARN into valueFrom, and Secrets Manager does not resolve it, so no task
+# would start.
+jwt_secret = secretsmanager.Secret.from_secret_complete_arn(
+    stack, "JwtSecret", secret_arns["JWT_SECRET_ARN"]
+)
+superuser_secret = secretsmanager.Secret.from_secret_complete_arn(
+    stack, "SuperuserPasswordSecret", secret_arns["FIRST_SUPERUSER_PASSWORD_SECRET_ARN"]
+)
+
+# The execution role may read exactly these secrets, by the same ARNs.
 task_definition.add_container(
     "ExperimentationBackend",
     image=ecs.ContainerImage.from_ecr_repository(repo, tag=image_tag),
@@ -219,16 +273,9 @@ task_definition.add_container(
         "POSTGRES_PASSWORD": ecs.Secret.from_secrets_manager(
             db_credentials, field="password"
         ),
-        "JWT_SECRET": ecs.Secret.from_secrets_manager(
-            secretsmanager.Secret.from_secret_name_v2(
-                stack, "JwtSecret", "/prod/experimentation/jwt-secret"
-            )
-        ),
-        "COGNITO_CONFIG": ecs.Secret.from_secrets_manager(
-            secretsmanager.Secret.from_secret_name_v2(
-                stack, "CognitoConfig", "/prod/experimentation/cognito-config"
-            )
-        ),
+        "SECRET_KEY": ecs.Secret.from_secrets_manager(jwt_secret),
+        "FIRST_SUPERUSER_PASSWORD": ecs.Secret.from_secrets_manager(superuser_secret),
+        # profile: full adds AUDIT_HMAC_KEY from AUDIT_HMAC_KEY_SECRET_ARN.
     },
 )
 ```
@@ -240,7 +287,7 @@ The application reads these as standard environment variables:
 import os
 
 POSTGRES_PASSWORD = os.environ["POSTGRES_PASSWORD"]  # from the Aurora-generated secret
-JWT_SECRET = os.environ["JWT_SECRET"]            # from /prod/experimentation/jwt-secret
+SECRET_KEY = os.environ["SECRET_KEY"]            # from /prod/experimentation/jwt-secret
 REDIS_HOST = os.environ["REDIS_HOST"]            # the Redis stack's primary endpoint
 ```
 
@@ -402,7 +449,9 @@ If the key may have been exposed through a vulnerability in Experimently itself,
 
 ## IAM Permissions for Secret Access
 
-The ECS task execution role must have the following policy attached to read secrets at container startup:
+The ECS task execution role must be able to read the secrets at container startup. The CDK stacks grant
+`secretsmanager:GetSecretValue` on exactly the complete ARNs the task definition names (the synth
+inputs above) and nothing wider. A hand-made role outside the CDK needs at least this:
 
 ```json
 {

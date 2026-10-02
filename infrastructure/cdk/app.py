@@ -18,6 +18,7 @@ from stacks.authentication_stack import AuthenticationStack
 from stacks.fargate_service_stack import FargateServiceStack
 from stacks.migration_task_stack import MigrationTaskStack
 from stacks.environments import nat_gateway_count
+from stacks.secret_arns import resolve_secret_arns
 
 # ---------------------------------------------------------------------------
 # The modules' stacks (modules/infrastructure/cdk/stacks, issue #89)
@@ -125,6 +126,20 @@ if not account:
         "CDK_DEFAULT_ACCOUNT from your credentials) before synthesizing."
     )
 env = Environment(account=account, region=region)
+
+# The three secrets the API and migration task definitions read, by their
+# COMPLETE ARN (#636): JWT_SECRET_ARN, FIRST_SUPERUSER_PASSWORD_SECRET_ARN and,
+# for the full profile, AUDIT_HMAC_KEY_SECRET_ARN. Required in every
+# environment; a partial ARN (no suffix) is what ECS cannot resolve, so there
+# is no fallback to the secret's name. stacks/secret_arns.py has what it
+# refuses and the read-only command that prints each value.
+secret_arns = resolve_secret_arns(
+    os.environ,
+    env_name=env_name,
+    account=account,
+    region=region,
+    include_modules=ENABLE_MODULE_STACKS,
+)
 
 app = App()
 
@@ -271,6 +286,7 @@ fargate_stack = FargateServiceStack(
     # AUDIT_HMAC_KEY is read only by the modules, and naming a secret that was
     # never created stops ECS from starting the task at all.
     include_modules=ENABLE_MODULE_STACKS,
+    secret_arns=secret_arns,
     api_desired_count=API_DESIRED_COUNT[env_name],
     dashboard_desired_count=DASHBOARD_DESIRED_COUNT[env_name],
     # Where Aurora is and how to log in to it (#78, #146): this environment's
@@ -317,6 +333,7 @@ migration_stack = MigrationTaskStack(
     ecs_security_group=compute_stack.ecs_security_group,
     public_base_url=public_base_url,
     include_modules=ENABLE_MODULE_STACKS,
+    secret_arns=secret_arns,
     env=env,
 )
 migration_stack.add_dependency(fargate_stack)

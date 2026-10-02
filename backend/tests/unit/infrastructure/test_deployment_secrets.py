@@ -27,6 +27,7 @@ from __future__ import annotations
 import ast
 import os
 import re
+import runpy
 import subprocess
 import sys
 from pathlib import Path
@@ -219,12 +220,37 @@ def test_the_module_secrets_are_gated_on_the_profile(name: str):
 DEPLOY_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "deploy.yml"
 
 
+SECRET_ARNS = STACKS_DIR / "secret_arns.py"
+
+
 def _stack_secret_names() -> set[str]:
-    """Every ``/<env>/experimentation/<name>`` secret the two stacks import."""
-    pattern = re.compile(r'f"/\{env_name\}/experimentation/([a-z0-9-]+)"')
-    return {
-        name for stack in STACKS.values() for name in pattern.findall(stack.read_text())
-    }
+    """Every ``/<env>/experimentation/<name>`` secret the two stacks import.
+
+    The stacks import each secret by its complete ARN (#636), from a synth
+    input, so the name no longer sits in the stack source: it is
+    ``SECRET_INPUTS`` in ``stacks/secret_arns.py`` (input -> name), the table
+    the validator checks every input against. A name counts only when BOTH
+    stacks import its input with ``from_secret_complete_arn``, and neither may
+    import a secret by name any more.
+    """
+    inputs = runpy.run_path(str(SECRET_ARNS))["SECRET_INPUTS"]
+    names = set()
+    for variable, name in inputs.items():
+        for stack in STACKS.values():
+            text = stack.read_text()
+            imports = set(re.findall(r"secretsmanager\.Secret\.(from_\w+)\(", text))
+            assert imports == {"from_secret_complete_arn"}, (
+                f"{stack.name} imports secrets with {sorted(imports)}; only a "
+                "complete ARN is a valueFrom ECS documents (a by-name import "
+                "renders a partial ARN it cannot resolve)"
+            )
+            assert re.search(
+                r"from_secret_complete_arn\(\s*self,\s*\"\w+\",\s*"
+                + re.escape(f'secret_arns["{variable}"]'),
+                text,
+            ), f"{stack.name} does not import {variable} by complete ARN"
+        names.add(name)
+    return names
 
 
 def _preflight_secret_names() -> tuple[set[str], set[str]]:

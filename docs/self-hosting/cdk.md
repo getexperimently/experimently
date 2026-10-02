@@ -51,7 +51,7 @@ aws sts get-caller-identity --query Account --output text
 
 ## Required Environment Variables
 
-`infrastructure/cdk/app.py` reads these from the environment. `cdk synth`, `cdk diff`, `cdk deploy` and `cdk destroy` fail without the ones marked required, and `ALARM_EMAIL` is required for `staging` and `prod` (below).
+`infrastructure/cdk/app.py` reads these from the environment. `cdk synth`, `cdk diff`, `cdk deploy` and `cdk destroy` fail without the ones marked required, `ALARM_EMAIL` is required for `staging` and `prod`, and the three secret ARNs are required in every environment (below).
 
 **One region.** The Deploy, Rollback and Database Migration workflows act in
 `us-west-2` (`AWS_REGION` at the top of each), so deploy the stacks, the ECR
@@ -121,11 +121,40 @@ aws sns list-subscriptions-by-topic --topic-arn "$TOPIC_ARN" \
 The last command must show the `email` subscription with a real ARN, not
 `PendingConfirmation`.
 
-The application's own secrets (database password, JWT secret and the rest) are
-not read from your shell. The task definition takes them from Secrets Manager
-under `/<env>/experimentation/`, and they must exist before the first deploy:
-see [Secrets Management](../deployment/secrets-management.md) and the list in
-the [Deployment README](../deployment/README.md). The API image is pulled from
+Required in **every** environment: the complete ARN of each secret the task
+definitions read. The secrets themselves must exist first
+([Secrets Management](../deployment/secrets-management.md)); read each ARN by
+name, read-only, in the region the stacks deploy to (the third only for the
+full profile):
+
+```bash
+export JWT_SECRET_ARN=$(aws secretsmanager describe-secret \
+  --secret-id "/$ENVIRONMENT/experimentation/jwt-secret" --query ARN --output text)
+export FIRST_SUPERUSER_PASSWORD_SECRET_ARN=$(aws secretsmanager describe-secret \
+  --secret-id "/$ENVIRONMENT/experimentation/first-superuser-password" --query ARN --output text)
+export AUDIT_HMAC_KEY_SECRET_ARN=$(aws secretsmanager describe-secret \
+  --secret-id "/$ENVIRONMENT/experimentation/audit-hmac-key" --query ARN --output text)
+```
+
+- **`JWT_SECRET_ARN`**, **`FIRST_SUPERUSER_PASSWORD_SECRET_ARN`**: always.
+  **`AUDIT_HMAC_KEY_SECRET_ARN`**: the full profile only (checked on core too
+  if you set it).
+- **Each must be the complete ARN**,
+  `arn:aws:secretsmanager:<region>:<account>:secret:/<env>/experimentation/<name>-<suffix>`,
+  in the stack's own account and region. Synth refuses a missing value, a
+  partial ARN (one that stops at the name: ECS cannot resolve it), another
+  environment's secret, or one variable's secret given in another. The refusal
+  names the variable and the command above, and never prints the value.
+- **Recreating a secret changes its ARN.** Update the input and run
+  `cdk deploy` again, or the next task start fails. Changing a secret's value
+  keeps its ARN.
+- An ARN carries the account ID: keep these out of issues, pull requests and
+  logs.
+
+The application's own secret *values* (database password, JWT secret and the
+rest) are not read from your shell. The task definition takes them from Secrets
+Manager when each task starts; see the list in the
+[Deployment README](../deployment/README.md). The API image is pulled from
 the ECR repository `experimentation-platform/backend`, which the CDK does not
 create.
 

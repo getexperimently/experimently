@@ -55,6 +55,43 @@ CORE_STACKS = {
 #: The ALARM_EMAIL every synth here gets (``_app_environment``).
 TEST_ALARM_EMAIL = "alerts@experimently.test"
 
+#: The account and region every synth here deploys to. The account is one of
+#: the documented placeholders the repository's account check accepts, and
+#: never a real one.
+FAKE_ACCOUNT = "111111111111"
+FAKE_REGION = "us-west-2"
+
+#: The synth inputs that carry the task definitions' secrets by complete ARN
+#: (stacks/secret_arns.py, #636), and the name part each must point at.
+SECRET_ARN_INPUTS = {
+    "JWT_SECRET_ARN": "jwt-secret",
+    "FIRST_SUPERUSER_PASSWORD_SECRET_ARN": "first-superuser-password",
+    "AUDIT_HMAC_KEY_SECRET_ARN": "audit-hmac-key",
+}
+
+#: The fake six-character suffix each fixture ARN ends in. Letters only, and
+#: distinct per secret, so a value in the wrong slot is told apart.
+FAKE_SUFFIX = {
+    "JWT_SECRET_ARN": "JwtFak",
+    "FIRST_SUPERUSER_PASSWORD_SECRET_ARN": "SupFak",
+    "AUDIT_HMAC_KEY_SECRET_ARN": "AudFak",
+}
+
+
+def fake_secret_arn(
+    variable: str,
+    environment: str,
+    *,
+    account: str = FAKE_ACCOUNT,
+    region: str = FAKE_REGION,
+) -> str:
+    """A complete, fake ARN for ``variable``'s secret in ``environment``."""
+    return (
+        f"arn:aws:secretsmanager:{region}:{account}:secret:"
+        f"/{environment}/experimentation/{SECRET_ARN_INPUTS[variable]}"
+        f"-{FAKE_SUFFIX[variable]}"
+    )
+
 
 @contextmanager
 def _app_environment(cdk_dir: Path, **overrides: str | None):
@@ -64,15 +101,15 @@ def _app_environment(cdk_dir: Path, **overrides: str | None):
         k: v for k, v in sys.modules.items() if k.split(".")[0] == "stacks"
     }
     os.environ.update(
-        CDK_DEFAULT_ACCOUNT="123456789012",
-        CDK_DEFAULT_REGION="us-west-2",
+        CDK_DEFAULT_ACCOUNT=FAKE_ACCOUNT,
+        CDK_DEFAULT_REGION=FAKE_REGION,
         ENVIRONMENT="dev",
         # Required at synth, not at deploy: both ALB listeners are HTTPS and
         # CDK validates that at the end of synthesis, so FargateServiceStack
         # refuses to build without one. Never resolved -- no AWS call is made
         # for an ACM ARN until a real deployment.
         CERTIFICATE_ARN=(
-            "arn:aws:acm:us-west-2:123456789012:certificate/"
+            f"arn:aws:acm:{FAKE_REGION}:{FAKE_ACCOUNT}:certificate/"
             "00000000-0000-0000-0000-000000000000"
         ),
         # Required at synth for the same class of reason as the certificate:
@@ -87,12 +124,26 @@ def _app_environment(cdk_dir: Path, **overrides: str | None):
         ALARM_EMAIL=TEST_ALARM_EMAIL,
     )
     os.environ.pop("EXPERIMENTLY_PROFILE", None)
+    for name in SECRET_ARN_INPUTS:
+        os.environ.pop(name, None)
     # An override of None removes the variable (e.g. ALARM_EMAIL=None: unset).
     for name, value in overrides.items():
         if value is None:
             os.environ.pop(name, None)
         else:
             os.environ[name] = value
+    # Required at synth in EVERY environment (#636): the complete ARN of each
+    # secret the API and migration task definitions read. Built for the
+    # environment, account and region this synth ends up with, so a staging
+    # synth gets staging ARNs. Never resolved: no AWS call is made at synth.
+    for name in SECRET_ARN_INPUTS:
+        if name not in overrides:
+            os.environ[name] = fake_secret_arn(
+                name,
+                os.environ["ENVIRONMENT"],
+                account=os.environ.get("CDK_DEFAULT_ACCOUNT", FAKE_ACCOUNT),
+                region=os.environ.get("CDK_DEFAULT_REGION", FAKE_REGION),
+            )
     sys.path.insert(0, str(cdk_dir))
     for name in list(sys.modules):
         if name.split(".")[0] == "stacks":
