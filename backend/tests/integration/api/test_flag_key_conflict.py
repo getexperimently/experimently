@@ -135,6 +135,45 @@ def test_put_key_onto_flag_past_first_100_is_409(
     assert db_session.get(FeatureFlag, mover.id).key == mover.key
 
 
+@pytest.mark.regression
+def test_put_key_check_past_first_100_refuses_before_any_write(
+    admin_client, db_session, admin_user, make_feature_flag, monkeypatch
+):
+    """The key check alone answers 409 past row 100; the write is never reached.
+
+    The IntegrityError fallback would also turn a missed clash into 409, so
+    the test above passes on either one. This one takes the write away: the
+    service update fails the request if it is called, so only the direct key
+    query before it can answer 409.
+    """
+    prefix = f"precheck-{uuid.uuid4().hex[:6]}"
+    others = [
+        FeatureFlag(
+            key=f"{prefix}-{i:03d}",
+            name=f"Other {i}",
+            status=FeatureFlagStatus.INACTIVE,
+            owner_id=admin_user.id,
+            rollout_percentage=0,
+        )
+        for i in range(130)
+    ]
+    db_session.add_all(others)
+    db_session.commit()
+    mover = make_feature_flag(key=unique_flag_key("precheck-mover"))
+
+    def the_write_must_not_be_reached(self, flag_id, flag_data):
+        raise AssertionError(f"update reached the write for key {flag_data.key!r}")
+
+    monkeypatch.setattr(
+        FeatureFlagService, "update_feature_flag", the_write_must_not_be_reached
+    )
+
+    for other in others:
+        response = admin_client.put(f"{COLLECTION}/{mover.id}", json={"key": other.key})
+        assert response.status_code == 409, (other.key, response.text)
+        assert response.json()["detail"] == _detail(other.key)
+
+
 def test_put_to_a_free_key_still_succeeds(admin_client, make_feature_flag):
     """The direct query excludes the flag itself and only refuses a taken key."""
     flag = make_feature_flag(key=unique_flag_key("free"))
