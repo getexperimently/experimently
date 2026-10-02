@@ -686,8 +686,16 @@ do_previous() {
 
 do_upgrade_previous() {
     local prev=${PREVIOUS_VERSION:?PREVIOUS_VERSION: run the previous phase first}
-    local ns=chart-kind-previous release=prev ptag ltag ref
+    local ns=chart-kind-previous release=prev ptag ltag ref this_api
     ptag="$PROFILE-$prev"
+    # This PR's api image, by the ID `load` recorded, read BEFORE the pull
+    # below. When N-1 is the release VERSION names (the usual case), $ptag is
+    # the very tag `load` gave this PR's image, and the pull moves that tag to
+    # N-1's image: read through the tag afterwards, "this PR's revisions" were
+    # N-1's, and the delta was empty however many migrations the PR added.
+    this_api=$(sed -n 's/^api=//p' "$WORK/images.txt")
+    : "${this_api:?no api image id in $WORK/images.txt: run the load phase first}"
+    revisions "$this_api" >"$WORK/revisions-this"
     # A local tag of its own: N-1 is usually the release VERSION names, whose
     # tag is the one this job gave the PR's images. Same profile prefix, so the
     # chart's tag rule accepts it.
@@ -711,9 +719,8 @@ do_upgrade_previous() {
     [ -f "$WORK/previous/$CHART_DIR/Chart.yaml" ] ||
         fail "N-1 cannot be resolved: v$prev has no $CHART_DIR"
 
-    # What N adds: revisions in this PR's image and not in N-1's.
-    revisions "$API_REPO:$ptag" >"$WORK/revisions-previous"
-    revisions "$API_REPO:$PROFILE-$(app_version)" >"$WORK/revisions-this"
+    # What N adds: revisions in this PR's image (read above) and not in N-1's.
+    revisions "$API_REPO:$ltag" >"$WORK/revisions-previous"
     LC_ALL=C comm -13 "$WORK/revisions-previous" "$WORK/revisions-this" >"$WORK/revisions-delta"
     LC_ALL=C comm -23 "$WORK/revisions-previous" "$WORK/revisions-this" >"$WORK/revisions-only-previous"
     if [ -s "$WORK/revisions-only-previous" ]; then
