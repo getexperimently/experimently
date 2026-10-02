@@ -10,7 +10,11 @@ from fastapi.encoders import jsonable_encoder
 from sqlalchemy.orm import Session
 
 from backend.app.crud.base import CRUDBase
-from backend.app.models.feature_flag import FeatureFlag, FeatureFlagStatus
+from backend.app.models.feature_flag import (
+    NOT_WRITTEN_BY_REQUESTS,
+    FeatureFlag,
+    FeatureFlagStatus,
+)
 from backend.app.schemas.feature_flag import FeatureFlagCreate, FeatureFlagUpdate
 
 
@@ -59,7 +63,11 @@ class CRUDFeatureFlag(CRUDBase[FeatureFlag, FeatureFlagCreate, FeatureFlagUpdate
 
         # Remove any fields that don't exist in the model
         model_fields = [c.name for c in FeatureFlag.__table__.columns]
-        obj_in_data = {k: v for k, v in obj_in_data.items() if k in model_fields}
+        obj_in_data = {
+            k: v
+            for k, v in obj_in_data.items()
+            if k in model_fields and k not in NOT_WRITTEN_BY_REQUESTS
+        }
 
         # Create feature flag
         db_obj = FeatureFlag(**obj_in_data)
@@ -105,7 +113,11 @@ class CRUDFeatureFlag(CRUDBase[FeatureFlag, FeatureFlagCreate, FeatureFlagUpdate
 
         # Remove fields that don't exist in the model
         model_fields = [c.name for c in FeatureFlag.__table__.columns]
-        update_data = {k: v for k, v in update_data.items() if k in model_fields}
+        update_data = {
+            k: v
+            for k, v in update_data.items()
+            if k in model_fields and k not in NOT_WRITTEN_BY_REQUESTS
+        }
 
         return super().update(db, db_obj=db_obj, obj_in=update_data)
 

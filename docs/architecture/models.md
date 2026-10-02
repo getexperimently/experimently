@@ -180,6 +180,7 @@ The FeatureFlag model manages feature toggles.
 - `owner_id`: Foreign key to User model
 - `targeting_rules`: JSON field for flag enablement rules
 - `rollout_percentage`: Percentage for gradual rollout (0-100)
+- `default_value`: Boolean, not null, default false: what the flag serves when it is off. Stored only for now; the API neither reads nor writes it yet (#94)
 - `variants`: JSON field for multivariate flags
 - `tags`: JSON field for categorization
 

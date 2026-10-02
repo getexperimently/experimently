@@ -16,7 +16,11 @@ from backend.app.core.targeting_adapter import (
     match_targeting_rule,
     normalise_targeting_rules,
 )
-from backend.app.models.feature_flag import FeatureFlag, FeatureFlagStatus
+from backend.app.models.feature_flag import (
+    NOT_WRITTEN_BY_REQUESTS,
+    FeatureFlag,
+    FeatureFlagStatus,
+)
 from backend.app.schemas.feature_flag import FeatureFlagCreate, FeatureFlagUpdate
 from backend.app.schemas.metrics import ErrorLogCreate
 from backend.app.services.metrics_service import MetricsService
@@ -128,7 +132,10 @@ class FeatureFlagService:
 
             # Remove any other fields that don't exist in the model
             for key in list(flag_dict.keys()):
-                if key not in [c.name for c in FeatureFlag.__table__.columns]:
+                if (
+                    key not in [c.name for c in FeatureFlag.__table__.columns]
+                    or key in NOT_WRITTEN_BY_REQUESTS
+                ):
                     flag_dict.pop(key)
 
             flag = FeatureFlag(**flag_dict)
@@ -176,7 +183,10 @@ class FeatureFlagService:
 
             # Remove fields that don't exist in the model
             for key in list(update_data.keys()):
-                if key not in [c.name for c in FeatureFlag.__table__.columns]:
+                if (
+                    key not in [c.name for c in FeatureFlag.__table__.columns]
+                    or key in NOT_WRITTEN_BY_REQUESTS
+                ):
                     update_data.pop(key)
 
             for field, value in update_data.items():
