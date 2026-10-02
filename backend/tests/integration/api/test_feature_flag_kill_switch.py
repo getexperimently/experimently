@@ -12,6 +12,8 @@ endpoints against the database and check the SDK-facing evaluation flips.
 import uuid
 
 import pytest
+from sqlalchemy import text
+from sqlalchemy.orm import sessionmaker
 
 from backend.app.models.audit_log import AuditLog
 from backend.app.models.feature_flag import FeatureFlag, FeatureFlagStatus
@@ -134,3 +136,50 @@ class TestKillSwitch:
         )
         assert stored.status == FeatureFlagStatus.ACTIVE
         assert len(_audit_rows(db_session, active_flag)) == 2
+
+
+def _fresh_status(db_session, flag_id):
+    """Read a flag's status through a brand-new session, not the fixture's."""
+    fresh = sessionmaker(bind=db_session.get_bind())()
+    try:
+        fresh.execute(text("SET search_path TO test_experimentation"))
+        return (
+            fresh.query(FeatureFlag.status).filter(FeatureFlag.id == flag_id).one()[0]
+        )
+    finally:
+        fresh.close()
+
+
+@pytest.mark.regression
+def test_toggle_turns_a_stored_active_flag_off(admin_client, db_session, active_flag):
+    """The first toggle of an ACTIVE flag turns it off.
+
+    The status column loads as ``FeatureFlagStatus``; ``/toggle`` compared it
+    with the string ``"ACTIVE"``, which never matched, so an ACTIVE flag was
+    set to ACTIVE again and toggling could not turn it off.
+    ``test_toggle_flips_status_each_call`` above stayed green over that: it
+    toggles twice and only checks that the flag ends where it started.
+    """
+    assert _fresh_status(db_session, active_flag.id) == FeatureFlagStatus.ACTIVE
+
+    first = admin_client.post(
+        f"/api/v1/feature-flags/{active_flag.id}/toggle", json={"reason": "off"}
+    )
+    assert first.status_code == 200, first.text
+    assert first.json()["status"] == "INACTIVE", (
+        f"first toggle {first.status_code} {first.json()['status']}"
+    )
+    assert _fresh_status(db_session, active_flag.id) == FeatureFlagStatus.INACTIVE
+
+    second = admin_client.post(
+        f"/api/v1/feature-flags/{active_flag.id}/toggle", json={"reason": "on"}
+    )
+    assert second.status_code == 200, second.text
+    assert second.json()["status"] == "ACTIVE"
+    assert _fresh_status(db_session, active_flag.id) == FeatureFlagStatus.ACTIVE
+
+    rows = _audit_rows(db_session, active_flag)
+    assert [(r.action_type, r.old_value, r.new_value) for r in rows] == [
+        ("toggle_disable", "ACTIVE", "INACTIVE"),
+        ("toggle_enable", "INACTIVE", "ACTIVE"),
+    ]
