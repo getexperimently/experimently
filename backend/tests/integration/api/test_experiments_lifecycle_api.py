@@ -18,7 +18,8 @@ in backend/app/api/v1/endpoints/experiments.py:
   GET  /api/v1/experiments/{id}/split-url/preview
 
 It also targets the permission/403 branches of start/pause/get/update/delete
-and the module-level `stats_z_score` helper.
+and the sample-size endpoint's critical values at the significance levels and
+powers the wizard offers.
 
 IMPORTANT — dependency override caveat:
   `admin_client` / `developer_client` / `analyst_client` / `viewer_client`
@@ -58,7 +59,6 @@ from datetime import datetime, timedelta, timezone
 import pytest
 from fastapi.testclient import TestClient
 
-from backend.app.api.v1.endpoints.experiments import stats_z_score
 from backend.app.main import app as fastapi_app
 from backend.tests.integration.conftest import make_client_for_user
 
@@ -855,7 +855,7 @@ class TestCalculateSampleSize:
         assert response.status_code == 422, response.text
 
     def test_sample_size_custom_significance_and_power(self, admin_client):
-        """Exercises non-exact-match z-score central-region approximation branch."""
+        """A significance and power off the wizard's presets still answer 200."""
         response = admin_client.get(
             "/api/v1/experiments/analysis/sample-size",
             params={
@@ -888,49 +888,40 @@ class TestCalculateSampleSize:
 
 
 # ---------------------------------------------------------------------------
-# stats_z_score helper (module-level function). Both alpha/beta inputs to it
-# are always < 0.5 through the sample-size endpoint (significance_level and
-# 1-statistical_power are bounded well below 0.5), so the upper-region
-# (p >= 0.97575) branch is unreachable via HTTP; we exercise it directly.
+# Critical values. The endpoint used to take z from a helper with hard-coded
+# shortcuts (p == 0.05 -> 1.96, 0.1 -> 1.65, 0.5 -> 0.67, ...), which applied
+# the two-sided 5% value to a two-sided 10% test and to a one-sided 5% test,
+# and gave z_beta 0.67 at power 0.5 instead of 0. Each case below hit one of
+# those shortcuts; the answers are the exact norm.ppf ones at a 12% baseline
+# and a 5% relative MDE.
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.integration
-class TestStatsZScoreHelper:
-    def test_exact_common_values(self):
-        assert stats_z_score(0.05) == 1.96
-        assert stats_z_score(0.01) == 2.58
-        assert stats_z_score(0.1) == 1.65
-        assert stats_z_score(0.2) == 1.28
-        assert stats_z_score(0.5) == 0.67
-
-    def test_lower_region_approximation(self):
-        """p < 0.02425 -> large-magnitude negative z (left tail)."""
-        z = stats_z_score(0.001)
-        assert z < -2.5
-
-    def test_central_region_approximation_left_of_median(self):
-        """0.02425 <= p < 0.5 -> negative z."""
-        z = stats_z_score(0.3)
-        assert -1 < z < 0
-
-    def test_central_region_approximation_right_of_median(self):
-        """0.5 < p < 0.97575 -> positive z."""
-        z = stats_z_score(0.7)
-        assert 0 < z < 1
-
-    def test_upper_region_approximation(self):
-        """p >= 0.97575 -> large-magnitude positive z (right tail)."""
-        z = stats_z_score(0.999)
-        assert z > 2.5
-
-    def test_invalid_probability_raises_value_error(self):
-        with pytest.raises(ValueError):
-            stats_z_score(0)
-        with pytest.raises(ValueError):
-            stats_z_score(1)
-        with pytest.raises(ValueError):
-            stats_z_score(-0.1)
+class TestSampleSizeCriticalValues:
+    @pytest.mark.parametrize(
+        ("extra", "per_variant"),
+        [
+            ({"significance_level": 0.1}, 37048),
+            ({"is_one_sided": True}, 37048),
+            ({"is_one_sided": True, "significance_level": 0.01}, 60140),
+            ({"is_one_sided": True, "significance_level": 0.1}, 27013),
+            ({"statistical_power": 0.5}, 23020),
+        ],
+    )
+    def test_formerly_shortcut_cases(self, admin_client, extra, per_variant):
+        response = admin_client.get(
+            "/api/v1/experiments/analysis/sample-size",
+            params={
+                "baseline_rate": 0.12,
+                "minimum_detectable_effect": 0.05,
+                **extra,
+            },
+        )
+        assert response.status_code == 200, response.text
+        data = response.json()
+        assert data["samples_per_variant"] == per_variant
+        assert data["total_samples"] == per_variant * 2
 
 
 # ---------------------------------------------------------------------------
