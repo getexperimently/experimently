@@ -44,6 +44,19 @@ jobs:
   # trigger at all (documentation merges without a site-build gate; founder,
   # 2026-09-24). The required home of the docs tests is profile-build's core
   # leg below.
+  #
+  # A classifier that fails runs EVERYTHING. A job whose `needs:` failed is
+  # skipped, and protection accepts a skipped check, so the plain
+  # `docs_only != 'true'` form turned a crashed classifier into a green gate
+  # with nothing run. Every classified job is instead
+  #   ${{ !cancelled() && (needs.changes.result != 'success' || <its lane>) }}
+  # and the two jobs below that must never skip are `${{ !cancelled() }}`.
+  # `!cancelled()` would also run a job after ANY of its needs failed, so
+  # every one of them needs `changes` alone. The step collects the file list
+  # and the verdict into variables first and writes one checked line last:
+  # a failure part-way leaves `$GITHUB_OUTPUT` untouched, never a half answer.
+  # backend/tests/unit/infrastructure/test_ci_classification.py pins the
+  # exact `if:` and `needs:` of every job, and runs this step's script.
   changes:
     name: Detect docs-only change
     runs-on: ubuntu-latest
@@ -59,11 +72,17 @@ jobs:
           HEAD: ${{ github.event.pull_request.head.sha }}
         run: |
           set -euo pipefail
-          git diff --no-renames --name-only "$BASE" "$HEAD" | python3 scripts/classify_changes.py >> "$GITHUB_OUTPUT"
+          files="$(git diff --no-renames --name-only "$BASE" "$HEAD")"
+          lane="$(printf '%s\n' "$files" | python3 scripts/classify_changes.py)"
+          case "$lane" in
+            docs_only=true | docs_only=false) ;;
+            *) printf '::error::the classifier printed %s, not one docs_only line\n' "$lane" >&2; exit 1 ;;
+          esac
+          printf '%s\n' "$lane" >> "$GITHUB_OUTPUT"
 
   unit-tests:
     needs: changes
-    if: needs.changes.outputs.docs_only != 'true'
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.docs_only != 'true') }}
     name: Unit Tests
     runs-on: ubuntu-latest
     services:
@@ -128,7 +147,7 @@ jobs:
   # minutes.
   module-tests:
     needs: changes
-    if: needs.changes.outputs.docs_only != 'true'
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.docs_only != 'true') }}
     name: Module Tests
     runs-on: ubuntu-latest
     services:
@@ -188,7 +207,7 @@ jobs:
 
   base-requirements-only:
     needs: changes
-    if: needs.changes.outputs.docs_only != 'true'
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.docs_only != 'true') }}
     # The environment nobody was testing: a FULL checkout whose interpreter has
     # ONLY backend/requirements.txt in it -- no modules/requirements.txt, no
     # extras. Every other Python job either installs both sets (module-tests)
@@ -262,7 +281,7 @@ jobs:
 
   smoke-tests:
     needs: changes
-    if: needs.changes.outputs.docs_only != 'true'
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.docs_only != 'true') }}
     name: Smoke Tests
     runs-on: ubuntu-latest
     services:
@@ -305,7 +324,7 @@ jobs:
 
   frontend-tests:
     needs: changes
-    if: needs.changes.outputs.docs_only != 'true'
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.docs_only != 'true') }}
     name: Frontend Tests
     runs-on: ubuntu-latest
     steps:
@@ -368,7 +387,7 @@ jobs:
   # --list step names every sdk/ directory this job does not run, and why.
   sdk-contracts:
     needs: changes
-    if: needs.changes.outputs.docs_only != 'true'
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.docs_only != 'true') }}
     name: SDK Contract Tests
     runs-on: ubuntu-latest
     steps:
@@ -444,12 +463,14 @@ jobs:
   # The same sequence as `make core-build` / `make full-build`; the step that
   # failed is named in the last line of the log.
   #
-  # No job-level `if:` (see the `changes` job): on a docs-only change every
+  # No classification `if:` at job level, only `!cancelled()` (see the
+  # `changes` job): on a docs-only change every
   # step below is skipped except the reason and, in the core leg only, the
   # tests that pin docs/ content -- which is why a docs-only pull request
   # still starts both legs and their Postgres service.
   profile-build:
     needs: changes
+    if: ${{ !cancelled() }}
     # The check name stays `core-build` / `full-build`: an explicit `name:`
     # replaces the default `profile-build (core)` spelling, so the required
     # status checks keep working.
@@ -582,11 +603,13 @@ jobs:
   # Every SDK against a real API, through the shared boot in _platform.yml so
   # the sequence lives in one place (this is its only caller today).
   #
-  # No job-level `if:` (see the `changes` job): a skipped caller never reports
+  # No classification `if:` at job level, only `!cancelled()` (see the
+  # `changes` job): a skipped caller never reports
   # the required `SDK Live Contract / sdk-live-contract (core)`. On a docs-only
   # change `skip` makes every step of the called job a no-op instead.
   sdk-live-contract:
     needs: changes
+    if: ${{ !cancelled() }}
     name: SDK Live Contract
     uses: ./.github/workflows/_platform.yml
     with:
@@ -607,7 +630,7 @@ jobs:
   # is no "skip if the element is missing" tolerance anywhere in them.
   browser-e2e:
     needs: changes
-    if: needs.changes.outputs.docs_only != 'true'
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.docs_only != 'true') }}
     name: Browser E2E
     runs-on: ubuntu-latest
     # 20 before C2b; the SSO steps add a second API, a `next dev` compile and
@@ -862,7 +885,7 @@ jobs:
   # (including a dynamic route served by nginx from the static export).
   docker-smoke:
     needs: changes
-    if: needs.changes.outputs.docs_only != 'true'
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.docs_only != 'true') }}
     name: Docker Smoke
     runs-on: ubuntu-latest
     timeout-minutes: 25

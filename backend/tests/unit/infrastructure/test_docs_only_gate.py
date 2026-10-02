@@ -142,6 +142,11 @@ NOT_DOCS_TESTS = {
     "backend/tests/integration/api/test_edge_api.py": "docstring mention only",
     # Hands the classifier path STRINGS such as "docs/a.py"; opens no file.
     "backend/tests/unit/scripts/test_classify_changes.py": "fixture strings only",
+    # Hands stub `git` and `python3` path STRINGS such as "docs/a.md" to the
+    # classifier step's script; opens no file under docs/.
+    "backend/tests/unit/infrastructure/test_ci_classification.py": (
+        "fixture strings only"
+    ),
     # Assert that the scripts' and workflow's printed copy CONTAINS a
     # docs/...#anchor string; they open no file under docs/. Whether the
     # anchors exist is test_deploy_docs.py's, which is in DOCS_TESTS.
@@ -226,12 +231,14 @@ class TestTheChangesJob:
             assert "git diff --no-renames --name-only" in line, line
 
     def test_the_diff_feeds_the_classifier_into_github_output(self, gate):
+        """Collected first, written last; the whole script is pinned and run
+        by test_ci_classification.py."""
         run = self._run(gate)
-        assert (
-            'git diff --no-renames --name-only "$BASE" "$HEAD" '
-            '| python3 scripts/classify_changes.py >> "$GITHUB_OUTPUT"'
-        ) in run
-        assert "set -euo pipefail" in run, "a failing git diff must fail the job"
+        assert run.startswith("set -euo pipefail\n"), "a failing git diff must fail"
+        assert 'files="$(git diff --no-renames --name-only "$BASE" "$HEAD")"\n' in run
+        assert "| python3 scripts/classify_changes.py)" in run
+        assert run.endswith('printf \'%s\\n\' "$lane" >> "$GITHUB_OUTPUT"\n')
+        assert run.count("GITHUB_OUTPUT") == 1, "one write, at the end"
 
     def test_the_output_is_wired(self, gate):
         outputs = gate["jobs"]["changes"]["outputs"]
@@ -241,19 +248,25 @@ class TestTheChangesJob:
 # ---------------------------------------------------------------------------
 # No job-level skip on a job whose check name protection cannot see skipped
 # ---------------------------------------------------------------------------
+#: The only job-level `if:` a matrix or reusable job may have: run unless the
+#: run was cancelled, including after a failed classifier.
+NEVER_SKIPS = "${{ !cancelled() }}"
+
+
 class TestNoJobLevelSkip:
     @pytest.mark.parametrize("job", ["profile-build", "sdk-live-contract"])
     def test_the_two_jobs_have_no_job_level_if(self, gate, job):
-        assert "if" not in gate["jobs"][job], (
-            f"{job} has a job-level if: again. Skipped, it never reports its "
-            "required check name and every docs-only pull request is BLOCKED."
+        assert gate["jobs"][job].get("if") == NEVER_SKIPS, (
+            f"{job} has a job-level if: other than {NEVER_SKIPS}. Skipped, it "
+            "never reports its required check name and every docs-only pull "
+            "request is BLOCKED; without it, a failed classifier skips it."
         )
 
     def test_no_matrix_or_reusable_job_skips_on_docs_only(self, gate):
         """The same trap for any job added later in either shape."""
         for name, job in gate["jobs"].items():
             if "strategy" in job or "uses" in job:
-                assert "docs_only" not in str(job.get("if", "")), name
+                assert job.get("if") == NEVER_SKIPS, name
 
 
 # ---------------------------------------------------------------------------
