@@ -17,7 +17,9 @@ An experimentation platform that enables teams to make data-driven decisions thr
 - **Enhanced Rules Engine**: 20+ operators including semantic versioning, geo-distance, time windows
 - **Real-time Analytics**: High-throughput event collection and comprehensive metrics
 - **RBAC**: Role-based access control with local or AWS Cognito authentication; custom roles with the `rbac` module
-- **Complete Audit Trail**: append-only audit log of every change, exportable for your compliance program
+- **Audit Trail**: creating, changing and deleting flags and experiments, and flag toggles, are
+  recorded in every profile; the full profile adds warehouse changes, HMAC-SHA256 signing, SOC 2 /
+  ISO 27001 reports and a JSON or CSV export for your compliance program
 - **Automated Safety**: Real-time monitoring with automatic rollback capabilities
 
 ### Measured, not marketed
@@ -34,7 +36,9 @@ production deployment we cannot show you:
   with a DB-backed test that drives the public API. CUPED is beta: its covariate is not yet a
   pre-experiment metric, so it reduces almost no variance today
   ([#217](https://github.com/getexperimently/experimently/issues/217))
-- **5,400+ backend tests, 640+ dashboard tests, 15 SDKs** verified against a live backend in CI
+- **5,400+ backend tests, 640+ dashboard tests**, and 13 of the 16 SDKs run against a live backend in
+  CI (the `SDK Live Contract` job of `pr-qa-gate.yml`); Flutter, Elixir
+  and iOS are covered by their unit tests, nightly and whenever they change
 
 ---
 

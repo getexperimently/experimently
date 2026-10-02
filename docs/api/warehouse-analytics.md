@@ -93,7 +93,7 @@ same for every role.
 A refusal names the role needed and yours, for example
 `Creating a warehouse connection requires the ADMIN role; you are DEVELOPER.`
 Every change to a connection or a source, and every analysis started, is
-recorded in the audit log; a source's entry carries its full definition, and a
+recorded in the [compliance audit trail](compliance.md#what-is-recorded); a source's entry carries its full definition, and a
 connection's entry never carries its credentials.
 
 ## Limits and cost

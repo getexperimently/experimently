@@ -186,7 +186,7 @@ npm install @getexperimently/js-sdk
 ```
 
 Build it from a clone of this repository instead. `npm pack` writes
-`getexperimently-js-sdk-1.1.0.tgz`:
+`getexperimently-js-sdk-0.1.0.tgz`:
 
 ```bash
 cd sdk/js
@@ -196,7 +196,7 @@ npm ci && npm run build && npm pack
 Then, in your app, install the packed tarball:
 
 ```bash
-npm install /path/to/experimently/sdk/js/getexperimently-js-sdk-1.1.0.tgz
+npm install /path/to/experimently/sdk/js/getexperimently-js-sdk-0.1.0.tgz
 ```
 
 ### Quick Start
