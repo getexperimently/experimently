@@ -11,9 +11,11 @@ So, for every top-level ``sdk/<name>/`` manifest (``package.json`` or
 publishes must admit that directory's current manifest version:
 
 * Python: the PEP 508 specifier, checked with ``packaging``.
-* npm: a semver range, checked by the small evaluator below (no ``semver``
-  package is available to the Python suite). A ``file:`` spec must point at the
-  sibling's own directory.
+* npm: a semver range, checked by the small evaluator below. The ``semver``
+  package pinned for ``core/rules_engine.py`` understands plain comparators
+  only (``>=0.1.0``), not npm's caret, tilde and range grammar: its
+  ``match('^0.1.0')`` raises ``ValueError``. A ``file:`` spec must point at
+  the sibling's own directory.
 
 The npm evaluator refuses any range shape it does not understand rather than
 passing it: an unknown shape fails the test until the evaluator is taught it.
