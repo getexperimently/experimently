@@ -67,11 +67,16 @@ class TestExperimentScheduling:
         assert draft_experiment.start_date.replace(tzinfo=timezone.utc) == start_date
         assert draft_experiment.end_date.replace(tzinfo=timezone.utc) == end_date
 
+    @pytest.mark.regression
     def test_update_experiment_schedule_custom_timezone(
         self, experiment_service, draft_experiment
     ):
-        """Test updating experiment schedule with custom timezone."""
-        # Set up test data
+        """A zone other than UTC is not written anywhere (#483).
+
+        The service used to write ``experiment.metadata["time_zone"]``; on a
+        model ``metadata`` is the table ``MetaData``, so every non-UTC zone
+        was a 500. ``ScheduleConfig`` now reads offset-less dates in the zone
+        before the service sees them, and the service ignores the name."""
         start_date = datetime.now(timezone.utc) + timedelta(days=1)
         end_date = start_date + timedelta(days=7)
         schedule = {
@@ -80,20 +85,10 @@ class TestExperimentScheduling:
             "time_zone": "America/New_York",
         }
 
-        # Set metadata to empty dictionary
-        draft_experiment.metadata = {}
+        experiment_service.update_experiment_schedule(draft_experiment, schedule)
 
-        # Update schedule
-        updated_experiment = experiment_service.update_experiment_schedule(
-            draft_experiment, schedule
-        )
-
-        # Assert results
         assert draft_experiment.start_date.replace(tzinfo=timezone.utc) == start_date
         assert draft_experiment.end_date.replace(tzinfo=timezone.utc) == end_date
-        assert draft_experiment.metadata is not None
-        assert "time_zone" in draft_experiment.metadata
-        assert draft_experiment.metadata["time_zone"] == "America/New_York"
 
     def test_update_experiment_schedule_invalid_dates(
         self, experiment_service, draft_experiment

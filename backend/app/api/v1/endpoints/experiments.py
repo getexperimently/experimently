@@ -59,6 +59,7 @@ from backend.app.services.audit_log_service import AuditLogService
 from backend.app.services.experiment_service import (
     AnalysisConfigError,
     ExperimentService,
+    is_experiment_key_conflict,
 )
 
 #: The states in which ``PUT /experiments/{id}`` accepts ``targeting_rules``
@@ -325,34 +326,6 @@ async def list_experiments(
         )
 
 
-#: Postgres error code for a unique constraint violation.
-_UNIQUE_VIOLATION = "23505"
-
-
-def is_experiment_key_conflict(exc: BaseException) -> bool:
-    """True when *exc* is the database refusing a second experiment with a key.
-
-    Decided from the driver's structured diagnostics, never from the message
-    text. The index name follows the schema (``ix_<schema>_experiments_key``),
-    so it is derived from the diagnostics' own schema name rather than written
-    out: the schema differs between a deployment, CI and the core build.
-    Anything without those diagnostics is not recognised, which answers the
-    generic message instead of the 409.
-    """
-    orig = getattr(exc, "orig", None)
-    if orig is None or getattr(orig, "pgcode", None) != _UNIQUE_VIOLATION:
-        return False
-    diag = getattr(orig, "diag", None)
-    if diag is None:
-        return False
-    schema = getattr(diag, "schema_name", None)
-    return (
-        getattr(diag, "table_name", None) == "experiments"
-        and schema is not None
-        and getattr(diag, "constraint_name", None) == f"ix_{schema}_experiments_key"
-    )
-
-
 #: The fixed message for a create that failed for any reason other than a
 #: key the caller chose already being taken.
 CREATE_FAILED = "Something went wrong while creating the experiment"
@@ -468,8 +441,9 @@ async def create_experiment(
         key = experiment_in.key
         if key is not None and is_experiment_key_conflict(e):
             # Only a key the caller chose is named. A generated key that
-            # collides is not theirs; it takes the generic answer below and a
-            # retry generates a new one.
+            # collides is not theirs: the service has already tried other
+            # keys (#388), and if every one was taken it takes the generic
+            # answer below.
             logger.info("Experiment create refused: key %r already exists", key)
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
@@ -980,7 +954,7 @@ async def delete_experiment(
     # Additional check for experiment status for non-draft experiments
     if experiment.status != ExperimentStatus.DRAFT:
         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
+            status_code=status.HTTP_400_BAD_REQUEST,
             detail="Cannot delete experiments that are not in DRAFT status",
         )
 
@@ -1215,18 +1189,21 @@ async def update_experiment_schedule(
 
     - **start_date**: When the experiment should automatically activate
     - **end_date**: When the experiment should automatically complete
-    - **time_zone**: Time zone for interpreting the dates (default: UTC)
+    - **time_zone**: IANA time zone name (default: UTC) for a date given
+      without a UTC offset; a date with an offset keeps it. Dates are stored
+      in UTC. A name that is not an IANA zone answers 422.
 
-    A field the request omits is cleared. end_date must be at least an hour
-    after start_date.
+    On either status, a field the request omits is left unchanged and an
+    explicit null clears it. On a draft, end_date must be at least an hour
+    after start_date (the stored one when the request omits it).
 
     On a **PAUSED** experiment, start_date is the time to resume it at. It is
     stored as ``resume_at``; the experiment's own start_date is never moved. A
-    null start_date cancels a scheduled resume, and a field the request omits
-    is left unchanged. end_date must be later than the experiment's start date
-    and, with a resume scheduled, at least an hour after the resume time. A
-    paused experiment is resumed automatically only by a resume scheduled after
-    it was paused; any change of status cancels a scheduled resume.
+    null start_date cancels a scheduled resume. end_date must be later than
+    the experiment's start date and, with a resume scheduled, at least an hour
+    after the resume time. A paused experiment is resumed automatically only
+    by a resume scheduled after it was paused; any change of status cancels a
+    scheduled resume.
 
     start_date may not be more than ten minutes in the past.
 
@@ -1238,6 +1215,8 @@ async def update_experiment_schedule(
         HTTPException 403: If the caller's role does not hold READ and UPDATE
             on experiments
         HTTPException 404: If experiment not found
+        HTTPException 422: If a date is malformed or time_zone is not an IANA
+            time zone name
     """
     try:
         # Get experiment by ID

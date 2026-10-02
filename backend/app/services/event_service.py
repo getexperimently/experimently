@@ -9,7 +9,7 @@ from sqlalchemy import desc, func
 from sqlalchemy.orm import Session
 
 from backend.app.models.assignment import Assignment
-from backend.app.models.event import Event, EventType
+from backend.app.models.event import Event, EventType, normalize_event_timestamp
 from backend.app.schemas.tracking import EventCreate
 
 logger = logging.getLogger(__name__)
@@ -30,14 +30,16 @@ def _to_uuid(value: Union[str, UUID, None]) -> Optional[UUID]:
 
 
 def _to_iso_timestamp(value: Union[str, datetime, None]) -> str:
-    """Serialise a timestamp for the ``events.created_at`` string column."""
+    """Serialise a timestamp for the ``events.created_at`` string column.
+
+    Always UTC in one fixed format (``normalize_event_timestamp``), so a
+    client timestamp carrying an offset compares correctly against a window
+    boundary; ``None`` or ``""`` means now.  Raises ``ValueError`` for a
+    string that is not ISO-8601.
+    """
     if value is None or value == "":
-        return datetime.now(timezone.utc).isoformat()
-    if isinstance(value, datetime):
-        if value.tzinfo is None:
-            value = value.replace(tzinfo=timezone.utc)
-        return value.isoformat()
-    return str(value)
+        value = datetime.now(timezone.utc)
+    return normalize_event_timestamp(value)
 
 
 class EventService:

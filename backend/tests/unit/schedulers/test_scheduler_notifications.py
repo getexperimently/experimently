@@ -356,19 +356,33 @@ class TestSafetySchedulerNotifications:
 
 
 class TestRolloutSchedulerNotifications:
-    """Tests that RolloutScheduler calls NotificationService when a stage advances."""
+    """Tests that RolloutScheduler calls NotificationService when a stage advances.
+
+    The notification is sent by the tick once the schedule's change is
+    committed (#593), so these drive ``process_rollout_schedules`` with a
+    mocked session: one ACTIVE schedule, no stage in progress, one pending
+    stage that may start at once.
+    """
 
     def _make_rollout_mocks(
         self, flag_id="flag-rollout-1", stage_name="Stage 1", target_pct=25
     ):
-        """Build mock objects for RolloutScheduler._activate_stage tests."""
-        from backend.app.models.rollout_schedule import RolloutStageStatus
+        """Build a mocked session holding one schedule ready to start a stage."""
+        from backend.app.models.feature_flag import FeatureFlag
+        from backend.app.models.rollout_schedule import (
+            RolloutSchedule,
+            RolloutStage,
+            RolloutStageStatus,
+            TriggerType,
+        )
 
         mock_stage = MagicMock()
         mock_stage.id = "stage-uuid-1"
         mock_stage.name = stage_name
         mock_stage.target_percentage = target_pct
         mock_stage.status = RolloutStageStatus.PENDING
+        mock_stage.trigger_type = TriggerType.TIME_BASED
+        mock_stage.start_date = None
         mock_stage.updated_at = datetime.now(timezone.utc)
 
         mock_schedule = MagicMock()
@@ -380,34 +394,70 @@ class TestRolloutSchedulerNotifications:
         mock_flag.key = "my-rollout-flag"
         mock_flag.rollout_percentage = 0
 
+        schedules_query = MagicMock()
+        schedules_query.filter.return_value = schedules_query
+        schedules_query.order_by.return_value = schedules_query
+        schedules_query.all.return_value = [mock_schedule]
+        active_query = MagicMock()
+        active_query.filter.return_value = active_query
+        active_query.first.return_value = None
+        pending_query = MagicMock()
+        pending_query.filter.return_value = pending_query
+        pending_query.order_by.return_value = pending_query
+        pending_query.all.return_value = [mock_stage]
+        flag_query = MagicMock()
+        flag_query.filter.return_value = flag_query
+        flag_query.with_for_update.return_value = flag_query
+        flag_query.first.return_value = mock_flag
+        stage_queries = iter([active_query, pending_query])
+
+        def query_side_effect(model):
+            if model is RolloutSchedule:
+                return schedules_query
+            if model is RolloutStage:
+                return next(stage_queries)
+            if model is FeatureFlag:
+                return flag_query
+            return MagicMock()
+
         mock_db = MagicMock()
-        mock_db.query.return_value.filter.return_value.with_for_update.return_value.first.return_value = mock_flag
+        mock_db.query.side_effect = query_side_effect
 
         return mock_db, mock_schedule, mock_stage, mock_flag
 
+    async def _tick(self, notification_service, mock_db):
+        from backend.app.core.rollout_scheduler import RolloutScheduler
+
+        scheduler = RolloutScheduler()
+        scheduler._notification_service = notification_service
+        with patch(
+            "backend.app.core.rollout_scheduler.SessionLocal", return_value=mock_db
+        ):
+            return await scheduler.process_rollout_schedules()
+
     @pytest.mark.asyncio
     async def test_rollout_advance_calls_notify_rollout_advanced(self):
-        """notify_rollout_advanced is called after _activate_stage succeeds."""
+        """notify_rollout_advanced is called once the stage start is committed."""
         mock_notification_service = MagicMock()
         mock_notification_service.notify_rollout_advanced = MagicMock(return_value=True)
 
         mock_db, mock_schedule, mock_stage, mock_flag = self._make_rollout_mocks()
-
-        from backend.app.core.rollout_scheduler import RolloutScheduler
-
-        scheduler = RolloutScheduler()
-        scheduler._notification_service = mock_notification_service
-
-        result = await scheduler._activate_stage(
-            mock_db, mock_schedule, mock_stage, datetime.now(timezone.utc)
+        order = []
+        mock_db.commit.side_effect = lambda: order.append("commit")
+        mock_notification_service.notify_rollout_advanced.side_effect = (
+            lambda **kwargs: order.append("notify")
         )
 
-        assert result is True
+        result = await self._tick(mock_notification_service, mock_db)
+
+        assert result["items_processed"] == 1
+        assert mock_flag.rollout_percentage == 25
         mock_notification_service.notify_rollout_advanced.assert_called_once()
+        assert order == ["commit", "notify"]
 
     @pytest.mark.asyncio
     async def test_rollout_advance_notification_swallows_errors(self):
-        """A notification failure does not prevent _activate_stage from returning True."""
+        """A notification failure does not undo or fail the stage start."""
         mock_notification_service = MagicMock()
         mock_notification_service.notify_rollout_advanced.side_effect = RuntimeError(
             "network error"
@@ -415,17 +465,12 @@ class TestRolloutSchedulerNotifications:
 
         mock_db, mock_schedule, mock_stage, mock_flag = self._make_rollout_mocks()
 
-        from backend.app.core.rollout_scheduler import RolloutScheduler
-
-        scheduler = RolloutScheduler()
-        scheduler._notification_service = mock_notification_service
-
-        result = await scheduler._activate_stage(
-            mock_db, mock_schedule, mock_stage, datetime.now(timezone.utc)
-        )
+        result = await self._tick(mock_notification_service, mock_db)
 
         # Stage was activated successfully despite notification error
-        assert result is True
+        assert result["items_processed"] == 1
+        assert result["items_failed"] == 0
+        mock_db.rollback.assert_not_called()
         mock_notification_service.notify_rollout_advanced.assert_called_once()
 
     @pytest.mark.asyncio
@@ -437,19 +482,10 @@ class TestRolloutSchedulerNotifications:
             stage_name="Beta Rollout"
         )
 
-        from backend.app.core.rollout_scheduler import RolloutScheduler
-
-        scheduler = RolloutScheduler()
-        scheduler._notification_service = mock_notification_service
-
-        await scheduler._activate_stage(
-            mock_db, mock_schedule, mock_stage, datetime.now(timezone.utc)
-        )
+        await self._tick(mock_notification_service, mock_db)
 
         kwargs = mock_notification_service.notify_rollout_advanced.call_args
-        assert kwargs[1].get("stage_name") == "Beta Rollout" or (
-            kwargs[0] and "Beta Rollout" in str(kwargs)
-        )
+        assert kwargs[1].get("stage_name") == "Beta Rollout"
 
     @pytest.mark.asyncio
     async def test_rollout_advance_passes_percentage(self):
@@ -460,17 +496,11 @@ class TestRolloutSchedulerNotifications:
             target_pct=75
         )
 
-        from backend.app.core.rollout_scheduler import RolloutScheduler
-
-        scheduler = RolloutScheduler()
-        scheduler._notification_service = mock_notification_service
-
-        await scheduler._activate_stage(
-            mock_db, mock_schedule, mock_stage, datetime.now(timezone.utc)
-        )
+        await self._tick(mock_notification_service, mock_db)
 
         kwargs = mock_notification_service.notify_rollout_advanced.call_args
-        assert kwargs[1].get("new_percentage") == 75 or (kwargs[0] and 75 in kwargs[0])
+        assert kwargs[1].get("new_percentage") == 75
+        assert kwargs[1].get("feature_flag_id") == "flag-rollout-1"
 
 
 # ---------------------------------------------------------------------------

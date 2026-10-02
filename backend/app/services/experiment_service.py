@@ -7,8 +7,14 @@ from uuid import UUID
 from fastapi.encoders import jsonable_encoder
 from pydantic import BaseModel
 from sqlalchemy import func, or_
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, joinedload
 
+from backend.app.core.targeting_adapter import (
+    _is_dashboard_rules_shape,
+    buckets_on_rule_id,
+    stored_rule_id,
+)
 from backend.app.models.experiment import (
     Experiment,
     ExperimentStatus,
@@ -26,6 +32,38 @@ from backend.app.schemas.experiment import (
 from backend.app.schemas.variance_reduction import VarianceReductionConfig
 
 logger = logging.getLogger(__name__)
+
+#: Postgres error code for a unique constraint violation.
+_UNIQUE_VIOLATION = "23505"
+
+#: How many keys a create without a ``key`` generates before it gives up. The
+#: random suffix has 16**6 values, so a second collision in a row is already
+#: vanishingly rare; the bound keeps a broken generator from looping (#388).
+KEY_GENERATION_ATTEMPTS = 3
+
+
+def is_experiment_key_conflict(exc: BaseException) -> bool:
+    """True when *exc* is the database refusing a second experiment with a key.
+
+    Decided from the driver's structured diagnostics, never from the message
+    text. The index name follows the schema (``ix_<schema>_experiments_key``),
+    so it is derived from the diagnostics' own schema name rather than written
+    out: the schema differs between a deployment, CI and the core build.
+    Anything without those diagnostics is not recognised, which answers the
+    generic message instead of the 409.
+    """
+    orig = getattr(exc, "orig", None)
+    if orig is None or getattr(orig, "pgcode", None) != _UNIQUE_VIOLATION:
+        return False
+    diag = getattr(orig, "diag", None)
+    if diag is None:
+        return False
+    schema = getattr(diag, "schema_name", None)
+    return (
+        getattr(diag, "table_name", None) == "experiments"
+        and schema is not None
+        and getattr(diag, "constraint_name", None) == f"ix_{schema}_experiments_key"
+    )
 
 
 def _as_utc(value: Any) -> Optional[datetime]:
@@ -219,6 +257,94 @@ def _normalise_analysis_configs(
     if enabled and not config:
         data["bayesian_config"] = BayesianConfig().model_dump(mode="json")
     return data
+
+
+# --- each experiment's partial rollout buckets on its own id (#533) ------------
+#
+# The rules engine admits a user to a rule with a partial ``rollout_percentage``
+# when ``md5("<user_id>:<rule id>") % 100`` is below it. A dashboard-shaped
+# rule with no top-level ``id`` gets the shared id ``"dashboard"``, so every
+# such experiment admitted the same users. An experiment's rule is therefore
+# given the experiment's own id when that id starts to decide who is admitted:
+#
+# * on DRAFT -> ACTIVE (``start_experiment`` and the scheduler; never on a
+#   resume from PAUSED, so an experiment already running keeps the users it
+#   admits on ``"dashboard"``);
+# * on a PAUSED edit that turns a rule admitting everyone it matches into one
+#   admitting part of them (people already assigned keep their variant: an
+#   existing assignment is returned before targeting is evaluated);
+# * and a later ``PUT`` whose rule carries no id keeps the stored one.
+#
+# Only stored dashboard rules are changed; flags never bucket on a rule id.
+
+
+def stamp_rollout_rule_id(
+    experiment: Experiment, previous_status: Optional[ExperimentStatus]
+) -> bool:
+    """Give a starting experiment's partial-rollout rule the experiment's id.
+
+    Called on every write of ``ExperimentStatus.ACTIVE``, with the status the
+    experiment had before it. Changes ``targeting_rules`` only when the
+    experiment is leaving DRAFT and its stored dashboard rule admits part of
+    the users it matches (:func:`buckets_on_rule_id`) with no id of its own.
+
+    Returns:
+        Whether ``targeting_rules`` was changed. The caller commits.
+    """
+    if previous_status != ExperimentStatus.DRAFT:
+        return False
+    rules = experiment.targeting_rules
+    if not buckets_on_rule_id(rules) or stored_rule_id(rules) is not None:
+        return False
+    # A new dict, so the JSONB column is seen as changed.
+    experiment.targeting_rules = {**rules, "id": str(experiment.id)}
+    return True
+
+
+def rules_with_rule_id(experiment: Experiment, new_rules: Any) -> Any:
+    """The ``targeting_rules`` an update stores, given the ones it sent.
+
+    A dashboard rule sent without an ``id`` keeps the stored rule's id, so
+    saving the rules again never changes which users a partial rollout
+    admits. With no stored id, a PAUSED experiment whose stored rule admitted
+    everyone it matched, and whose new rule admits only part of them, gets the
+    experiment's id now: it already ran, so this edit is the moment the id
+    starts to decide. Anything else is returned unchanged.
+    """
+    if (
+        not isinstance(new_rules, dict)
+        or not _is_dashboard_rules_shape(new_rules)
+        or not new_rules.get("groups")
+        or stored_rule_id(new_rules) is not None
+    ):
+        return new_rules
+    stored = experiment.targeting_rules
+    inherited = stored_rule_id(stored)
+    if inherited is not None:
+        return {**new_rules, "id": inherited}
+    if (
+        experiment.status == ExperimentStatus.PAUSED
+        and buckets_on_rule_id(new_rules)
+        and not buckets_on_rule_id(stored)
+    ):
+        return {**new_rules, "id": str(experiment.id)}
+    return new_rules
+
+
+def rules_for_clone(source: Experiment) -> Any:
+    """The ``targeting_rules`` a clone of ``source`` starts with.
+
+    The stored rules as they are, except a top-level ``id`` equal to the
+    source's own id: that is the id :func:`stamp_rollout_rule_id` gave the
+    source, and a clone keeping it would admit exactly the source's users
+    for ever (the stamp never replaces an id). Without it, the clone is
+    stamped with its own id when it first starts. Any other id was chosen by
+    a caller and is kept, like every other stored value.
+    """
+    rules = source.targeting_rules
+    if stored_rule_id(rules) == str(source.id):
+        return {key: value for key, value in rules.items() if key != "id"}
+    return rules
 
 
 class ExperimentService:
@@ -443,6 +569,33 @@ class ExperimentService:
         ]
         return f"{slug or 'experiment'}-{_uuid.uuid4().hex[:6]}"
 
+    def _insert_with_generated_key(self, experiment: Experiment) -> None:
+        """Insert *experiment* under a generated key, retrying a taken one.
+
+        Each attempt flushes inside a savepoint, so a unique conflict on the
+        key index rolls back only that attempt and the session stays usable.
+        Any other refusal, or a conflict on the last attempt, is raised as is.
+        """
+        for attempt in range(1, KEY_GENERATION_ATTEMPTS + 1):
+            experiment.key = self.generate_key(experiment.name)
+            try:
+                with self.db.begin_nested():
+                    self.db.add(experiment)
+                    self.db.flush()  # Flush to get the experiment ID
+                return
+            except IntegrityError as exc:
+                if attempt == KEY_GENERATION_ATTEMPTS or not (
+                    is_experiment_key_conflict(exc)
+                ):
+                    raise
+                logger.info(
+                    "Generated experiment key %r is taken; generating another "
+                    "(attempt %d of %d)",
+                    experiment.key,
+                    attempt,
+                    KEY_GENERATION_ATTEMPTS,
+                )
+
     def create_experiment(
         self,
         obj_in: Union[ExperimentCreate, Dict[str, Any]],
@@ -500,10 +653,13 @@ class ExperimentService:
 
         # Create experiment
         experiment = Experiment(**obj_data)
-        if not experiment.key:
-            experiment.key = self.generate_key(experiment.name)
-        self.db.add(experiment)
-        self.db.flush()  # Flush to get the experiment ID
+        if experiment.key:
+            # A key the caller chose: a conflict is theirs to hear about, so
+            # it propagates unchanged (the endpoint answers 409 naming it).
+            self.db.add(experiment)
+            self.db.flush()  # Flush to get the experiment ID
+        else:
+            self._insert_with_generated_key(experiment)
 
         # Create variants
         for variant_data in variants_data:
@@ -572,6 +728,14 @@ class ExperimentService:
                 update_data["experiment_type"] = resolved_type
 
         _normalise_analysis_configs(update_data, experiment)
+
+        # A rule sent without an id keeps the one its partial rollout buckets
+        # on (#533). Before any attribute changes: it reads the stored rules
+        # and status.
+        if "targeting_rules" in update_data:
+            update_data["targeting_rules"] = rules_with_rule_id(
+                experiment, update_data["targeting_rules"]
+            )
 
         # Extract nested objects if present
         variants_data = update_data.pop("variants", None)
@@ -645,7 +809,9 @@ class ExperimentService:
         if not self._validate_experiment_for_start(experiment):
             raise ValueError("Experiment does not meet requirements to start")
 
-        # Update status and start date
+        # Update status and start date. Only a first start stamps the rule
+        # id; a resume from PAUSED keeps the users the rule admits (#533).
+        stamp_rollout_rule_id(experiment, experiment.status)
         experiment.status = ExperimentStatus.ACTIVE
         if not experiment.start_date:
             experiment.start_date = datetime.now(timezone.utc).isoformat()
@@ -741,19 +907,24 @@ class ExperimentService:
         """
         Update experiment scheduling configuration.
 
-        On a DRAFT experiment, ``start_date`` and ``end_date`` are written as
-        given, and a field the request omitted is cleared.
+        A field the request omitted is left unchanged, on either status
+        (#482); an explicit null clears it.
+
+        On a DRAFT experiment, ``start_date`` and ``end_date`` are the times
+        to activate and complete it at; a null one is no longer scheduled.
 
         On a PAUSED experiment, ``start_date`` is the time to resume at and is
         stored as ``resume_at``; the experiment's own ``start_date`` is never
-        moved. A null ``start_date`` cancels a scheduled resume. A field the
-        request omitted is left unchanged.
+        moved. A null ``start_date`` cancels a scheduled resume.
+
+        ``time_zone`` is not read here: ``ScheduleConfig`` has already read
+        any date without an offset in that zone and validated the name (#483).
 
         Args:
             experiment: Experiment model to update
             schedule: Scheduling configuration containing start_date, end_date, and time_zone
             fields_set: The fields the request actually carried. Defaults to
-                the keys of ``schedule``. Only the PAUSED path reads it.
+                the keys of ``schedule``.
 
         Returns:
             Dictionary containing the updated experiment data
@@ -768,35 +939,11 @@ class ExperimentService:
                 f"Experiment must be in DRAFT or PAUSED status."
             )
 
+        fields = set(schedule) if fields_set is None else set(fields_set)
         if experiment.status == ExperimentStatus.PAUSED:
-            self._schedule_resume(
-                experiment,
-                schedule,
-                set(schedule) if fields_set is None else set(fields_set),
-            )
+            self._schedule_resume(experiment, schedule, fields)
         else:
-            # Update experiment schedule
-            if "start_date" in schedule:
-                experiment.start_date = schedule["start_date"]
-
-            if "end_date" in schedule:
-                experiment.end_date = schedule["end_date"]
-
-            # Validate date relationships
-            if experiment.start_date and experiment.end_date:
-                if experiment.end_date <= experiment.start_date:
-                    raise ValueError("End date must be after start date")
-
-                # Minimum duration check
-                min_duration = timedelta(hours=1)
-                if experiment.end_date - experiment.start_date < min_duration:
-                    raise ValueError(f"Experiment must run for at least {min_duration}")
-
-        # Add timezone metadata if not using UTC
-        if "time_zone" in schedule and schedule["time_zone"] != "UTC":
-            if not hasattr(experiment, "metadata") or not experiment.metadata:
-                experiment.metadata = {}
-            experiment.metadata["time_zone"] = schedule["time_zone"]
+            self._schedule_draft(experiment, schedule, fields)
 
         experiment.updated_at = datetime.now(timezone.utc)
 
@@ -810,6 +957,48 @@ class ExperimentService:
         )
 
         return self._experiment_to_dict(experiment)
+
+    @staticmethod
+    def _schedule_draft(
+        experiment: Experiment,
+        schedule: Dict[str, Any],
+        fields_set: Set[str],
+    ) -> None:
+        """Apply PUT /schedule to a DRAFT experiment (#482).
+
+        ``start_date`` and ``end_date`` present are written (null clears the
+        scheduled activation or completion); omitted, the stored value is
+        kept. The values the experiment would end up with -- the request's
+        where it carries them, the stored ones otherwise -- are checked before
+        anything is written, so a refusal leaves the row as it was:
+
+        * ``end_date`` must be later than ``start_date``;
+        * and at least one hour later.
+        """
+        start_date = (
+            _as_utc(schedule.get("start_date"))
+            if "start_date" in fields_set
+            else _as_utc(experiment.start_date)
+        )
+        end_date = (
+            _as_utc(schedule.get("end_date"))
+            if "end_date" in fields_set
+            else _as_utc(experiment.end_date)
+        )
+
+        if start_date is not None and end_date is not None:
+            if end_date <= start_date:
+                raise ValueError("End date must be after start date")
+
+            # Minimum duration check
+            min_duration = timedelta(hours=1)
+            if end_date - start_date < min_duration:
+                raise ValueError(f"Experiment must run for at least {min_duration}")
+
+        if "start_date" in fields_set:
+            experiment.start_date = schedule.get("start_date")
+        if "end_date" in fields_set:
+            experiment.end_date = schedule.get("end_date")
 
     @staticmethod
     def _schedule_resume(
@@ -895,8 +1084,10 @@ class ExperimentService:
             description=experiment.description,
             hypothesis=experiment.hypothesis,
             experiment_type=experiment.experiment_type,
-            # Copied as stored and not validated, on purpose: stored rules are not re-judged.
-            targeting_rules=experiment.targeting_rules,
+            # Copied as stored and not validated, on purpose: stored rules are
+            # not re-judged. Only the rule id the server stamped from the
+            # source's own id is dropped, so the clone gets its own (#533).
+            targeting_rules=rules_for_clone(experiment),
             status=ExperimentStatus.DRAFT,
             owner_id=str(user_id),
             tags=experiment.tags,

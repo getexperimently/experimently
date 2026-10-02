@@ -30,6 +30,7 @@ from unittest.mock import patch
 import pytest
 from sqlalchemy import event
 
+from backend.app.core.bandit_scheduler import BanditScheduler
 from backend.app.models.analysis_snapshot import AnalysisSnapshot
 from backend.app.models.assignment import Assignment
 from backend.app.models.event import Event
@@ -302,6 +303,19 @@ def _streaming_counts(db_session, exp):
     }
 
 
+def _bandit_counts(db_session, exp):
+    """The bandit scheduler's PostgreSQL arm statistics (pulls, successes)."""
+    control, treatment = _variants(exp)
+    stats = BanditScheduler(db_session)._stats_from_postgres(
+        exp.id, [str(control.id), str(treatment.id)], exp
+    )
+    assert stats is not None
+    return {
+        v.name: {"n": stats[str(v.id)].pulls, "converted": stats[str(v.id)].successes}
+        for v in (control, treatment)
+    }
+
+
 def _breakdown_conversions(results):
     """Converting users and users seen, summed over the ``country`` segments."""
     totals = {
@@ -347,6 +361,7 @@ def test_counts_agree_across_endpoints(admin_client, db_session, experiment):
     assert _bayesian_counts(results["bayesian_results"]) == EXPECTED
     assert _cumulative_counts(_get(admin_client, f"{base}/daily")) == EXPECTED
     assert _streaming_counts(db_session, exp) == EXPECTED
+    assert _bandit_counts(db_session, exp) == EXPECTED
 
     # /cuped with no variance_reduction_config is method "none": the
     # unadjusted means, i.e. converting users / assigned users.
@@ -495,7 +510,9 @@ def test_conversion_counts_never_join_events_to_assignments_in_sql(
     sequential scan: more than 8 s for the demo data in CI, on the event loop
     of the live-results stream, so docs/websocket-streaming.md's snapshot
     never arrived.  The counts are now read from ``events`` alone and the
-    assignments looked up by id, so no statement touches both tables.
+    assignments looked up by id, so no statement touches both tables.  The
+    bandit scheduler's PostgreSQL fallback joined the two tables in SQL until
+    #338; it now counts the same way.
     """
     exp = experiment
     control, treatment = _variants(exp)
@@ -517,6 +534,7 @@ def test_conversion_counts_never_join_events_to_assignments_in_sql(
         }
         total = count_converting_users_any(db_session, exp.id, ["purchase"])
         streamed = _streaming_counts(db_session, exp)
+        bandit = _bandit_counts(db_session, exp)
     finally:
         event.remove(engine, "before_cursor_execute", record)
 
@@ -525,6 +543,7 @@ def test_conversion_counts_never_join_events_to_assignments_in_sql(
     assert firsts == converted
     assert total == 5
     assert streamed == EXPECTED
+    assert bandit == EXPECTED
     joined = [s for s in statements if ".events" in s and ".assignments" in s]
     assert statements, "no SQL was captured"
     assert joined == [], joined

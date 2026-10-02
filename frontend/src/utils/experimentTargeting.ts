@@ -15,7 +15,12 @@ import { getOperatorsForAttribute, rulesToJson } from '@/utils/targeting';
 
 type Stored = Record<string, unknown> | null | undefined;
 
-const TOP_KEYS = new Set(['logical_operator', 'groups']);
+/**
+ * `id` is the rule's id: a rule admitting only part of the users it matches
+ * picks them by it, and the server gives a starting experiment's rule its own
+ * id (#533). The builder does not show it and sends it back unchanged.
+ */
+const TOP_KEYS = new Set(['logical_operator', 'groups', 'id']);
 const GROUP_KEYS = new Set(['id', 'logical_operator', 'conditions']);
 const CONDITION_KEYS = new Set(['id', 'attribute', 'operator', 'value']);
 const BUILDER_LOGICAL_OPERATORS = new Set(['AND', 'OR']);
@@ -26,6 +31,11 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 
 function keysWithin(obj: Record<string, unknown>, allowed: Set<string>): boolean {
   return Object.keys(obj).every((key) => allowed.has(key));
+}
+
+/** The stored rule id the builder carries through a save: absent, or non-empty text. */
+function builderRuleId(value: unknown): boolean {
+  return value === undefined || (typeof value === 'string' && value.length > 0);
 }
 
 /** A logical operator the builder's AND/OR toggle can show: absent, AND or OR. */
@@ -74,19 +84,21 @@ export function isNoRules(value: Stored): boolean {
  * Whether the rule builder can edit `value` without changing what it means.
  *
  * Editable: "no rules" (see `isNoRules`), or a dashboard value whose top-level
- * keys are within {logical_operator, groups}, group keys within {id,
+ * keys are within {logical_operator, groups, id} (an `id` being non-empty
+ * text, which `targetingPayload` sends back unchanged), group keys within {id,
  * logical_operator, conditions} and condition keys within {id, attribute,
  * operator, value}; where every logical operator is AND or OR (the builder
  * has no NOT), every operator is one the builder offers for that attribute,
  * and every value is one it keeps exactly (see `builderValue`).
  *
- * Not editable, among others: a top-level `rollout_percentage` or `id` (the
- * API accepts them, `jsonToRules` drops them), the native `{"rules": [...]}`
- * shape, and a flat `{"country": ["US"]}`.
+ * Not editable, among others: a top-level `rollout_percentage` (the API
+ * accepts it, the builder has no control for it and would drop it), the
+ * native `{"rules": [...]}` shape, and a flat `{"country": ["US"]}`.
  */
 export function isEditableTargeting(value: Stored): boolean {
   if (isNoRules(value)) return true;
   if (!isPlainObject(value) || !keysWithin(value, TOP_KEYS)) return false;
+  if (!builderRuleId(value.id)) return false;
   if (!builderLogicalOperator(value.logical_operator) || !Array.isArray(value.groups)) return false;
   return value.groups.every((group) => {
     if (!isPlainObject(group) || !keysWithin(group, GROUP_KEYS)) return false;
@@ -121,7 +133,9 @@ export function combineWord(logicalOperator: unknown): 'all' | 'any' {
 /**
  * What the page sends as `targeting_rules` for the builder's rules: the
  * dashboard shape without the builder's ids, or `{}` when there are no
- * groups (no rules, everyone is eligible).
+ * groups (no rules, everyone is eligible). The stored value's top-level `id`,
+ * when it has one, is sent back unchanged: it is the rule's id, which decides
+ * who a partial rollout admits (#533).
  *
  * `is_null` / `is_not_null` conditions are sent with `value: null`, as stored:
  * `jsonToRules` reads null as "" for the text input, and this puts it back.
@@ -130,10 +144,12 @@ export function combineWord(logicalOperator: unknown): 'all' | 'any' {
  * ids are dropped (nothing below the top level reads an id), and an absent
  * logical operator is written as AND (the API's default).
  */
-export function targetingPayload(rules: TargetingRules): Record<string, unknown> {
+export function targetingPayload(rules: TargetingRules, stored?: Stored): Record<string, unknown> {
   if (rules.groups.length === 0) return {};
   const json = rulesToJson(rules);
+  const ruleId = isPlainObject(stored) && typeof stored.id === 'string' && stored.id ? { id: stored.id } : {};
   return {
+    ...ruleId,
     ...json,
     groups: json.groups.map((group) => ({
       ...group,

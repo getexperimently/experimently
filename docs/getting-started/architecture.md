@@ -69,7 +69,7 @@ Several background tasks run on a configurable cycle alongside the API process:
 | Rollout scheduler | 15 minutes | Advances rollout schedule stages based on time-based triggers |
 | Metrics collector | 15 minutes | Aggregates raw events into experiment metric summaries |
 | Safety monitor | 5 minutes | Checks error rate and latency thresholds; triggers auto-rollback if breached |
-| Bandit scheduler | 5 minutes (`BANDIT_UPDATE_INTERVAL_MINUTES`) | Recomputes variant weights for active multi-armed bandit experiments from DynamoDB counters when every variant has at least PostgreSQL's pulls and successes there, otherwise from PostgreSQL assignments + conversion events; `/tracking/assign` routes new users by these weights |
+| Bandit scheduler | 5 minutes (`BANDIT_UPDATE_INTERVAL_MINUTES`) | Recomputes variant weights for active multi-armed bandit experiments from DynamoDB counters when every variant has at least PostgreSQL's pulls and successes there, otherwise from PostgreSQL assignments + converting users (counted as `/results` counts them); `/tracking/assign` routes new users by these weights |
 
 ---
 

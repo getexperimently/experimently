@@ -1,5 +1,14 @@
 # Post-Stratification Variance Reduction
 
+!!! warning "Not available through the API yet"
+    `POST /api/v1/results/{experiment_id}/post-stratification` answers
+    **501 Not Implemented**. The estimator described below exists as a
+    Python service (`PostStratificationService`), but nothing yet builds its
+    input -- one metric value and the stratum attributes per assigned user --
+    from an experiment's recorded assignments and events. Earlier versions of
+    the route filled that gap with randomly generated values; it now refuses
+    rather than report numbers that do not describe your experiment.
+
 Post-stratification is a statistical technique that reduces the variance of experiment
 effect estimates by reweighting stratum-specific means to match the population stratum
 proportions. It is particularly powerful when treatment and control group sizes differ
@@ -95,17 +104,14 @@ treatment_df = pd.DataFrame({
 
 ### POST `/api/v1/results/{experiment_id}/post-stratification`
 
-Compute post-stratification variance-reduced effect estimates for an experiment.
-
-**Request body:**
+Not available yet: answers **501** for every existing experiment, with
 
 ```json
-{
-  "stratum_cols": ["country", "device"],
-  "metric_col": "metric_value",
-  "alpha": 0.05
-}
+{"detail": "Post-stratification is not available yet: it is not computed from an experiment's recorded data."}
 ```
+
+The request body is still validated, so a malformed request answers 422
+first:
 
 | Field | Type | Required | Default | Description |
 |---|---|---|---|---|
@@ -113,36 +119,16 @@ Compute post-stratification variance-reduced effect estimates for an experiment.
 | `metric_col` | `str` | No | `"metric_value"` | Name of the outcome column. |
 | `alpha` | `float` | No | `0.05` | Significance level for CI (exclusive: 0–1). |
 
-**Response (200):**
-
-```json
-{
-  "metric_name": "metric_value",
-  "control_mean": 10.05,
-  "treatment_mean": 10.68,
-  "effect_size": 0.63,
-  "effect_size_relative": 0.063,
-  "variance_reduction": 28.4,
-  "adjusted_se": 0.095,
-  "p_value": 0.0021,
-  "confidence_interval": [0.444, 0.816],
-  "n_strata": 4,
-  "strata_sizes": {
-    "US_mobile": 1200,
-    "US_desktop": 800,
-    "UK_mobile": 600,
-    "UK_desktop": 400
-  }
-}
-```
-
-**Error codes:**
+**Status codes:**
 
 | Status | Condition |
 |---|---|
 | 404 | Experiment not found |
-| 422 | Missing/invalid `stratum_cols`, invalid `alpha`, or stratum validation failure |
-| 500 | Internal computation error |
+| 422 | Missing/invalid `stratum_cols` or invalid `alpha` |
+| 501 | Any existing experiment: post-stratification is not available yet |
+
+To run the estimator on your own per-user data, call the service directly as
+shown below.
 
 ## Example Python Usage
 

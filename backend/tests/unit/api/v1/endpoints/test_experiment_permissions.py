@@ -511,8 +511,8 @@ def test_experiment_endpoint_permissions(
         (
             ExperimentStatus.ACTIVE,
             "DELETE",
-            403,
-        ),  # Cannot delete active experiments - returning 403 forbidden
+            400,
+        ),  # Cannot delete active experiments - 400, not a draft (#465)
         # Completed experiments
         (
             ExperimentStatus.COMPLETED,
@@ -522,8 +522,8 @@ def test_experiment_endpoint_permissions(
         (
             ExperimentStatus.COMPLETED,
             "DELETE",
-            403,
-        ),  # Cannot delete completed experiments - returns 403 Forbidden
+            400,
+        ),  # Cannot delete completed experiments - 400, not a draft (#465)
         # Archived experiments
         (
             ExperimentStatus.ARCHIVED,
@@ -533,8 +533,8 @@ def test_experiment_endpoint_permissions(
         (
             ExperimentStatus.ARCHIVED,
             "DELETE",
-            403,
-        ),  # Cannot delete archived experiments - returns 403 Forbidden
+            400,
+        ),  # Cannot delete archived experiments - 400, not a draft (#465)
     ],
 )
 def test_experiment_state_permissions(

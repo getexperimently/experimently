@@ -173,7 +173,7 @@ class TestExperimentLifecycleWorkflow:
         )
 
     def test_cannot_delete_active_experiment(self, admin_client):
-        """Attempting to delete an ACTIVE experiment returns 403."""
+        """Attempting to delete an ACTIVE experiment returns 400 (#465)."""
         exp = _create_experiment(admin_client, "Protected Active Experiment")
         exp_id = exp["id"]
 
@@ -184,7 +184,11 @@ class TestExperimentLifecycleWorkflow:
             f"/api/v1/experiments/{exp_id}",
             params={"experiment_key": exp_id},
         )
-        assert delete_resp.status_code == 403, delete_resp.text
+        assert delete_resp.status_code == 400, delete_resp.text
+        assert (
+            delete_resp.json()["detail"]
+            == "Cannot delete experiments that are not in DRAFT status"
+        )
 
 
 @pytest.mark.integration

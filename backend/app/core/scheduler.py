@@ -17,6 +17,7 @@ from backend.app.core.metrics import update_active_experiments
 from backend.app.core.scheduler_tick import run_locked_tick
 from backend.app.db.session import SessionLocal
 from backend.app.models.experiment import Experiment, ExperimentStatus
+from backend.app.services.experiment_service import stamp_rollout_rule_id
 from backend.app.services.notification_service import NotificationService
 
 logger = get_logger(__name__)
@@ -135,31 +136,42 @@ class ExperimentScheduler:
             )
 
             # Activate experiments. Setting the status clears resume_at (the
-            # listener on Experiment.status).
+            # listener on Experiment.status). Each row is flushed inside its
+            # own savepoint, so a row the database refuses is rolled back on
+            # its own and the rest of the tick still activates (#489).
             for experiment in experiments_to_activate:
+                experiment_id = experiment.id
+                savepoint = db.begin_nested()
                 try:
                     resumed = experiment.status == ExperimentStatus.PAUSED
                     due = experiment.resume_at if resumed else experiment.start_date
+                    # A scheduled first start stamps the rule id; a scheduled
+                    # resume keeps the users the rule admits (#533).
+                    stamp_rollout_rule_id(experiment, experiment.status)
                     experiment.status = ExperimentStatus.ACTIVE
                     experiment.updated_at = current_time
                     db.add(experiment)
-                    activated_count += 1
-                    logger.info(
-                        f"Activating experiment: {experiment.id} - {experiment.name} "
-                        f"({'scheduled resume' if resumed else 'scheduled start'}: "
-                        f"{due})"
-                    )
-                    try:
-                        self._notification_service.notify_experiment_started(
-                            experiment_id=str(experiment.id),
-                            experiment_name=experiment.name,
-                            resumed=resumed,
-                        )
-                    except Exception as exc:
-                        logger.warning("Notification failed (non-critical): %s", exc)
-                except Exception as e:
+                    db.flush()
+                    savepoint.commit()
+                except Exception:
+                    savepoint.rollback()
                     failed_count += 1
-                    logger.error(f"Error activating experiment {experiment.id}: {e!s}")
+                    logger.exception("Error activating experiment %s", experiment_id)
+                    continue
+                activated_count += 1
+                logger.info(
+                    f"Activating experiment: {experiment_id} - {experiment.name} "
+                    f"({'scheduled resume' if resumed else 'scheduled start'}: "
+                    f"{due})"
+                )
+                try:
+                    self._notification_service.notify_experiment_started(
+                        experiment_id=str(experiment_id),
+                        experiment_name=experiment.name,
+                        resumed=resumed,
+                    )
+                except Exception as exc:
+                    logger.warning("Notification failed (non-critical): %s", exc)
 
             # Commit all activation changes before checking for experiments to complete
             if activated_count > 0:
@@ -178,27 +190,33 @@ class ExperimentScheduler:
                 .all()
             )
 
-            # Complete experiments
+            # Complete experiments, one savepoint per row as above.
             for experiment in experiments_to_complete:
+                experiment_id = experiment.id
+                savepoint = db.begin_nested()
                 try:
                     experiment.status = ExperimentStatus.COMPLETED
                     experiment.updated_at = current_time
                     db.add(experiment)
-                    completed_count += 1
-                    logger.info(
-                        f"Completing experiment: {experiment.id} - {experiment.name} "
-                        f"(scheduled end: {experiment.end_date})"
-                    )
-                    try:
-                        self._notification_service.notify_experiment_ended(
-                            experiment_id=str(experiment.id),
-                            experiment_name=experiment.name,
-                        )
-                    except Exception as exc:
-                        logger.warning("Notification failed (non-critical): %s", exc)
-                except Exception as e:
+                    db.flush()
+                    savepoint.commit()
+                except Exception:
+                    savepoint.rollback()
                     failed_count += 1
-                    logger.error(f"Error completing experiment {experiment.id}: {e!s}")
+                    logger.exception("Error completing experiment %s", experiment_id)
+                    continue
+                completed_count += 1
+                logger.info(
+                    f"Completing experiment: {experiment_id} - {experiment.name} "
+                    f"(scheduled end: {experiment.end_date})"
+                )
+                try:
+                    self._notification_service.notify_experiment_ended(
+                        experiment_id=str(experiment_id),
+                        experiment_name=experiment.name,
+                    )
+                except Exception as exc:
+                    logger.warning("Notification failed (non-critical): %s", exc)
 
             # Commit completion changes
             if completed_count > 0:

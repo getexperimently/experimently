@@ -165,7 +165,7 @@ export function TargetingSection({
     setError(null);
     try {
       const updated = await ExperimentsService.update(experiment.id, {
-        targeting_rules: targetingPayload(rules),
+        targeting_rules: targetingPayload(rules, stored),
       });
       setRules(null);
       setSaved(
