@@ -954,7 +954,7 @@ async def delete_experiment(
     # Additional check for experiment status for non-draft experiments
     if experiment.status != ExperimentStatus.DRAFT:
         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
+            status_code=status.HTTP_400_BAD_REQUEST,
             detail="Cannot delete experiments that are not in DRAFT status",
         )
 

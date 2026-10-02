@@ -143,8 +143,11 @@ EXPECTED = {
     "clone": _row(201),
     "schedule": CHANGE_ROW,
     "delete": _row(204),
-    # 403 for every signed-in caller, so the detail tells the two refusals apart.
-    "delete_active": _row(403),
+    # 400 (not a draft) for every caller the role check admits; 403 for the
+    # ANALYST and VIEWER callers, whom the role check refuses before the state
+    # is looked at. The detail is asserted in every signed-in cell
+    # (DELETE_ACTIVE_DETAIL), so a refusal from the wrong check fails there.
+    "delete_active": _row(400),
     "schedule_active": _row(400),
 }
 
