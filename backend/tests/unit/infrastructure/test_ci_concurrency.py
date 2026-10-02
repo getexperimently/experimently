@@ -23,7 +23,9 @@ run), the cancelled run stays in the rollup, and branch protection refuses the
 merge (#399). Such a workflow has no ``concurrency:`` block at all.
 
 A push to main keeps the group it had before the change: the table below is
-the value each changed workflow evaluated to on main before #75 was fixed.
+the value each changed workflow evaluated to on main before #75 was fixed. The
+one deliberate exception is chart-kind, whose runs on main are keyed on the
+commit and never cancelled (PR-2').
 """
 
 from __future__ import annotations
@@ -104,7 +106,10 @@ def _group_and_cancel(concurrency: Any, context: Dict[str, Any]) -> Tuple[Any, A
         cancel = concurrency.get("cancel-in-progress", False)
     rendered = wg.render(str(group), context, NULL_UNDER)
     if isinstance(cancel, str):
+        # An expression renders to text, as GitHub's does; only the exact
+        # words become booleans, so anything else still fails a comparison.
         cancel = wg.render(cancel, context, NULL_UNDER)
+        cancel = {"true": True, "false": False}.get(cancel, cancel)
     return rendered, cancel
 
 
@@ -211,11 +216,17 @@ def test_no_two_workflows_share_a_pull_request_group():
     assert clashes == []
 
 
-#: (workflow, event on main) -> (group, cancel-in-progress), as before #75.
+#: (workflow, event on main) -> (group, cancel-in-progress), as before #75 --
+#: except chart-kind, whose main runs are keyed on the commit and never
+#: cancelled (PR-2', EM C7c): keyed on the ref, each push to main cancelled the
+#: one before it, so a merge that broke the install was never seen on main.
 MAIN_GROUPS = {
-    ("chart-kind.yml", "push"): ("chart-kind-refs/heads/main", True),
-    ("chart-kind.yml", "schedule"): ("chart-kind-refs/heads/main", True),
-    ("chart-kind.yml", "workflow_dispatch"): ("chart-kind-refs/heads/main", True),
+    ("chart-kind.yml", "push"): (f"chart-kind-push-{MAIN_SHA}", False),
+    ("chart-kind.yml", "schedule"): (f"chart-kind-schedule-{MAIN_SHA}", False),
+    ("chart-kind.yml", "workflow_dispatch"): (
+        f"chart-kind-workflow_dispatch-{MAIN_SHA}",
+        False,
+    ),
     ("chart.yml", "push"): ("chart-refs/heads/main", True),
     ("compose-production.yml", "push"): ("compose-production-8000", True),
     ("compose-production.yml", "workflow_dispatch"): (
@@ -249,6 +260,27 @@ def test_a_run_on_main_keeps_its_group(name, event):
     assert (
         _group_and_cancel(only[1], _main_context(event)) == MAIN_GROUPS[(name, event)]
     )
+
+
+@pytest.mark.parametrize("event", ["push", "schedule", "workflow_dispatch"])
+def test_two_chart_kind_runs_on_main_never_share_a_group(event):
+    """Two commits on main get two groups, and neither cancels: a later merge
+    must not end the run that would have shown the earlier one red (PE H2)."""
+    (only,) = _groups(wg.load(wg.WORKFLOWS / "chart-kind.yml"))
+    first, second = _main_context(event), _main_context(event)
+    second["github"]["sha"] = "1" * 40
+    group_1, cancel_1 = _group_and_cancel(only[1], first)
+    group_2, cancel_2 = _group_and_cancel(only[1], second)
+    assert group_1 != group_2
+    assert cancel_1 is False and cancel_2 is False
+
+
+def test_a_chart_kind_pull_request_run_is_still_cancelled_by_a_newer_push():
+    """PR-2' changes main only: a pull request keeps one group per number, with
+    cancel-in-progress, as #638 left it."""
+    (only,) = _groups(wg.load(wg.WORKFLOWS / "chart-kind.yml"))
+    group, cancel = _group_and_cancel(only[1], _pr_context("pull_request", 7))
+    assert (group, cancel) == ("chart-kind-pull_request-7", True)
 
 
 # ---------------------------------------------------------------------------

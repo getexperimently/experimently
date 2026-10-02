@@ -28,6 +28,11 @@ name: Chart (kind)
 # its runtime over five or more runs, make it always report (a `changes` job
 # that skips the work, the way pr-qa-gate's docs-only gate does), then add
 # `chart-kind (core)` and `chart-kind (full)` to branch protection.
+#
+# A red run anywhere but a pull request (a push to main, the nightly, a
+# dispatch) opens an issue labelled `chart-kind-failure`, or comments on the
+# open one: `failure-issue` below, a copy of Doc Examples' job of that name
+# (test_chart_kind_failure_issue.py holds the two identical).
 
 on:
   pull_request:
@@ -53,10 +58,16 @@ on:
         default: ''
 
 concurrency:
-  # Keyed on the pull request NUMBER, not head_ref: two forks' `patch-1`
-  # branches share a head_ref and would cancel each other's runs (#75).
-  group: chart-kind-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  # A pull request is keyed on its NUMBER, not head_ref: two forks' `patch-1`
+  # branches share a head_ref and would cancel each other's runs (#75). A newer
+  # push to the same pull request cancels the older run.
+  #
+  # Every other run -- a push to main, the nightly, a dispatch -- is keyed on its
+  # commit and never cancelled. Keyed on the ref, each push to main cancelled the
+  # one before it (8 of the last 10 main runs when this was measured), so a
+  # merge that broke the install could go unseen on main.
+  group: chart-kind-${{ github.event_name }}-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
@@ -235,3 +246,40 @@ jobs:
       - name: Per-phase timings
         if: always()
         run: bash scripts/chart_kind.sh summary
+
+  failure-issue:
+    name: File an issue on failure
+    runs-on: ubuntu-latest
+    needs: [chart-kind]
+    # Doc Examples' condition, unchanged: a matrix leg that reaches
+    # timeout-minutes concludes `cancelled`, not `failure`, so a cancelled job
+    # is red here too. `!cancelled()` still leaves out a run that was itself
+    # cancelled; with the group above, a later run never cancels one off a
+    # pull request, so that means a person cancelled it.
+    if: ${{ github.event_name != 'pull_request' && !cancelled() && (failure() || contains(needs.*.result, 'cancelled')) }}
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - name: Open or update the issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          TITLE="The Helm chart on kind is red"
+          BODY="Chart (kind) failed on $(date -u '+%Y-%m-%d') (${GITHUB_EVENT_NAME}, commit ${GITHUB_SHA})."$'\n\n'"Run: ${RUN_URL}"
+
+          # `|| true`: the label does not exist yet on the first red run.
+          EXISTING=$(gh issue list --repo "$REPO" --state open --label chart-kind-failure \
+            --json number --jq '.[0].number // empty' 2>/dev/null || true)
+
+          if [ -n "$EXISTING" ]; then
+            gh issue comment "$EXISTING" --repo "$REPO" --body "$BODY"
+          else
+            gh label create chart-kind-failure --repo "$REPO" --color B60205 \
+              --description "Chart (kind) failed" 2>/dev/null || true
+            gh issue create --repo "$REPO" --title "$TITLE" \
+              --label chart-kind-failure --body "$BODY"
+          fi
