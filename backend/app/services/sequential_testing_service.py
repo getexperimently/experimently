@@ -248,7 +248,8 @@ class SequentialTestingService:
         Because V and tau^2 are the ones ``compute_msprt`` uses, 0 lies
         outside this interval exactly when Lambda >= 1/alpha, i.e. exactly when
         ``can_stop`` is true.  The half-width falls like sqrt(V log(1/V)), so
-        the interval keeps narrowing as data arrives.
+        the interval keeps narrowing as data arrives.  The result is
+        intersected with [-1, 1], the range of a difference in proportions.
 
         When there is no data in an arm (n = 0) or the plug-in variance is 0
         (within each arm, all 0s or all 1s), nothing bounds the effect: the
@@ -291,8 +292,13 @@ class SequentialTestingService:
 
         margin = self.confidence_sequence_half_width(V_n, tau_squared, alpha)
 
-        lower = delta_hat - margin
-        upper = delta_hat + margin
+        # A difference of proportions lies in [-1, 1], so the interval is
+        # intersected with it.  0 and the true delta are always inside
+        # [-1, 1], so this changes neither coverage nor the agreement with
+        # ``can_stop``; it only stops a small-sample interval being reported
+        # as, say, [-7.5, 7.5].
+        lower = max(delta_hat - margin, -1.0)
+        upper = min(delta_hat + margin, 1.0)
         width = upper - lower
 
         return ConfidenceSequence(

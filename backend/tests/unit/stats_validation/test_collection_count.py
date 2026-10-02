@@ -29,7 +29,7 @@ REPO_ROOT = HERE.parents[3]
 EXPECTED = {
     "test_bayesian_stop_winner.py": 12,
     "test_collection_count.py": 2,
-    "test_sequential_confidence_sequence.py": 16,
+    "test_sequential_confidence_sequence.py": 18,
 }
 
 # Assembled so that this file does not match its own check.

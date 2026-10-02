@@ -47,11 +47,13 @@ pytestmark = pytest.mark.unit
 #: multiplier and significance level (pinned by
 #: ``test_sufficient_stats_fingerprint.py``, not by this dataset), and #231
 #: replaced the sequential confidence sequence with the inverted mSPRT, which
-#: moves the ``cs`` and ``analysis`` outputs below.  #242, in the same version,
-#: made STOP_WINNER need a probability to be best of 0.975: the ``bayesian``
-#: case (0.97465) and the added ``bayesian_aa`` case both answered STOP_WINNER
-#: before it and CONTINUE after.  The 1.1.0 entry is kept as released; it
-#: predates the ``bayesian_aa`` case.
+#: moves the ``cs`` and ``analysis`` outputs below.  #231 also clips that
+#: interval to [-1, 1]; the interval of this dataset lies inside that range,
+#: so the clip leaves the 1.2.0 fingerprint as it was.  #242, in the same
+#: version, made STOP_WINNER need a probability to be best of 0.975: the
+#: ``bayesian`` case (0.97465) and the added ``bayesian_aa`` case both
+#: answered STOP_WINNER before it and CONTINUE after.  The 1.1.0 entry is kept
+#: as released; it predates the ``bayesian_aa`` case.
 ENGINE_FINGERPRINTS: Dict[str, str] = {
     "1.1.0": "2feed80e7e305c3c8d0b183e1f2905799e8af73b34aa674cd358fa5948d2f089",
     "1.2.0": "4860dd07b1052f1f47329d61cc5fa72f58a1721177f07bb1e912d00754a0a2c3",
