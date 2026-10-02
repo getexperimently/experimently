@@ -46,6 +46,8 @@ from backend.app.models.assignment import Assignment
 from backend.app.models.event import Event
 from backend.app.models.experiment import Experiment, ExperimentStatus
 from backend.app.models.user import User, UserRole
+from backend.app.services.assignment_service import AssignmentService
+from backend.app.services.rules_evaluation_service import RulesEvaluationService
 
 pytestmark = [pytest.mark.integration, pytest.mark.requires_db]
 
@@ -483,3 +485,48 @@ def test_a_draft_put_does_not_stamp(client, headers, create, fresh):
     _put_rules(client, headers, experiment_id, _rules())
 
     assert _stored(fresh, experiment_id) == _rules()
+
+
+# --- a clone gets its own id ----------------------------------------------------------
+
+
+def _admitted_by_targeting(fresh, experiment_id, users):
+    """The users the assignment path's targeting admits, read from the stored
+    experiment. Ten thousand ``/tracking/assign`` calls would take minutes;
+    this is the same eligibility check those calls make for a new user."""
+    experiment = fresh(lambda s: s.get(Experiment, uuid.UUID(experiment_id)))
+    service = AssignmentService.__new__(AssignmentService)
+    service.rules_evaluation_service = RulesEvaluationService()
+    admitted = set()
+    for user_id in users:
+        context = AssignmentService._build_targeting_context(user_id, {"country": "US"})
+        if service._evaluate_experiment_targeting(experiment, context)["eligible"]:
+            admitted.add(user_id)
+    return admitted
+
+
+@pytest.mark.regression
+def test_a_clone_of_a_started_experiment_admits_its_own_users(
+    client, headers, create, fresh
+):
+    source_id, _ = create(_rules())
+    _post(client, headers, source_id, "start")
+    assert _stored(fresh, source_id) == {**_rules(), "id": source_id}
+
+    response = client.post(f"{EXPERIMENTS}/{source_id}/clone", headers=headers)
+    assert response.status_code == 201, response.text
+    clone_id = response.json()["id"]
+    assert response.json()["targeting_rules"] == _rules()
+
+    _post(client, headers, clone_id, "start")
+    assert _stored(fresh, clone_id) == {**_rules(), "id": clone_id}
+    assert _stored(fresh, source_id) == {**_rules(), "id": source_id}
+
+    users = [f"{PREFIX}-clone-{i}" for i in range(10_000)]
+    a = _admitted_by_targeting(fresh, source_id, users)
+    b = _admitted_by_targeting(fresh, clone_id, users)
+    assert a == {u for u in users if _md5_admits(u, source_id)}
+    assert b == {u for u in users if _md5_admits(u, clone_id)}
+    # The 533a bounds: 2,500 +- 5 sd overlap, 5,000 +- 5 sd each.
+    assert 2_283 <= len(a & b) <= 2_717, (len(a), len(b), len(a & b))
+    assert 4_750 <= len(b) <= 5_250, len(b)

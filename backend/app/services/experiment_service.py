@@ -298,6 +298,22 @@ def rules_with_rule_id(experiment: Experiment, new_rules: Any) -> Any:
     return new_rules
 
 
+def rules_for_clone(source: Experiment) -> Any:
+    """The ``targeting_rules`` a clone of ``source`` starts with.
+
+    The stored rules as they are, except a top-level ``id`` equal to the
+    source's own id: that is the id :func:`stamp_rollout_rule_id` gave the
+    source, and a clone keeping it would admit exactly the source's users
+    for ever (the stamp never replaces an id). Without it, the clone is
+    stamped with its own id when it first starts. Any other id was chosen by
+    a caller and is kept, like every other stored value.
+    """
+    rules = source.targeting_rules
+    if stored_rule_id(rules) == str(source.id):
+        return {key: value for key, value in rules.items() if key != "id"}
+    return rules
+
+
 class ExperimentService:
     """
     Service for managing experiments, including creation, retrieval, updates, and status changes.
@@ -982,8 +998,10 @@ class ExperimentService:
             description=experiment.description,
             hypothesis=experiment.hypothesis,
             experiment_type=experiment.experiment_type,
-            # Copied as stored and not validated, on purpose: stored rules are not re-judged.
-            targeting_rules=experiment.targeting_rules,
+            # Copied as stored and not validated, on purpose: stored rules are
+            # not re-judged. Only the rule id the server stamped from the
+            # source's own id is dropped, so the clone gets its own (#533).
+            targeting_rules=rules_for_clone(experiment),
             status=ExperimentStatus.DRAFT,
             owner_id=str(user_id),
             tags=experiment.tags,

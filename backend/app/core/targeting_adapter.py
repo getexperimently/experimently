@@ -673,8 +673,9 @@ def buckets_on_rule_id(raw: Any) -> bool:
     """True when stored dashboard rules admit only part of the matching users.
 
     That is: the dashboard shape (:func:`_is_dashboard_rules_shape`), at least
-    one group, and a ``rollout_percentage`` that ``_from_dashboard`` reads as
-    below 100. Only then does the rules engine bucket a user, on
+    one group with conditions (``_from_dashboard`` drops a group without any,
+    and with no group left there is no rule to bucket on), and a
+    ``rollout_percentage`` that ``_from_dashboard`` reads as below 100. Only then does the rules engine bucket a user, on
     ``"<user_id>:<rule id>"``, so only then does the rule's id decide who is
     admitted (#533).
     """
@@ -682,7 +683,10 @@ def buckets_on_rule_id(raw: Any) -> bool:
         isinstance(raw, dict)
         and _is_dashboard_rules_shape(raw)
         and isinstance(raw.get("groups"), list)
-        and len(raw["groups"]) > 0
+        and any(
+            isinstance(group, dict) and group.get("conditions")
+            for group in raw["groups"]
+        )
         and _rollout_percentage(raw.get("rollout_percentage")) < 100
     )
 

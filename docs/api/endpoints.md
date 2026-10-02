@@ -896,7 +896,9 @@ conditions, each condition an `attribute`, an `operator` and a `value`.
   `id` keeps the stored one. An `id` you send is never replaced, and
   resuming a `paused` experiment changes nothing: an experiment started
   without an `id` before this behaviour existed keeps admitting the users it
-  admitted then.
+  admitted then. Cloning an experiment drops an `id` equal to the source
+  experiment's own id, so the clone is given its own when it first starts;
+  any other `id` is copied.
 - `null`, `{}` and `{"groups": []}` mean no targeting: every user is eligible.
 
 `POST /api/v1/experiments/` and `PUT /api/v1/experiments/{experiment_id}` answer

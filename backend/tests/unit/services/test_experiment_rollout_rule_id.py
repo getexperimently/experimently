@@ -42,7 +42,10 @@ from backend.app.models.experiment import (
 )
 from backend.app.models.feature_flag import FeatureFlag, FeatureFlagStatus
 from backend.app.services.assignment_service import AssignmentService
-from backend.app.services.experiment_service import ExperimentService
+from backend.app.services.experiment_service import (
+    ExperimentService,
+    rules_for_clone,
+)
 from backend.app.services.feature_flag_service import FeatureFlagService
 from backend.app.services.rules_evaluation_service import RulesEvaluationService
 
@@ -70,9 +73,11 @@ def _rules(rollout=50, **extra):
     return rules
 
 
-def _experiment(rules, status=ExperimentStatus.DRAFT, **values) -> Experiment:
+def _experiment(
+    rules, status=ExperimentStatus.DRAFT, experiment_id=None, **values
+) -> Experiment:
     experiment = Experiment(
-        id=uuid.uuid4(),
+        id=experiment_id or uuid.uuid4(),
         name=f"rollout {uuid.uuid4().hex[:6]}",
         key=f"rollout-{uuid.uuid4().hex[:6]}",
         owner_id=uuid.uuid4(),
@@ -135,8 +140,9 @@ def _md5_admitted(salt: str, percentage: int = 50) -> set[str]:
 
 @pytest.mark.regression
 def test_two_idless_50pct_experiments_overlap_quarter():
-    first = _experiment(_rules(50))
-    second = _experiment(_rules(50))
+    # Fixed ids, so the counts are the same on every run.
+    first = _experiment(_rules(50), experiment_id=uuid.UUID(int=1))
+    second = _experiment(_rules(50), experiment_id=uuid.UUID(int=2))
     _start(first)
     _start(second)
 
@@ -167,6 +173,11 @@ def test_first_start_stamps_the_experiments_id():
         _rules(100.0),
         _rules(50, id="chosen-id"),
         {"logical_operator": "AND", "groups": [], "rollout_percentage": 50},
+        {
+            "logical_operator": "AND",
+            "groups": [{"logical_operator": "AND", "conditions": []}],
+            "rollout_percentage": 50,
+        },
         {"rules": [], "default_rule": None},
         None,
         {},
@@ -177,6 +188,7 @@ def test_first_start_stamps_the_experiments_id():
         "rollout 100.0",
         "an id of its own",
         "no groups",
+        "only a group without conditions",
         "native shape",
         "no rules",
         "empty",
@@ -204,6 +216,28 @@ def test_resume_from_paused_writes_nothing():
     assert experiment.status == ExperimentStatus.ACTIVE
     assert experiment.targeting_rules == _rules(50)
     assert _admitted(experiment) == _md5_admitted("dashboard")
+
+
+# --- a clone gets its own id ------------------------------------------------------
+
+
+@pytest.mark.regression
+def test_a_clone_drops_the_id_stamped_from_its_source():
+    source = _experiment(_rules(50))
+    _start(source)
+    assert rules_for_clone(source) == _rules(50)
+    # The source's stored rules are not changed by the copy.
+    assert source.targeting_rules == {**_rules(50), "id": str(source.id)}
+
+
+@pytest.mark.parametrize(
+    "rules",
+    [_rules(50, id="checkout-half"), _rules(50), None, {"country": ["US"]}],
+    ids=["an id a caller chose", "no id", "no rules", "a flat value"],
+)
+def test_a_clone_keeps_everything_else(rules):
+    source = _experiment(rules)
+    assert rules_for_clone(source) == rules
 
 
 # --- the scheduler -------------------------------------------------------------
