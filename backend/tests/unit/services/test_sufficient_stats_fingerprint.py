@@ -48,6 +48,12 @@ SUFFICIENT_STATS_FINGERPRINTS: Dict[str, Dict[str, str]] = {
         "binomial_metric_result": "cd5de7d0dd07d9e53e847cd8bb56a2b7e1c1164b590e2370c50f35aee74e0411",
         "mean_metric_result": "ad119bc6bfff1ec62f70b7499e7c7eb29341f3a12df69587935128964e03125c",
     },
+    # #454: the proportion interval uses norm.ppf at 1 - alpha instead of a
+    # fixed 1.96.  The mean path already used t.ppf at alpha: 1.1.0's hash.
+    "1.2.0": {
+        "binomial_metric_result": "c65e109491f6e0968e0f5f8e248fcad9f571826960095622cf76e813516eba8a",
+        "mean_metric_result": "ad119bc6bfff1ec62f70b7499e7c7eb29341f3a12df69587935128964e03125c",
+    },
 }
 
 _CONTROL = "ffffffff-0000-4000-8000-000000000002"

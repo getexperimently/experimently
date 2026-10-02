@@ -163,7 +163,7 @@ looks like this:
   "last_updated": "2026-09-26T14:32:00+00:00",
   "seed": 6346510783624545786,
   "n_samples": 10000,
-  "engine_version": "1.1.0"
+  "engine_version": "1.2.0"
 }
 ```
 

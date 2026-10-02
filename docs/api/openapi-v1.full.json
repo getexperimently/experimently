@@ -1335,7 +1335,7 @@
             "type": "array"
           },
           "engine_version": {
-            "default": "1.1.0",
+            "default": "1.2.0",
             "description": "Statistics engine version that computed the current weights",
             "title": "Engine Version",
             "type": "string"
@@ -1600,7 +1600,7 @@
             ]
           },
           "engine_version": {
-            "default": "1.1.0",
+            "default": "1.2.0",
             "description": "Statistics engine version that produced these results.",
             "title": "Engine Version",
             "type": "string"
@@ -3564,7 +3564,7 @@
             "type": "string"
           },
           "engine_version": {
-            "default": "1.1.0",
+            "default": "1.2.0",
             "description": "Statistics engine version that produced these results.",
             "title": "Engine Version",
             "type": "string"
@@ -15590,7 +15590,7 @@
             "title": "Adjusted P Value"
           },
           "confidence_interval": {
-            "description": "Two-sided confidence interval as (lower, upper).  The confidence level is specified at the experiment level.",
+            "description": "Two-sided confidence interval as (lower, upper).  Its level is the confidence_level the request asked for (default 0.95); experiments store no level of their own.",
             "maxItems": 2,
             "minItems": 2,
             "prefixItems": [
@@ -15645,7 +15645,7 @@
             "type": "boolean"
           },
           "is_significant": {
-            "description": "True when the adjusted (or raw, if no correction) p-value is below the experiment's significance threshold (1 - confidence_level).",
+            "description": "True when the adjusted (or raw, if no correction) p-value is below the significance threshold 1 - confidence_level, the same level as confidence_interval.",
             "title": "Is Significant",
             "type": "boolean"
           },
