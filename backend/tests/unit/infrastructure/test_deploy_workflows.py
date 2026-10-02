@@ -458,7 +458,8 @@ REFUSALS = {
     "wrong account": "sts get-caller-identity",
     "cluster missing": "aws ecs describe-clusters",
     "profile vs task definition": "injects no AUDIT_HMAC_KEY",
-    "missing secrets": "aws secretsmanager describe-secret",
+    # #636: by each task definition's valueFrom, not by name.
+    "missing secrets": "scripts/check_task_secrets.py",
     "ECR repository": "aws ecr describe-repositories",
     "dashboard ECR repository": 'for repo in "$ECR_BACKEND_REPO" "$ECR_DASHBOARD_REPO"',
     "earlier deployment still active": "scripts/refuse_active_deployment.py",
@@ -546,7 +547,7 @@ def test_the_refusals_say_what_to_do():
 @pytest.mark.regression
 def test_the_required_secrets_are_this_environments():
     runs = "\n".join(_run_of(s) for s in _steps(_deploy_job()))
-    assert '--secret-id "${SECRETS_PREFIX}/${name}"' in runs
+    assert '--secrets-prefix "$SECRETS_PREFIX"' in runs
     assert _deploy_job()["env"]["SECRETS_PREFIX"] == (
         "/${{ inputs.environment }}/experimentation"
     )

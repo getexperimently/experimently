@@ -151,9 +151,10 @@ its very first step and their validator rejects the shipped dev default in
 staging and production, so a full image without it never registers the modules
 — `abort_if_modules_broken()` refuses to start the API and
 `require_modules_or_absent()` fails every `alembic` command, including the
-migration task. The deploy's **"Required secrets exist for this profile"**
-step checks for it (and for the two every profile needs) before it builds
-anything. Create it with [secrets-management.md](secrets-management.md).
+migration task. The deploy's **"Every secret the task definitions reference
+exists"** step checks that both task definitions reference it (and the two
+every profile needs) by complete ARN, and that each one exists, before it
+builds anything. Create it with [secrets-management.md](secrets-management.md).
 
 ---
 

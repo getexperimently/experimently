@@ -17,13 +17,14 @@ not classify fails, so a new name cannot slip past unexamined.
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import re
 
 import pytest
 import yaml
 
-from .test_app_profiles import REPO_ROOT
+from .test_app_profiles import FAKE_ACCOUNT, FAKE_REGION, REPO_ROOT
 from .test_dashboard_service import _synth
 
 WORKFLOWS = REPO_ROOT / ".github" / "workflows"
@@ -121,12 +122,80 @@ def test_workflow_names_exist_in_that_environment(synths, workflow, env):
             assert f"secret:{name}/jwt-secret" in blob, (
                 f"{workflow}: no stack imports a secret under {name}"
             )
+            if workflow == "deploy.yml":
+                _preflight_accepts_the_synth(assembly, name)
             checked += 1
     # Exact, per workflow: a name dropped from a job's env (or never read
     # because a key was renamed) changes the count and fails here (QA 4c).
     assert checked == NAMES_CHECKED[workflow], (
         f"{workflow}: {checked} names checked, expected {NAMES_CHECKED[workflow]}"
     )
+
+
+def _check_task_secrets():
+    """deploy.yml's secrets pre-flight, ``scripts/check_task_secrets.py``."""
+    path = REPO_ROOT / "scripts" / "check_task_secrets.py"
+    spec = importlib.util.spec_from_file_location("check_task_secrets", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _preflight_accepts_the_synth(assembly, prefix: str) -> None:
+    """The pre-flight accepts the secret references the CDK renders (#636).
+
+    deploy.yml's pre-flight refuses a reference that is not a complete ARN in
+    the environment's account and region, and requires both app families (the
+    API's and the migration's) to reference ``APP_SECRETS`` under
+    ``SECRETS_PREFIX``. So in each app task definition -- one that supplies
+    ``SECRET_KEY`` -- every reference to a secret under the prefix must be a
+    literal the pre-flight accepts, and ``APP_SECRETS`` must all be among
+    them. A by-name import renders an ``Fn::Join`` partial ARN and fails here;
+    so does a prefix the pre-flight would look under in vain. (The database
+    credentials are a cross-stack reference, resolved only at deploy, and are
+    not under the prefix.)
+    """
+    script = _check_task_secrets()
+    known = frozenset(
+        f"{prefix}/{n}" for n in (*script.APP_SECRETS, *script.FULL_ONLY_SECRETS)
+    )
+    apps = 0
+    for stack in assembly.stacks:
+        for logical_id, resource in stack.template.get("Resources", {}).items():
+            if resource["Type"] != "AWS::ECS::TaskDefinition":
+                continue
+            secrets = [
+                secret
+                for container in resource["Properties"].get("ContainerDefinitions", [])
+                for secret in container.get("Secrets", [])
+            ]
+            if "SECRET_KEY" not in {secret["Name"] for secret in secrets}:
+                continue
+            apps += 1
+            names = set()
+            for secret in secrets:
+                value = secret["ValueFrom"]
+                if not isinstance(value, str):
+                    assert f"{prefix}/" not in json.dumps(value), (
+                        f"{logical_id} {secret['Name']} is rendered from an "
+                        "intrinsic, not a literal complete ARN; deploy.yml's "
+                        "secrets pre-flight refuses the partial ARN that resolves to"
+                    )
+                    continue
+                outcome = script.complete_arn(
+                    value, region=FAKE_REGION, account=FAKE_ACCOUNT, known=known
+                )
+                assert not isinstance(outcome, str), (
+                    f"deploy.yml's secrets pre-flight refuses {logical_id} "
+                    f"{secret['Name']}: it {outcome}"
+                )
+                names.add(outcome[1])
+            for name in script.APP_SECRETS:
+                assert f"{prefix}/{name}" in names, (
+                    f"the pre-flight requires {logical_id} to reference "
+                    f"{prefix}/{name} by a literal complete ARN"
+                )
+    assert apps == 2, f"{apps} task definitions supply SECRET_KEY; expected 2"
 
 
 #: How many environment-built names each workflow's bound job carries.
