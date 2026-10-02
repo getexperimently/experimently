@@ -102,7 +102,7 @@ REDIS_SSL=true
 
 ### Application Cache
 
-Feature flag configurations and experiment assignments are cached in Redis. The default TTL is 60 seconds. Changes to flags and experiments propagate to all users within one cache cycle.
+Experiment assignments are cached in Redis. The default TTL is 60 seconds, and changes to experiments propagate to all users within one cache cycle. The API does not cache feature flags: it reads them from the database on every request, so a flag change is served on the next one.
 
 `REDIS_CACHE_TTL` is the cache TTL in seconds, and `REDIS_CACHE_MAX_SIZE` the
 maximum number of items in the cache:

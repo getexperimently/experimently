@@ -83,7 +83,9 @@ async def test_clear_cache_scans_the_namespaces_the_app_actually_writes():
     assert scanned == [f"{ns}:*" for ns in admin.CACHE_NAMESPACES]
     # The namespaces have to match what the app writes, or a cleared cache
     # is not cleared.
-    assert "admin:*" in scanned and "feature_flag:*" in scanned
+    assert "admin:*" in scanned and "experiment:*" in scanned
+    # The flag routes no longer cache (#630), so nothing writes flag keys.
+    assert "feature_flag:*" not in scanned and "feature_flags:*" not in scanned
 
 
 @pytest.mark.asyncio

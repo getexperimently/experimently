@@ -1,7 +1,7 @@
 """The integration-tests job keeps the Redis-backed tests armed.
 
-The flag-cache and experiment-cache tests under ``backend/tests/integration/``
-skip when no Redis answers, unless ``EXPERIMENTLY_REQUIRE_REDIS=1`` turns that
+The Redis-backed tests under ``backend/tests/integration/`` (the experiment
+cache, and the flag reads after every writer, #630) skip when no Redis answers, unless ``EXPERIMENTLY_REQUIRE_REDIS=1`` turns that
 skip into a failure. The ``integration-tests`` workflow provides the ``redis``
 service and sets the variable on the step that runs the suite, and nothing
 pinned either: deleting the env line, the service, or narrowing the run with

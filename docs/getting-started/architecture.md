@@ -96,7 +96,7 @@ Redis serves two purposes:
 
 1. **Session storage**: User session tokens are stored in Redis with a configurable TTL. This allows horizontal scaling of the API layer without sticky sessions.
 
-2. **Application cache**: Feature flag configurations and experiment assignments are cached in Redis to reduce database load. The default cache TTL is 60 seconds, meaning flag changes propagate to all users within one minute.
+2. **Application cache**: Experiment assignments are cached in Redis to reduce database load, with a default TTL of 60 seconds. The API does not cache feature flags: it reads them from the database on every request, so a flag change is served on the next one.
 
 ---
 

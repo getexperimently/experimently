@@ -27,11 +27,7 @@ from sqlalchemy.orm import Session
 
 from backend.app.api import deps
 from backend.app.core.logger import unexpected_failure
-from backend.app.core.metrics import (
-    record_cache_hit,
-    record_cache_miss,
-    record_flag_evaluation,
-)
+from backend.app.core.metrics import record_flag_evaluation
 from backend.app.core.permissions import (
     Action,
     ResourceType,
@@ -56,9 +52,6 @@ from backend.app.services.feature_flag_service import FeatureFlagService
 
 # Setup logger
 logger = logging.getLogger(__name__)
-
-#: How long a cached flag detail or flag list lives, in seconds.
-FLAG_CACHE_TTL_SECONDS = 3600
 
 #: Postgres error code for a unique constraint violation.
 _UNIQUE_VIOLATION = "23505"
@@ -107,53 +100,17 @@ def _raise_if_key_conflict(
         ) from None
 
 
-# The flag cache (#100). `deps.get_cache_control` hands out a redis.asyncio
-# client, so every call on it is awaited -- un-awaited, `get` returns a
-# coroutine (truthy, so it was served as a cache hit and `json.loads` raised: a
-# 500) and `delete` silently does nothing. The cache is best-effort: a Redis
-# error is logged and the request carries on against the database.
-async def _cache_get(cache_control: deps.CacheControl, key: str) -> Optional[str]:
-    if not (cache_control.enabled and cache_control.redis):
-        return None
-    try:
-        return await cache_control.redis.get(key)
-    except Exception as cache_error:
-        logger.warning("Flag cache read failed for %s: %s", key, cache_error)
-        return None
+async def _skip_cache_ignored(skip_cache: bool = False) -> None:
+    """Accept the published ``skip_cache`` query parameter, and ignore it.
 
-
-async def _cache_set(cache_control: deps.CacheControl, key: str, value: Any) -> None:
-    if not (cache_control.enabled and cache_control.redis):
-        return
-    try:
-        await cache_control.redis.setex(
-            key, FLAG_CACHE_TTL_SECONDS, json.dumps(value, default=str)
-        )
-    except Exception as cache_error:
-        logger.warning("Flag cache write failed for %s: %s", key, cache_error)
-
-
-async def _invalidate_flag_cache(
-    cache_control: deps.CacheControl, flag_id: Optional[UUID]
-) -> None:
-    """Drop the cached detail of ``flag_id`` and every cached flag list.
-
-    Lists are cached per user, but every role sees every flag (#83), so a
-    change drops all of them rather than only the caller's. Called after the
-    change is committed, so a Redis error is logged rather than raised.
+    The flag routes had an opt-in Redis cache (#100). It is gone (#630): every
+    flag read comes from the database, so there is nothing to skip. Nine stable
+    operations publish ``skip_cache`` (docs/api/openapi-v1.stable.json), and a
+    stable operation does not change shape (docs/api/stability.md), so this
+    dependency keeps the parameter with the same name, type and default and
+    does nothing with it. Removing the parameter is tracked by #674.
     """
-    if not (cache_control.enabled and cache_control.redis):
-        return
-    try:
-        if flag_id is not None:
-            await cache_control.redis.delete(f"feature_flag:{flag_id}")
-        keys = [
-            key async for key in cache_control.redis.scan_iter(match="feature_flags:*")
-        ]
-        if keys:
-            await cache_control.redis.delete(*keys)
-    except Exception as cache_error:
-        logger.warning("Flag cache invalidation failed: %s", cache_error)
+    del skip_cache
 
 
 # Create router with tag for documentation grouping
@@ -242,26 +199,6 @@ async def list_feature_flags(
             detail="You don't have permission to list feature flags",
         )
 
-    cache_key = f"feature_flags:{current_user.id}:{skip}:{limit}:{status}:{search}"
-    # Called, not injected: as a dependency it would add its `skip_cache` query
-    # parameter to this stable route (docs/api snapshot).
-    cache_control = await deps.get_cache_control()
-
-    # Check if we have cached data
-    if cache_control.enabled and cache_control.redis:
-        cached_data = await _cache_get(cache_control, cache_key)
-        if cached_data:
-            record_cache_hit("feature_flag_list")
-            cached_response = json.loads(cached_data)
-            # Convert cached data to FeatureFlagListResponse
-            return FeatureFlagListResponse(
-                items=cached_response["items"],
-                total=cached_response["total"],
-                skip=cached_response["skip"],
-                limit=cached_response["limit"],
-            )
-        record_cache_miss("feature_flag_list")
-
     # Everyone the LIST check above admitted sees the whole platform.
     #
     # This had a third access model again, different from both the role table
@@ -283,9 +220,6 @@ async def list_feature_flags(
     response = FeatureFlagListResponse(
         items=feature_flags_data, total=total, skip=skip, limit=limit
     )
-
-    # Cache the response if caching is enabled
-    await _cache_set(cache_control, cache_key, response.model_dump(mode="json"))
 
     return response
 
@@ -310,7 +244,7 @@ async def create_feature_flag(
     ),
     db: Session = Depends(deps.get_db),
     current_user: User = Depends(deps.get_current_active_user),
-    cache_control: Dict[str, Any] = Depends(deps.get_cache_control),
+    _skip_cache: None = Depends(_skip_cache_ignored),
     _: bool = Depends(deps.can_create_feature_flag),  # Use the permission dependency
 ) -> Dict[str, Any]:
     """
@@ -405,8 +339,6 @@ async def create_feature_flag(
             f"Compliance audit logging failed for feature_flag create: {audit_error}"
         )
 
-    await _invalidate_flag_cache(cache_control, None)
-
     return response_dict
 
 
@@ -420,7 +352,7 @@ async def get_feature_flag(
     flag_id: UUID = Path(..., description="The ID of the feature flag to retrieve"),
     db: Session = Depends(deps.get_db),
     current_user: User = Depends(deps.get_current_active_user),
-    cache_control: Dict[str, Any] = Depends(deps.get_cache_control),
+    _skip_cache: None = Depends(_skip_cache_ignored),
 ) -> Dict[str, Any]:
     """
     Get feature flag by ID.
@@ -435,8 +367,7 @@ async def get_feature_flag(
         HTTPException 404: If feature flag not found
         HTTPException 403: If user doesn't have access to this feature flag
     """
-    # Access is decided on the stored row, before anything is served -- the
-    # cached copy included.
+    # Access is decided on the stored row, before anything is served.
     owner_row = db.query(FeatureFlag.owner_id).filter(FeatureFlag.id == flag_id).first()
     if owner_row is None:
         raise HTTPException(
@@ -448,15 +379,6 @@ async def get_feature_flag(
             detail="Not enough permissions to access this feature flag",
         )
 
-    # Check cache first if enabled
-    if cache_control.enabled and cache_control.redis:
-        cache_key = f"feature_flag:{flag_id}"
-        cached_data = await _cache_get(cache_control, cache_key)
-        if cached_data:
-            record_cache_hit("feature_flag")
-            return json.loads(cached_data)
-        record_cache_miss("feature_flag")
-
     # Create feature flag service
     feature_flag_service = FeatureFlagService(db)
 
@@ -466,9 +388,6 @@ async def get_feature_flag(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Feature flag not found"
         )
-
-    # Cache result if enabled
-    await _cache_set(cache_control, f"feature_flag:{flag_id}", feature_flag)
 
     return feature_flag
 
@@ -487,7 +406,7 @@ async def update_feature_flag(
     ),
     db: Session = Depends(deps.get_db),
     current_user: User = Depends(deps.get_current_active_user),
-    cache_control: Dict[str, Any] = Depends(deps.get_cache_control),
+    _skip_cache: None = Depends(_skip_cache_ignored),
 ) -> Dict[str, Any]:
     """
     Update a feature flag.
@@ -593,8 +512,6 @@ async def update_feature_flag(
             f"Compliance audit logging failed for feature_flag update: {audit_error}"
         )
 
-    await _invalidate_flag_cache(cache_control, flag_id)
-
     return updated_flag
 
 
@@ -639,7 +556,7 @@ async def delete_feature_flag(
     flag_id: UUID = Path(..., description="The ID of the feature flag to delete"),
     db: Session = Depends(deps.get_db),
     current_user: User = Depends(deps.get_current_active_user),
-    cache_control: Dict[str, Any] = Depends(deps.get_cache_control),
+    _skip_cache: None = Depends(_skip_cache_ignored),
 ) -> None:
     """
     Delete a feature flag.
@@ -709,8 +626,6 @@ async def delete_feature_flag(
             f"Compliance audit logging failed for feature_flag delete: {audit_error}"
         )
 
-    await _invalidate_flag_cache(cache_control, flag_id)
-
     # Return 204 No Content
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
@@ -725,7 +640,7 @@ async def activate_feature_flag(
     flag_id: UUID = Path(..., description="The ID of the feature flag to activate"),
     db: Session = Depends(deps.get_db),
     current_user: User = Depends(deps.get_current_active_user),
-    cache_control: Dict[str, Any] = Depends(deps.get_cache_control),
+    _skip_cache: None = Depends(_skip_cache_ignored),
 ) -> Dict[str, Any]:
     """
     Activate a feature flag.
@@ -775,8 +690,6 @@ async def activate_feature_flag(
     # Activate feature flag
     activated_flag = feature_flag_service.activate_feature_flag(flag)
 
-    await _invalidate_flag_cache(cache_control, flag_id)
-
     return activated_flag
 
 
@@ -790,7 +703,7 @@ async def deactivate_feature_flag(
     flag_id: UUID = Path(..., description="The ID of the feature flag to deactivate"),
     db: Session = Depends(deps.get_db),
     current_user: User = Depends(deps.get_current_active_user),
-    cache_control: Dict[str, Any] = Depends(deps.get_cache_control),
+    _skip_cache: None = Depends(_skip_cache_ignored),
 ) -> Dict[str, Any]:
     """
     Deactivate a feature flag.
@@ -839,8 +752,6 @@ async def deactivate_feature_flag(
 
     # Deactivate feature flag
     deactivated_flag = feature_flag_service.deactivate_feature_flag(flag)
-
-    await _invalidate_flag_cache(cache_control, flag_id)
 
     return deactivated_flag
 
@@ -1067,7 +978,7 @@ async def toggle_feature_flag(
     ),
     db: Session = Depends(deps.get_db),
     current_user: User = Depends(deps.get_current_active_user),
-    cache_control: Dict[str, Any] = Depends(deps.get_cache_control),
+    _skip_cache: None = Depends(_skip_cache_ignored),
 ) -> ToggleResponse:
     """
     Toggle a feature flag between enabled and disabled states.
@@ -1148,8 +1059,6 @@ async def toggle_feature_flag(
                 f"Audit logging failed for toggle operation: {audit_error!s}"
             )
 
-        await _invalidate_flag_cache(cache_control, flag_id)
-
         return ToggleResponse(
             id=flag.id,
             name=flag.name,
@@ -1182,7 +1091,7 @@ async def enable_feature_flag(
     ),
     db: Session = Depends(deps.get_db),
     current_user: User = Depends(deps.get_current_active_user),
-    cache_control: Dict[str, Any] = Depends(deps.get_cache_control),
+    _skip_cache: None = Depends(_skip_cache_ignored),
 ) -> ToggleResponse:
     """
     Enable a feature flag (set to ACTIVE status).
@@ -1238,8 +1147,6 @@ async def enable_feature_flag(
             reason=toggle_request.reason,
         )
 
-        await _invalidate_flag_cache(cache_control, flag_id)
-
         return ToggleResponse(
             id=flag.id,
             name=flag.name,
@@ -1272,7 +1179,7 @@ async def disable_feature_flag(
     ),
     db: Session = Depends(deps.get_db),
     current_user: User = Depends(deps.get_current_active_user),
-    cache_control: Dict[str, Any] = Depends(deps.get_cache_control),
+    _skip_cache: None = Depends(_skip_cache_ignored),
 ) -> ToggleResponse:
     """
     Disable a feature flag (set to INACTIVE status).
@@ -1327,8 +1234,6 @@ async def disable_feature_flag(
             new_value=new_status,
             reason=toggle_request.reason,
         )
-
-        await _invalidate_flag_cache(cache_control, flag_id)
 
         return ToggleResponse(
             id=flag.id,

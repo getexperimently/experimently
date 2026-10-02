@@ -9,9 +9,13 @@ async client it builds is never awaited (#100).
 Things that make a test of this pass on the old code, so each is avoided:
 `deps` binds `settings` at import (patching `backend.app.core.config.settings`
 does not reach it); the shared `client` fixture overrides `get_cache_control`
-to disabled; and a synchronous fake Redis hides a missing `await`. The routes
-against a real Redis are in
-`backend/tests/integration/api/test_flag_cache_redis.py`.
+to disabled; and a synchronous fake Redis hides a missing `await`.
+
+The flag cache itself is gone (#630): the routes now read the database whatever
+`CACHE_ENABLED` says, and these tests keep the list and the detail answering
+under production settings. The reads against a real Redis with the cache
+switched on are in
+`backend/tests/integration/api/test_flag_reads_after_writers.py`.
 """
 
 from __future__ import annotations
