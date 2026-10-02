@@ -43,7 +43,7 @@ pytestmark = [pytest.mark.integration]
 REVISION = "271f03a31742"
 PREVIOUS_CORE_HEAD = "8fd44fb483a2"
 #: The core head of this tree, which ``upgrade heads`` runs on to.
-CORE_HEAD = "a89544fb1075"
+CORE_HEAD = "1ab99332f0ba"
 #: The modules branch's head, in the previous release and in this one alike.
 MODULES_HEAD = "modules_0002_warehouse_analysis"
 

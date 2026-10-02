@@ -37,10 +37,10 @@ pytestmark = [pytest.mark.integration]
 REVISION = "8fd44fb483a2"
 PREVIOUS_CORE_HEAD = "b8c9d0e1f2a3"
 #: The core head of this tree: ``upgrade heads`` runs on past this revision to
-#: ``a89544fb1075`` (``feature_flags.default_value``), through ``271f03a31742``
-#: and ``d12cbd384bbe``; a database built by ``create_all`` already carries all
-#: three, so they add nothing here.
-CORE_HEAD = "a89544fb1075"
+#: ``1ab99332f0ba`` (``events.created_at`` in UTC), through ``271f03a31742``,
+#: ``d12cbd384bbe`` and ``a89544fb1075``; a database built by ``create_all``
+#: already carries all four, so they add nothing here.
+CORE_HEAD = "1ab99332f0ba"
 #: The modules revision the previous full release (0.10.0) recorded, and the
 #: branch's head in this one.  This release also carries
 #: ``modules_0002_warehouse_analysis`` (#312), so a full database at the

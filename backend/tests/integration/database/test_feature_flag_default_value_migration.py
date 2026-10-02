@@ -46,6 +46,9 @@ pytestmark = [pytest.mark.integration]
 #: This revision, and the core revision it extends.
 REVISION = "a89544fb1075"
 PREVIOUS_CORE_HEAD = "d12cbd384bbe"
+#: The core head of this tree, which ``upgrade heads`` runs on to: the next
+#: revision, ``1ab99332f0ba`` (``events.created_at`` in UTC), adds no DDL.
+CORE_HEAD = "1ab99332f0ba"
 #: The modules branch's head, in the previous release and in this one alike.
 MODULES_HEAD = "modules_0002_warehouse_analysis"
 
@@ -54,8 +57,8 @@ PREVIOUS_ROWS = {
     FULL: {PREVIOUS_CORE_HEAD, MODULES_HEAD},
 }
 ROWS = {
-    CORE: {REVISION},
-    FULL: {REVISION, MODULES_HEAD},
+    CORE: {CORE_HEAD},
+    FULL: {CORE_HEAD, MODULES_HEAD},
 }
 
 COLUMN = "default_value"
@@ -279,15 +282,20 @@ _PREVIOUS_RELEASE_WRITES = textwrap.dedent(
 
 
 def _previous_release(profile: str, tmp_path):
-    """Release N-1: a copy of this tree without the revision and the column."""
+    """Release N-1: a copy of this tree without the revision and the column.
+
+    The revisions after this one go too: they are newer than release N-1, and
+    one whose ``down_revision`` file is gone would break the script directory.
+    """
     destination = tmp_path / "release-n-minus-1"
     if profile == FULL:
         tree = tree_profiles.full_tree(destination)
     else:
         tree = tree_profiles.core_tree(destination)
     versions = tree / "backend" / "app" / "db" / "migrations" / "versions"
-    (revision_file,) = versions.glob(f"{REVISION}_*.py")
-    revision_file.unlink()
+    for newer in (REVISION, CORE_HEAD):
+        (revision_file,) = versions.glob(f"{newer}_*.py")
+        revision_file.unlink()
     model = tree / "backend" / "app" / "models" / "feature_flag.py"
     source, found = _MODEL_COLUMN.subn("", model.read_text(encoding="utf-8"))
     assert found == 1, f"{found} default_value declarations: update _MODEL_COLUMN"
