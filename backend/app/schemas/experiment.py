@@ -5,9 +5,11 @@ This module defines Pydantic models for experiment-related data structures.
 These models are used for request/response validation and documentation.
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone, tzinfo
 from enum import Enum
+from functools import lru_cache
 from typing import Any, Dict, List, Optional
+from zoneinfo import ZoneInfo, available_timezones
 
 from pydantic import (
     UUID4,
@@ -65,8 +67,41 @@ class MetricType(str, Enum):
 INT32_MAX = 2**31 - 1
 
 
+#: The message for a ``time_zone`` that is not a known IANA zone name. Fixed:
+#: it names the field and never repeats the submitted value (#483).
+TIME_ZONE_ERROR = (
+    "time_zone must be an IANA time zone name, such as UTC or America/Los_Angeles"
+)
+
+
+@lru_cache(maxsize=1)
+def _known_time_zones() -> frozenset:
+    """Every IANA zone name the interpreter can load (from ``tzdata``, which
+    the runtime lock pins, or the system zone files).
+
+    Membership, not ``ZoneInfo(name)`` alone, decides: on a case-insensitive
+    file system ``ZoneInfo("utc")`` loads, so a bare load would accept a name
+    on a laptop that the Linux image refuses.
+    """
+    return frozenset(available_timezones())
+
+
+def _zone(name: str) -> tzinfo:
+    """The zone *name* names. ``UTC`` always resolves, even with no zone data."""
+    if name == "UTC":
+        return timezone.utc
+    return ZoneInfo(name)
+
+
 class ScheduleConfig(BaseModel):
-    """Configuration for experiment scheduling."""
+    """Configuration for experiment scheduling.
+
+    ``time_zone`` is how a date written without a UTC offset is read: such a
+    date is taken as wall-clock time in that zone and converted to UTC. A date
+    that carries an offset (``Z``, ``+02:00``) means exactly that instant and
+    the zone does not change it. Dates are stored in UTC; the zone itself is
+    not stored.
+    """
 
     start_date: Optional[datetime] = Field(
         None, description="Date and time when experiment should automatically start"
@@ -74,7 +109,15 @@ class ScheduleConfig(BaseModel):
     end_date: Optional[datetime] = Field(
         None, description="Date and time when experiment should automatically complete"
     )
-    time_zone: str = Field("UTC", description="Time zone for interpreting dates")
+    time_zone: str = Field(
+        "UTC",
+        max_length=64,
+        description=(
+            "IANA time zone name (for example America/Los_Angeles) for a date "
+            "given without a UTC offset; a date with an offset keeps it. "
+            "Dates are stored in UTC. Default UTC."
+        ),
+    )
 
     model_config = ConfigDict(
         json_schema_extra={
@@ -89,16 +132,49 @@ class ScheduleConfig(BaseModel):
     @field_validator("start_date")
     @classmethod
     def validate_start_date(cls, v: Optional[datetime]) -> Optional[datetime]:
-        """Validate that start_date is in the future if provided."""
-        if v and v < datetime.now(timezone.utc) - timedelta(
-            minutes=10
+        """Validate that start_date is in the future if provided.
+
+        A date without an offset is checked in ``validate_dates``, once it has
+        been read in ``time_zone``.
+        """
+        if (
+            v
+            and v.tzinfo is not None
+            and v < datetime.now(timezone.utc) - timedelta(minutes=10)
         ):  # Allow small buffer
             raise ValueError("Start date must be in the future")
         return v
 
+    @field_validator("time_zone")
+    @classmethod
+    def validate_time_zone(cls, v: str) -> str:
+        """Refuse a name that is not an IANA zone, with a fixed message (#483)."""
+        if v != "UTC" and v not in _known_time_zones():
+            raise ValueError(TIME_ZONE_ERROR)
+        return v
+
     @model_validator(mode="after")
     def validate_dates(self) -> "ScheduleConfig":
-        """Validate date relationships."""
+        """Read offset-less dates in ``time_zone``, then check them.
+
+        The conversion happens before any comparison, so a date without an
+        offset is compared as the instant it names rather than raising on a
+        naive/aware comparison.
+        """
+        zone = _zone(self.time_zone)
+        naive_start = self.start_date is not None and self.start_date.tzinfo is None
+        for name in ("start_date", "end_date"):
+            value = getattr(self, name)
+            if value is not None and value.tzinfo is None:
+                # Only a field the request carried can be naive, so this
+                # assignment does not mark an omitted field as set.
+                setattr(self, name, value.replace(tzinfo=zone).astimezone(timezone.utc))
+
+        if naive_start and self.start_date < datetime.now(timezone.utc) - timedelta(
+            minutes=10
+        ):  # Allow small buffer
+            raise ValueError("Start date must be in the future")
+
         if self.start_date and self.end_date and self.end_date <= self.start_date:
             raise ValueError("End date must be after start date")
 

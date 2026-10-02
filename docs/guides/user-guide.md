@@ -125,8 +125,10 @@ Click **Start** on the experiment's page. The status changes to `ACTIVE`.
 You can also schedule automatic start and end dates. The dashboard has no schedule
 screen yet, so this is an API call: `PUT /api/v1/experiments/{experiment_id}/schedule`,
 on a `DRAFT` experiment, with an ADMIN or DEVELOPER token. The experiment activates at
-`start_date` and completes at `end_date`, which must be at least an hour later. On a draft,
-a date you leave out of the request is cleared.
+`start_date` and completes at `end_date`, which must be at least an hour later. A date you
+leave out of the request is left as it is, and `null` clears it. A date written without a
+UTC offset is read in `time_zone`, an IANA name such as `America/Los_Angeles` (default
+`UTC`); a date with an offset, like the ones below, keeps it. Dates are stored in UTC.
 
 ```{.bash skip reason="server: needs a running API, a signed-in token in TOKEN and a draft experiment's id in EXPERIMENT_ID"}
 curl -s -X PUT "localhost:8000/api/v1/experiments/$EXPERIMENT_ID/schedule" \
@@ -149,7 +151,7 @@ to resume at. It is stored as `resume_at` (returned with the experiment); the ex
 start date does not move. On a paused experiment:
 
 - `"start_date": null` cancels a scheduled resume;
-- a field you leave out is left as it is;
+- a field you leave out is left as it is, as on a draft;
 - `end_date` must be later than the experiment's start date and, with a resume scheduled,
   at least an hour after the resume time.
 

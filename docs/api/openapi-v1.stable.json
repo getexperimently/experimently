@@ -9222,7 +9222,7 @@
         "type": "object"
       },
       "ScheduleConfig": {
-        "description": "Configuration for experiment scheduling.",
+        "description": "Configuration for experiment scheduling.\n\n``time_zone`` is how a date written without a UTC offset is read: such a\ndate is taken as wall-clock time in that zone and converted to UTC. A date\nthat carries an offset (``Z``, ``+02:00``) means exactly that instant and\nthe zone does not change it. Dates are stored in UTC; the zone itself is\nnot stored.",
         "example": {
           "end_date": "2023-12-31T23:59:59Z",
           "start_date": "2023-12-01T00:00:00Z",
@@ -9257,7 +9257,8 @@
           },
           "time_zone": {
             "default": "UTC",
-            "description": "Time zone for interpreting dates",
+            "description": "IANA time zone name (for example America/Los_Angeles) for a date given without a UTC offset; a date with an offset keeps it. Dates are stored in UTC. Default UTC.",
+            "maxLength": 64,
             "title": "Time Zone",
             "type": "string"
           }
@@ -16474,7 +16475,7 @@
     },
     "/api/v1/experiments/{experiment_id}/schedule": {
       "put": {
-        "description": "Update experiment scheduling configuration.\n\nOn a **DRAFT** experiment this schedules its activation and completion:\n\n- **start_date**: When the experiment should automatically activate\n- **end_date**: When the experiment should automatically complete\n- **time_zone**: Time zone for interpreting the dates (default: UTC)\n\nA field the request omits is cleared. end_date must be at least an hour\nafter start_date.\n\nOn a **PAUSED** experiment, start_date is the time to resume it at. It is\nstored as ``resume_at``; the experiment's own start_date is never moved. A\nnull start_date cancels a scheduled resume, and a field the request omits\nis left unchanged. end_date must be later than the experiment's start date\nand, with a resume scheduled, at least an hour after the resume time. A\npaused experiment is resumed automatically only by a resume scheduled after\nit was paused; any change of status cancels a scheduled resume.\n\nstart_date may not be more than ten minutes in the past.\n\nReturns:\n    ExperimentResponse: The updated experiment with scheduling information\n\nRaises:\n    HTTPException 400: If scheduling parameters are invalid\n    HTTPException 403: If the caller's role does not hold READ and UPDATE\n        on experiments\n    HTTPException 404: If experiment not found",
+        "description": "Update experiment scheduling configuration.\n\nOn a **DRAFT** experiment this schedules its activation and completion:\n\n- **start_date**: When the experiment should automatically activate\n- **end_date**: When the experiment should automatically complete\n- **time_zone**: IANA time zone name (default: UTC) for a date given\n  without a UTC offset; a date with an offset keeps it. Dates are stored\n  in UTC. A name that is not an IANA zone answers 422.\n\nOn either status, a field the request omits is left unchanged and an\nexplicit null clears it. On a draft, end_date must be at least an hour\nafter start_date (the stored one when the request omits it).\n\nOn a **PAUSED** experiment, start_date is the time to resume it at. It is\nstored as ``resume_at``; the experiment's own start_date is never moved. A\nnull start_date cancels a scheduled resume. end_date must be later than\nthe experiment's start date and, with a resume scheduled, at least an hour\nafter the resume time. A paused experiment is resumed automatically only\nby a resume scheduled after it was paused; any change of status cancels a\nscheduled resume.\n\nstart_date may not be more than ten minutes in the past.\n\nReturns:\n    ExperimentResponse: The updated experiment with scheduling information\n\nRaises:\n    HTTPException 400: If scheduling parameters are invalid\n    HTTPException 403: If the caller's role does not hold READ and UPDATE\n        on experiments\n    HTTPException 404: If experiment not found\n    HTTPException 422: If a date is malformed or time_zone is not an IANA\n        time zone name",
         "operationId": "update_experiment_schedule_api_v1_experiments__experiment_id__schedule_put",
         "parameters": [
           {
