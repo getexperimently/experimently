@@ -46,6 +46,10 @@ REASON_ROLLOUT = "rollout"
 REASON_INACTIVE = "inactive"
 REASON_ERROR = "error"
 
+# The operators a legacy (list-shaped) ``context`` condition understands. A
+# tuple, not a set: a stored operator can be any JSON value, a list among them.
+_LEGACY_OPERATORS = ("eq", "ne", "gt", "lt", "contains", "in")
+
 
 class FlagStatusReadOnly(Exception):
     """A request's ``status`` differs from the flag's status.
@@ -545,6 +549,9 @@ class FeatureFlagService:
         """
         Evaluate a targeting rule for a user.
 
+        A ``context`` condition matches only through one of the operators in
+        ``_LEGACY_OPERATORS``; any other operator, or none, does not match.
+
         Args:
             rule: Rule dictionary from feature flag
             user_id: ID of the user
@@ -602,6 +609,11 @@ class FeatureFlagService:
                 elif operator == "in" and not (
                     isinstance(value, (list, tuple)) and context_value in value
                 ):
+                    return False
+                elif operator not in _LEGACY_OPERATORS:
+                    # Any other operator, or none, does not match (#733), as
+                    # in the Lambda evaluator's ``evaluate_targeting_rules``
+                    # (backend/lambda/feature_flag_evaluation/evaluator.py:181).
                     return False
 
             # All conditions passed
