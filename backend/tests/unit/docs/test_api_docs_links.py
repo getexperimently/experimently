@@ -53,12 +53,10 @@ SKIPPED_DIRS = frozenset(
     }
 )
 
-#: Lines in the root CLAUDE.md, which only the founder edits. Each entry is
-#: the exact line; once it is fixed, `test_every_allowance_is_still_needed`
-#: fails and the entry is deleted. Nothing else is allowed.
-FOUNDER_ONLY = {
-    "CLAUDE.md": {"- API Documentation: http://localhost:8000/docs"},
-}
+#: Exact lines allowed to keep an old link, by page. Empty: the root CLAUDE.md
+#: was the one page here, and it is now edited like any other (D46). An entry
+#: added later is checked by `test_every_allowance_is_still_needed`.
+ALLOWANCES: dict = {}
 
 
 def stale_links(text: str) -> List[Tuple[int, str]]:
@@ -85,7 +83,7 @@ def offenders(root: Path) -> List[str]:
     out = []
     for page in pages(root):
         rel = page.relative_to(root).as_posix()
-        allowed = FOUNDER_ONLY.get(rel, set())
+        allowed = ALLOWANCES.get(rel, set())
         text = page.read_text(encoding="utf-8", errors="replace")
         for number, line in stale_links(text):
             if line.strip() not in allowed:
@@ -102,14 +100,14 @@ def test_no_page_links_to_the_api_docs_at_the_old_path():
 
 
 def test_every_allowance_is_still_needed():
-    for rel, lines in FOUNDER_ONLY.items():
+    for rel, lines in ALLOWANCES.items():
         path = REPO_ROOT / rel
         present = {
             line.strip() for line in path.read_text(encoding="utf-8").splitlines()
         }
         gone = lines - present
         assert not gone, (
-            f"{rel} no longer has these lines; delete them from FOUNDER_ONLY: {gone}"
+            f"{rel} no longer has these lines; delete them from ALLOWANCES: {gone}"
         )
 
 
