@@ -489,7 +489,7 @@ not, restore the snapshot the deploy took before migrating
 
 - [ ] Migration applied in staging — no errors, no data loss
 - [ ] Migration is [backward-compatible](#backward-compatible-migrations)
-- [ ] The downgrade tested in staging (Actions → Database Migration, `downgrade`, `-1`)
+- [ ] The downgrade tested in staging (Actions → Database Migration, `downgrade`, target: the new migration's `down_revision` id)
 
 ---
 
