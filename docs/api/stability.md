@@ -107,10 +107,17 @@ the pull request. Removing a deprecated operation later is a breaking change.
 The API sends no `Deprecation` or `Sunset` response header; the OpenAPI
 document and this page are where a deprecation is declared.
 
-| Operation | Deprecated by | Use instead |
-|---|---|---|
-| `GET /api/v1/edge/bootstrap` | #226 | `GET /api/v1/sdk/ruleset` (beta; an API key with the `sdk:ruleset` scope) for server-side [local evaluation](../sdk/local-evaluation.md), or `GET /api/v1/feature-flags/evaluate/{flag_key}` for one flag |
-| `GET /api/v1/openfeature/flags` | #241 | `GET /api/v1/feature-flags/evaluate/{flag_key}`, which both OpenFeature providers call; `GET /api/v1/sdk/ruleset` for server-side local evaluation |
+No operation is deprecated at present.
+
+## Removed operations
+
+A removed operation answers `404` and is absent from both snapshots. Removing
+one is a breaking change.
+
+| Operation | Deprecated by | Removed in | Use instead |
+|---|---|---|---|
+| `GET /api/v1/edge/bootstrap` | #226 | 0.18.0 (#737) | `GET /api/v1/sdk/ruleset` (beta; an API key with the `sdk:ruleset` scope) for server-side [local evaluation](../sdk/local-evaluation.md), or `GET /api/v1/feature-flags/evaluate/{flag_key}` for one flag; for experiments, `POST /api/v1/tracking/assign` |
+| `GET /api/v1/openfeature/flags` | #241 | 0.18.0 (#737) | `GET /api/v1/feature-flags/evaluate/{flag_key}`, which both OpenFeature providers call; `GET /api/v1/sdk/ruleset` for server-side local evaluation |
 
 ## Beta numbers on a stable route
 

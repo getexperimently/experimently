@@ -178,8 +178,8 @@ curl -s -G localhost:8000/api/v1/feature-flags/evaluate/beta_features \
 
 It prints `true`.
 
-An API key is accepted only by the endpoints an SDK calls: tracking, flag evaluation,
-OpenFeature and edge bootstrap. Everything else takes a bearer token.
+An API key is accepted only by the endpoints an SDK calls: tracking, flag evaluation and
+the flag ruleset. Everything else takes a bearer token.
 
 ---
 

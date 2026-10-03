@@ -2,7 +2,7 @@
 User-owned API keys (core) — ``/api/v1/api-keys``.
 
 Keys authenticate SDK traffic (``X-API-Key`` header on ``/tracking/*``,
-flag evaluation, OpenFeature, edge bootstrap ...) as the owning user via
+flag evaluation, the ruleset ...) as the owning user via
 ``deps.get_api_key``.  The plaintext secret is returned exactly once by the
 create endpoint; only its SHA-256 hash is persisted (``APIKey.key``).
 

@@ -18,7 +18,6 @@ from backend.app.api.v1.endpoints import (
     bulk_toggle,
     client_errors,
     compliance,
-    edge,
     events,
     experiment_wizard,
     experiments,
@@ -34,7 +33,6 @@ from backend.app.api.v1.endpoints import (
     modules,
     mutual_exclusion_groups,
     notifications,
-    openfeature,
     post_stratification,
     power_calculator,
     results,
@@ -142,10 +140,6 @@ def register_core_routers(router: APIRouter) -> APIRouter:
     router.include_router(
         post_stratification.router, prefix="/results", tags=["Results"]
     )
-    # EP-044: OpenFeature Provider endpoints
-    router.include_router(
-        openfeature.router, prefix="/openfeature", tags=["OpenFeature"]
-    )
     # EP-046: LLM/AI Model Evaluation
     router.include_router(
         llm_experiments.router, prefix="/llm-experiments", tags=["LLM Experiments"]
@@ -157,8 +151,6 @@ def register_core_routers(router: APIRouter) -> APIRouter:
     router.include_router(
         power_calculator.router, prefix="/power", tags=["Power Calculator"]
     )
-    # EP-047: Edge SDK bootstrap endpoint (Cloudflare Workers / Vercel Edge / Deno Deploy)
-    router.include_router(edge.router, prefix="/edge", tags=["Edge"])
     # #226: the flag ruleset for server-side local evaluation (needs sdk:ruleset)
     router.include_router(sdk.router, prefix="/sdk", tags=["SDK"])
     # EP-058: Real-time WebSocket Streaming Results
