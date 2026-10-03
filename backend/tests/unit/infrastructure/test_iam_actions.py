@@ -380,3 +380,44 @@ def test_dropping_an_implied_action_makes_the_policy_stale(monkeypatch):
     without = iam.policy(iam.calls())
     assert without != committed
     assert "rds:AddTagsToResource" not in json.dumps(without)
+
+
+# --- the revision lookup behind a rollback's create-deployment (#754) ---------
+
+
+@pytest.mark.regression
+def test_a_deployment_implies_looking_up_its_revision(tmp_path):
+    """A rollback's create-deployment names a revision deployed before, and
+    CodeDeploy then checks codedeploy:GetApplicationRevision. With only
+    RegisterApplicationRevision granted, the staging rollback rehearsal was
+    refused at "Roll back via CodeDeploy" after it had stopped the in-flight
+    deployment."""
+    iam = _module()
+    script = tmp_path / "probe.sh"
+    script.write_text(
+        "aws deploy create-deployment --application-name a \\\n"
+        '  --deployment-group-name g --revision "$rev"\n'
+    )
+    found = set(iam.calls([script]))
+    assert {
+        "codedeploy:CreateDeployment",
+        "codedeploy:GetApplicationRevision",
+        "codedeploy:RegisterApplicationRevision",
+    } <= found, found
+
+
+@pytest.mark.regression
+def test_the_committed_policy_grants_the_revision_lookup():
+    """Both workflows that create a deployment are what grant it, and the
+    committed policy holds it with the other deploy actions."""
+    found = _module().calls()
+    assert {p.split(":")[0] for p in found["codedeploy:GetApplicationRevision"]} == {
+        ".github/workflows/deploy.yml",
+        ".github/workflows/rollback.yml",
+    }, found["codedeploy:GetApplicationRevision"]
+    statements = json.loads(POLICY.read_text())["Statement"]
+    granted = [
+        s for s in statements if "codedeploy:GetApplicationRevision" in s["Action"]
+    ]
+    assert [s["Sid"] for s in granted] == ["DeployWorkflows"], granted
+    assert granted[0]["Resource"] == "*"

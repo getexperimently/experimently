@@ -128,7 +128,7 @@ jobs:
             exit 1
           fi
           if [ "$TARGET" = "base" ]; then
-            echo "::error title=Target refused::target=base is refused, so nothing was migrated: it unapplies every revision and drops every table. To go back further than one migration can, restore a snapshot (docs/deployment/rollback-runbook.md#step-3-emergency-restore-from-aurora-snapshot). ${NAME_THE_ID}"
+            echo "::error title=Target refused::target=base is refused, so nothing was migrated: it unapplies every revision and drops every table. To go back further than one migration can, the emergency route is a point-in-time restore to a new cluster, with the Engineering Lead (docs/deployment/rollback-runbook.md#step-3-emergency-point-in-time-restore-to-a-new-cluster). ${NAME_THE_ID}"
             exit 1
           fi
           if [ "$DIRECTION" = "downgrade" ] && [ "$TARGET" = "heads" ]; then

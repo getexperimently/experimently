@@ -109,9 +109,6 @@ SPECIAL = {
 #:   deploy continue-deployment, stop-deployment ->
 #:     codedeploy:CreateCloudFormationDeployment: CloudFormation-driven
 #:     blue/green only; these deployments are ECS ones created directly.
-#:   deploy create-deployment -> codedeploy:GetApplicationRevision: AWS asks
-#:     for it OR RegisterApplicationRevision; the AppSpecContent revision is
-#:     registered, so the latter is the one granted.
 #:   cloudformation describe-stacks -> cloudformation:ListStacks: only without
 #:     a stack name; stack-outputs always passes --stack-name.
 #:   ecr batch-get-image, get-download-url-for-layer ->
@@ -129,7 +126,19 @@ IMPLIED = {
     # GetApplicationRevision or RegisterApplicationRevision permissions for
     # the application revision."
     # https://docs.aws.amazon.com/codedeploy/latest/userguide/auth-and-access-control-permissions-reference.html
+    # That sentence reads as either-or, and RegisterApplicationRevision alone
+    # was granted until #754. Observed in the staging rollback rehearsal: its
+    # create-deployment, sending an AppSpec for a revision that had been
+    # deployed before (the previous task definition), was refused with "not
+    # authorized to perform: codedeploy:GetApplicationRevision"; the deploys'
+    # create-deployment calls, with an AppSpec for a new revision, were not.
+    # So both are granted. The service reference lists both among
+    # CreateDeployment's AuthorizedActions:
+    # https://docs.aws.amazon.com/service-authorization/latest/reference/list_codedeploy.html#list_codedeploy-operations
+    # Both are scoped to the application resource type; like
+    # RegisterApplicationRevision, it is granted on `*` with the rest.
     ("deploy", "create-deployment"): [
+        "codedeploy:GetApplicationRevision",
         "codedeploy:GetDeploymentConfig",
         "codedeploy:RegisterApplicationRevision",
     ],
