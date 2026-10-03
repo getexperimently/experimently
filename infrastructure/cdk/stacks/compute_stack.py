@@ -64,11 +64,15 @@ class ComputeStack(Stack):
         # *compute* stack, which is what created the dependency cycle, and the
         # fix imports the group `mutable=False` so CDK writes nothing here.
         # `fargate_service_stack.py` now states that rule explicitly -- this
-        # ALB's security group, port 8000, nothing else -- and
-        # `test_the_load_balancer_can_still_reach_the_tasks` pins it.
+        # ALB's group, port 8000, nothing else -- together with the ALB's
+        # matching egress rule (#801), which it states for both live colours.
+        # `test_app_profiles.py::test_the_load_balancer_can_still_reach_the_tasks`
+        # pins the ingress, and `test_alb_egress_to_tasks.py` pins the egress.
         #
-        # So the blanket rule has no job left. Removing it means the tasks are
-        # reachable from the load balancer and from nothing else.
+        # So the blanket rule has no job left, and it is gone: the tasks are
+        # reachable from the load balancer and from nothing else. Nothing here
+        # opens 8000 any more, so losing either of those two rules cuts the
+        # load balancer off from the API rather than falling back to this one.
 
         # Create database access Lambda role with additional permissions
         db_lambda_role = iam.Role(
