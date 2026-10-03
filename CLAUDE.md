@@ -49,7 +49,7 @@ pytest backend/tests/integration/  # Integration tests only
 # repository tooling unchecked.
 ruff format backend/ modules/ scripts/        # Format code
 ruff check backend/ modules/ scripts/ --fix   # Lint and auto-fix (includes import sorting)
-mypy backend/app/                             # Type checking
+mypy backend/app/                             # Type checking: NOT gated, NOT clean (#788)
 make format                 # The two ruff commands above
 make lint                   # Everything the `lint` CI job runs (see below)
 
@@ -204,7 +204,12 @@ source venv/bin/activate && pytest -m "unit" -v
 #### Safety Monitoring
 - Automated safety checks for feature flags monitoring error rates, latency
 - API endpoints under `/api/v1/safety` (`/settings`, `/feature-flags/{id}/config|check|rollback`)
-- Rollback mechanism for problematic feature flags
+- Rollback mechanism for problematic feature flags. A rollback to 0% turns the flag off
+  (status INACTIVE, so every user gets `enabled: false`, `reason: "inactive"`, targeting-rule
+  matches included); a rollback to 1-100% lowers only the global percentage, and users matched
+  by a targeting rule keep their rule's percentage. Both pause every ACTIVE rollout schedule of
+  the flag (`details["paused_schedules"]`), so a stage cannot raise it again (#629, #729;
+  `SafetyService.execute_rollback`'s docstring is the contract)
 - `SafetyService` (`backend/app/services/safety_service.py`) reads error metrics from `error_logs` and latency from `raw_metrics`; a missing per-flag config is returned as a default with `id = DEFAULT_CONFIG_ID` (nil UUID), never a 404
 
 #### Public tracking API and conversion matching
@@ -255,8 +260,8 @@ cd infrastructure/cloudwatch
 
 ### Application URLs
 - Backend API: http://localhost:8000
-- Frontend: http://localhost:3000
-- API Documentation: http://localhost:8000/docs
+- Frontend (dashboard, `npm run dev` = `next dev -p 3100`): http://localhost:3100
+- API Documentation: http://localhost:8000/api/v1/docs (ReDoc at `/api/v1/redoc`; `/docs` answers 404)
 - Health Check: http://localhost:8000/health
 
 ## Common Development Tasks
@@ -1098,11 +1103,24 @@ recursion. Two consequences, both certain to recur:
 - **The release-please pull request has ZERO checks.** With 20 required, it can
   never satisfy branch protection. It is not blocked on anything you can fix in
   the pull request; merge it with `--admin` after confirming the diff is only
-  CHANGELOG.md, VERSION, the manifest and the three version fixtures.
-- **The tag it pushes triggers nothing.** `release.yml` has a
-  `workflow_dispatch` with a tag input for exactly this: `gh workflow run
-  release.yml -f tag=vX.Y.Z`. A tag pushed by a human token DOES trigger
-  workflows, which is why a hand-pushed tag behaves differently.
+  the eight files it owns: CHANGELOG.md, VERSION, `.release-please-manifest.json`
+  and the five `extra-files` (see the next section).
+- **The tag it pushes triggers nothing -- but `release.yml` does not need it
+  to.** `release-please.yml` calls `release.yml` itself (`uses:
+  ./.github/workflows/release.yml`, a `workflow_call`) when `release_created`
+  is true, so merging the release pull request builds, signs and publishes the
+  release. **Do not dispatch `release.yml` after a release.** A second run
+  builds the release again and moves its image tags to the new digests; that
+  happened to 0.17.0, two runs, and the first signed build was orphaned.
+  `gh workflow run release.yml -f tag=vX.Y.Z` is only for re-running a release
+  whose own `release.yml` run failed after the tag existed.
+- **The docs site does need a dispatch.** `docs.yml` deploys only on a `v*`
+  ref, and the bot's tag triggers nothing, so after each release run
+  `gh workflow run docs.yml --ref vX.Y.Z`. A pre-release tag (anything with a
+  `-`, e.g. `v1.2.0-rc.1`) does not deploy (#776).
+
+A tag pushed by a human token DOES trigger workflows, which is why a
+hand-pushed tag behaves differently: `release.yml` runs from the push.
 
 Release-please also needs the ORGANISATION to allow it. If it fails with
 
@@ -1117,15 +1135,20 @@ permissions, and it needs an org owner.
 
 ### A release bumps VERSION and leaves the fixtures behind
 
-Three committed files embed the version -- both OpenAPI snapshots under
-`docs/api/` and the frontend's copy. They are `extra-files` in
-`release-please-config.json`, so the release pull request updates them. If a
-release ever lands with them stale, `make openapi` and commit; the smoke test
+Five committed files embed the version and are `extra-files` in
+`release-please-config.json`: both OpenAPI snapshots under `docs/api/`
+(`openapi-v1.full.json`, `openapi-v1.stable.json`), the frontend's copy
+(`frontend/src/tests/fixtures/openapi.json`), `charts/experimently/Chart.yaml`
+and `deploy/compose/compose.yml`. With CHANGELOG.md, VERSION and
+`.release-please-manifest.json` that is eight files in every release pull
+request (0.18.0, #749, is the example). If a release ever lands with the
+OpenAPI copies stale, `make openapi` and commit; the smoke test
 `test_version_sources.py` fails loudly either way.
 
 Check a release pull request by diffing it: if anything but the version string
-changed in those three files, the generator and the committed copies have
-diverged and `make openapi` is the fix, not the release.
+changed in those five files, the generator and the committed copies have
+diverged; for the three OpenAPI files `make openapi` is the fix, not the
+release.
 
 ### The docs site deploys from a TAG, and two settings gate it
 
@@ -1242,6 +1265,8 @@ make format
 #   actionlint                         .github/workflows
 make lint
 
-# Run type checking
+# Type checking. NOT part of `make lint` or any gate (no workflow, Makefile
+# target or pre-commit hook runs it) and NOT clean: ~931 errors on main. A
+# baseline gate or dropping it is #788; until then a mypy run is advisory.
 mypy backend/app/
 ```
