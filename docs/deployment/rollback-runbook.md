@@ -92,7 +92,7 @@ back. The rest of the table, and everything after that hour, is yours.
 
 ## Method 1: GitHub Actions Manual Rollback (Preferred — ~3 minutes)
 
-This is the preferred method. It is audited and sends Slack notifications. It does **not** run smoke tests; Step 5 of Method 2 and the post-rollback checklist are by hand.
+This is the preferred method. It is audited and sends Slack notifications when `SLACK_BOT_TOKEN` is set. It does **not** run smoke tests; Step 5 of Method 2 and the post-rollback checklist are by hand.
 
 The deploy that went wrong printed the target for you: its run summary ends
 with `Rollback: Actions → Rollback → environment=<env>, task_definition_arn=experimentation-backend-<env>:<n>, dashboard_task_definition_arn=experimentation-dashboard-<env>:<m>`.

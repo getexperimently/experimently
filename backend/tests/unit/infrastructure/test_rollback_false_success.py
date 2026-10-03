@@ -96,14 +96,20 @@ def runner(tmp_path: Path) -> Runner:
 # --- a minimal evaluator for the `if:` expressions rollback.yml uses ------------------
 
 _CLAUSE = re.compile(
-    r"^(steps\.([\w-]+)\.(?:outputs\.([\w-]+)|(outcome))|inputs\.([\w-]+))"
+    r"^(steps\.([\w-]+)\.(?:outputs\.([\w-]+)|(outcome))|inputs\.([\w-]+)"
+    r"|env\.(\w+))"
     r"\s*(==|!=)\s*'([^']*)'$"
 )
 
 
 def _should_run(
-    step: dict, outputs: dict[str, dict[str, str]], inputs: dict, failed: bool
+    step: dict,
+    outputs: dict[str, dict[str, str]],
+    inputs: dict,
+    failed: bool,
+    env: dict | None = None,
 ) -> bool:
+    """A job-env name not given reads as unset, as with no SLACK_BOT_TOKEN."""
     expr = str(step.get("if", "")).strip()
     if expr.startswith("${{") and expr.endswith("}}"):
         expr = expr[3:-2].strip()
@@ -124,8 +130,10 @@ def _should_run(
         # An `if:` of a shape this evaluator does not know fails the test
         # rather than being guessed at.
         assert match, f"cannot evaluate if: {step.get('if')!r}"
-        _, sid, key, outcome, inp, op, literal = match.groups()
-        if inp:
+        _, sid, key, outcome, inp, env_name, op, literal = match.groups()
+        if env_name:
+            value = (env or {}).get(env_name, "")
+        elif inp:
             value = inputs.get(inp, "")
         elif outcome:
             value = outputs.get(sid, {}).get("__outcome__", "")
@@ -818,7 +826,7 @@ def test_the_refused_run_says_so_in_the_summary_and_slack(runner):
         "experimentation-backend-staging:43)" in headline
     ), headline
     notify = _step(ROLLBACK, "Notify rollback result")
-    assert notify["if"] == "always()"
+    assert notify["if"] == "always() && env.SLACK_ON == 'true'"
     assert "steps.summary.outputs.slack" in notify["with"]["slack-message"]
 
 

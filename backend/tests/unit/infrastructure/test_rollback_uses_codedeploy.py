@@ -236,7 +236,7 @@ def test_the_result_is_announced_even_when_the_rollback_fails():
     ]
     assert notifiers, "no step announces the rollback result"
     for step in notifiers:
-        assert str(step.get("if", "")).strip() == "always()", (
+        assert str(step.get("if", "")).strip().startswith("always() && "), (
             f"{step.get('name')!r} has no `if: always()`, so every failure "
             "path leaves Slack showing only the ROLLBACK-initiated warning"
         )
