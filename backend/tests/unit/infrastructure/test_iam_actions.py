@@ -232,12 +232,12 @@ def _probe(tmp_path, suffix: str, script: str) -> Path:
         # rollback.yml's form: the flag on the call itself, line-continued.
         "aws deploy create-deployment \\\n"
         "  --application-name a --deployment-group-name g \\\n"
-        "  --override-alarm-configuration enabled=false \\\n"
+        '  --override-alarm-configuration \'{"enabled":false,"ignorePollAlarmFailure":false,"alarms":[]}\' \\\n'
         "  --query deploymentId --output text\n",
         # deploy.yml's break-glass form: the flag in an array the call expands.
         "override=()\n"
         'if [ "$OVERRIDE" = true ]; then\n'
-        "  override=(--override-alarm-configuration enabled=false)\n"
+        '  override=(--override-alarm-configuration \'{"enabled":false,"ignorePollAlarmFailure":false,"alarms":[]}\')\n'
         "fi\n"
         'aws deploy create-deployment --application-name a "${override[@]}"\n',
     ],

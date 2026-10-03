@@ -839,6 +839,9 @@ jobs:
       # created with the alarms overridden. The override is on this one
       # CreateDeployment call and changes nothing about the group, so the next
       # deploy is watched again. It is the only place deploy.yml passes it.
+      # The value is the same JSON as rollback.yml's, with an explicit
+      # `alarms` list (#777): the shorthand `enabled=false` was measured to
+      # send no `alarms` key, which CodeDeploy refused on staging.
       - name: Create the CodeDeploy deployment (blue/green)
         id: codedeploy
         env:
@@ -848,7 +851,7 @@ jobs:
           set -euo pipefail
           override=()
           if [ "$OVERRIDE_ALARMS" = "true" ]; then
-            override=(--override-alarm-configuration enabled=false)
+            override=(--override-alarm-configuration '{"enabled":false,"ignorePollAlarmFailure":false,"alarms":[]}')
             echo "::warning title=ALARMS OVERRIDDEN::deployment created with the API's alarms overridden: no alarm watches it or rolls it back"
           fi
           appspec="$(jq -cn --arg td "$TASK_DEFINITION" '{

@@ -158,8 +158,8 @@ apply here, are listed beside it. Confirm the whole list with
 (#148). The API's deployment group has two 5xx alarms, and CodeDeploy stops
 every deployment to the group while one of them is in ALARM. The release
 being rolled back is usually what holds it there, so Rollback creates its
-deployment with `--override-alarm-configuration enabled=false`, always, and
-Deploy does the same only under its break-glass input
+deployment with the group's alarms overridden (`--override-alarm-configuration`),
+always, and Deploy does the same only under its break-glass input
 ([Fix forward while an alarm is firing](rollback-runbook.md#fix-forward-while-an-alarm-is-firing)).
 AWS documents that overriding alarms on `CreateDeployment` needs the
 `UpdateDeploymentGroup` permission; there is no narrower action. It is a real

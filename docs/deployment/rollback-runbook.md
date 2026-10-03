@@ -123,7 +123,7 @@ It refuses the API half, fails, and says why, in two cases:
   cannot read an in-flight deployment's creator.
 
 It creates its CodeDeploy deployment with the deployment group's alarms
-overridden (`--override-alarm-configuration enabled=false`), always: the
+overridden (`--override-alarm-configuration`), always: the
 release being rolled back is usually what holds a 5xx alarm in ALARM, and
 CodeDeploy stops every deployment to the group while one is. The override is
 for that one deployment; the alarms watch the next deploy as before. It needs

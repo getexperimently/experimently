@@ -127,12 +127,87 @@ def _code(script: str) -> str:
 
 # --- a fake aws, a fake curl, and a step runner -------------------------------------
 
+#: The fake `aws`: logs every call, answers from the scenario's rules.
+#:
+#: Before the rules, `deploy create-deployment` with the alarm override has to
+#: meet a contract (#777). The fake used to accept any value, and the staging
+#: rollback rehearsal (run 37139163352) was the first thing to see CodeDeploy
+#: refuse the shorthand `enabled=false` -- which the CLI sends as
+#: `{"enabled": false}`, with no `alarms` key -- with "InvalidAlarmConfigException
+#: ... Alarm list cannot be null". Three layers, refused with the CLI's
+#: service-error status, 254:
+#:
+#: 1. the value must be JSON. A policy of this harness, not an API rule: it does
+#:    not reimplement the CLI's shorthand parser, the notation that hid #777;
+#: 2. botocore's ParamValidator against the model's AlarmConfiguration shape
+#:    (types: `"enabled":"nope"`, `"alarms":null`). The model marks no member
+#:    required, so this alone accepts `{"enabled": false}`;
+#: 3. the server rules the model's InvalidAlarmConfigException documentation
+#:    lists: the alarm list is present and a list; every alarm is an object with
+#:    a name of 1-255 characters; no two alarms share a name; an enabled
+#:    configuration has a non-empty list.
+#:
+#: Layer 3 is a copy of documented rules, not an oracle: CodeDeploy may refuse
+#: something it lets through. Whether CodeDeploy accepts `"alarms": []` with
+#: `"enabled": false` is shown only by a staging run.
 FAKE_AWS = r"""#!{python}
 import json, os, sys
 args = sys.argv[1:]
 state = os.environ["FAKE_AWS_STATE"]
 with open(os.path.join(state, "calls.log"), "a") as log:
     log.write(json.dumps(args) + "\n")
+
+
+def refuse_alarm_config(reason):
+    print(
+        "An error occurred (InvalidAlarmConfigException) when calling the "
+        "CreateDeployment operation: " + reason,
+        file=sys.stderr,
+    )
+    sys.exit(254)
+
+
+OVERRIDE = "--override-alarm-configuration"
+if args[:2] == ["deploy", "create-deployment"] and OVERRIDE in args:
+    position = args.index(OVERRIDE) + 1
+    raw = args[position] if position < len(args) else ""
+    try:
+        value = json.loads(raw)
+    except ValueError:
+        refuse_alarm_config("fake: the override value is not JSON: %r" % raw)
+    from botocore.session import get_session
+    from botocore.validate import ParamValidator
+
+    shape = (
+        get_session()
+        .get_service_model("codedeploy")
+        .operation_model("CreateDeployment")
+        .input_shape.members["overrideAlarmConfiguration"]
+    )
+    report = ParamValidator().validate(value, shape)
+    if report.has_errors():
+        refuse_alarm_config("fake: " + report.generate_report())
+    alarms = value.get("alarms")
+    if not isinstance(alarms, list):
+        refuse_alarm_config("Alarm list cannot be null.")
+    names = []
+    for alarm in alarms:
+        if not isinstance(alarm, dict):
+            refuse_alarm_config("The alarm object is null.")
+        name = alarm.get("name")
+        if not isinstance(name, str) or not 1 <= len(name) <= 255:
+            refuse_alarm_config(
+                "The alarm name is empty or null or exceeds the limit of 255 "
+                "characters."
+            )
+        if name in names:
+            refuse_alarm_config("Two alarms with the same name have been specified.")
+        names.append(name)
+    if value.get("enabled") is True and not alarms:
+        refuse_alarm_config(
+            "The alarm configuration is enabled, but the alarm list is empty."
+        )
+
 rules = json.load(open(os.path.join(state, "rules.json")))
 line = " ".join(args)
 for i, rule in enumerate(rules):
