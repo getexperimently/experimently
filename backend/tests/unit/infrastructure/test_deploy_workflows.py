@@ -861,10 +861,14 @@ def test_rollback_stops_every_status_the_deploy_refuses_on():
     """PE B3b C2: the deploy refuses while a deployment is in any ACTIVE status
     and sends the operator to Rollback; Rollback must then be able to stop it."""
     code = "\n".join(_runs(ROLLBACK))
-    match = re.search(r"--include-only-statuses((?:\s+[A-Za-z]+)+)", code)
-    assert match, "rollback.yml lists no in-flight statuses"
-    statuses = tuple(match.group(1).split())
-    assert statuses == _module("refuse_active_deployment").ACTIVE
+    # Every occurrence (#783): the stop step lists twice -- what to stop, then
+    # the wait for an idle group -- and its error copy prints the same call.
+    calls = code.count("aws deploy list-deployments")
+    found = re.findall(r"--include-only-statuses((?:\s+[A-Za-z]+)+)", code)
+    assert calls >= 2, "rollback.yml lists the in-flight statuses fewer than twice"
+    assert len(found) == calls, (len(found), calls)
+    active = _module("refuse_active_deployment").ACTIVE
+    assert [tuple(f.split()) for f in found] == [active] * calls
 
 
 @pytest.mark.regression

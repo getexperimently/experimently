@@ -27,7 +27,9 @@ credentials, and a no-op `sleep`, so nothing waits and no test measures time.
 
 from __future__ import annotations
 
+import json
 import re
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -62,6 +64,8 @@ TARGET = OLD
 ROLLBACK_ID = "d-ROLLBACK1"
 BAD_ID = "d-BADDEPLOY"
 CD_ROLLBACK_ID = "d-CDROLLBACK"
+#: CodeDeploy's own revert of what the stop step stopped (#783).
+CD_REVERT_ID = "d-CDRB"
 PRIMARY_QUERY = "taskSets[?status=='PRIMARY'].taskDefinition"
 
 
@@ -398,7 +402,7 @@ def test_success_waits_for_this_runs_own_approval_after_the_stop_reverted_the_ap
     this run's deployment is Ready. Planted defect: main's loop, which breaks
     on that first poll and never approves its own deployment."""
     rules = [
-        rule("deploy list-deployments", answers=[BAD_ID]),
+        rule("deploy list-deployments", answers=[BAD_ID, CD_REVERT_ID, ""]),
         rule("deploy get-deployment", BAD_ID, "creator", answers=["user\tNone"]),
         rule("deploy stop-deployment", BAD_ID, answers=[""]),
         rule(
@@ -426,8 +430,165 @@ def test_success_waits_for_this_runs_own_approval_after_the_stop_reverted_the_ap
         if c[:2] == ["deploy", "get-deployment"] and ROLLBACK_ID in c
     ]
     assert len(polls) == 3 and polls[-1] < approve, (polls, approve)
+    # The pre-stop read, then the wait (#783): busy, empty, empty.
+    assert ops.count("deploy list-deployments") == 4, ops
+    assert ops.index("deploy create-deployment") > max(
+        i for i in range(len(ops)) if ops[i] == "deploy list-deployments"
+    ), ops
     assert f"deployment {ROLLBACK_ID}" in log and "approved by this run" in log
     assert "API rolled back to experimentation-backend-staging:42" in _headline(summary)
+
+
+# --- #783: after its own stop, the rollback waits out CodeDeploy's revert ------------
+
+
+def _revert_clock(runner: Runner, d: float | None, length: float = 3.1) -> None:
+    """FAKE_AWS's revert model (test_dashboard_deploy_wiring.py): every call
+    takes 0.7 s of virtual time and `sleep N` takes N. Measured on staging
+    (4 stops of 4): the revert is created about 0.6 s after the stop and is
+    done about 3.1 s later."""
+    (runner.state / "revert.json").write_text(
+        json.dumps({"d": d, "length": length, "latency": 0.7, "id": CD_REVERT_ID})
+    )
+    clock = runner.state / "vclock"
+    sleep = runner.bin / "sleep"
+    sleep.write_text(
+        f"#!{sys.executable}\n"
+        "import os, sys\n"
+        f"p = {str(clock)!r}\n"
+        "t = float(open(p).read()) if os.path.exists(p) else 0.0\n"
+        "open(p, 'w').write(repr(t + float(sys.argv[1])))\n"
+    )
+    sleep.chmod(0o755)
+
+
+def _stop_then_roll_back() -> list:
+    """Run 37148722775's shape: a user deployment in flight, stopped, Stopped
+    on the first read; then this run's own create, approval and verify."""
+    return [
+        # The pre-stop read. After the stop, FAKE_AWS answers from the revert.
+        rule("deploy list-deployments", answers=[BAD_ID]),
+        rule("deploy get-deployment", BAD_ID, "creator", answers=["user\tNone"]),
+        rule("deploy stop-deployment", BAD_ID, answers=[""]),
+        rule(
+            "deploy get-deployment",
+            BAD_ID,
+            "deploymentInfo.status",
+            answers=["Stopped"],
+        ),
+        *_verify(),
+        *_primary(TARGET),
+        *_create_and_approve(["InProgress", "InProgress", "Ready", "InProgress"]),
+    ]
+
+
+@pytest.mark.regression
+@pytest.mark.parametrize(
+    "d",
+    [None, 0.6, 1.0, 1.6, 6.5],
+    ids=[
+        "no-revert",
+        "revert-at-0.6s",
+        "revert-at-1.0s",
+        "revert-at-1.6s",
+        "revert-at-6.5s",
+    ],
+)
+def test_a_revert_after_the_stop_is_waited_out_before_create(runner, d):
+    """#783, the run-37148722775 replay on revert state. The stop step stopped
+    a user deployment with auto-rollback, read it Stopped, and the create met
+    CodeDeploy's own revert: DeploymentLimitExceededException, the dashboard
+    half skipped. Each `d` is when the revert starts after the stop.
+
+    Planted defects: main (no wait) fails at 0.6 s and 1.0 s and passes with
+    no revert; a single empty read with no sleep fails at 1.6 s. Putting a
+    sleep before the first read passes every case here, as expected: it is
+    rejected because it hides the busy read staging needs, not because it
+    races at these timings."""
+    _revert_clock(runner, d)
+    outputs, results, summary = _run_from_stop(runner, _stop_then_roll_back())
+    logs = "\n".join(log for _, log in results.values())
+    assert "DeploymentLimitExceededException" not in logs, logs
+    code, log = results["Roll back via CodeDeploy"]
+    assert code == 0, log
+    ops = _ops(runner)
+    # The wait only reads: one stop, for the deployment this run stopped.
+    (stop,) = [c for c in runner.calls() if c[:2] == ["deploy", "stop-deployment"]]
+    assert BAD_ID in stop and CD_REVERT_ID not in stop
+    lists = [i for i in range(len(ops)) if ops[i] == "deploy list-deployments"]
+    assert ops.index("deploy create-deployment") > lists[-1], ops
+    assert outputs["dashboard-rollback"]["__outcome__"] != "failure"
+    assert "API rolled back to experimentation-backend-staging:42" in _headline(summary)
+
+
+def test_a_revert_that_outlasts_a_read_is_named_while_the_wait_runs(runner):
+    """The staging evidence the wait ran: a busy line naming the revert, then
+    two empty reads, then the create. A revert of 15 s, started 0.6 s after
+    the stop."""
+    _revert_clock(runner, 0.6, length=15)
+    outputs, results, summary = _run_from_stop(runner, _stop_then_roll_back())
+    code, log = results["Stop any deployment already in flight"]
+    assert code == 0, log
+    assert f"deployment group still busy: {CD_REVERT_ID}; reading again in 5 s" in log
+    assert (
+        "no active deployment on the deployment group in two reads in a row; "
+        "creating the rollback deployment" in log
+    ), log
+    assert results["Roll back via CodeDeploy"][0] == 0
+    assert "API rolled back to experimentation-backend-staging:42" in _headline(summary)
+
+
+@pytest.mark.regression
+def test_a_group_still_busy_at_the_cap_creates_nothing_and_says_so(runner):
+    """At GROUP_IDLE_POLLS (60 reads, about 5 minutes) with the group still
+    busy: labelled, nothing created, no new output, and the summary still
+    reads what the API is serving. Planted defect: no `exit 1` at the cap."""
+    rules = [
+        rule("deploy list-deployments", answers=[BAD_ID, CD_REVERT_ID]),
+        rule("deploy get-deployment", BAD_ID, "creator", answers=["user\tNone"]),
+        rule("deploy stop-deployment", BAD_ID, answers=[""]),
+        rule(
+            "deploy get-deployment",
+            BAD_ID,
+            "deploymentInfo.status",
+            answers=["Stopped"],
+        ),
+        *dashboard_rules([]),
+        *api_rules(BEFORE, RULES_BLUE),
+    ]
+    outputs, results, summary = _run_from_stop(runner, rules, dashboard=DASHBOARD)
+    code, log = results["Stop any deployment already in flight"]
+    assert code == 1, log
+    ops = _ops(runner)
+    assert "deploy create-deployment" not in ops, ops
+    assert ops.count("deploy stop-deployment") == 1, ops
+    assert ops.count("deploy list-deployments") == 1 + 60, ops
+    (line,) = [
+        x
+        for x in log.splitlines()
+        if x.startswith("::error title=Deployment group still busy::")
+    ]
+    assert f"This run stopped {BAD_ID} with auto-rollback" in line
+    assert "waited about 5 minutes (60 reads, 5 s apart)" in line
+    assert f"(last read 0 s ago) still listed: {CD_REVERT_ID}." in line
+    assert "This run created no rollback deployment" in line
+    assert (
+        "Check by hand: aws deploy list-deployments --application-name "
+        "experimentation-platform-staging --deployment-group-name "
+        "experimentation-staging --include-only-statuses Created Queued "
+        "InProgress Baking Ready" in line
+    ), line
+    assert line.endswith(
+        "Do not dispatch Rollback again while any of them is active: a new "
+        "Rollback refuses while CodeDeploy's revert is running."
+    ), line
+    assert set(outputs["stop"]) == {"__outcome__"}, outputs["stop"]
+    assert outputs["codedeploy"]["__outcome__"] == "skipped"
+    headline = _headline(summary)
+    expected = f"{SERVING_ON_TARGET} (its verify step: skipped); {DIFFERENT_RELEASES}"
+    assert headline == f"## Rollback of {expected}", headline
+    assert "| CodeDeploy deployment | `not created` |" in summary
+    assert not re.search(r"\d{12}", log + summary)
 
 
 def _shift(runner: Runner, rules: list, timeout: str = "1800") -> tuple[int, str]:
@@ -564,7 +725,7 @@ def _in_flight(*deployments: tuple[str, str]) -> list:
     rules = [
         rule(
             "deploy list-deployments",
-            answers=["\t".join(d for d, _ in deployments)],
+            answers=["\t".join(d for d, _ in deployments), "", ""],
         )
     ]
     for deployment_id, line in deployments:
@@ -611,6 +772,8 @@ def test_the_stop_step_never_stops_codedeploys_own_rollback(runner, deployments)
     assert "up to an hour" in log and "Method 2" in log
     assert written["refused"] == "codeDeployRollback"
     assert written["refused_id"] == CD_ROLLBACK_ID
+    # T33 is unchanged by #783: refused before the stop, and no wait.
+    assert _ops(runner).count("deploy list-deployments") == 1, runner.calls()
 
 
 @pytest.mark.regression
@@ -779,7 +942,7 @@ def test_a_stop_that_put_the_target_back_is_reported_when_the_rollback_then_fail
     The job still fails. Planted defect: key the headline on API_VERIFY again
     (main's line)."""
     rules = [
-        rule("deploy list-deployments", answers=[BAD_ID]),
+        rule("deploy list-deployments", answers=[BAD_ID, CD_REVERT_ID, ""]),
         rule("deploy get-deployment", BAD_ID, "creator", answers=["user\tNone"]),
         rule("deploy stop-deployment", BAD_ID, answers=[""]),
         rule(
@@ -805,6 +968,8 @@ def test_a_stop_that_put_the_target_back_is_reported_when_the_rollback_then_fail
     assert _read_exit(summary) == "0"
     # Stopped at the first 0.
     assert len(_serving_reads(runner)) == 1, runner.calls()
+    # The pre-stop read, then the wait (#783): busy, empty, empty.
+    assert _ops(runner).count("deploy list-deployments") == 4, runner.calls()
     assert "Job status: failure." in summary
     assert "| CodeDeploy deployment | `not created` |" in summary
     assert "123456789012" not in summary
