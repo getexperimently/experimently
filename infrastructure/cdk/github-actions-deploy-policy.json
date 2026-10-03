@@ -10,6 +10,7 @@
         "cloudwatch:DescribeAlarms",
         "codedeploy:ContinueDeployment",
         "codedeploy:CreateDeployment",
+        "codedeploy:GetApplicationRevision",
         "codedeploy:GetDeployment",
         "codedeploy:GetDeploymentConfig",
         "codedeploy:GetDeploymentGroup",
