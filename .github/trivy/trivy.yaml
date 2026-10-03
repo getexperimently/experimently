@@ -1,0 +1,3 @@
+# Deliberately empty. The release workflow passes this file as trivy's
+# --config so that a trivy.yaml in the checked-out tree is never read; every
+# option the scans use is written on their command lines.

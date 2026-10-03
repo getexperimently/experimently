@@ -61,6 +61,23 @@ For version `X.Y.Z`, in the repository's GitHub Container Registry namespace:
 A final release also moves `:core` and `:full` to point at it, and only once
 everything else in the release, including the chart below, has succeeded.
 
+Each image is scanned for stored credentials with trivy's secret scanner
+before it is pushed, and a finding stops that image and the release. The
+claim is that the scan found nothing, not that the image is proven to hold no
+credential. There are two scans:
+
+- **The whole image, with trivy's default rules.** Those rules skip
+  `/usr/share` and `/usr/lib`, `vendor/` and `locale/` directories, `*.md`
+  files, file names containing `example` or `_test`, and `node_modules/`
+  (trivy skips that one even with every rule turned off).
+- **This project's own files, with every rule turned off.** These are `/app`
+  in the API images, and `/usr/share/nginx/html` and `/etc/nginx` in the
+  dashboard images. They are copied out of the image without running it.
+
+So the remaining gap is third-party files on the paths the default rules
+skip. After the push, the release checks that the pushed image's layers are
+the layers it scanned, before signing it.
+
 The GitHub release also carries the Helm chart as `experimently-X.Y.Z.tgz`,
 packaged from the tagged tree after `helm lint --strict`. Before it is
 attached, `scripts/check_chart_package.py` reads the `Chart.yaml` inside the
@@ -85,6 +102,37 @@ Dockerfile builds it inside the image — an `arm64` variant would mean running
 `next build` under emulation for no difference in what nginx serves. On an
 `arm64` host the image runs under emulation (nginx serving static files), or
 build locally, which is what `docker compose up` does anyway.
+
+### If the credential scan fails
+
+The image job fails at "Scan the image for stored credentials" or "Scan the
+payload with every allow rule off". Its summary lists each finding's file
+path in the image, rule, severity and line. The matched text is never
+printed, because the log of a public repository's run is public.
+
+1. **Know what was published.** The failed image was not pushed. The other
+   image jobs may have pushed their versioned tags, because each image is
+   built separately. No SBOMs or chart are attached to the GitHub release,
+   and `:core` and `:full` stay on the previous release. The git tag exists,
+   and release-please may already have opened the GitHub release.
+2. **Revoke and replace the credential first.** An image is built from the
+   tagged tree, so a credential in the image is almost certainly in the
+   repository's public history too. Removing the file does not undo that.
+3. **Remove the file from the image and cut a new patch release.**
+   Re-running the release for the same tag rebuilds the same tree and fails
+   the same way.
+4. **There is no allow-list.** The workflow passes trivy its own empty
+   ignore file, so a finding is fixed by taking the file out of the image,
+   never by listing it.
+5. **Versioned tags already pushed for the failed version stay** until an
+   organization owner deletes those package versions in GitHub Packages. That
+   is a manual step.
+
+If "The pushed image is the scanned image" fails instead, the pushed layers
+differ from the scanned ones. That image's versioned tag has already been
+pushed, but it is not signed and nothing else in the release continues. An
+organization owner deletes that package version, and the release is then
+re-run for the same tag: `gh workflow run release.yml -f tag=vX.Y.Z`.
 
 ## Verifying what you pulled
 
