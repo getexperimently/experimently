@@ -22,6 +22,7 @@ Runner: `bash -eo pipefail`, the step's `env:` resolved from the YAML, a fake
 
 from __future__ import annotations
 
+import json
 import re
 import subprocess
 import sys
@@ -58,7 +59,12 @@ from backend.tests.unit.infrastructure.test_forward_deploy_completes import (
 )
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-FLAG = "--override-alarm-configuration enabled=false"
+OVERRIDE = "--override-alarm-configuration"
+#: What both workflows send as the alarm override (#777): an explicit, empty
+#: `alarms` list. Tests compare this parsed dict, never the shell text.
+OVERRIDE_VALUE = {"enabled": False, "ignorePollAlarmFailure": False, "alarms": []}
+#: The workflows' text for it, for fixtures that edit a copy of a workflow.
+OVERRIDE_TEXT = '{"enabled":false,"ignorePollAlarmFailure":false,"alarms":[]}'
 GREEN_ALARM = "experimentation-api-5xx-green-staging"
 ALARM_DOC = "docs/deployment/rollback-runbook.md#an-alarm-rolled-the-api-back"
 FIRING_DOC = "docs/deployment/rollback-runbook.md#fix-forward-while-an-alarm-is-firing"
@@ -459,7 +465,12 @@ def _create(runner, override: str):
     )
     assert code == 0, out
     (call,) = [c for c in runner.calls() if c[:2] == ["deploy", "create-deployment"]]
-    return " ".join(call), out
+    return call, out
+
+
+def _sent_override(call: list[str]) -> dict:
+    """The alarm override as the fake aws received it, parsed."""
+    return json.loads(call[call.index(OVERRIDE) + 1])
 
 
 @pytest.mark.regression
@@ -467,11 +478,11 @@ def test_4d_p6_the_forward_deploy_overrides_the_alarms_only_under_the_input(runn
     """P6, rewritten by EM condition 4(d): the override is in deploy.yml exactly
     once, in the create-deployment step, and passed only when the input is set.
     Dropping the gate passes it on every deploy, and this fails."""
-    text = DEPLOY.read_text()
-    assert text.count(FLAG) == 1
+    assert DEPLOY.read_text().count(OVERRIDE) == 1
     code = "\n".join(_code(s["run"]) for s in _steps(DEPLOY) if "run" in s)
     assert code.count("--override-alarm-configuration") == 1
-    assert FLAG in _step(DEPLOY, "codedeploy")["run"]
+    assert OVERRIDE in _step(DEPLOY, "codedeploy")["run"]
+    assert _cli_module().override_value(DEPLOY) == OVERRIDE_VALUE
     assert _step(DEPLOY, "codedeploy")["env"]["OVERRIDE_ALARMS"] == (
         "${{ inputs.override_alarms }}"
     )
@@ -479,7 +490,7 @@ def test_4d_p6_the_forward_deploy_overrides_the_alarms_only_under_the_input(runn
     assert "--override-alarm-configuration" not in plain, plain
     assert "ALARMS OVERRIDDEN" not in out
     overridden, out = _create(runner, "true")
-    assert FLAG in overridden, overridden
+    assert _sent_override(overridden) == OVERRIDE_VALUE, overridden
     assert "::warning title=ALARMS OVERRIDDEN::" in out
     # And no script passes it. The two that name it are tooling that never
     # runs in a deploy: the IAM generator's flag map, and the CI CLI check.
@@ -495,10 +506,92 @@ def test_rollback_always_overrides_the_alarms():
     """M5a: the release being rolled back holds the alarm; without the override
     CodeDeploy stops Rollback's own deployment."""
     (step,) = [s for s in _steps(ROLLBACK) if s.get("id") == "codedeploy"]
-    call = re.sub(r"\\\s*\n\s*", " ", _code(step["run"]))
-    (line,) = [ln for ln in call.splitlines() if "aws deploy create-deployment" in ln]
-    assert FLAG in line
+    assert _cli_module().override_value(ROLLBACK) == OVERRIDE_VALUE
     assert step["if"] == "steps.stop.outputs.already_serving != 'true'"
+
+
+@pytest.mark.regression
+def test_the_alarm_override_carries_an_alarm_list():
+    """#777: the CLI shorthand `enabled=false` sends `{"enabled": false}` with
+    no `alarms` key, and CodeDeploy refused it on staging ("Alarm list cannot be
+    null"). Both workflows send the JSON with an explicit list, read by the CLI
+    check's own extraction. On main this fails: `enabled=false` is not a
+    single-quoted JSON value."""
+    cli = _cli_module()
+    for path in (ROLLBACK, DEPLOY):
+        value = cli.override_value(path)
+        assert isinstance(value.get("alarms"), list), (path.name, value)
+        assert value == OVERRIDE_VALUE, (path.name, value)
+
+
+#: Values the fake aws's CreateDeployment contract refuses, each with the
+#: InvalidAlarmConfigException text it prints (#777, EM condition 2).
+REFUSED_OVERRIDES = [
+    ("enabled=false", "fake: the override value is not JSON"),
+    ('{"enabled":"nope","alarms":[]}', "Invalid type for parameter enabled"),
+    ('{"enabled":false}', "Alarm list cannot be null."),
+    (
+        '{"enabled":false,"alarms":[{}]}',
+        "The alarm name is empty or null or exceeds the limit of 255 characters.",
+    ),
+    (
+        '{"enabled":false,"alarms":[{"name":"%s"}]}' % ("a" * 256),
+        "The alarm name is empty or null or exceeds the limit of 255 characters.",
+    ),
+    (
+        '{"enabled":true,"ignorePollAlarmFailure":false,"alarms":[]}',
+        "The alarm configuration is enabled, but the alarm list is empty.",
+    ),
+    (
+        '{"enabled":false,"alarms":[{"name":"api-5xx"},{"name":"api-5xx"}]}',
+        "Two alarms with the same name have been specified.",
+    ),
+]
+
+
+@pytest.mark.regression
+@pytest.mark.parametrize(("planted", "reason"), REFUSED_OVERRIDES)
+def test_the_rollback_step_is_refused_an_override_without_a_valid_alarm_list(
+    runner, planted, reason
+):
+    """Runs rollback.yml's create-deployment step, as written but for the
+    override value, through the fake aws. Each planted value is one CodeDeploy
+    documents refusing (or, for the first, the shorthand #777 sent): the step
+    fails with the service's InvalidAlarmConfigException text."""
+    step = dict(_step(ROLLBACK, "codedeploy"))
+    assert OVERRIDE_TEXT in step["run"]
+    step["run"] = step["run"].replace(OVERRIDE_TEXT, planted)
+    runner.scenario([rule("deploy create-deployment", answers=["d-ROLLBACK"])])
+    code, out, written, _ = runner.run(
+        ROLLBACK,
+        step,
+        {"target": {"arn": API_FAMILY_REVISION}},
+        {"reason": "the release is failing"},
+    )
+    assert code == 254, out
+    assert (
+        "An error occurred (InvalidAlarmConfigException) when calling the "
+        "CreateDeployment operation: "
+    ) in out, out
+    assert reason in out, out
+    assert "deployment-id" not in written
+
+
+@pytest.mark.regression
+def test_the_rollback_step_sends_the_override_the_fake_accepts(runner):
+    """The control for the test above: the workflow's own value passes the
+    contract and reaches the scenario's answer."""
+    runner.scenario([rule("deploy create-deployment", answers=["d-ROLLBACK"])])
+    code, out, written, _ = runner.run(
+        ROLLBACK,
+        _step(ROLLBACK, "codedeploy"),
+        {"target": {"arn": API_FAMILY_REVISION}},
+        {"reason": "the release is failing"},
+    )
+    assert code == 0, out
+    assert written["deployment-id"] == "d-ROLLBACK"
+    (call,) = [c for c in runner.calls() if c[:2] == ["deploy", "create-deployment"]]
+    assert _sent_override(call) == OVERRIDE_VALUE
 
 
 @pytest.mark.regression
@@ -589,21 +682,57 @@ def test_the_cli_check_reads_the_workflows_exact_flags():
     ]
     assert deploy.count("--override-alarm-configuration") == 1
     assert "--arg" not in rollback + deploy  # jq's, inside $(...)
-    argv = cli.argv(rollback)
+    text = cli.override_text(ROLLBACK)
+    assert json.loads(text) == OVERRIDE_VALUE
+    assert cli.override_text(DEPLOY) == text
+    argv = cli.argv(rollback, text)
     assert argv[-2:] == ["--generate-cli-skeleton", "output"]
-    assert "enabled=false" in argv
-    assert "enabled=nope" in cli.argv(rollback, "enabled=nope")
+    assert argv[argv.index(OVERRIDE) + 1] == text
+    tampered = cli.tampered(cli.override_value(ROLLBACK))
+    assert json.loads(tampered) == {**OVERRIDE_VALUE, "enabled": "nope"}
+    assert tampered in cli.argv(rollback, tampered)
 
 
-def test_the_cli_check_refuses_a_workflow_without_the_override(tmp_path, monkeypatch):
-    cli = _cli_module()
+def _workflow_copies(tmp_path):
     workflows = tmp_path / "workflows"
     workflows.mkdir()
     for path in (DEPLOY, ROLLBACK):
         (workflows / path.name).write_text(path.read_text())
+    return workflows
+
+
+@pytest.mark.regression
+@pytest.mark.parametrize("name", ["rollback.yml", "deploy.yml"])
+@pytest.mark.parametrize(
+    "planted",
+    [
+        "enabled=false",  # main's shorthand (#777)
+        '"enabled=false"',  # double-quoted, so not the single-quoted value
+        "'[]'",  # JSON, not an object
+    ],
+)
+def test_the_cli_check_refuses_an_override_that_is_not_a_quoted_json_object(
+    tmp_path, monkeypatch, name, planted
+):
+    cli = _cli_module()
+    workflows = _workflow_copies(tmp_path)
+    tampered = workflows / name
+    text = tampered.read_text()
+    tampered.write_text(text.replace(f"'{OVERRIDE_TEXT}'", planted))
+    assert tampered.read_text() != text
+    with pytest.raises(ValueError):
+        cli.override_value(tampered)
+    monkeypatch.setattr(cli, "WORKFLOWS", workflows)
+    assert cli.main(["--print"]) == 1
+
+
+def test_the_cli_check_refuses_a_workflow_without_the_override(tmp_path, monkeypatch):
+    cli = _cli_module()
+    workflows = _workflow_copies(tmp_path)
     tampered = workflows / "rollback.yml"
     text = tampered.read_text()
-    tampered.write_text(text.replace(f" \\\n            {FLAG} \\", " \\"))
+    flag = f"{OVERRIDE} '{OVERRIDE_TEXT}'"
+    tampered.write_text(text.replace(f" \\\n            {flag} \\", " \\"))
     assert tampered.read_text() != text
     assert "--override-alarm-configuration" not in cli.flags(tampered)
     monkeypatch.setattr(cli, "WORKFLOWS", workflows)

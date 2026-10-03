@@ -506,19 +506,27 @@ jobs:
           # five minutes, against a runbook target of "under 5 minutes from
           # decision to rollback complete".
           #
-          # --override-alarm-configuration enabled=false, always (#148): the
-          # release being rolled back is usually what holds the deployment
-          # group's 5xx alarm in ALARM, and CodeDeploy stops every deployment
-          # to the group while one is -- this one included. The override
-          # lasts for this deployment only; the group's alarms are unchanged
-          # and watch the next deploy. It needs codedeploy:UpdateDeploymentGroup
-          # on the workflow role (docs/deployment/iam-permissions.md).
+          # The alarms are overridden, always (#148): the release being rolled
+          # back is usually what holds the deployment group's 5xx alarm in
+          # ALARM, and CodeDeploy stops every deployment to the group while one
+          # is -- this one included. The override lasts for this deployment
+          # only; the group's alarms are unchanged and watch the next deploy.
+          # It needs codedeploy:UpdateDeploymentGroup on the workflow role
+          # (docs/deployment/iam-permissions.md).
+          #
+          # The value is JSON with an explicit `alarms` list (#777). The
+          # shorthand `enabled=false` was measured, with aws-cli 2.28.24
+          # --debug, to send {"enabled": false} with no `alarms` key, and
+          # CodeDeploy refused that on staging with InvalidAlarmConfigException
+          # ("Alarm list cannot be null"). This JSON sends all three keys.
+          # Whether CodeDeploy accepts the empty list with enabled false is
+          # first shown by the next staging rollback rehearsal.
           DEPLOYMENT_ID="$(aws deploy create-deployment \
             --application-name "$CODEDEPLOY_APPLICATION" \
             --deployment-group-name "$CODEDEPLOY_DEPLOYMENT_GROUP" \
             --deployment-config-name CodeDeployDefault.ECSAllAtOnce \
             --description "rollback: $REASON" \
-            --override-alarm-configuration enabled=false \
+            --override-alarm-configuration '{"enabled":false,"ignorePollAlarmFailure":false,"alarms":[]}' \
             --revision "$(jq -cn --arg c "$APPSPEC" '{revisionType:"AppSpecContent",appSpecContent:{content:$c}}')" \
             --query deploymentId --output text)"
           echo "deployment-id=$DEPLOYMENT_ID" >> "$GITHUB_OUTPUT"

@@ -67,10 +67,14 @@ jobs:
         run: pip install -r backend/requirements.txt
 
       # The runner's own AWS CLI, with no credential of any kind: rollback.yml's
-      # and deploy.yml's exact create-deployment flags, the alarm override
-      # included, must validate with --generate-cli-skeleton (no service call),
-      # and `enabled=nope` must be refused with 252 in the same run (#148 EM
-      # condition 13). The script refuses to start if a key is set.
+      # and deploy.yml's exact create-deployment flags, with the alarm override
+      # carrying each workflow's own single-quoted JSON value (#777), must
+      # validate with --generate-cli-skeleton (no service call), and the same
+      # value with `"enabled":"nope"` must be refused with 252 in the same run
+      # (#148 EM condition 13). The skeleton accepts a value CodeDeploy refuses
+      # (measured: `enabled=false` exits 0), so the value's rules are pinned by
+      # the fake aws in the unit tests, not here. The script refuses to start
+      # if a key is set.
       - name: The runner's AWS CLI accepts the create-deployment flags
         env:
           AWS_CONFIG_FILE: /dev/null

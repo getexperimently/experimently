@@ -341,7 +341,18 @@ def test_the_policy_upgrade_step_is_written_down():
     # #148 PE condition 12: the alarm override's permission, why it is not
     # narrower, and the re-apply before the first cdk deploy with the alarms.
     assert "`codedeploy:UpdateDeploymentGroup`" in text
-    assert "--override-alarm-configuration enabled=false" in text
+    # #777: the docs name the flag and describe its effect; they quote no
+    # value, so a value copied out of them cannot be the shorthand CodeDeploy
+    # refused ("Alarm list cannot be null").
+    assert "with the group's alarms overridden (`--override-alarm-configuration`)" in (
+        text
+    )
+    runbook = " ".join(
+        (DOCS / "deployment" / "rollback-runbook.md").read_text().split()
+    )
+    assert "overridden (`--override-alarm-configuration`), always" in runbook
+    for doc, body in (("iam-permissions.md", text), ("rollback-runbook.md", runbook)):
+        assert not re.search(r"--override-alarm-configuration[ =]+[^`\s]", body), doc
     assert "there is no narrower action" in text
     assert "`iam:PassRole` is granted only to ECS tasks" in text
     assert (
