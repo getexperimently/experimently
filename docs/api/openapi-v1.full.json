@@ -20462,7 +20462,7 @@
     },
     "/api/v1/etl/partitions/add": {
       "post": {
-        "description": "Register 24 hourly Hive-style partitions for a given date. Requires ADMIN role. `database` and `table` must be the configured `GLUE_DATABASE` and `GLUE_EVENTS_TABLE`; anything else answers 404 \"Unknown Glue table\".",
+        "description": "Register 24 hourly Hive-style partitions for a given date, under the Glue table's own storage location. Requires ADMIN role. `database` and `table` must be the configured `GLUE_DATABASE` and `GLUE_EVENTS_TABLE`; anything else answers 404 \"Unknown Glue table\". 201 means Glue registered every hour, or already had it: re-running a date is safe. A `date` that is not a calendar date in YYYY-MM-DD form answers 422.",
         "operationId": "add_partitions_api_v1_etl_partitions_add_post",
         "parameters": [
           {
@@ -20512,13 +20512,13 @@
                 }
               }
             },
-            "description": "Partitions registered"
+            "description": "All 24 partitions are registered"
           },
           "403": {
             "description": "Insufficient permissions"
           },
           "404": {
-            "description": "Unknown Glue table"
+            "description": "Unknown Glue table, or \"Glue table not found. Run the crawler first.\" when the configured table is not in the catalog"
           },
           "422": {
             "content": {
@@ -20531,7 +20531,7 @@
             "description": "Validation Error"
           },
           "500": {
-            "description": "Failed to create partitions"
+            "description": "Could not read the Glue table, or could not register the partitions. Some hours may already be registered; re-run the date once the cause is fixed."
           }
         },
         "security": [

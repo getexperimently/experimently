@@ -304,9 +304,8 @@ The Glue client is built without naming a region, so it takes the region from
 `AWS_DEFAULT_REGION`. The client never reads `AWS_REGION`. The CDK sets `AWS_DEFAULT_REGION` on
 the task to the stack's region, and the repository's `docker-compose.yml` sets it from
 `AWS_REGION`. **Anywhere else** (Helm, a container you run yourself), set `AWS_DEFAULT_REGION`
-to the region your Glue job and crawler are in. Without it the job and crawler routes answer
-500 and the API logs `NoRegionError`, and `POST /etl/partitions/add` does not report the
-failure (#656). On Helm, put it in `api.extraEnv` alongside the `GLUE_*` names. The chart has
+to the region your Glue job and crawler are in. Without it the job, crawler and partitions
+routes answer 500 and the API logs `NoRegionError`. On Helm, put it in `api.extraEnv` alongside the `GLUE_*` names. The chart has
 no value of its own for it.
 
 `GLUE_EVENTS_TABLE` (default `raw_events`) names the one catalog table `POST /etl/partitions/add`

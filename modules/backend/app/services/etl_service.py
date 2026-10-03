@@ -17,6 +17,7 @@ what the task role grants (``infrastructure/cdk/stacks/fargate_service_stack.py`
 another one appears.
 """
 
+import datetime
 import logging
 from typing import Optional
 
@@ -99,6 +100,34 @@ def _require_configured_table(database: str, table: str) -> None:
         or table != configured_table
     ):
         raise _not_found(UNKNOWN_TABLE_DETAIL)
+
+
+#: The answers ``add_partitions`` gives when the catalog refuses. Fixed text:
+#: what Glue said goes to the log only.
+TABLE_NOT_IN_CATALOG_DETAIL = "Glue table not found. Run the crawler first."
+READ_TABLE_FAILED = "Could not read the Glue table"
+REGISTER_PARTITIONS_FAILED = "Could not register the partitions"
+INVALID_DATE_DETAIL = "date must be a calendar date in YYYY-MM-DD format"
+_ALREADY_EXISTS = "AlreadyExistsException"
+
+
+def _parse_partition_date(value: str) -> datetime.date:
+    """The date ``value`` names, or 422; called before any Glue client is created.
+
+    ``date.fromisoformat`` alone is not enough: on Python 3.11 it also accepts
+    ``2026-W40-1`` and ``20261001``. Only a string that is its own ISO form,
+    ``YYYY-MM-DD``, is a partition date.
+    """
+    try:
+        parsed = datetime.date.fromisoformat(value)
+    except (TypeError, ValueError):
+        parsed = None
+    if parsed is None or parsed.isoformat() != value:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=INVALID_DATE_DETAIL,
+        )
+    return parsed
 
 
 def _job_name_to_type(job_name: str) -> ETLJobType:
@@ -268,38 +297,38 @@ class ETLService:
         """
         Register 24 hourly Hive partitions for a given date in the Glue catalog.
 
-        Partition keys: year, month, day, hour.
+        Partition keys: year, month, day, hour. The partitions sit under the
+        table's own ``StorageDescriptor.Location``; there is no other location.
+        Hours already registered count as registered, so re-running a date
+        answers the same 24 partitions.
 
         Args:
             database: Glue database name.
             table: Glue table name.
             date: Date string in YYYY-MM-DD format.
-            base_location: Optional base S3 path (auto-derived if None).
+            base_location: Optional base S3 path (read from the Glue table if
+                None).
 
         Returns:
             List of PartitionInfo objects, one per hour (24 total).
 
         Raises:
             HTTPException 404: if the pair is not ``GLUE_DATABASE`` and
-                ``GLUE_EVENTS_TABLE`` (no Glue call is made).
-            HTTPException 500: if the Glue API call fails.
+                ``GLUE_EVENTS_TABLE``, or the table is not in the catalog.
+            HTTPException 422: if ``date`` is not a YYYY-MM-DD calendar date.
+                Neither this nor the unconfigured-pair 404 makes a Glue call.
+            HTTPException 500: if Glue refuses to read the table, the table
+                has no location, or Glue refuses to register any partition
+                for a reason other than it already existing.
         """
         _require_configured_table(database, table)
-        year, month, day = date.split("-")
+        parsed = _parse_partition_date(date)
+        year = f"{parsed.year:04d}"
+        month = f"{parsed.month:02d}"
+        day = f"{parsed.day:02d}"
 
-        # Auto-derive base location from Glue table definition
         if base_location is None:
-            try:
-                table_response = self._glue().get_table(
-                    DatabaseName=database, Name=table
-                )
-                base_location = (
-                    table_response.get("Table", {})
-                    .get("StorageDescriptor", {})
-                    .get("Location", f"s3://experimentation-data/{database}/{table}/")
-                )
-            except Exception:
-                base_location = f"s3://experimentation-data/{database}/{table}/"
+            base_location = self._table_location(database, table)
 
         # Build partition inputs for all 24 hours
         partition_inputs = []
@@ -326,15 +355,47 @@ class ETLService:
         logger.info(f"Adding 24 partitions to {database}.{table} for date={date}")
 
         try:
-            self._glue().batch_create_partition(
+            response = self._glue().batch_create_partition(
                 DatabaseName=database,
                 TableName=table,
                 PartitionInputList=partition_inputs,
             )
         except Exception as exc:
-            # Ignore AlreadyExistsException (partitions already registered)
-            if "AlreadyExistsException" not in str(type(exc).__name__):
-                logger.warning(f"batch_create_partition warning: {exc}")
+            # Matched by exact class name: partitions already registered are
+            # what the call was asked to produce.
+            if type(exc).__name__ != _ALREADY_EXISTS:
+                logger.error(
+                    "Glue partition registration failed (%s)",
+                    type(exc).__name__,
+                    exc_info=exc,
+                )
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail=failure_detail(REGISTER_PARTITIONS_FAILED),
+                )
+            response = {}
+
+        # A successful reply lists every partition Glue did not create in
+        # ``Errors``; a clean reply has no such key at all.
+        refused = [
+            entry
+            for entry in (response.get("Errors") or [])
+            if (entry.get("ErrorDetail") or {}).get("ErrorCode") != _ALREADY_EXISTS
+        ]
+        if refused:
+            codes = sorted(
+                {
+                    str((entry.get("ErrorDetail") or {}).get("ErrorCode"))
+                    for entry in refused
+                }
+            )
+            logger.error(
+                "Glue refused %d of 24 partitions (%s)", len(refused), ", ".join(codes)
+            )
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=failure_detail(REGISTER_PARTITIONS_FAILED),
+            )
 
         # Build PartitionInfo list from the inputs we constructed
         result = []
@@ -359,6 +420,36 @@ class ETLService:
             )
 
         return result
+
+    def _table_location(self, database: str, table: str) -> str:
+        """The table's ``StorageDescriptor.Location``, or 404 or 500.
+
+        The client is built inside the ``try``, so a client that cannot be
+        built (no region) is a handled 500 like any other refusal.
+        """
+        try:
+            table_response = self._glue().get_table(DatabaseName=database, Name=table)
+        except Exception as exc:
+            if type(exc).__name__ == "EntityNotFoundException":
+                raise _not_found(TABLE_NOT_IN_CATALOG_DETAIL)
+            logger.error(
+                "Glue table read failed (%s)", type(exc).__name__, exc_info=exc
+            )
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=failure_detail(READ_TABLE_FAILED),
+            )
+
+        location = (
+            (table_response.get("Table") or {}).get("StorageDescriptor") or {}
+        ).get("Location")
+        if not isinstance(location, str) or not location.strip():
+            logger.error("Glue table %s.%s has no storage location", database, table)
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=failure_detail(READ_TABLE_FAILED),
+            )
+        return location
 
     # ------------------------------------------------------------------
     # run_crawler

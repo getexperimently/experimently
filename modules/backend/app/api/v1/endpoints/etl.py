@@ -7,7 +7,7 @@ registration, and Glue crawler management.
 Endpoints:
     POST /api/v1/etl/jobs/run              — trigger ETL job (ADMIN/DEVELOPER)
     GET  /api/v1/etl/jobs/{run_id}/status  — get job run status (any authenticated user)
-    POST /api/v1/etl/partitions/add        — add S3 partitions to Glue catalog (ADMIN)
+    POST /api/v1/etl/partitions/add        — register a date's 24 hourly partitions (ADMIN)
     GET  /api/v1/etl/crawler/status        — get crawler state (any authenticated user)
     POST /api/v1/etl/crawler/run           — trigger crawler (ADMIN)
 
@@ -167,16 +167,29 @@ def get_job_status(
     status_code=status.HTTP_201_CREATED,
     summary="Add S3 partitions to the Glue catalog",
     description=(
-        "Register 24 hourly Hive-style partitions for a given date. "
-        "Requires ADMIN role. `database` and `table` must be the configured "
-        "`GLUE_DATABASE` and `GLUE_EVENTS_TABLE`; anything else answers 404 "
-        '"Unknown Glue table".'
+        "Register 24 hourly Hive-style partitions for a given date, under the "
+        "Glue table's own storage location. Requires ADMIN role. `database` and "
+        "`table` must be the configured `GLUE_DATABASE` and `GLUE_EVENTS_TABLE`; "
+        'anything else answers 404 "Unknown Glue table". 201 means Glue '
+        "registered every hour, or already had it: re-running a date is safe. "
+        "A `date` that is not a calendar date in YYYY-MM-DD form answers 422."
     ),
     responses={
-        201: {"description": "Partitions registered"},
+        201: {"description": "All 24 partitions are registered"},
         403: {"description": "Insufficient permissions"},
-        404: {"description": "Unknown Glue table"},
-        500: {"description": "Failed to create partitions"},
+        404: {
+            "description": (
+                'Unknown Glue table, or "Glue table not found. Run the crawler '
+                'first." when the configured table is not in the catalog'
+            )
+        },
+        500: {
+            "description": (
+                "Could not read the Glue table, or could not register the "
+                "partitions. Some hours may already be registered; re-run the "
+                "date once the cause is fixed."
+            )
+        },
     },
 )
 def add_partitions(

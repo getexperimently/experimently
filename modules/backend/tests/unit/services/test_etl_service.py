@@ -383,6 +383,37 @@ class TestAddPartitions:
             assert "day=15" in p.location
             assert "hour=" in p.location
 
+    @mock_glue
+    def test_re_running_a_date_answers_the_same_24_partitions(self, mock_settings):
+        """Glue reports the second run's hours as already existing (in ``Errors``
+        of a successful reply); that is success, and nothing is added twice."""
+        from modules.backend.app.services.etl_service import ETLService
+
+        glue = _make_glue_client()
+        glue.create_database(DatabaseInput={"Name": GLUE_DATABASE})
+        glue.create_table(
+            DatabaseName=GLUE_DATABASE,
+            TableInput={
+                "Name": "raw_events",
+                "StorageDescriptor": {"Location": "s3://exp-data-bucket/raw/events/"},
+                "PartitionKeys": [
+                    {"Name": key, "Type": "string"}
+                    for key in ("year", "month", "day", "hour")
+                ],
+            },
+        )
+
+        first = ETLService().add_partitions(GLUE_DATABASE, "raw_events", "2024-01-15")
+        second = ETLService().add_partitions(GLUE_DATABASE, "raw_events", "2024-01-15")
+
+        assert first == second
+        assert len(second) == 24
+        stored = glue.get_partitions(DatabaseName=GLUE_DATABASE, TableName="raw_events")
+        assert len(stored["Partitions"]) == 24
+        assert {
+            part["StorageDescriptor"]["Location"] for part in stored["Partitions"]
+        } == {p.location for p in second}
+
 
 # ---------------------------------------------------------------------------
 # run_crawler tests
