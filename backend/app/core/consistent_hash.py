@@ -9,7 +9,7 @@ WHERE BUCKETING HAPPENS, and with what:
 
     uses this module (first 4 bytes LE of MD5("{user}:{key}"), / 2^32)
       assignment_service._hash_user_to_variant   key = experiment.key (UUID fallback), bucket_of
-      (endpoints/openfeature.py _evaluate_flag used it too; that route was removed, #241)
+      (endpoints/openfeature.py _evaluate_flag used it too; the module was removed, #241, #737)
 
     its own MD5("{user}:{flag.key}") read as the FULL 128-bit digest, % 100
       feature_flag_service._evaluate_percentage_rollout

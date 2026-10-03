@@ -350,8 +350,8 @@ are downloaded, and no evaluation happens locally.
   attribute the model does not have), and neither provider called them. To evaluate a flag,
   call `GET /api/v1/feature-flags/evaluate/{flag_key}?user_id=…` with your API key, as the
   table below shows.
-- `GET /api/v1/openfeature/flags` is **deprecated** and still answers as before. Neither provider
-  calls it, and it may be removed in a later release; do not build on it.
+- `GET /api/v1/openfeature/flags` has been **removed** (#737) and answers 404. Neither provider
+  called it.
 
 Base URL = origin only (e.g. `http://localhost:8000`); the SDK appends `/api/v1/...`. Every request
 carries `X-API-Key: <key>`, `Content-Type: application/json`, `Accept: application/json`.

@@ -427,11 +427,12 @@ modules/backend/tests/unit/warehouse
 #   analysis_snapshot_service.py:283 writes BanditStateHistory. Three hot-path
 #   crossings for a feature the plan already calls core.
 #
-# INTERACTIONS, WEBSOCKET LIVE RESULTS, AI DESIGN + MCP, EDGE BOOTSTRAP →
+# INTERACTIONS, WEBSOCKET LIVE RESULTS, AI DESIGN + MCP →
 #   keep core, as the plan's §3 table says. Each is self-contained (no core
 #   importer outside models/__init__.py and api.py), so they could move
-#   cheaply — but nothing is gained: none is a thing a buyer asks for, and
-#   the edge bootstrap is part of the MIT SDK story.
+#   cheaply — but nothing is gained: none is a thing a buyer asks for. (The
+#   edge bootstrap route once listed here was removed, #737; the edge SDK
+#   calls the evaluate, user-flags and tracking routes.)
 #
 # LLM / AI MODEL EVALUATION (EP-046) → undecided; the plan's profile table
 #   omits it entirely. It is self-contained (3 tables, one crossing at
