@@ -10,6 +10,14 @@ answers are cached per user + flag. Nothing is bucketed locally and no flag defi
 
 Full documentation: [`docs/sdk/openfeature.md`](../../docs/sdk/openfeature.md).
 
+## Install
+
+```bash
+npm install @openfeature/server-sdk @getexperimently/openfeature-provider
+```
+
+`@getexperimently/js-sdk` is installed with it; `@openfeature/server-sdk` is a peer dependency your app provides.
+
 ## Quick start
 
 ```ts
