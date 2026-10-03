@@ -1,0 +1,4 @@
+# Deliberately empty. The release workflow passes this file as trivy's
+# --ignorefile so that a .trivyignore in the checked-out tree is never read.
+# A credential finding is fixed by removing the file from the image, never by
+# listing it here.

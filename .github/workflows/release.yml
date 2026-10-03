@@ -63,6 +63,12 @@ env:
   # enough on its own: see the header and #181 first.
   API_PLATFORMS: linux/amd64
   WEB_PLATFORMS: linux/amd64
+  # The trivy release the image jobs scan with, installed from its release
+  # tarball and checked against this sha256 (of trivy_<v>_Linux-64bit.tar.gz,
+  # as the release's checksums file gives it). No action, no apt: what runs is
+  # exactly this binary.
+  TRIVY_VERSION: '0.74.0'
+  TRIVY_SHA256: '2ae6fe3ee734b7fdf11335663e18c75ea12dccc76062f09f164a3b0f8be4371a'
 
 jobs:
   # ---------------------------------------------------------------------------
@@ -211,6 +217,126 @@ jobs:
           echo "build_date=$(date -u +'%Y-%m-%dT%H:%M:%SZ')" >> "$GITHUB_OUTPUT"
           echo "$tags"
 
+      # The credential scan (#748). Nothing reaches the registry until trivy's
+      # secret scanner has reported zero findings on the image as built.
+      #
+      # The image is built first into the runner's Docker ("Build for the
+      # scan"), scanned there, and only then built again with `push: true`,
+      # which the builder serves from the first build's cache; "The pushed
+      # image is the scanned image" proves afterwards that the layers pushed
+      # are the layers scanned. Two scans, both before the push:
+      #
+      #   * the whole image, with trivy's default rules. Those skip /usr/share
+      #     and /usr/lib, vendor/ and locale/ directories, *.md files, file
+      #     names containing `example` or `_test`, and node_modules/ (skipped
+      #     even with every allow rule off);
+      #   * this project's own payload, /app, copied out of the image without
+      #     running it and scanned with every allow rule and every skip
+      #     pattern off (.github/trivy/secret-payload.yaml).
+      #
+      # So what neither scan reads is third-party files on the paths above.
+      # A finding fails the job before anything is pushed. There is no
+      # allow-list: the fix is to remove the file and cut a new release (see
+      # docs/self-hosting/releases.md, "If the credential scan fails"). The
+      # report goes to a file under $RUNNER_TEMP and only path, rule,
+      # severity and line are printed (scripts/render_secret_findings.py),
+      # because this log is public. trivy's own exit status is kept.
+      - name: Install trivy (pinned, checksum-verified)
+        run: |
+          set -euo pipefail
+          bin="$RUNNER_TEMP/bin"
+          mkdir -p "$bin"
+          curl -fsSL -o "$RUNNER_TEMP/trivy.tgz" \
+            "https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}/trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz"
+          printf '%s  %s\n' "$TRIVY_SHA256" "$RUNNER_TEMP/trivy.tgz" | sha256sum -c -
+          tar -xzf "$RUNNER_TEMP/trivy.tgz" -C "$RUNNER_TEMP" trivy
+          install -m 0755 "$RUNNER_TEMP/trivy" "$bin/trivy"
+          "$bin/trivy" --version > "$RUNNER_TEMP/trivy-version.txt"
+          grep -Fx "Version: ${TRIVY_VERSION}" "$RUNNER_TEMP/trivy-version.txt"
+          printf 'TRIVY=%s\n' "$bin/trivy" >> "$GITHUB_ENV"
+
+      # The same file, target, build arguments and platforms as "Build and
+      # push" -- a test holds them equal -- so the second build is this one,
+      # from cache. No `id: build`: the label check, signing, SBOM and
+      # attestation all read steps.build.outputs.digest, which is the push.
+      # Only the push writes the cache.
+      - name: Build for the scan
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: backend/Dockerfile
+          target: ${{ matrix.profile }}
+          platforms: ${{ env.API_PLATFORMS }}
+          load: true
+          push: false
+          tags: release-scan/api:${{ matrix.profile }}
+          build-args: |
+            VERSION=${{ needs.verify.outputs.version }}
+            BUILD_DATE=${{ steps.tags.outputs.build_date }}
+            GIT_COMMIT=${{ github.sha }}
+          provenance: false
+          sbom: false
+          cache-from: type=gha,scope=release-api-${{ matrix.profile }}
+
+      - name: Scan the image for stored credentials
+        env:
+          SCAN_IMAGE: release-scan/api:${{ matrix.profile }}
+          LABEL: experimently:${{ matrix.profile }}-${{ needs.verify.outputs.version }} (whole image)
+          TRIVY_CONF: ${{ github.workspace }}/.github/trivy
+        run: |
+          set -euo pipefail
+          report="$RUNNER_TEMP/trivy-image.json"
+          rm -f "$report"
+          # An empty working directory, so no trivy.yaml, trivy-secret.yaml or
+          # .trivyignore from the tree can apply; the three are named below.
+          cd "$(mktemp -d "$RUNNER_TEMP/trivy-cwd.XXXXXX")"
+          status=0
+          "$TRIVY" image --image-src docker --scanners secret --skip-version-check \
+            --exit-code 1 --format json --output "$report" --timeout 15m \
+            --config "$TRIVY_CONF/trivy.yaml" \
+            --ignorefile "$TRIVY_CONF/trivyignore" \
+            --secret-config "$TRIVY_CONF/secret-default.yaml" \
+            "$SCAN_IMAGE" || status=$?
+          render=0
+          python3 "$GITHUB_WORKSPACE/scripts/render_secret_findings.py" "$report" --label "$LABEL" || render=$?
+          if [ "$status" -ne 0 ]; then exit "$status"; fi
+          exit "$render"
+
+      - name: Scan the payload with every allow rule off
+        env:
+          SCAN_IMAGE: release-scan/api:${{ matrix.profile }}
+          LABEL: experimently:${{ matrix.profile }}-${{ needs.verify.outputs.version }} (/app, every allow rule off)
+          TRIVY_CONF: ${{ github.workspace }}/.github/trivy
+        run: |
+          set -euo pipefail
+          payload="$RUNNER_TEMP/payload"
+          report="$RUNNER_TEMP/trivy-payload.json"
+          rm -rf "$payload" "$report"
+          mkdir -p "$payload"
+          # `docker create` makes a container without starting it: nothing in
+          # the image runs. `docker cp` fails on a path the image lacks.
+          cid="$(docker create "$SCAN_IMAGE")"
+          docker cp "$cid:/app" "$payload/app"
+          docker rm -f "$cid" > /dev/null
+          for dir in app; do
+            if [ -z "$(find "$payload/$dir" -type f -print -quit)" ]; then
+              printf '::error::/%s holds no files in the image; nothing to scan\n' "$dir"
+              exit 1
+            fi
+          done
+          cd "$(mktemp -d "$RUNNER_TEMP/trivy-cwd.XXXXXX")"
+          status=0
+          "$TRIVY" fs --scanners secret --skip-version-check \
+            --exit-code 1 --format json --output "$report" --timeout 15m \
+            --config "$TRIVY_CONF/trivy.yaml" \
+            --ignorefile "$TRIVY_CONF/trivyignore" \
+            --secret-config "$TRIVY_CONF/secret-payload.yaml" \
+            "$payload" || status=$?
+          render=0
+          python3 "$GITHUB_WORKSPACE/scripts/render_secret_findings.py" "$report" --label "$LABEL" || render=$?
+          if [ "$status" -ne 0 ]; then exit "$status"; fi
+          exit "$render"
+
       - name: Build and push
         id: build
         uses: docker/build-push-action@v7
@@ -236,6 +362,24 @@ jobs:
           provenance: mode=max
           cache-from: type=gha,scope=release-api-${{ matrix.profile }}
           cache-to: type=gha,scope=release-api-${{ matrix.profile }},mode=max
+
+      # Before the label check and signing: an image whose layers differ from
+      # the scanned ones is not signed. If this fails, the versioned tag has
+      # already been pushed; see "If the credential scan fails" in
+      # docs/self-hosting/releases.md.
+      - name: The pushed image is the scanned image
+        env:
+          IMAGE: ${{ needs.verify.outputs.image }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+          SCAN_IMAGE: release-scan/api:${{ matrix.profile }}
+        run: |
+          set -euo pipefail
+          docker image inspect "$SCAN_IMAGE" > "$RUNNER_TEMP/scanned-image.json"
+          docker buildx imagetools inspect "${IMAGE}@${DIGEST}" \
+            --format '{{ json .Image }}' > "$RUNNER_TEMP/pushed-image.json"
+          python3 scripts/check_scanned_layers.py \
+            --loaded "$RUNNER_TEMP/scanned-image.json" \
+            --pushed "$RUNNER_TEMP/pushed-image.json"
 
       # The label is metadata anyone can read off the published image, and it
       # is the only place the version appears outside the tag. Assert it rather
@@ -353,6 +497,109 @@ jobs:
           echo "build_date=$(date -u +'%Y-%m-%dT%H:%M:%SZ')" >> "$GITHUB_OUTPUT"
           echo "$tags"
 
+      # The credential scan, as in the API images above (#748). The whole
+      # dashboard payload lives under /usr/share/nginx/html, which trivy's
+      # default rules skip with the rest of /usr/share, so the payload scan
+      # is the one that reads this project's files: /usr/share/nginx/html and
+      # /etc/nginx, copied out without running the image and scanned with
+      # every allow rule and skip pattern off. The image scan's defaults also
+      # skip /usr/lib, vendor/, locale/, *.md, file names containing
+      # `example` or `_test`, and node_modules/; what neither scan reads is
+      # third-party files on those paths.
+      - name: Install trivy (pinned, checksum-verified)
+        run: |
+          set -euo pipefail
+          bin="$RUNNER_TEMP/bin"
+          mkdir -p "$bin"
+          curl -fsSL -o "$RUNNER_TEMP/trivy.tgz" \
+            "https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}/trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz"
+          printf '%s  %s\n' "$TRIVY_SHA256" "$RUNNER_TEMP/trivy.tgz" | sha256sum -c -
+          tar -xzf "$RUNNER_TEMP/trivy.tgz" -C "$RUNNER_TEMP" trivy
+          install -m 0755 "$RUNNER_TEMP/trivy" "$bin/trivy"
+          "$bin/trivy" --version > "$RUNNER_TEMP/trivy-version.txt"
+          grep -Fx "Version: ${TRIVY_VERSION}" "$RUNNER_TEMP/trivy-version.txt"
+          printf 'TRIVY=%s\n' "$bin/trivy" >> "$GITHUB_ENV"
+
+      # Same file, build arguments and platforms as "Build and push"; no
+      # `id: build`; only the push writes the cache. See the API images.
+      - name: Build for the scan
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: frontend/Dockerfile
+          platforms: ${{ env.WEB_PLATFORMS }}
+          load: true
+          push: false
+          tags: release-scan/web:${{ matrix.profile }}
+          build-args: |
+            EXPERIMENTLY_PROFILE=${{ matrix.profile }}
+            VERSION=${{ needs.verify.outputs.version }}
+            BUILD_DATE=${{ steps.tags.outputs.build_date }}
+            GIT_COMMIT=${{ github.sha }}
+          provenance: false
+          sbom: false
+          cache-from: type=gha,scope=release-web-${{ matrix.profile }}
+
+      - name: Scan the image for stored credentials
+        env:
+          SCAN_IMAGE: release-scan/web:${{ matrix.profile }}
+          LABEL: experimently-web:${{ matrix.profile }}-${{ needs.verify.outputs.version }} (whole image)
+          TRIVY_CONF: ${{ github.workspace }}/.github/trivy
+        run: |
+          set -euo pipefail
+          report="$RUNNER_TEMP/trivy-image.json"
+          rm -f "$report"
+          # An empty working directory, so no trivy.yaml, trivy-secret.yaml or
+          # .trivyignore from the tree can apply; the three are named below.
+          cd "$(mktemp -d "$RUNNER_TEMP/trivy-cwd.XXXXXX")"
+          status=0
+          "$TRIVY" image --image-src docker --scanners secret --skip-version-check \
+            --exit-code 1 --format json --output "$report" --timeout 15m \
+            --config "$TRIVY_CONF/trivy.yaml" \
+            --ignorefile "$TRIVY_CONF/trivyignore" \
+            --secret-config "$TRIVY_CONF/secret-default.yaml" \
+            "$SCAN_IMAGE" || status=$?
+          render=0
+          python3 "$GITHUB_WORKSPACE/scripts/render_secret_findings.py" "$report" --label "$LABEL" || render=$?
+          if [ "$status" -ne 0 ]; then exit "$status"; fi
+          exit "$render"
+
+      - name: Scan the payload with every allow rule off
+        env:
+          SCAN_IMAGE: release-scan/web:${{ matrix.profile }}
+          LABEL: experimently-web:${{ matrix.profile }}-${{ needs.verify.outputs.version }} (/usr/share/nginx/html and /etc/nginx, every allow rule off)
+          TRIVY_CONF: ${{ github.workspace }}/.github/trivy
+        run: |
+          set -euo pipefail
+          payload="$RUNNER_TEMP/payload"
+          report="$RUNNER_TEMP/trivy-payload.json"
+          rm -rf "$payload" "$report"
+          mkdir -p "$payload"
+          # `docker create` makes a container without starting it: nothing in
+          # the image runs. `docker cp` fails on a path the image lacks.
+          cid="$(docker create "$SCAN_IMAGE")"
+          docker cp "$cid:/usr/share/nginx/html" "$payload/html"
+          docker cp "$cid:/etc/nginx" "$payload/nginx"
+          docker rm -f "$cid" > /dev/null
+          for dir in html nginx; do
+            if [ -z "$(find "$payload/$dir" -type f -print -quit)" ]; then
+              printf '::error::the copied %s payload holds no files; nothing to scan\n' "$dir"
+              exit 1
+            fi
+          done
+          cd "$(mktemp -d "$RUNNER_TEMP/trivy-cwd.XXXXXX")"
+          status=0
+          "$TRIVY" fs --scanners secret --skip-version-check \
+            --exit-code 1 --format json --output "$report" --timeout 15m \
+            --config "$TRIVY_CONF/trivy.yaml" \
+            --ignorefile "$TRIVY_CONF/trivyignore" \
+            --secret-config "$TRIVY_CONF/secret-payload.yaml" \
+            "$payload" || status=$?
+          render=0
+          python3 "$GITHUB_WORKSPACE/scripts/render_secret_findings.py" "$report" --label "$LABEL" || render=$?
+          if [ "$status" -ne 0 ]; then exit "$status"; fi
+          exit "$render"
+
       - name: Build and push
         id: build
         uses: docker/build-push-action@v7
@@ -370,6 +617,20 @@ jobs:
           provenance: mode=max
           cache-from: type=gha,scope=release-web-${{ matrix.profile }}
           cache-to: type=gha,scope=release-web-${{ matrix.profile }},mode=max
+
+      - name: The pushed image is the scanned image
+        env:
+          IMAGE: ${{ needs.verify.outputs.web_image }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+          SCAN_IMAGE: release-scan/web:${{ matrix.profile }}
+        run: |
+          set -euo pipefail
+          docker image inspect "$SCAN_IMAGE" > "$RUNNER_TEMP/scanned-image.json"
+          docker buildx imagetools inspect "${IMAGE}@${DIGEST}" \
+            --format '{{ json .Image }}' > "$RUNNER_TEMP/pushed-image.json"
+          python3 scripts/check_scanned_layers.py \
+            --loaded "$RUNNER_TEMP/scanned-image.json" \
+            --pushed "$RUNNER_TEMP/pushed-image.json"
 
       # The same assertion the API images get: a renamed ARG would otherwise
       # leave every released dashboard image labelled 0.0.0+unknown, and
