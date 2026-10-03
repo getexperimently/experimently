@@ -15,7 +15,10 @@ name: Chart (kind)
 #             anonymously (the packages are public), then upgraded to this
 #             PR's. Runs everywhere, forks included, and is never skipped: an
 #             N-1 that cannot be resolved or pulled without credentials fails
-#             the job, whatever the event.
+#             the job, whatever the event. Right after a release, while
+#             the newest tag's images are still publishing, N-1 is the
+#             release before it and the job summary says so (#519); one step
+#             back and no further.
 #
 # Profiles: both, on every run, as parallel jobs. Measured on the first runs
 # (2026-09-27): core about 4 minutes, full about 5.5, most of the difference
@@ -114,8 +117,10 @@ jobs:
         run: echo "BUILD_START=$(date +%s)" >> "$GITHUB_ENV"
 
       # N-1 for the upgrade leg, resolved before anything is built so that an
-      # unresolvable one fails in seconds. The same on every event, forks
-      # included: it fails rather than skips.
+      # unresolvable one fails in seconds: the newest release at or below
+      # VERSION whose images read anonymously from GHCR, or the release
+      # before it while the newest one's are still publishing. The same on
+      # every event, forks included: it fails rather than skips.
       - name: Resolve the previous release (N-1)
         id: previous
         env:

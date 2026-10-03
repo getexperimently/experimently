@@ -137,6 +137,8 @@ def test_previous_resolves_n_minus_1_on_a_pull_request_from_a_fork(sandbox):
         printf 'ccc\\trefs/tags/v0.17.0\\n'
         """,
     )
+    # Every manifest read answers: the images are published.
+    _stub(tmp / "bin", "docker", "exit 0\n")
     out = tmp / "github_output"
     summary = tmp / "step_summary"
     env.update(
@@ -147,7 +149,16 @@ def test_previous_resolves_n_minus_1_on_a_pull_request_from_a_fork(sandbox):
         HEAD_REPO="someone/experimently",
         GITHUB_EVENT_NAME="pull_request",
     )
-    result = _run(_harness("do_previous") + "do_previous\n", tmp, env)
+    result = _run(
+        _harness(
+            "published",
+            "do_previous",
+            assignments=("API_REPO", "WEB_REPO", "PULL_FAILED"),
+        )
+        + "do_previous\n",
+        tmp,
+        env,
+    )
     assert result.returncode == 0, result.stdout + result.stderr
     combined = result.stdout + result.stderr
     assert "not run" not in combined.lower()
