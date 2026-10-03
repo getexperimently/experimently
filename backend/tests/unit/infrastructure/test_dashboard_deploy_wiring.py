@@ -1624,6 +1624,7 @@ def _summary(
     dashboard_outcome: str,
     given: str,
     result: str = "",
+    **overrides: str,
 ):
     outputs = {
         "target": {"arn": API_FAMILY_REVISION},
@@ -1642,7 +1643,17 @@ def _summary(
             if api_verify == "success" and dashboard_outcome in ("success", "")
             else "failure",
         },
+        # The read of what is serving (#755) polls; the verdict, not the
+        # wait, is under test.
+        **{"SUMMARY_SERVING_POLL_SECONDS": "0", **overrides},
     )
+
+
+#: scripts/api_serving.py's answer when the bad release is still PRIMARY.
+NOT_YET_43 = (
+    "NOT YET: the PRIMARY task set runs experimentation-backend-staging:43, "
+    "not experimentation-backend-staging:42"
+)
 
 
 @pytest.mark.regression
@@ -1675,7 +1686,13 @@ def _summary(
             "",
             "",
             "",
-            "staging: API NOT rolled back (its verify step: failure); dashboard left as it is",
+            # Verify failed and the read says the bad release is PRIMARY:
+            # not confirmed, quoting the read, never the absolute "API NOT
+            # rolled back" (#755).
+            "staging: API not confirmed on experimentation-backend-staging:42 at "
+            f"the end of the run (scripts/api_serving.py exit 1: {NOT_YET_43}); "
+            "this run did not finish its own steps (its verify step: failure); "
+            "dashboard left as it is",
         ),
     ],
     ids=["api-only-ok", "both-ok", "api-ok-dashboard-failed", "api-failed"],
@@ -1684,14 +1701,31 @@ def test_the_result_line_keys_on_the_api_verify_step(
     runner, api_verify, dashboard_outcome, given, result, slack
 ):
     """EM ruling C2 (the code review's CRITICAL): never "NOT rolled back" for
-    an API that was rolled back and verified."""
-    runner.scenario([])
+    an API that was rolled back and verified. Every row supplies the reads
+    of what is serving; only the row whose verify step failed makes them."""
+    runner.scenario(api_rules(API_AFTER, RULES_GREEN))
     code, out, written, summary = _summary(
-        runner, api_verify, dashboard_outcome, given, result
+        runner,
+        api_verify,
+        dashboard_outcome,
+        given,
+        result,
+        SUMMARY_SERVING_POLLS="3",
     )
     assert code == 0, out
     assert written["slack"] == slack
     assert summary.startswith(f"## Rollback of {slack}\n")
+    reads = [c for c in runner.calls() if c[:2] == ["ecs", "describe-services"]]
+    if api_verify == "success":
+        assert reads == [], reads
+        assert "| API at the end of the run |" not in summary
+    else:
+        # Polled to the limit on 1 and decided on the last answer.
+        assert len(reads) == 3, reads
+        assert (
+            f"| API at the end of the run | {NOT_YET_43} "
+            "(scripts/api_serving.py exit 1) |" in summary
+        ), summary
 
 
 @pytest.mark.regression
@@ -1718,15 +1752,24 @@ def test_a_dashboard_half_never_reached_is_read_and_named(runner):
                 "ecs describe-task-definition",
                 answers=[_task_definition(DASH_NEW, WEB_IMAGE)],
             ),
+            *api_rules(API_AFTER, RULES_GREEN),
         ]
     )
     code, out, written, summary = _summary(
-        runner, "failure", "skipped", "experimentation-dashboard-staging:6"
+        runner,
+        "failure",
+        "skipped",
+        "experimentation-dashboard-staging:6",
+        SUMMARY_SERVING_POLLS="1",
     )
     assert code == 0, out
     assert written["slack"] == (
-        "staging: API NOT rolled back (its verify step: failure); dashboard NOT rolled back (not reached)"
+        "staging: API not confirmed on experimentation-backend-staging:42 at the "
+        f"end of the run (scripts/api_serving.py exit 1: {NOT_YET_43}); this run "
+        "did not finish its own steps (its verify step: failure); dashboard NOT "
+        "rolled back (not reached)"
     )
+    assert "(scripts/api_serving.py exit 1) |" in summary
     assert (
         "Dashboard not rolled back (the API half failed): experimentation-dashboard-staging "
         "is serving experimentation-dashboard-staging:7" in summary
