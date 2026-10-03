@@ -2092,7 +2092,7 @@ POST /api/v1/etl/jobs/run               — Trigger an ETL job run
 GET  /api/v1/etl/jobs/{run_id}/status   — Status of one run
 POST /api/v1/etl/crawler/run            — Trigger the Glue crawler
 GET  /api/v1/etl/crawler/status         — Crawler status
-POST /api/v1/etl/partitions/add         — Register a new partition
+POST /api/v1/etl/partitions/add         — Register a date's 24 hourly partitions
 ```
 
 `POST /api/v1/etl/query` has been removed and answers 404.
@@ -2111,10 +2111,26 @@ configures nothing, so with it empty its routes answer 404 for every name, as
 does `jobs/run` for a job type whose job is unset. A run that Glue does not
 have answers 404 `"Job run not found"`.
 
+`POST .../partitions/add?database=...&table=...&date=YYYY-MM-DD` registers the
+24 hourly partitions (`year`, `month`, `day`, `hour`) of that date under the
+Glue table's own storage location, and answers **201** with the 24 partitions
+only when Glue registered every one of them or already had it. Re-running a
+date is safe: hours already registered are accepted. Otherwise:
+
+| Status | `detail` | When |
+|---|---|---|
+| 404 | `"Unknown Glue table"` | `database` or `table` is not the configured pair. Glue is not called |
+| 422 | `"date must be a calendar date in YYYY-MM-DD format"` | `date` is anything else, such as `2026-10`, `2026-1-01` or `2026-13-45`. Glue is not called |
+| 404 | `"Glue table not found. Run the crawler first."` | the configured table is not in the Glue catalog yet |
+| 500 | `"Could not read the Glue table (request ID: ...)."` | Glue refused to read the table, or the table has no storage location |
+| 500 | `"Could not register the partitions (request ID: ...)."` | Glue refused to register at least one partition for a reason other than it already existing. Some hours may already be registered; fix the cause and re-run the date |
+
+The cause of a 500 is in the server log under the request ID, not in the
+response.
+
 The API reaches Glue in the region named by `AWS_DEFAULT_REGION`, never
-`AWS_REGION`. With it unset, the job and crawler routes answer 500 (the
-partitions route does not report it, #656). `GLUE_EVENTS_TABLE` must
-be the table the crawler creates. See
+`AWS_REGION`. With it unset, the job, crawler and partitions routes answer
+500. `GLUE_EVENTS_TABLE` must be the table the crawler creates. See
 [AWS integration: Glue](../integrations/aws.md#glue-the-etl-routes).
 
 ---

@@ -96,12 +96,16 @@ class _Glue:
 
     ``fail`` maps an operation to the error code its next call raises, so the
     callers' error branches run under the recorder too. A failed call is still
-    recorded: it is a call the task role has to allow.
+    recorded: it is a call the task role has to allow. ``reply`` maps an
+    operation to the reply its next call returns in place of ``_RESPONSES``
+    (a ``batch_create_partition`` reply carrying ``Errors``, a table with no
+    location).
     """
 
     def __init__(self, calls: list):
         self._calls = calls
         self.fail: dict[str, str] = {}
+        self.reply: dict[str, dict] = {}
 
     def __getattr__(self, attribute: str):
         if attribute not in _CLIENT_ATTRIBUTES:
@@ -113,6 +117,8 @@ class _Glue:
         def operation(**kwargs):
             if attribute in self.fail:
                 raise _client_error(self.fail.pop(attribute), attribute)
+            if attribute in self.reply:
+                return self.reply.pop(attribute)
             return _RESPONSES.get(attribute, {})
 
         return operation
@@ -171,6 +177,21 @@ def _drive(service: ETLService) -> dict:
     }
 
 
+ALREADY_EXISTS = "AlreadyExistsException"
+DENIED = "AccessDeniedException"
+
+
+def _partition_errors(count: int, code: str) -> list[dict]:
+    """``Errors`` as a successful BatchCreatePartition reply carries them."""
+    return [
+        {
+            "PartitionValues": ["2026", "10", "01", f"{hour:02d}"],
+            "ErrorDetail": {"ErrorCode": code, "ErrorMessage": "no"},
+        }
+        for hour in range(count)
+    ]
+
+
 def _raises(status_code: int, call) -> None:
     with pytest.raises(HTTPException) as caught:
         call()
@@ -202,12 +223,25 @@ def _drive_failures(service: ETLService) -> dict:
         _raises(500, lambda: service.get_job_status("jr_1", JOB))
 
     def add_partitions():
+        def call():
+            return service.add_partitions(DATABASE, TABLE, "2026-10-01")
+
         glue.fail["get_table"] = "AccessDeniedException"
-        service.add_partitions(DATABASE, TABLE, "2026-10-01")
+        _raises(500, call)
+        glue.fail["get_table"] = "EntityNotFoundException"
+        _raises(404, call)
+        glue.reply["get_table"] = {"Table": {"Name": TABLE}}
+        _raises(500, call)
         glue.fail["batch_create_partition"] = "AlreadyExistsException"
-        service.add_partitions(DATABASE, TABLE, "2026-10-01")
+        assert len(call()) == 24
         glue.fail["batch_create_partition"] = "AccessDeniedException"
-        service.add_partitions(DATABASE, TABLE, "2026-10-01")
+        _raises(500, call)
+        glue.reply["batch_create_partition"] = {"Errors": _partition_errors(1, DENIED)}
+        _raises(500, call)
+        glue.reply["batch_create_partition"] = {
+            "Errors": _partition_errors(24, ALREADY_EXISTS)
+        }
+        assert len(call()) == 24
 
     def run_crawler():
         glue.fail["start_crawler"] = "CrawlerRunningException"
@@ -302,6 +336,7 @@ def test_every_error_branch_calls_only_the_granted_operations(calls):
     for name, drive in drivers.items():
         _assert_allowed(calls, name, drive)
         assert service._glue().fail == {}, f"{name} never reached the failing call"
+        assert service._glue().reply == {}, f"{name} never reached the planted reply"
 
 
 def test_the_recorder_sees_a_call_outside_the_grant(calls):
@@ -369,6 +404,11 @@ def test_with_no_region_the_glue_client_cannot_be_built(no_region_sources):
         ),
         ("run_crawler", lambda s: s.run_crawler(), "Could not start the crawler"),
         (
+            "add_partitions",
+            lambda s: s.add_partitions(DATABASE, TABLE, "2026-10-01"),
+            "Could not read the Glue table",
+        ),
+        (
             "get_crawler_status",
             lambda s: s.get_crawler_status(),
             "Could not read the crawler's status",
@@ -392,3 +432,85 @@ def test_with_no_region_the_routes_answer_a_handled_500(
     assert caught.value.detail == failure_detail(sentence), caught.value.detail
     logged = [c.args for c in logger.error.call_args_list]
     assert any("NoRegionError" in args for args in logged), logged
+
+
+# --- add_partitions: what a refusal reaches (#656) ---------------------------
+
+
+def _after_the_client(calls: list) -> list:
+    """The operations made, once the single ``boto3.client('glue')`` is built."""
+    assert calls[:1] == [("boto3.client", "glue", (), ())], calls
+    return calls[1:]
+
+
+@pytest.mark.regression
+@pytest.mark.parametrize(
+    ("plant", "status_code"),
+    [
+        pytest.param({"fail": DENIED}, 500, id="get-table-refused"),
+        pytest.param({"fail": "EntityNotFoundException"}, 404, id="table-not-found"),
+        pytest.param({"reply": {"Table": {"Name": TABLE}}}, 500, id="no-descriptor"),
+        pytest.param(
+            {"reply": {"Table": {"Name": TABLE, "StorageDescriptor": {}}}},
+            500,
+            id="no-location",
+        ),
+        pytest.param(
+            {"reply": {"Table": {"StorageDescriptor": {"Location": ""}}}},
+            500,
+            id="empty-location",
+        ),
+        pytest.param(
+            {"reply": {"Table": {"StorageDescriptor": {"Location": None}}}},
+            500,
+            id="null-location",
+        ),
+    ],
+)
+def test_a_table_that_cannot_be_read_registers_nothing(calls, plant, status_code):
+    """No usable location: GetTable is the only call, so no partition is made."""
+    service = ETLService()
+    glue = service._glue()
+    if "fail" in plant:
+        glue.fail["get_table"] = plant["fail"]
+    else:
+        glue.reply["get_table"] = plant["reply"]
+    _raises(status_code, lambda: service.add_partitions(DATABASE, TABLE, "2026-10-01"))
+    assert _after_the_client(calls) == ["get_table"]
+
+
+@pytest.mark.parametrize(
+    "date",
+    ["2026-10", "2026-13-45", "20261001", "2026-1-01", "2026-W40-1", "2026-02-29", ""],
+)
+def test_a_date_that_is_not_yyyy_mm_dd_answers_422_before_any_client(calls, date):
+    with pytest.raises(HTTPException) as caught:
+        ETLService().add_partitions(DATABASE, TABLE, date)
+    assert caught.value.status_code == 422, caught.value
+    assert caught.value.detail == etl_service.INVALID_DATE_DETAIL
+    assert calls == [], f"a client was built or Glue was called: {calls}"
+
+
+def test_an_unconfigured_table_answers_404_before_any_client(calls):
+    with pytest.raises(HTTPException) as caught:
+        ETLService().add_partitions(DATABASE, "other_table", "2026-10-01")
+    assert caught.value.status_code == 404, caught.value
+    assert calls == [], f"a client was built or Glue was called: {calls}"
+
+
+def test_the_partitions_come_from_the_parsed_date_under_the_table_location(calls):
+    service = ETLService()
+    partitions = service.add_partitions(DATABASE, TABLE, "2024-02-29")
+    assert len(partitions) == 24
+    assert {p.partition_values["hour"] for p in partitions} == {
+        f"{h:02d}" for h in range(24)
+    }
+    first = partitions[0]
+    assert first.partition_values == {
+        "year": "2024",
+        "month": "02",
+        "day": "29",
+        "hour": "00",
+    }
+    assert first.location == "s3://lake/raw/year=2024/month=02/day=29/hour=00/"
+    assert _after_the_client(calls) == ["get_table", "batch_create_partition"]
