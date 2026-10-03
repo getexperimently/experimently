@@ -24,9 +24,11 @@
 #              more core revision (made here, never committed): exactly one
 #              `migrate` logs `Running upgrade`, and every old pod stays Ready
 #              and answers /health/ready until it is being deleted
-#   previous   resolve N-1, the newest release at or below VERSION (or
-#              PREVIOUS_VERSION); writes version= to $GITHUB_OUTPUT. It runs
-#              the same way on every event, pull requests from forks included
+#   previous   resolve N-1, the newest release at or below VERSION whose
+#              images are published (falling back one release while the
+#              newest one's are still publishing), or PREVIOUS_VERSION; writes
+#              version= to $GITHUB_OUTPUT. It runs the same way on every
+#              event, pull requests from forks included
 #   upgrade-previous
 #              N-1 -> N: the N-1 release's chart and images (pulled from GHCR
 #              anonymously, with no credentials) upgraded to this PR's chart
@@ -653,8 +655,16 @@ EOF
 # pull requests, main, the nightly run, a manual run -- and is never skipped.
 # An N-1 that cannot be resolved, or whose images cannot be pulled
 # anonymously, fails the job.
+#
+# Right after a release its tag exists minutes before release.yml has
+# published its images (and the bot-pushed tag needs a manual dispatch to
+# start that run). So when the newest tag's images for this profile are not
+# on GHCR yet, N-1 is the release before it, and the job summary says so. The
+# fallback is one step and no further: if that release's images cannot be
+# read either, the cause is not the publishing window (a package no longer
+# public reads as "manifest unknown" too), and the job fails.
 do_previous() {
-    local version prev tags
+    local version prev tags candidates newest older note
     version=$(cat VERSION)
     tags=$(git ls-remote --tags --refs origin 'v*' | sed -n 's#.*refs/tags/v\([0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\)$#\1#p')
     [ -n "$tags" ] || fail "N-1 cannot be resolved: no vX.Y.Z tags on origin"
@@ -664,15 +674,51 @@ do_previous() {
             fail "N-1 cannot be resolved: PREVIOUS_VERSION '$prev' is not X.Y.Z"
         printf '%s\n' "$tags" | grep -Fqx "$prev" ||
             fail "N-1 cannot be resolved: there is no release tag v$prev"
+        # Asked for by name: no fallback.
+        published "$prev" ||
+            fail "N-1 cannot be resolved: PREVIOUS_VERSION $prev has no published $PROFILE images. $PULL_FAILED"
     else
-        # The newest tag that sorts at or below VERSION.
-        prev=$(printf '%s\n' "$tags" | while read -r t; do
+        # The tags that sort at or below VERSION, oldest first.
+        candidates=$(printf '%s\n' "$tags" | while read -r t; do
             [ "$(printf '%s\n%s\n' "$t" "$version" | sort -V | sed -n '$p')" != "$version" ] || printf '%s\n' "$t"
-        done | sort -V | sed -n '$p')
-        [ -n "$prev" ] || fail "N-1 cannot be resolved: no release tag at or below VERSION $version"
+        done | sort -V)
+        newest=$(printf '%s\n' "$candidates" | sed -n '$p')
+        [ -n "$newest" ] || fail "N-1 cannot be resolved: no release tag at or below VERSION $version"
+        if published "$newest"; then
+            prev=$newest
+        else
+            older=$(printf '%s\n' "$candidates" | sed '$d' | sed -n '$p')
+            [ -n "$older" ] ||
+                fail "N-1 cannot be resolved: v$newest has no published $PROFILE images and there is no earlier release to fall back to"
+            published "$older" ||
+                fail "N-1 cannot be resolved: neither v$newest nor v$older has published $PROFILE images. $PULL_FAILED"
+            prev=$older
+            note="N-1 is $older, not $newest: v$newest is tagged but its $PROFILE images are not published yet (release.yml publishes them after the tag), so the upgrade leg starts from the release before it."
+            printf '::warning::%s\n' "$note"
+            [ -z "${GITHUB_STEP_SUMMARY:-}" ] ||
+                printf '### chart-kind (%s): N-1\n\n%s\n\n' "$PROFILE" "$note" >>"$GITHUB_STEP_SUMMARY"
+        fi
     fi
     say "N-1 = $prev (VERSION $version)"
     [ -z "${GITHUB_OUTPUT:-}" ] || printf 'version=%s\n' "$prev" >>"$GITHUB_OUTPUT"
+}
+
+# published VERSION: both of this profile's images for VERSION can be read from
+# GHCR anonymously -- a manifest read with an empty client configuration, so
+# no stored credential is sent and nothing is pulled.
+published() {
+    local v=$1 anon ref rc=0
+    anon=$(mktemp -d "${TMPDIR:-/tmp}/chart-kind-anon.XXXXXX")
+    printf '{}\n' >"$anon/config.json"
+    for ref in "$API_REPO:$PROFILE-$v" "$WEB_REPO:$PROFILE-$v"; do
+        if ! DOCKER_CONFIG=$anon docker manifest inspect "$ref" >/dev/null 2>"$anon/err"; then
+            say "not published (or not readable anonymously): $ref: $(head -c 200 "$anon/err" | tr '\n' ' ')"
+            rc=1
+            break
+        fi
+    done
+    rm -rf "$anon"
+    return "$rc"
 }
 
 # pull_anonymously REF: docker pull REF with an empty client configuration, so
