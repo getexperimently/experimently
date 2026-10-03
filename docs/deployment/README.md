@@ -213,9 +213,9 @@ A deploy runs its own migration. **Actions → Database Migration** is for the
 rest -- chiefly undoing one:
 
 1. From `main`: `environment` (`staging` or `prod`), `direction` (`upgrade` or
-   `downgrade`), `target` (`heads` to upgrade; a revision id or `-1` to
-   downgrade -- never the singular `head`, which a full image refuses because it
-   has two).
+   `downgrade`), `target` (`heads` to upgrade; the revision id to end at to
+   downgrade). Relative steps such as `-1`, `head` and `base` are refused: a
+   full image has two heads.
 2. It runs with the image the API is **serving** (the PRIMARY task set), and
    refuses when nothing is serving yet. It snapshots the database first.
 3. The task's log is printed in the run; it is also CloudWatch log group

@@ -293,12 +293,14 @@ To apply migrations to your database:
 
 3. **Downgrade to a previous version**:
    ```bash
-   alembic downgrade -1
    alembic downgrade <revision>
+   alembic downgrade modules@-1
    ```
 
-   - `alembic downgrade -1`: Downgrade by one revision
-   - `alembic downgrade <revision>`: Downgrade to specific revision
+   - `alembic downgrade <revision>`: Downgrade to a specific revision (to undo a
+     migration, its `down_revision`)
+   - `alembic downgrade modules@-1`: Step the modules branch back one revision.
+     Not a bare `-1`: a full checkout has two heads, and alembic warns and picks one
 
 4. **Check current migration status**:
    ```bash

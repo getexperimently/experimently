@@ -30,6 +30,9 @@ from backend.app.models.user import User, UserRole
 pytestmark = pytest.mark.integration
 
 URL = "/api/v1/api-keys"
+# An SDK route that authenticates with deps.get_api_key (which records
+# last_used_at) and answers 200 with no other setup.
+SDK_PROBE = "/api/v1/feature-flags/user/probe-user"
 
 
 @pytest.fixture(autouse=True)
@@ -407,9 +410,9 @@ class TestDelete:
     def test_deleted_key_no_longer_authenticates(self, client, developer):
         created = _create(client, developer).json()
         headers = {"X-API-Key": created["key"]}
-        assert client.get("/api/v1/edge/bootstrap", headers=headers).status_code == 200
+        assert client.get(SDK_PROBE, headers=headers).status_code == 200
         client.delete(f"{URL}/{created['id']}", headers=_auth(developer))
-        assert client.get("/api/v1/edge/bootstrap", headers=headers).status_code == 401
+        assert client.get(SDK_PROBE, headers=headers).status_code == 401
 
 
 # ---------------------------------------------------------------------------
@@ -519,9 +522,7 @@ class TestLastUsedAt:
         updated_at_before = _row(db_session, created["id"]).updated_at
 
         before = datetime.utcnow() - timedelta(seconds=5)
-        resp = client.get(
-            "/api/v1/edge/bootstrap", headers={"X-API-Key": created["key"]}
-        )
+        resp = client.get(SDK_PROBE, headers={"X-API-Key": created["key"]})
         assert resp.status_code == 200, resp.text
 
         items = client.get(URL, headers=_auth(developer)).json()
@@ -538,9 +539,7 @@ class TestLastUsedAt:
         recent = datetime.utcnow() - timedelta(seconds=10)
         _set_last_used(db_session, created["id"], recent)
 
-        resp = client.get(
-            "/api/v1/edge/bootstrap", headers={"X-API-Key": created["key"]}
-        )
+        resp = client.get(SDK_PROBE, headers={"X-API-Key": created["key"]})
         assert resp.status_code == 200, resp.text
         assert _row(db_session, created["id"]).last_used_at == recent
 
@@ -549,9 +548,7 @@ class TestLastUsedAt:
         stale = datetime.utcnow() - timedelta(minutes=5)
         _set_last_used(db_session, created["id"], stale)
 
-        resp = client.get(
-            "/api/v1/edge/bootstrap", headers={"X-API-Key": created["key"]}
-        )
+        resp = client.get(SDK_PROBE, headers={"X-API-Key": created["key"]})
         assert resp.status_code == 200, resp.text
         assert _row(db_session, created["id"]).last_used_at > stale + timedelta(
             minutes=4
@@ -564,8 +561,6 @@ class TestLastUsedAt:
         row.is_active = False
         db_session.commit()
 
-        resp = client.get(
-            "/api/v1/edge/bootstrap", headers={"X-API-Key": created["key"]}
-        )
+        resp = client.get(SDK_PROBE, headers={"X-API-Key": created["key"]})
         assert resp.status_code == 401
         assert _row(db_session, created["id"]).last_used_at is None

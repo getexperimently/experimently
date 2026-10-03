@@ -19,7 +19,7 @@ the shell variables set by the ones before it.
 - **Event ingestion**: the tracking endpoints (`/api/v1/tracking/*`) take an API key.
 
 An API key authenticates as the user who created it, and only on the endpoints an SDK
-calls: tracking, flag evaluation, OpenFeature and edge bootstrap. Creating or changing flags
+calls: tracking, flag evaluation and the flag ruleset. Creating or changing flags
 and experiments, and managing users, take a user login; an API key there is refused with
 `401`. API keys are not for signing people in: user-facing applications use the login
 described in [Authentication](../api/auth.md).
@@ -84,8 +84,8 @@ The request takes:
 ### Scopes
 
 Scopes are stored with the key and returned when you list keys. **One scope is enforced:
-`sdk:ruleset`.** Every other endpoint that accepts an API key (tracking, flag evaluation,
-OpenFeature and edge bootstrap) accepts any active key, whatever its scopes. Names such as
+`sdk:ruleset`.** Every other endpoint that accepts an API key (tracking and flag
+evaluation) accepts any active key, whatever its scopes. Names such as
 `read`, `write` or `admin` on existing keys are labels only; nothing checks them.
 
 `sdk:ruleset` is for a server that evaluates flags locally. These routes answer `403` to a

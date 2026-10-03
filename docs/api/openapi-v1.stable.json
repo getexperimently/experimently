@@ -2540,194 +2540,6 @@
         "title": "DimensionalBreakdownResponse",
         "type": "object"
       },
-      "EdgeBootstrapResponse": {
-        "description": "The deprecated edge bootstrap payload.\n\n`version` is a SHA-256 of the sorted flags and experiments, so it is the\nsame for the same content. `ttl_seconds` is always 60. No Experimently SDK\nreads this payload; server-side local evaluation uses GET /api/v1/sdk/ruleset.",
-        "properties": {
-          "experiments": {
-            "items": {
-              "$ref": "#/components/schemas/EdgeExperiment"
-            },
-            "title": "Experiments",
-            "type": "array"
-          },
-          "flags": {
-            "items": {
-              "$ref": "#/components/schemas/EdgeFeatureFlag"
-            },
-            "title": "Flags",
-            "type": "array"
-          },
-          "ttl_seconds": {
-            "default": 60,
-            "title": "Ttl Seconds",
-            "type": "integer"
-          },
-          "version": {
-            "title": "Version",
-            "type": "string"
-          }
-        },
-        "required": [
-          "flags",
-          "experiments",
-          "version"
-        ],
-        "title": "EdgeBootstrapResponse",
-        "type": "object"
-      },
-      "EdgeExperiment": {
-        "description": "Minimal experiment definition for edge SDK assignment.",
-        "properties": {
-          "enabled": {
-            "title": "Enabled",
-            "type": "boolean"
-          },
-          "key": {
-            "title": "Key",
-            "type": "string"
-          },
-          "variants": {
-            "default": [],
-            "items": {
-              "$ref": "#/components/schemas/EdgeExperimentVariant"
-            },
-            "title": "Variants",
-            "type": "array"
-          }
-        },
-        "required": [
-          "key",
-          "enabled"
-        ],
-        "title": "EdgeExperiment",
-        "type": "object"
-      },
-      "EdgeExperimentVariant": {
-        "description": "Experiment variant for assignment / bucketing.",
-        "properties": {
-          "key": {
-            "title": "Key",
-            "type": "string"
-          },
-          "name": {
-            "title": "Name",
-            "type": "string"
-          },
-          "weight": {
-            "title": "Weight",
-            "type": "number"
-          }
-        },
-        "required": [
-          "key",
-          "name",
-          "weight"
-        ],
-        "title": "EdgeExperimentVariant",
-        "type": "object"
-      },
-      "EdgeFeatureFlag": {
-        "description": "A feature flag as the deprecated edge bootstrap listing returns it.\nUses camelCase keys. `enabled` is true when the flag's status is active.",
-        "properties": {
-          "enabled": {
-            "title": "Enabled",
-            "type": "boolean"
-          },
-          "key": {
-            "title": "Key",
-            "type": "string"
-          },
-          "rolloutPercentage": {
-            "title": "Rolloutpercentage",
-            "type": "number"
-          },
-          "rules": {
-            "default": [],
-            "items": {
-              "$ref": "#/components/schemas/EdgeTargetingRule"
-            },
-            "title": "Rules",
-            "type": "array"
-          },
-          "variants": {
-            "default": [],
-            "items": {
-              "$ref": "#/components/schemas/EdgeFlagVariant"
-            },
-            "title": "Variants",
-            "type": "array"
-          }
-        },
-        "required": [
-          "key",
-          "enabled",
-          "rolloutPercentage"
-        ],
-        "title": "EdgeFeatureFlag",
-        "type": "object"
-      },
-      "EdgeFlagVariant": {
-        "description": "A feature flag variant.",
-        "properties": {
-          "key": {
-            "title": "Key",
-            "type": "string"
-          },
-          "value": {
-            "anyOf": [
-              {},
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Value"
-          },
-          "weight": {
-            "title": "Weight",
-            "type": "number"
-          }
-        },
-        "required": [
-          "key",
-          "weight"
-        ],
-        "title": "EdgeFlagVariant",
-        "type": "object"
-      },
-      "EdgeTargetingRule": {
-        "description": "A targeting rule stored in the legacy list shape.",
-        "properties": {
-          "attribute": {
-            "title": "Attribute",
-            "type": "string"
-          },
-          "operator": {
-            "title": "Operator",
-            "type": "string"
-          },
-          "rolloutPercentage": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Rolloutpercentage"
-          },
-          "value": {
-            "title": "Value"
-          }
-        },
-        "required": [
-          "attribute",
-          "operator",
-          "value"
-        ],
-        "title": "EdgeTargetingRule",
-        "type": "object"
-      },
       "EffectSizeLabel": {
         "description": "Qualitative label for the magnitude of an effect size.\n\nBased on Cohen's conventional thresholds (h or d):\n  NEGLIGIBLE - |d| < 0.2\n  SMALL      - 0.2 <= |d| < 0.5\n  MEDIUM     - 0.5 <= |d| < 0.8\n  LARGE      - |d| >= 0.8",
         "enum": [
@@ -4614,46 +4426,6 @@
         "title": "FeatureFlagCreate",
         "type": "object"
       },
-      "FeatureFlagDefinition": {
-        "description": "A feature flag as the deprecated /openfeature/flags listing returns it.",
-        "properties": {
-          "enabled": {
-            "title": "Enabled",
-            "type": "boolean"
-          },
-          "key": {
-            "title": "Key",
-            "type": "string"
-          },
-          "rollout_percentage": {
-            "title": "Rollout Percentage",
-            "type": "number"
-          },
-          "rules": {
-            "default": [],
-            "items": {
-              "$ref": "#/components/schemas/TargetingRuleResponse"
-            },
-            "title": "Rules",
-            "type": "array"
-          },
-          "variants": {
-            "default": [],
-            "items": {
-              "$ref": "#/components/schemas/FlagVariantResponse"
-            },
-            "title": "Variants",
-            "type": "array"
-          }
-        },
-        "required": [
-          "key",
-          "enabled",
-          "rollout_percentage"
-        ],
-        "title": "FeatureFlagDefinition",
-        "type": "object"
-      },
       "FeatureFlagListResponse": {
         "description": "Paginated response model for feature flags.",
         "example": {
@@ -5227,49 +4999,6 @@
           "user_id"
         ],
         "title": "FlagEvaluationRequest",
-        "type": "object"
-      },
-      "FlagVariantResponse": {
-        "properties": {
-          "key": {
-            "title": "Key",
-            "type": "string"
-          },
-          "value": {
-            "anyOf": [
-              {},
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Value"
-          },
-          "weight": {
-            "title": "Weight",
-            "type": "number"
-          }
-        },
-        "required": [
-          "key",
-          "weight"
-        ],
-        "title": "FlagVariantResponse",
-        "type": "object"
-      },
-      "FlagsListResponse": {
-        "properties": {
-          "flags": {
-            "items": {
-              "$ref": "#/components/schemas/FeatureFlagDefinition"
-            },
-            "title": "Flags",
-            "type": "array"
-          }
-        },
-        "required": [
-          "flags"
-        ],
-        "title": "FlagsListResponse",
         "type": "object"
       },
       "ForgotPasswordRequest": {
@@ -10565,28 +10294,6 @@
         "title": "SubmitEvaluationRequest",
         "type": "object"
       },
-      "TargetingRuleResponse": {
-        "properties": {
-          "attribute": {
-            "title": "Attribute",
-            "type": "string"
-          },
-          "operator": {
-            "title": "Operator",
-            "type": "string"
-          },
-          "value": {
-            "title": "Value"
-          }
-        },
-        "required": [
-          "attribute",
-          "operator",
-          "value"
-        ],
-        "title": "TargetingRuleResponse",
-        "type": "object"
-      },
       "TestNotificationRequest": {
         "properties": {
           "channel": {
@@ -15052,38 +14759,6 @@
         "summary": "Generate compliance report",
         "tags": [
           "Compliance"
-        ]
-      }
-    },
-    "/api/v1/edge/bootstrap": {
-      "get": {
-        "deprecated": true,
-        "description": "**Deprecated.** For server-side local evaluation use `GET /api/v1/sdk/ruleset`, with an API key that carries the `sdk:ruleset` scope; to evaluate one flag use `GET /api/v1/feature-flags/evaluate/{flag_key}`. No Experimently SDK calls this route. It still answers as before and may be removed in a later release.\n\nReturns the feature flags and experiments owned by the user who created the API key, not every flag in the deployment.\n\n- A flag's `rules` carry only rules stored in the legacy list shape. Rules written in the dashboard's shape are left out, so a flag that has them is returned with `rules: []`.\n- A flag's `enabled` is true when its status is active.\n- An experiment's `key` is derived from its name (lower-cased, spaces replaced by hyphens), not the experiment's own `key`.\n- `version` is a SHA-256 of the flags and experiments, the same for the same content. `ttl_seconds` is always 60.\n\n**Authentication**: a valid API key in the `X-API-Key` header.",
-        "operationId": "get_edge_bootstrap_api_v1_edge_bootstrap_get",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/EdgeBootstrapResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "401": {
-            "description": "Missing or invalid API key"
-          }
-        },
-        "security": [
-          {
-            "APIKeyHeader": []
-          }
-        ],
-        "summary": "Flags and experiments owned by the API key's user (deprecated)",
-        "tags": [
-          "Edge",
-          "Edge"
         ]
       }
     },
@@ -21646,38 +21321,6 @@
         "summary": "Send Test Notification",
         "tags": [
           "Notifications"
-        ]
-      }
-    },
-    "/api/v1/openfeature/flags": {
-      "get": {
-        "deprecated": true,
-        "description": "**Deprecated.** Neither OpenFeature provider calls this route: both evaluate through `GET /api/v1/feature-flags/evaluate/{flag_key}`. For server-side local evaluation use `GET /api/v1/sdk/ruleset`, with an API key that carries the `sdk:ruleset` scope. This route still answers as before and may be removed in a later release.\n\nReturns the feature flags visible to the user who created the API key. A flag's `rules` carry only rules stored in the legacy list shape; rules written in the dashboard's shape are left out, so a flag that has them is returned with `rules: []`. A flag's `enabled` is true when its status is active.",
-        "operationId": "get_openfeature_flags_api_v1_openfeature_flags_get",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/FlagsListResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "401": {
-            "description": "Missing or invalid API key"
-          }
-        },
-        "security": [
-          {
-            "APIKeyHeader": []
-          }
-        ],
-        "summary": "Flag definitions for the API key's user (deprecated)",
-        "tags": [
-          "OpenFeature",
-          "OpenFeature"
         ]
       }
     },

@@ -26,6 +26,11 @@
     "provider"
   ],
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/getexperimently/experimently",
+    "directory": "sdk/openfeature"
+  },
   "dependencies": {
     "@getexperimently/js-sdk": "file:../js"
   },
