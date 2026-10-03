@@ -207,25 +207,16 @@ Resolved with `license-checker-rseidelsohn --production`.
 
 These are the dashboard's **build-time** dependencies. The dashboard image runs nginx over the static Next.js export: `frontend/Dockerfile`'s runtime stage copies `frontend/out` and the nginx configuration and nothing else, so none of the packages below is redistributed in it. They are listed because anyone building the dashboard from source resolves them.
 
-#### MIT (103)
+#### MIT (39)
 
 | Package | Version |
 |---|---|
-| `@alloc/quick-lru` | 5.2.0 |
 | `@img/colour` | 1.1.0 |
-| `@jridgewell/gen-mapping` | 0.3.13 |
-| `@jridgewell/resolve-uri` | 3.1.2 |
-| `@jridgewell/sourcemap-codec` | 1.5.5 |
-| `@jridgewell/trace-mapping` | 0.3.31 |
 | `@next/env` | 16.3.6 |
 | `@next/swc-linux-x64-gnu` | 16.3.6 |
-| `@nodelib/fs.scandir` | 2.1.5 |
-| `@nodelib/fs.stat` | 2.0.5 |
-| `@nodelib/fs.walk` | 1.2.8 |
 | `@reduxjs/toolkit` | 2.11.2 |
 | `@standard-schema/spec` | 1.1.0 |
 | `@standard-schema/utils` | 0.3.0 |
-| `@tailwindcss/typography` | 0.5.20 |
 | `@types/d3-array` | 3.2.2 |
 | `@types/d3-color` | 3.1.3 |
 | `@types/d3-ease` | 3.0.2 |
@@ -237,89 +228,33 @@ These are the dashboard's **build-time** dependencies. The dashboard image runs 
 | `@types/d3-timer` | 3.0.2 |
 | `@types/react` | 19.3.0 |
 | `@types/use-sync-external-store` | 0.0.6 |
-| `any-promise` | 1.3.0 |
-| `arg` | 5.0.2 |
-| `binary-extensions` | 2.3.0 |
-| `braces` | 3.0.3 |
-| `camelcase-css` | 2.0.1 |
-| `chokidar` | 3.6.0 |
 | `client-only` | 0.0.1 |
 | `clsx` | 2.1.1 |
-| `commander` | 4.1.1 |
-| `cssesc` | 3.0.0 |
 | `csstype` | 3.2.3 |
 | `decimal.js-light` | 2.5.1 |
-| `dlv` | 1.1.3 |
 | `es-toolkit` | 1.44.0 |
 | `eventemitter3` | 5.0.4 |
-| `fast-glob` | 3.3.3 |
-| `fdir` | 6.5.0 |
-| `fill-range` | 7.1.1 |
-| `function-bind` | 1.1.2 |
-| `hasown` | 2.0.4 |
 | `immer` | 11.1.18 |
-| `is-binary-path` | 2.1.0 |
-| `is-core-module` | 2.16.2 |
-| `is-extglob` | 2.1.1 |
-| `is-glob` | 4.0.3 |
-| `is-number` | 7.0.0 |
-| `jiti` | 1.21.7 |
-| `lilconfig` | 3.1.3 |
-| `lines-and-columns` | 1.2.4 |
-| `merge2` | 1.4.1 |
-| `micromatch` | 4.0.8 |
-| `mz` | 2.7.0 |
 | `nanoid` | 3.3.18 |
 | `next` | 16.3.6 |
-| `normalize-path` | 3.0.0 |
-| `object-assign` | 4.1.1 |
-| `object-hash` | 3.0.0 |
-| `path-parse` | 1.0.7 |
-| `picomatch` | 2.3.2 |
-| `picomatch` | 4.0.7 |
-| `pify` | 2.3.0 |
-| `pirates` | 4.0.7 |
 | `postcss` | 8.5.23 |
-| `postcss` | 8.5.28 |
-| `postcss-import` | 15.1.0 |
-| `postcss-js` | 4.1.0 |
-| `postcss-load-config` | 6.0.1 |
-| `postcss-nested` | 6.2.0 |
-| `postcss-selector-parser` | 6.0.10 |
-| `postcss-selector-parser` | 6.1.4 |
-| `postcss-value-parser` | 4.2.0 |
-| `queue-microtask` | 1.2.3 |
 | `react` | 19.3.0 |
 | `react-dom` | 19.3.0 |
 | `react-is` | 19.2.4 |
 | `react-redux` | 9.2.0 |
-| `read-cache` | 1.0.0 |
-| `readdirp` | 3.6.0 |
 | `recharts` | 3.10.1 |
 | `redux` | 5.0.1 |
 | `redux-thunk` | 3.1.0 |
 | `reselect` | 5.2.0 |
-| `resolve` | 1.22.11 |
-| `reusify` | 1.1.0 |
-| `run-parallel` | 1.2.0 |
 | `scheduler` | 0.28.0 |
 | `styled-jsx` | 5.1.6 |
-| `sucrase` | 3.35.1 |
-| `supports-preserve-symlinks-flag` | 1.0.0 |
-| `tailwindcss` | 3.4.19 |
-| `thenify` | 3.3.1 |
-| `thenify-all` | 1.6.0 |
 | `tiny-invariant` | 1.3.3 |
-| `tinyglobby` | 0.2.15 |
-| `to-regex-range` | 5.0.1 |
 | `use-sync-external-store` | 1.6.0 |
-| `util-deprecate` | 1.0.2 |
 
-#### ISC (17)
+#### ISC (13)
 
 | Package | Version |
 |---|---|
-| `anymatch` | 3.1.3 |
 | `d3-array` | 3.2.4 |
 | `d3-color` | 3.1.0 |
 | `d3-format` | 3.1.2 |
@@ -330,14 +265,11 @@ These are the dashboard's **build-time** dependencies. The dashboard image runs 
 | `d3-time` | 3.1.0 |
 | `d3-time-format` | 4.1.0 |
 | `d3-timer` | 3.0.1 |
-| `fastq` | 1.19.1 |
-| `glob-parent` | 5.1.2 |
-| `glob-parent` | 6.0.2 |
 | `internmap` | 2.0.3 |
 | `picocolors` | 1.1.1 |
 | `semver` | 7.8.5 |
 
-#### Apache-2.0 (11)
+#### Apache-2.0 (9)
 
 | Package | Version |
 |---|---|
@@ -347,11 +279,9 @@ These are the dashboard's **build-time** dependencies. The dashboard image runs 
 | `@swc/helpers` | 0.5.23 |
 | `baseline-browser-mapping` | 2.11.21 |
 | `detect-libc` | 2.1.2 |
-| `didyoumean` | 1.2.2 |
 | `playwright` | 1.63.0 |
 | `playwright-core` | 1.63.0 |
 | `sharp` | 0.35.4 |
-| `ts-interface-checker` | 0.1.13 |
 
 #### BSD-3-Clause (2)
 
