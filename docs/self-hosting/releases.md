@@ -142,3 +142,10 @@ with no registry account yet is listed as `unwired` in
 `scripts/check_sdk_version.py`, and tagging one is refused rather than quietly
 publishing nothing; `backend/tests/smoke/test_sdk_release_wiring.py` fails if
 an SDK in the tree is missing from that list altogether.
+
+Publish `sdk/js` before `sdk/openfeature`; the provider's release refuses until
+the matching `@getexperimently/js-sdk` is on npm. The provider's source depends
+on `file:../js` so that its tests run against the JS SDK in the same tree; the
+npm job rewrites that to `^<sdk/js version>` before packing, checks the
+`package.json` inside the packed tarball, installs the tarball in an empty
+directory, and publishes that same tarball.

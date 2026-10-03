@@ -226,17 +226,99 @@ jobs:
           npm test --if-present
           npm run build --if-present
 
-      # What `npm publish` would actually upload. A package whose `files` list
-      # is missing ships its sources and tests, or -- worse -- ships no `dist`
-      # at all and installs as an empty module; both have happened to other
-      # people's SDKs and neither fails a test.
-      - name: Show the package contents
+      # The published manifest must install from npm. sdk/openfeature depends
+      # on @getexperimently/js-sdk as `file:../js` so its tests run against the
+      # JS SDK in this tree; `npm pack` copies that spec into the tarball
+      # unchanged and `npm publish` does not resolve it (#687). This rewrites
+      # each `file:` dependency to `^<that package's version on this ref>` and
+      # refuses any other non-registry spec. For an SDK with no `file:`
+      # dependency it rewrites nothing and writes an empty list.
+      # Standard library only, so the runner's python3 is enough.
+      - name: Pin local dependencies to npm ranges
+        id: pin
+        env:
+          SDK: ${{ needs.resolve.outputs.sdk }}
+        run: |
+          set -euo pipefail
+          python3 scripts/pin_npm_local_deps.py "sdk/$SDK" --rewrites-file "$RUNNER_TEMP/rewrites.txt"
+          printf 'rewritten=%s\n' "$(wc -l < "$RUNNER_TEMP/rewrites.txt" | tr -d ' ')" >> "$GITHUB_OUTPUT"
+
+      # Publish order: the provider names js-sdk at the version in this tree,
+      # so that version has to be on npm before the provider is published.
+      # `npm view` exits 1 (E404) when it is not. Skipped when nothing was
+      # rewritten; if the condition ever misreads, the empty list fails here.
+      - name: Each pinned dependency is already on npm
+        if: steps.pin.outputs.rewritten != '0'
+        run: |
+          set -euo pipefail
+          if [ ! -s "$RUNNER_TEMP/rewrites.txt" ]; then
+            printf '%s\n' "::error::no rewritten dependency was recorded, but this step only runs when there is one"
+            exit 1
+          fi
+          while read -r spec; do
+            if ! npm view "$spec" version; then
+              printf '%s\n' "::error::$spec is not on npm yet, so this package would install without it. Publish that package first (its own sdk/<name>/v<version> tag), then re-run this release with the same tag."
+              exit 1
+            fi
+          done < "$RUNNER_TEMP/rewrites.txt"
+
+      # What `npm publish` will upload: this exact tarball is published below.
+      # A package whose `files` list is missing ships its sources and tests, or
+      # -- worse -- ships no `dist` at all and installs as an empty module; the
+      # listing `npm pack` prints is where that shows.
+      - name: Pack
+        id: pack
         working-directory: sdk/${{ needs.resolve.outputs.sdk }}
-        run: npm pack --dry-run
+        run: |
+          set -euo pipefail
+          dest="$RUNNER_TEMP/pack"
+          mkdir -p "$dest"
+          npm pack --pack-destination "$dest"
+          shopt -s nullglob
+          tarballs=("$dest"/*.tgz)
+          if [ "${#tarballs[@]}" -ne 1 ]; then
+            printf '%s\n' "::error::expected one tarball in $dest, found ${#tarballs[@]}"
+            exit 1
+          fi
+          printf 'tgz=%s\n' "${tarballs[0]}" >> "$GITHUB_OUTPUT"
+
+      # `npm pack --dry-run --json` lists files, not dependencies, so check the
+      # package.json inside the tarball itself.
+      - name: The packed package.json has registry ranges only
+        env:
+          TGZ: ${{ steps.pack.outputs.tgz }}
+        run: |
+          set -euo pipefail
+          out="$RUNNER_TEMP/extract"
+          rm -rf "$out"
+          mkdir -p "$out"
+          tar -xzf "$TGZ" -C "$out" package/package.json
+          python3 scripts/pin_npm_local_deps.py --check-only "$out/package/package.json"
+
+      # A consumer installs the tarball alone, so every dependency resolves
+      # from npm. `npm install` and `require()` both exit 0 over a dangling
+      # `file:` link; `npm ls --all` is what fails on one. No lifecycle
+      # scripts run, and peers are the versions this SDK's lock was tested with.
+      - name: A consumer can install the tarball
+        env:
+          SDK: ${{ needs.resolve.outputs.sdk }}
+          TGZ: ${{ steps.pack.outputs.tgz }}
+        run: |
+          set -euo pipefail
+          peers="$(python3 scripts/pin_npm_local_deps.py --print-peer-pins "sdk/$SDK")"
+          consumer="$RUNNER_TEMP/consumer"
+          rm -rf "$consumer"
+          mkdir -p "$consumer"
+          cd "$consumer"
+          npm init -y > /dev/null
+          # shellcheck disable=SC2086  # one peer pin per word
+          npm install --ignore-scripts --no-audit --no-fund "$TGZ" $peers
+          npm ls --all
 
       - name: Publish
-        working-directory: sdk/${{ needs.resolve.outputs.sdk }}
-        run: npm publish --provenance --access public
+        env:
+          TGZ: ${{ steps.pack.outputs.tgz }}
+        run: npm publish "$TGZ" --provenance --access public
 
   # ---------------------------------------------------------------------------
   # Go: nothing to upload. `go get` resolves the tag from the repository, so
