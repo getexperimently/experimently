@@ -50,7 +50,13 @@ the server's `md5-mod100-v1` bucketing instead.
 "Verified live" means the SDK's `contract_smoke` entry point passed
 `tests/sdk-contract/live/run_live_contract.py` against a running backend (see
 [tests/sdk-contract/README.md](https://github.com/getexperimently/experimently/blob/main/tests/sdk-contract/README.md)); the `SDK Live Contract` CI job repeats
-this on every pull request for the SDKs whose toolchain is available on Linux.
+this on every pull request, with `--strict`, for python, openfeature-python, js, openfeature, edge,
+react, react-native, go, java, android, ruby, php and dotnet (the `sdks:` list of the job in
+[pr-qa-gate.yml](https://github.com/getexperimently/experimently/blob/main/.github/workflows/pr-qa-gate.yml)).
+Each SDK's own unit tests run in
+[sdk-unit-tests.yml](https://github.com/getexperimently/experimently/blob/main/.github/workflows/sdk-unit-tests.yml):
+the Linux SDKs on pull requests that touch them (js, python and react on every one), and elixir, flutter, android and ios nightly and
+when touched.
 
 | SDK | Location | Unit tests | Verified live | Docs |
 |---|---|---|---|---|
@@ -58,22 +64,22 @@ this on every pull request for the SDKs whose toolchain is available on Linux.
 | JavaScript / TypeScript | `sdk/js` | 171 (jest) | yes, including local evaluation | [javascript.md](sdk/javascript.md), [local-evaluation.md](sdk/local-evaluation.md) |
 | OpenFeature (JS) | `sdk/openfeature` | 51 (jest) | yes | [openfeature.md](sdk/openfeature.md) |
 | Edge (Cloudflare Workers) | `sdk/edge` | 101 (jest) | yes | [edge.md](sdk/edge.md) |
-| React Native | `sdk/react-native` | jest | unit tests only (no device runtime) | [react-native.md](sdk/react-native.md) |
+| React Native | `sdk/react-native` | jest | yes, in CI — the smoke runs under jest in Node (no device runtime) | [react-native.md](sdk/react-native.md) |
 | Python | `sdk/python` | 182 (pytest, Python 3.9+) | yes, including local evaluation | [python.md](sdk/python.md), [local-evaluation.md](sdk/local-evaluation.md) |
 | OpenFeature (Python) | `sdk/openfeature-python` | 79 (pytest) | yes | [openfeature.md](sdk/openfeature.md) |
 | Go | `sdk/go` | 51 (`go test -race`) | yes | [go.md](sdk/go.md) |
 | Java + Spring Boot starter | `sdk/java` | 77 + 30 (JUnit 5) | yes | [java.md](sdk/java.md) |
-| iOS (Swift) | `sdk/ios` | 71 (XCTest) | yes | [ios.md](sdk/ios.md) |
+| iOS (Swift) | `sdk/ios` | 71 (XCTest) | not yet (unit tests run in the nightly tier) | [ios.md](sdk/ios.md) |
 | Ruby | `sdk/ruby` | 109 (RSpec) | yes | [ruby.md](sdk/ruby.md) |
 | PHP | `sdk/php` | PHPUnit | in CI only (no PHP on the dev machine) | [php.md](sdk/php.md) |
 | .NET | `sdk/dotnet` | xUnit | in CI only (no .NET on the dev machine) | [dotnet.md](sdk/dotnet.md) |
-| Android (Kotlin) | `sdk/android` | JUnit 5 | not yet (needs the Android SDK) | [android.md](sdk/android.md) |
-| Flutter / Dart | `sdk/flutter` | `dart test` | not yet (needs the Dart SDK) | [flutter.md](sdk/flutter.md) |
-| Elixir | `sdk/elixir` | ExUnit | not yet (needs Elixir) | [elixir.md](sdk/elixir.md) |
+| Android (Kotlin) | `sdk/android` | JUnit 5 | yes, in CI — the smoke runs the JVM build of the Kotlin sources (no emulator); the Android library tests run in the nightly tier | [android.md](sdk/android.md) |
+| Flutter / Dart | `sdk/flutter` | `dart test` | not yet (unit tests run in the nightly tier) | [flutter.md](sdk/flutter.md) |
+| Elixir | `sdk/elixir` | ExUnit | not yet (unit tests run in the nightly tier) | [elixir.md](sdk/elixir.md) |
 
-Rows marked "not yet" were rewired by inspection and reviewed line by line, but their tests and smoke
-have not been executed anywhere; run `run_live_contract.py --sdk <name> --strict` on a machine with the
-toolchain before relying on them.
+Rows marked "not yet" have a `contract_smoke` entry point that no CI job runs against a live backend;
+their unit tests run in the nightly tier and on pull requests that touch them. Run `run_live_contract.py --sdk <name> --strict` on a
+machine with the toolchain before relying on them.
 
 ---
 

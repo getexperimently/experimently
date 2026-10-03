@@ -267,7 +267,7 @@ the core through the registration hooks in `backend/app/core/`:
 | `sso` | OIDC identity providers with just-in-time provisioning and role mapping. SAML 2.0 sign-in is not available yet; use OIDC |
 | `hipaa` | PHI encryption, six-year PHI audit retention, BAA records |
 | `compliance` | SOC 2 / ISO 27001 reports, signed audit exports |
-| `warehouse` | Being rebuilt (#312): no endpoints today |
+| `warehouse` | Warehouse analysis (beta): run an experiment's analysis on tables in your own warehouse, under `/api/v1/warehouse/analysis` (connections, sources, runs). No connector is enabled yet; `GET /api/v1/warehouse/analysis/connectors` lists which are. See [docs/api/warehouse-analytics.md](docs/api/warehouse-analytics.md) |
 | `integrations` | Jira, Salesforce and GitHub |
 | `counters` | DynamoDB-backed live assignment and conversion counters |
 | `etl` | Glue crawlers, Athena partitions and scheduled jobs |
