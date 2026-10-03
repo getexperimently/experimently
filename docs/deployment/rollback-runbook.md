@@ -62,7 +62,7 @@ Is any of the following true?
           |         v
           |   Is it a database schema issue?
           |         |
-          |   YES ──→ ROLLBACK APPLICATION + DATABASE (Method 1 + DB Rollback section)
+          |   YES ──→ DATABASE FIRST, THEN APPLICATION (DB Rollback section, then Method 1)
           |   NO  ──→ HOTFIX (deploy new tag following standard procedure)
           |
           |   Only the dashboard is broken, and the API is fine?
@@ -154,8 +154,9 @@ newer one migrated and serves it. That is correct only when every migration
 since the target release is backward-compatible, which is the rule migrations
 here follow ([Deployment Guide](deployment-guide.md#backward-compatible-migrations)).
 When one is not -- it dropped or renamed something the target release reads --
-rolling the API back is not enough: restore the snapshot the deploy took before
-migrating ([Database Rollback Procedure](#database-rollback-procedure)).
+rolling the API back is not enough, and the order matters: undo the migration
+while the release that ran it is still serving, then roll the API back
+([Database Rollback Procedure](#database-rollback-procedure)).
 
 Check the target's environment before you roll back to it:
 
@@ -696,7 +697,21 @@ and do not leave the environment in this state longer than the fix takes.
 
 ## Database Rollback Procedure
 
-**Only use this section if a database migration caused the issue.** Application rollback (Methods 1–3) must be completed first or in parallel. Database rollback is higher risk and requires Engineering Lead approval if data loss is possible.
+**Only use this section if a database migration caused the issue.** Database rollback is higher risk and requires Engineering Lead approval if data loss is possible.
+
+**Undo the migration before you roll the API back.** The Database Migration
+workflow has no image input: it runs `alembic` with the image of the API's
+PRIMARY task set. So the workflow downgrade works only while the release that
+contains the migration is PRIMARY. Run Step 2 first, and only then roll the API
+back with Methods 1–3.
+
+**After an API rollback or an alarm rollback, there is no supported downgrade
+through the workflow.** The image now serving does not contain the migration's
+file, so `alembic` cannot locate the database's revision. The workflow fails at
+"Show the current revision", after it has already taken a snapshot, and changes
+nothing. Do not dispatch it to try. The documented recovery from that state is
+the point-in-time restore in Step 3, and the tasks cannot pick up a restored
+cluster today. Call the Engineering Lead now.
 
 ### Step 1: Confirm Migration is the Root Cause
 
@@ -704,7 +719,7 @@ Before touching the database, confirm all of the following:
 
 - Error logs contain schema-related errors (e.g., `column "X" does not exist`, `relation "Y" does not exist`, `UndefinedColumn`, `ProgrammingError`)
 - The failure correlates with the migration that ran during this deployment
-- Application rollback alone did not resolve the issue
+- The API has not been rolled back: the release that ran the migration is still PRIMARY. If Rollback or an alarm has already rolled it back, go to Step 3 and call the Engineering Lead
 
 Check migration logs from the ECS migration task:
 
@@ -727,17 +742,30 @@ The current revision is printed by the Database Migration workflow's
    - **Target:** `-1` (reverts the single most recent migration)
 3. Click **Run workflow**
 
-After the downgrade completes, redeploy the previous application version using Method 1.
+Once the downgrade has completed, roll the API back (Method 1). Not before: after the API is rolled back, the workflow can no longer read this migration.
 
-### Step 3: Emergency — Restore from Aurora Snapshot
+### Step 3: Emergency — Point-in-time restore to a new cluster
 
-**This causes data loss for the period since the snapshot was taken. Escalate to the Engineering Lead before proceeding.**
+**This causes data loss for the period after the time you restore to. Call the Engineering Lead before proceeding.**
 
 Only take this path if:
-- The migration downgrade failed or is not available
+- The API has already been rolled back (by Rollback or by an alarm), so the workflow cannot downgrade, or the downgrade in Step 2 failed
 - The migration is not backward-compatible, so the release you rolled back to cannot run against the migrated schema
 - The migration caused data corruption or irreversible data loss
 - The Engineering Lead has explicitly approved this path
+
+**STOP. A restore to a NEW cluster cannot be picked up by a redeploy today.**
+
+Both backend task definitions take `POSTGRES_SERVER` from the database STACK's writer endpoint, and `POSTGRES_USER` and `POSTGRES_PASSWORD` from the generated secret of the stack, as CloudFormation imports, issue 78. A cluster restored beside the stack is not that endpoint, so there is no connection string in Secrets Manager to update, and a new deployment would bring the tasks back pointing at the original cluster -- while this runbook reported success. The restored cluster also keeps the master password of the snapshot, which is the one in the secret only if it has not been rotated since.
+
+So restoring to `$CLUSTER-restored` means one of:
+
+- restore IN PLACE instead, so the endpoint the tasks already resolve does not change, or
+- repoint the DNS name the tasks use at the restored cluster, or
+- change the database stack to own the restored cluster and `cdk deploy` it and the Fargate
+  stack, which rewrites the imported endpoint.
+
+Decide which BEFORE an incident. Tracked as a gap in the deploy path.
 
 The cluster's identifier is generated by CloudFormation; the stack publishes it:
 
@@ -746,8 +774,9 @@ CLUSTER=$(aws cloudformation describe-stacks --stack-name "experimentation-datab
   --query "Stacks[0].Outputs[?OutputKey=='ClusterIdentifier'].OutputValue" --output text)
 ```
 
-Find the most recent pre-deployment snapshot. A deploy takes one before
-migrating, named `pre-deploy-<env>-<tag>-<time>`; a manual migration's is named
+Find when the most recent pre-deployment snapshot was taken; the restore time
+must be before the migration. A deploy takes a snapshot before migrating, named
+`pre-deploy-<env>-<tag>-<time>`; a manual migration's is named
 `pre-migration-...`:
 
 ```bash
@@ -767,7 +796,7 @@ aws rds describe-db-clusters --db-cluster-identifier "$CLUSTER" \
   --query 'DBClusters[].BackupRetentionPeriod'
 ```
 
-Restore to a new cluster from the target snapshot (~30 min):
+Restore to a new cluster at a time before the migration (~30 min):
 
 ```bash
 aws rds restore-db-cluster-to-point-in-time \
@@ -777,19 +806,6 @@ aws rds restore-db-cluster-to-point-in-time \
   --db-subnet-group-name "<the cluster's DB subnet group>" \
   --vpc-security-group-ids "<aurora-sg-id>"
 ```
-
-**STOP. A restore to a NEW cluster cannot be picked up by a redeploy today.**
-
-Both backend task definitions take `POSTGRES_SERVER` from the database STACK's writer endpoint, and `POSTGRES_USER` and `POSTGRES_PASSWORD` from the generated secret of the stack, as CloudFormation imports, issue 78. A cluster restored beside the stack is not that endpoint, so there is no connection string in Secrets Manager to update, and a new deployment would bring the tasks back pointing at the original cluster -- while this runbook reported success. The restored cluster also keeps the master password of the snapshot, which is the one in the secret only if it has not been rotated since.
-
-So restoring to `$CLUSTER-restored` means one of:
-
-- restore IN PLACE instead, so the endpoint the tasks already resolve does not change, or
-- repoint the DNS name the tasks use at the restored cluster, or
-- change the database stack to own the restored cluster and `cdk deploy` it and the Fargate
-  stack, which rewrites the imported endpoint.
-
-Decide which BEFORE an incident. Tracked as a gap in the deploy path.
 
 The restart below is correct for this controller and is what you run once the tasks would come back pointing at the right database. Through CodeDeploy, naming the revision already serving: `aws ecs update-service --force-new-deployment` is the usual way to restart a service and is not documented either way for a CODE_DEPLOY-controlled service, which this one is. Rather than find out during a restore, use the call that is correct for this controller regardless:
 
@@ -818,7 +834,7 @@ aws deploy create-deployment \
   --revision "$(jq -cn --arg c "$APPSPEC" '{revisionType:"AppSpecContent",appSpecContent:{content:$c}}')"
 ```
 
-**RTO for snapshot restore: ~30 minutes. RPO: 5 minutes (PITR window).**
+**RTO for a point-in-time restore: ~30 minutes. RPO: 5 minutes (PITR window).**
 
 ---
 
