@@ -26,6 +26,7 @@ from backend.tests.unit.infrastructure.test_dashboard_deploy_wiring import (
 from backend.tests.unit.infrastructure.test_forward_deploy_completes import NEW
 from backend.tests.unit.infrastructure.test_rollback_false_success import (
     BAD_ID,
+    CD_REVERT_ID,
     PRIMARY_QUERY,
     ROLLBACK_ID,
     TARGET,
@@ -229,7 +230,7 @@ def test_a_failed_read_of_a_failed_deployments_error_still_says_it_failed(runner
 def _stop_step(runner, statuses: list, **overrides: str):
     runner.scenario(
         [
-            rule("deploy list-deployments", answers=[BAD_ID]),
+            rule("deploy list-deployments", answers=[BAD_ID, "", ""]),
             rule("deploy get-deployment", BAD_ID, "creator", answers=["user\tNone"]),
             rule("deploy stop-deployment", BAD_ID, answers=[""]),
             rule(
@@ -268,6 +269,146 @@ def test_the_stop_steps_wait_ends_labelled_on_persistent_throttling(runner):
         if c[:2] == ["deploy", "get-deployment"] and "deploymentInfo.status" in c
     ]
     assert len(polls) == STOP_LIMIT, polls
+
+
+# --- #783: the wait for an idle deployment group after the stop -----------------------
+
+#: The wait reads the group at most this many times, 5 s apart.
+GROUP_IDLE_POLLS = 60
+CD = CD_REVERT_ID
+LIST_THROTTLE = {
+    "error": "An error occurred (ThrottlingException) when calling the "
+    "ListDeployments operation (reached max retries: 2): Rate exceeded"
+}
+
+
+def _wait(runner, after_stop: list):
+    """The stop step alone, with a user deployment stopped and read Stopped;
+    `after_stop` is what each list-deployments read after the stop answers
+    (the last one repeats)."""
+    runner.scenario(
+        [
+            rule("deploy list-deployments", answers=[BAD_ID, *after_stop]),
+            rule("deploy get-deployment", BAD_ID, "creator", answers=["user\tNone"]),
+            rule("deploy stop-deployment", BAD_ID, answers=[""]),
+            rule(
+                "deploy get-deployment",
+                BAD_ID,
+                "deploymentInfo.status",
+                answers=["Stopped"],
+            ),
+        ]
+    )
+    step = _step(ROLLBACK, "Stop any deployment already in flight")
+    code, log, written, _ = runner.run(ROLLBACK, step, {"target": {"arn": TARGET}})
+    lists = _ops(runner).count("deploy list-deployments")
+    return code, log, written, lists
+
+
+def _titled(log: str, title: str) -> str:
+    (line,) = [x for x in log.splitlines() if x.startswith(f"::error title={title}::")]
+    return line
+
+
+@pytest.mark.regression
+def test_the_wait_proceeds_on_two_empty_reads_after_busy_ones(runner):
+    """V1: busy, busy, empty, empty. Planted defect: proceed on the first
+    empty read (one list fewer)."""
+    code, log, written, lists = _wait(runner, [CD, CD, ""])
+    assert code == 0, log
+    assert lists == 1 + 4, lists
+    assert log.count(f"deployment group still busy: {CD}") == 2
+    assert "Deployment group still busy" not in log
+    assert written == {}
+
+
+@pytest.mark.regression
+def test_a_failed_read_in_the_wait_is_read_again(runner):
+    """V3: busy, failed, empty, empty. Planted defect: a failed read counts
+    as empty (one list fewer)."""
+    code, log, _, lists = _wait(runner, [CD, LIST_THROTTLE, ""])
+    assert code == 0, log
+    assert lists == 1 + 4, lists
+    assert "could not read from AWS" in log
+
+
+@pytest.mark.regression
+def test_a_failed_read_neither_breaks_nor_extends_the_empty_streak(runner):
+    """Throttled every other read: empty, failed, empty is two empty reads in
+    a row. Before the rule was written down, this shape ended in "still busy"
+    with nothing to name."""
+    code, log, _, lists = _wait(runner, [LIST_THROTTLE, ""] * 3)
+    assert code == 0, log
+    assert lists == 1 + 4, lists
+    assert "Deployment group still busy" not in log
+    assert "could not confirm" not in log
+
+
+@pytest.mark.regression
+def test_twelve_failed_reads_in_the_wait_end_could_not_read(runner):
+    code, log, _, lists = _wait(runner, [LIST_THROTTLE])
+    assert code == 1, log
+    line = _titled(log, "Rollback could not read AWS")
+    assert (
+        f"{STOP_LIMIT} reads in a row of the deployment group's active "
+        f"deployments failed after this run stopped {BAD_ID}" in line
+    ), line
+    assert "created no rollback deployment" in line
+    assert "ListDeployments operation" in line
+    assert lists == 1 + STOP_LIMIT, lists
+
+
+@pytest.mark.regression
+def test_a_busy_read_then_failures_is_could_not_read_not_still_busy(runner):
+    """[CD, THROTTLE x11, ...]: the read-failure limit is reached first, and
+    no message names d-CD as still busy from a read a minute old."""
+    code, log, _, lists = _wait(runner, [CD] + [LIST_THROTTLE] * 11)
+    assert code == 1, log
+    _titled(log, "Rollback could not read AWS")
+    assert "Deployment group still busy" not in log
+    assert lists == 1 + 1 + STOP_LIMIT, lists
+
+
+@pytest.mark.regression
+def test_still_busy_at_the_cap_says_how_old_its_last_read_is(runner):
+    """[CD, THROTTLE x11] five times: the cap, with the last successful read
+    busy 55 s before the end."""
+    code, log, _, lists = _wait(runner, ([CD] + [LIST_THROTTLE] * 11) * 5)
+    assert code == 1, log
+    line = _titled(log, "Deployment group still busy")
+    assert f"(last read 55 s ago) still listed: {CD}." in line, line
+    assert "Rollback could not read AWS" not in log
+    assert lists == 1 + GROUP_IDLE_POLLS, lists
+
+
+@pytest.mark.regression
+def test_an_empty_read_then_failures_at_the_cap_could_not_confirm_idle(runner):
+    """At the cap with no busy read since the last empty one: a distinct
+    message with the failure count, never "still busy"."""
+    after = ([CD] + [LIST_THROTTLE] * 11) * 4 + [""] + [LIST_THROTTLE] * 11
+    code, log, _, lists = _wait(runner, after)
+    assert code == 1, log
+    line = _titled(log, "Rollback could not confirm the group idle")
+    assert "11 reads after it failed" in line, line
+    assert "created no rollback deployment" in line
+    assert "Deployment group still busy" not in log
+    assert "Rollback could not read AWS" not in log
+    assert lists == 1 + GROUP_IDLE_POLLS, lists
+
+
+@pytest.mark.regression
+def test_the_waits_aws_error_loses_the_account_id(runner):
+    """The wait's failed read goes through the shared helper and `scrub`."""
+    denied = {
+        "error": "An error occurred (AccessDeniedException) when calling the "
+        "ListDeployments operation: User: arn:aws:sts::123456789012:assumed-role/"
+        "deploy/x is not authorized to perform: codedeploy:ListDeployments"
+    }
+    code, log, _, _ = _wait(runner, [denied])
+    assert code == 1, log
+    line = _titled(log, "Rollback could not read AWS")
+    assert "arn:aws:sts::<account>:assumed-role" in line, line
+    assert "123456789012" not in log
 
 
 # --- #225: a stopped deployment that never finishes ends the step, labelled ------------

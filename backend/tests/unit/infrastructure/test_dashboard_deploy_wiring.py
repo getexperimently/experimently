@@ -150,12 +150,40 @@ def _code(script: str) -> str:
 #: Layer 3 is a copy of documented rules, not an oracle: CodeDeploy may refuse
 #: something it lets through. Whether CodeDeploy accepts `"alarms": []` with
 #: `"enabled": false` is shown only by a staging run.
+#:
+#: CodeDeploy's own revert (#783), only when the scenario writes `revert.json`
+#: ({"d", "length", "latency", "id"}): a virtual clock in `vclock` that every
+#: call advances by `latency` (the call lands half-way through it) and the
+#: test's `sleep` by its argument. `stop-deployment` starts a revert `d`
+#: seconds after it lands, active for `length` seconds (`d` null: no revert).
+#: After the stop, `list-deployments` answers from that state, not from the
+#: rules, and `create-deployment` is refused, with the staging text, while the
+#: revert is active. The refusal is keyed on the revert, not on what the
+#: workflow last listed, so a workflow that never lists again still meets it.
 FAKE_AWS = r"""#!{python}
 import json, os, sys
 args = sys.argv[1:]
 state = os.environ["FAKE_AWS_STATE"]
 with open(os.path.join(state, "calls.log"), "a") as log:
     log.write(json.dumps(args) + "\n")
+
+REVERT = os.path.join(state, "revert.json")
+revert = json.load(open(REVERT)) if os.path.exists(REVERT) else None
+revert_active = False
+if revert is not None:
+    clock = os.path.join(state, "vclock")
+    now = float(open(clock).read()) if os.path.exists(clock) else 0.0
+    open(clock, "w").write(repr(now + revert["latency"]))
+    now += revert["latency"] / 2
+    if args[:2] == ["deploy", "stop-deployment"] and "stop" not in revert:
+        revert["stop"] = now
+        json.dump(revert, open(REVERT, "w"))
+    if "stop" in revert and revert["d"] is not None:
+        start = revert["stop"] + revert["d"]
+        revert_active = start <= now < start + revert["length"]
+    if args[:2] == ["deploy", "list-deployments"] and "stop" in revert:
+        print(revert["id"] if revert_active else "")
+        sys.exit(0)
 
 
 def refuse_alarm_config(reason):
@@ -207,6 +235,15 @@ if args[:2] == ["deploy", "create-deployment"] and OVERRIDE in args:
         refuse_alarm_config(
             "The alarm configuration is enabled, but the alarm list is empty."
         )
+
+if args[:2] == ["deploy", "create-deployment"] and revert_active:
+    print(
+        "An error occurred (DeploymentLimitExceededException) when calling the "
+        "CreateDeployment operation: The Deployment Group 'experimentation-staging "
+        "(id=fake)' already has an active Deployment '%s'" % revert["id"],
+        file=sys.stderr,
+    )
+    sys.exit(254)
 
 rules = json.load(open(os.path.join(state, "rules.json")))
 line = " ".join(args)

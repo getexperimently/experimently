@@ -67,9 +67,12 @@ jobs:
   rollback:
     name: Roll back ${{ inputs.environment }}
     runs-on: ubuntu-latest
-    # The job's waits are ROLLBACK_TIMEOUT_SECONDS (1800) and
-    # DASHBOARD_ROLLOUT_DEADLINE_SECONDS (1200), about 55 minutes with the
-    # rest; the default of 360 would outlive the AWS session.
+    # The job's waits are ROLLBACK_TIMEOUT_SECONDS (1800),
+    # DASHBOARD_ROLLOUT_DEADLINE_SECONDS (1200) and the stop step's two (#783):
+    # about 5 minutes for a stopped deployment to finish (STOP_WAIT_POLLS) and
+    # about 5 more for the group to go idle (GROUP_IDLE_POLLS), both 60 reads
+    # 5 s apart. About 65 minutes with the rest; the default of 360 would
+    # outlive the AWS session.
     timeout-minutes: 90
     environment: ${{ inputs.environment }}
     permissions:
@@ -415,7 +418,9 @@ jobs:
           #   is then expected to fail, and set -e fails this step loudly.
           # - CodeDeploy can start a rollback deployment of its own in
           #   between. It is not in IN_FLIGHT, so nothing here stops it; the
-          #   create-deployment below then fails because the group is busy.
+          #   wait for an idle group at the end of this step waits it out like
+          #   any other active deployment (#783), and fails, labelled, if it is
+          #   still active after about 5 minutes.
           # Neither lets this step stop a codeDeployRollback deployment.
           for id in $IN_FLIGHT; do
             echo "stopping in-flight deployment $id"
@@ -440,6 +445,16 @@ jobs:
           scrub() {
             sed -E 's/(^|[^0-9A-Za-z])[0-9]{12}([^0-9A-Za-z]|$)/\1<account>\2/g'
           }
+          # One failed read: its error, flattened, cut and scrubbed into
+          # last_error, and the line saying it will be read again. Both waits
+          # below use it, so the scrub is written once.
+          note_read_failure() {
+            last_error="$(<"$aws_errors")"
+            last_error="${last_error//$'\n'/ }"
+            last_error="${last_error:0:200}"
+            last_error="$(scrub <<<"$last_error")"
+            echo "could not read from AWS (${last_error:-no error text}); reading again on the next poll"
+          }
           for id in $IN_FLIGHT; do
             read_failures=0
             finished=""
@@ -454,11 +469,7 @@ jobs:
                 esac
               else
                 read_failures=$(( read_failures + 1 ))
-                last_error="$(<"$aws_errors")"
-                last_error="${last_error//$'\n'/ }"
-                last_error="${last_error:0:200}"
-                last_error="$(scrub <<<"$last_error")"
-                echo "could not read from AWS (${last_error:-no error text}); reading again on the next poll"
+                note_read_failure
                 if [ "$read_failures" -ge "$READ_FAILURE_LIMIT" ]; then
                   echo "::error title=Rollback could not read AWS::${read_failures} reads in a row of deployment ${id} failed after this run stopped it with auto-rollback, so this run created no rollback deployment. The last AWS error: ${last_error:-no error text}. Check it by hand: aws deploy get-deployment --deployment-id ${id}"
                   exit 1
@@ -471,6 +482,79 @@ jobs:
               exit 1
             fi
           done
+
+          # Stopping with auto-rollback makes CodeDeploy create its own revert of
+          # the stopped deployment, and the group is busy until that revert ends
+          # (#783). Staging, 4 stops of 4: created about 0.6 s after the stop,
+          # done about 3.1 s later -- and the stopped deployment can read
+          # Stopped before it, so the per-id wait above does not cover it. Wait
+          # here, reading only, until the group has no deployment in any active
+          # status, with the same call (and status set) as IN_FLIGHT.
+          # - The first read is taken at once, then one every
+          #   GROUP_IDLE_POLL_SECONDS. A busy read is the only sign that the
+          #   wait was needed, so no read is skipped by sleeping first.
+          # - Two successful reads in a row that list nothing proceed. A failed
+          #   read neither breaks nor extends that streak.
+          # - READ_FAILURE_LIMIT failed reads in a row fail the step, as above.
+          # - At GROUP_IDLE_POLLS (about 5 minutes) the step fails, labelled,
+          #   creating nothing.
+          # A revert created after the last of those reads (about 7 s after
+          # the stop) is not seen, and create-deployment then fails, loudly.
+          GROUP_IDLE_POLLS=60
+          GROUP_IDLE_POLL_SECONDS=5
+          stopped="${IN_FLIGHT//[$'\t\n']/ }"
+          read_failures=0
+          empty_reads=0
+          failed_since_empty=0
+          last_seen=""
+          last_busy_read=0
+          idle=""
+          echo "waiting up to about 5 minutes for the deployment group to have no active deployment: stopping with auto-rollback makes CodeDeploy create its own revert of what was stopped, usually finished in a few seconds"
+          for n in $(seq 1 "$GROUP_IDLE_POLLS"); do
+            [ "$n" -eq 1 ] || sleep "$GROUP_IDLE_POLL_SECONDS"
+            if listed="$(aws deploy list-deployments \
+                  --application-name "$CODEDEPLOY_APPLICATION" \
+                  --deployment-group-name "$CODEDEPLOY_DEPLOYMENT_GROUP" \
+                  --include-only-statuses Created Queued InProgress Baking Ready \
+                  --query 'deployments' --output text 2>"$aws_errors")"; then
+              read_failures=0
+              if [ -z "$listed" ] || [ "$listed" = "None" ]; then
+                empty_reads=$(( empty_reads + 1 ))
+                failed_since_empty=0
+                last_seen="empty"
+                if [ "$empty_reads" -ge 2 ]; then
+                  echo "no active deployment on the deployment group in two reads in a row; creating the rollback deployment"
+                  idle=1
+                  break
+                fi
+                echo "no active deployment on the deployment group (read ${n}); reading again in ${GROUP_IDLE_POLL_SECONDS} s to confirm"
+              else
+                empty_reads=0
+                active="${listed//$'\t'/ }"
+                active="${active:0:200}"
+                last_seen="busy"
+                last_busy_read=$n
+                echo "deployment group still busy: ${active}; reading again in ${GROUP_IDLE_POLL_SECONDS} s"
+              fi
+            else
+              read_failures=$(( read_failures + 1 ))
+              failed_since_empty=$(( failed_since_empty + 1 ))
+              note_read_failure
+              if [ "$read_failures" -ge "$READ_FAILURE_LIMIT" ]; then
+                echo "::error title=Rollback could not read AWS::${read_failures} reads in a row of the deployment group's active deployments failed after this run stopped ${stopped} with auto-rollback, so this run created no rollback deployment. The last AWS error: ${last_error:-no error text}. Check it by hand: aws deploy list-deployments --application-name ${CODEDEPLOY_APPLICATION} --deployment-group-name ${CODEDEPLOY_DEPLOYMENT_GROUP} --include-only-statuses Created Queued InProgress Baking Ready --query 'deployments' --output text"
+                exit 1
+              fi
+            fi
+          done
+          if [ -z "$idle" ]; then
+            if [ "$last_seen" = "busy" ]; then
+              ago=$(( (n - last_busy_read) * GROUP_IDLE_POLL_SECONDS ))
+              echo "::error title=Deployment group still busy::This run stopped ${stopped} with auto-rollback and waited about 5 minutes (${GROUP_IDLE_POLLS} reads, ${GROUP_IDLE_POLL_SECONDS} s apart) for the deployment group to have no active deployment, but its last successful read (last read ${ago} s ago) still listed: ${active}. Most often that is CodeDeploy's own revert of what was stopped. This run created no rollback deployment, and the dashboard half did not run; the run summary below says what the API is serving. Check by hand: aws deploy list-deployments --application-name ${CODEDEPLOY_APPLICATION} --deployment-group-name ${CODEDEPLOY_DEPLOYMENT_GROUP} --include-only-statuses Created Queued InProgress Baking Ready --query 'deployments' --output text. Do not dispatch Rollback again while any of them is active: a new Rollback refuses while CodeDeploy's revert is running."
+            else
+              echo "::error title=Rollback could not confirm the group idle::This run stopped ${stopped} with auto-rollback and waited about 5 minutes (${GROUP_IDLE_POLLS} reads, ${GROUP_IDLE_POLL_SECONDS} s apart) for two successful reads in a row that list no active deployment. Its last successful read listed none, but no second one confirmed it before the wait ended: ${failed_since_empty} reads after it failed (the last AWS error: ${last_error:-no error text}). So this run created no rollback deployment; the run summary below says what the API is serving. Check by hand: aws deploy list-deployments --application-name ${CODEDEPLOY_APPLICATION} --deployment-group-name ${CODEDEPLOY_DEPLOYMENT_GROUP} --include-only-statuses Created Queued InProgress Baking Ready --query 'deployments' --output text"
+            fi
+            exit 1
+          fi
 
       - name: Roll back via CodeDeploy
         id: codedeploy

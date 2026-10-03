@@ -830,11 +830,16 @@ def test_rollback_lets_the_cli_merge_every_page():
     code = "\n".join(
         line for line in text.splitlines() if not line.lstrip().startswith("#")
     )
-    call = code[code.index("aws deploy list-deployments") :]
-    call = call[: call.index("--output text")]
-    assert "--include-only-statuses" in call  # the call, not something else
-    for flag in PAGE_LIMITING_FLAGS:
-        assert flag not in call, flag
+    # Every occurrence (#783): the stop step's second listing, the wait for an
+    # idle group, merges every page too.
+    starts = [m.start() for m in re.finditer("aws deploy list-deployments", code)]
+    assert len(starts) >= 2, starts
+    for start in starts:
+        call = code[start:]
+        call = call[: call.index("--output text")]
+        assert "--include-only-statuses" in call  # the call, not something else
+        for flag in PAGE_LIMITING_FLAGS:
+            assert flag not in call, (flag, call)
 
 
 def test_one_that_finished_since_it_was_listed_passes(aws):
