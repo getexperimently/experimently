@@ -822,7 +822,9 @@ jobs:
       # The outcome is keyed on the API's verify step and the dashboard's
       # step, never on job.status alone: when the API was rolled back and only
       # the dashboard failed, "NOT rolled back" would send the operator to
-      # start a second Rollback, whose stop step reverts the first one.
+      # start a second Rollback, whose stop step reverts the first one. When
+      # the verify step did not succeed, the API's clause comes from a
+      # read-only read of what is serving at the end of the run (#755).
       - name: Run summary
         id: summary
         if: always()
@@ -864,6 +866,54 @@ jobs:
               not_reached="this run could not read what it is serving"
             fi
           fi
+          # The run did not finish its own steps, but something it did may
+          # still have put the API back: stopping the bad deployment with
+          # auto-rollback does that before CodeDeploy is asked for anything
+          # (#755, run 37080696791). So the headline says what is serving at
+          # the end of the run, read with the same predicate the stop step
+          # uses (read-only), rather than which step passed. Not for a refused
+          # or already-serving run (their verdict is decided), and not without
+          # a resolved target (nothing to compare against).
+          #
+          # SUMMARY_SERVING_POLLS reads, SUMMARY_SERVING_POLL_SECONDS apart,
+          # stopping at the first 0 and deciding on the last answer: a revert
+          # reroute may still be moving when this step starts. The default of
+          # 12 reads 5 s apart is a guess, until the deployment history after
+          # d-F32H2PR9L says how long a revert takes. No read starts after
+          # SUMMARY_SERVING_DEADLINE_SECONDS (90), so the worst case is 90 s
+          # plus one read of four describe calls, inside timeout-minutes: 90.
+          serving_rc=""
+          serving_said=""
+          if [ "$API_VERIFY" != success ] && [ -n "$TARGET_ARN" ] && [ -z "$REFUSED" ] && [ "$ALREADY_SERVING" != true ]; then
+            polls="${SUMMARY_SERVING_POLLS:-12}"
+            poll_seconds="${SUMMARY_SERVING_POLL_SECONDS:-5}"
+            deadline=$(( SECONDS + ${SUMMARY_SERVING_DEADLINE_SECONDS:-90} ))
+            n=0
+            while :; do
+              n=$(( n + 1 ))
+              rc=0
+              said="$(python3 scripts/api_serving.py "$ECS_CLUSTER" "$ECS_BACKEND_SERVICE" "$TARGET_ARN" 2>&1)" || rc=$?
+              # Its own sentence, one line, bounded, and with any run of
+              # twelve digits gone: it goes into a public summary and Slack.
+              # On 0 that is the first line ("serving: ..."); otherwise the
+              # last ("NOT YET: ...", "UNKNOWN: ...", "WRONG: ...").
+              said="${said%$'\n'}"
+              if [ "$rc" = 0 ]; then
+                said="${said%%$'\n'*}"
+              else
+                said="${said##*$'\n'}"
+              fi
+              said="${said:0:300}"
+              said="$(sed -E 's/(^|[^0-9A-Za-z])[0-9]{12}([^0-9A-Za-z]|$)/\1<account>\2/g' <<<"$said")"
+              serving_rc="$rc"
+              serving_said="$said"
+              echo "what the API is serving, read ${n} of ${polls}: exit ${rc}: ${said}"
+              if [ "$rc" = 0 ] || [ "$n" -ge "$polls" ] || [ "$SECONDS" -ge "$deadline" ]; then
+                break
+              fi
+              sleep "$poll_seconds"
+            done
+          fi
           if [ "$REFUSED" = codeDeployRollback ]; then
             # Nothing was stopped or rolled (#148 W9).
             api="API NOT rolled back: CodeDeploy's own rollback ${REFUSED_ID} is still active, so this run stopped nothing (the API is on ${REFUSED_PRIMARY:-a revision this run could not read})"
@@ -899,7 +949,26 @@ jobs:
             else
               dash="dashboard NOT rolled back (${DASHBOARD_RESULT:-not reached})"
             fi
+          elif [ "$serving_rc" = 0 ]; then
+            # What is serving, not which step passed (#755). The run still
+            # fails: its own steps did not finish.
+            api="API is serving ${target}, read at the end of the run, but this run did not finish its own steps (its verify step: ${API_VERIFY:-not reached})"
+            if [ -z "$DASHBOARD_INPUT" ]; then
+              dash="dashboard left as it is"
+            else
+              dash="dashboard NOT rolled back (not reached), so the API and dashboard are on different releases: put the dashboard back with docs/deployment/rollback-runbook.md Method 2, the dashboard block"
+            fi
+          elif [ -n "$serving_rc" ]; then
+            # Not confirmed is not "not rolled back": exit 1 is also a split
+            # listener mid-reroute, and 2 is a read that failed.
+            api="API not confirmed on ${target} at the end of the run (scripts/api_serving.py exit ${serving_rc}: ${serving_said:-no output}); this run did not finish its own steps (its verify step: ${API_VERIFY:-not reached})"
+            if [ -z "$DASHBOARD_INPUT" ]; then
+              dash="dashboard left as it is"
+            else
+              dash="dashboard NOT rolled back (not reached)"
+            fi
           else
+            # No target resolved, so nothing to read against.
             api="API NOT rolled back (its verify step: ${API_VERIFY:-not reached})"
             if [ -z "$DASHBOARD_INPUT" ]; then
               dash="dashboard left as it is"
@@ -922,6 +991,9 @@ jobs:
               echo "| Dashboard target | \`${dashboard_target:-not resolved}\` |"
               echo "| Dashboard result | ${DASHBOARD_RESULT:-not reached} |"
             fi
+            if [ -n "$serving_rc" ]; then
+              echo "| API at the end of the run | ${serving_said:-no output} (scripts/api_serving.py exit ${serving_rc}) |"
+            fi
             echo ""
             if [ -z "$DASHBOARD_INPUT" ]; then
               # An API-only rollback leaves the dashboard as it was: say what
@@ -933,8 +1005,14 @@ jobs:
               fi
             elif [ -n "$not_reached" ] && [ -n "$REFUSED" ]; then
               echo "Dashboard not rolled back (the API half refused, and nothing was stopped): ${not_reached}. To put the dashboard back alone, use docs/deployment/rollback-runbook.md Method 2, the dashboard block."
+            elif [ -n "$not_reached" ] && [ "$serving_rc" = 0 ]; then
+              echo "Dashboard not rolled back (the API half did not finish): ${not_reached}. The API is on ${target}, so the API and dashboard are on different releases, the newer-dashboard, older-API state: put the dashboard back with docs/deployment/rollback-runbook.md Method 2, the dashboard block."
             elif [ -n "$not_reached" ]; then
               echo "Dashboard not rolled back (the API half failed): ${not_reached}. If the stop step already reverted the API, this is the newer-dashboard, older-API state: put the dashboard back with docs/deployment/rollback-runbook.md Method 2, the dashboard block."
+            fi
+            if [ -n "$serving_rc" ] && [ -n "$DEPLOYMENT_ID" ]; then
+              echo ""
+              echo "Do not dispatch Rollback again while CodeDeploy deployment ${DEPLOYMENT_ID} is active: its stop step would stop that deployment with auto-rollback, which reverts whatever it has shifted. Check it first: aws deploy get-deployment --deployment-id ${DEPLOYMENT_ID} --query deploymentInfo.status"
             fi
             echo ""
             echo "Job status: ${JOB_STATUS}."

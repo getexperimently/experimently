@@ -145,6 +145,22 @@ own CodeDeploy deployment is active (about an hour after its shift): its stop
 step would stop that deployment with auto-rollback and put the API back on the
 release you rolled back from.
 
+### Reading the result
+
+The run's headline, which is also the first line of its Slack message, starts
+with the API's half. When the run's own steps did not finish (its verify step
+did not succeed), the summary reads what the API is serving at the end of the
+run, with `scripts/api_serving.py` (read-only, the same check the stop step
+uses), and the API's half says what that read found. The run fails either way.
+
+| The API's half starts with | What it means | What to do |
+|---|---|---|
+| `API rolled back to <target>` | This run's deployment was approved and verified. | Nothing for the API. Read the dashboard's half. |
+| `API is serving <target>, read at the end of the run, but this run did not finish its own steps` | The API is on the target, most often because stopping the bad deployment with auto-rollback put it back, and a later step then failed (the step's error says which). | Nothing more for the API. Fix what the failed step names before the next deploy or rollback. If the dashboard's half adds "so the API and dashboard are on different releases", put the dashboard back with Method 2's dashboard block. Do not dispatch Rollback again while a CodeDeploy deployment the summary names is active. |
+| `API not confirmed on <target> at the end of the run` | The read did not find the target serving. It quotes `api_serving.py`: `NOT YET` (another revision is PRIMARY, or traffic is still split between blue and green), `WRONG` (the target is PRIMARY but the `/api/*` rule forwards elsewhere) or `UNKNOWN` (the read failed). | Check what is serving and whether a deployment is active before acting: run `python3 scripts/api_serving.py experimentation-$ENV experimentation-backend-$ENV <target>` (exit 0 means on the target) and list the deployment group's active deployments. |
+| `API NOT rolled back: ...` | The run refused, and says why (already on the target, CodeDeploy's own rollback active, or a deployment it could not classify). | Follow the reason in the line. |
+| `API NOT rolled back (its verify step: ...)` | The target revision was never resolved, so nothing was read. | Fix what the target check's error names. |
+
 ### The rolled-back API runs against the current schema
 
 Rolling back puts back an older API; it does not put back the database. The
