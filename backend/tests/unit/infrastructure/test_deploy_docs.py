@@ -438,3 +438,46 @@ def test_no_copy_advises_running_rollback_again():
                 flat[max(0, match.start() - 60) : match.end() + 40],
             )
     assert "Do not dispatch Rollback again while" in " ".join(texts["runbook"].split())
+
+
+# --- undoing a migration (#726) -------------------------------------------------
+
+
+@pytest.mark.regression
+def test_the_runbook_undoes_a_migration_before_the_api_rollback():
+    """#726, PE v2 condition 6. db-migrate.yml takes its image from the API's
+    PRIMARY task set and has no image input, so once the API is rolled back
+    the serving image lacks the migration's file and `alembic` cannot locate
+    the database's revision: the workflow snapshots, then fails, and migrates
+    nothing. The runbook must put the downgrade first, say there is no
+    supported downgrade after an API or alarm rollback, and put the STOP
+    paragraph (the restored cluster is unreachable by the tasks today) ahead of
+    the point-in-time restore command, not after it."""
+    section = _runbook_section("Database Rollback Procedure")
+    flat = " ".join(section.split())
+    # (c) the old order is gone, from the section and from the decision tree.
+    assert "first or in parallel" not in flat
+    assert not re.search(r"redeploy the previous application version", flat)
+    assert "Method 1 + DB Rollback section" not in RUNBOOK.read_text()
+    assert "DATABASE FIRST, THEN APPLICATION" in RUNBOOK.read_text()
+    assert "Application rollback alone did not resolve the issue" not in flat
+    # (a) the downgrade works only while the migrating release is PRIMARY.
+    assert "Undo the migration before you roll the API back." in flat
+    assert "works only while the release that contains the migration is PRIMARY" in flat
+    # (b) no supported downgrade afterwards; the restore; the Engineering Lead.
+    assert (
+        "After an API rollback or an alarm rollback, there is no supported "
+        "downgrade through the workflow." in flat
+    )
+    assert "Call the Engineering Lead now." in flat
+    # Never "snapshot restore" while the command is a point-in-time restore.
+    assert not re.search(
+        r"snapshot restore|restore from (aurora )?snapshot", flat, re.I
+    )
+    assert not re.search(r"restore the snapshot", RUNBOOK.read_text(), re.I)
+    # The STOP paragraph and its gap reference come before the command.
+    command = section.index("aws rds restore-db-cluster-to-point-in-time")
+    stop = section.index("**STOP. A restore to a NEW cluster cannot be picked up")
+    gap = section.index("Tracked as a gap in the deploy path.")
+    assert "issue 78" in section[stop:gap]
+    assert stop < gap < command, (stop, gap, command)
