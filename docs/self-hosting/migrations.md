@@ -598,14 +598,20 @@ What this means for you:
   older release against the newer schema. That works only when the migrations
   in between are backward-compatible (see *Migration Guidelines*). For one that
   is not -- a dropped or renamed table or column the older release reads --
-  restore the snapshot the Deploy took before migrating
-  ([rollback runbook](../deployment/rollback-runbook.md#database-rollback-procedure)).
-  Some data cannot come back any other way: `modules_0002_warehouse_analysis`,
+  undo the migration while the release that contains it is still serving, and
+  only then roll the API back
+  ([rollback runbook, Database Rollback Procedure](../deployment/rollback-runbook.md#database-rollback-procedure),
+  [Step 2](../deployment/rollback-runbook.md#step-2-run-migration-downgrade-via-github-actions)). Once the API has been rolled back, the workflow
+  can no longer undo it; the emergency route is then a point-in-time restore to
+  a new cluster, which the API tasks cannot pick up today
+  (the same procedure, Step 3).
+  Some data cannot come back without such a restore: `modules_0002_warehouse_analysis`,
   which shipped in 0.11.0, drops the earlier `warehouse_connections` table with
   its rows, and neither a rollback nor a downgrade restores them. And
   [`1ab99332f0ba`](#1ab99332f0ba-rewrites-stored-event-times-to-utc) rewrites
   stored event times to UTC: a rollback runs against those rows unchanged, but
-  the offsets clients sent come back only from that snapshot.
+  the offsets clients sent come back only from a restore to a time before it
+  ran.
 - **Docker Compose and the Helm chart are deliberately unchanged.** Compose runs
   one API container, which is the only writer and keeps `RUN_MIGRATIONS=true`.
   The chart already keeps the bootstrap out of the serving container: it runs

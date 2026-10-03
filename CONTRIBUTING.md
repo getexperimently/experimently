@@ -132,7 +132,8 @@ Other useful targets — `make help` lists them all:
 Both suites need PostgreSQL on **localhost:5432**. `make db` starts it. The unit
 suite is not database-free despite the name: 26 of its files take the
 `db_session` fixture, and `backend/tests/conftest.py` connects to
-`localhost:5432` regardless of `POSTGRES_PORT`. The split is by what the test
+`POSTGRES_SERVER` (or `POSTGRES_HOST`) and `POSTGRES_PORT`, defaulting to
+`localhost:5432`. The split is by what the test
 exercises, not by whether it touches a database.
 Run backend tests from the repository root; `pyproject.toml` is the single pytest
 configuration and `testpaths` covers `backend/tests` and `modules/backend/tests`.

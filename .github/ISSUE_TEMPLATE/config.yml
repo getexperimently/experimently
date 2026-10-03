@@ -7,8 +7,11 @@ contact_links:
       vulnerability reporting, or email security@getexperimently.com. See
       SECURITY.md for the disclosure timeline and safe harbour.
   - name: 💬 Question or usage help
-    url: https://github.com/getexperimently/experimently/discussions
-    about: Ask how to do something, or discuss an idea before filing a feature request.
+    url: https://getexperimently.github.io/experimently/
+    about: >-
+      Start with the documentation site: self-hosting, the SDKs, statistics
+      and the API. If it does not answer your question, open a feature
+      request or a bug report.
   - name: 📖 Documentation
     url: https://github.com/getexperimently/experimently/tree/main/docs
     about: Self-hosting, SDKs, statistics and API reference.

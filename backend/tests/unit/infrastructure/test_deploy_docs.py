@@ -186,8 +186,9 @@ def test_the_deploy_docs_say_what_the_alarms_watch(path):
     runbook, that alarm-based rollback (#148) was the founder-waivable
     prerequisite for production. With the alarms in place each page must say
     what they watch and, as plainly, what they do not: the 2xx case, the
-    dashboard, and the load balancer's own 502/504. The waiver sentence goes,
-    and the "not yet run against a real AWS account" caveat stays.
+    dashboard, and the load balancer's own 502/504. The waiver sentence goes.
+    The "not yet run against a real AWS account" caveat went in #798: the
+    forward deploy has run on staging, and the pages say what has run there.
     """
     text = " ".join(path.read_text().split())
     assert not re.search(r"canary is timed only", text, re.I), path.name
@@ -205,7 +206,8 @@ def test_the_deploy_docs_say_what_the_alarms_watch(path):
     assert "waived it in writing" not in text, path.name
     assert "unless the founder waives it" not in text, path.name
     if path != RUNBOOK:
-        assert "Not yet run against a real AWS account" in text, path.name
+        assert "Not yet run against a real AWS account" not in text, path.name
+        assert "What has run against a real AWS account" in text, path.name
 
 
 def _runbook_section(heading: str) -> str:
@@ -295,11 +297,19 @@ def test_no_timed_only_wording_is_left():
 @pytest.mark.parametrize(
     "path", [DOCS / "deployment" / "README.md", GUIDE], ids=lambda p: p.name
 )
-def test_the_docs_say_the_deploy_path_is_unproven(path):
-    """EM B3b C8: until a real account has run it, the docs say so."""
-    text = " ".join(path.read_text().split())
-    assert "Not yet run against a real AWS account" in text, path.name
-    assert "first staging deploy" in text, path.name
+def test_the_docs_say_what_has_run_against_aws(path):
+    """Inverted from test_the_docs_say_the_deploy_path_is_unproven (EM B3b C8)
+    by #798. The forward deploy has run to success on staging; the Rollback
+    workflow has run there but not yet completed end to end. Each page says
+    both, and neither still calls the whole path unrun. The note is a
+    blockquote, so its `>` markers are dropped before the text is joined."""
+    text = " ".join(re.sub(r"(?m)^>[ \t]?", "", path.read_text()).split())
+    assert "Not yet run against a real AWS account" not in text, path.name
+    assert "forward deploy" in text and "has run to success on staging" in text
+    assert (
+        "The Rollback workflow has run on staging but has not yet completed "
+        "end to end there" in text
+    ), path.name
 
 
 @pytest.mark.regression

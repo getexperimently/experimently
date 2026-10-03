@@ -60,10 +60,14 @@ checklist in [the deployment guide](deployment-guide.md#1-before-the-first-deplo
    -- the API and the dashboard, each with its new revision and what was
    serving before -- and hands you one rollback line that covers both.
 
-> **Not yet run against a real AWS account.** The CodeDeploy forward deploy
-> and the Rollback workflow are tested against a simulated `aws` only.
-> The first staging deploy is the first time either runs against AWS, and the
-> first time an alarm rolls a deployment back.
+> **What has run against a real AWS account.** The CodeDeploy forward deploy
+> has run to success on staging. An alarm-driven rollback has been seen there
+> too: a 5xx alarm raised during a deploy's traffic shift stopped the
+> deployment, and CodeDeploy moved the API back to the previous revision by
+> itself ([#148](https://github.com/getexperimently/experimently/issues/148)).
+> The Rollback workflow has run on staging but has not yet completed end to
+> end there; its whole path has been tested only against a simulated `aws`,
+> so read a Rollback run and its summary closely.
 
 **How the traffic moves.** The deploy creates a CodeDeploy blue/green
 deployment. When CodeDeploy reports it `Ready`, the deploy checks that every

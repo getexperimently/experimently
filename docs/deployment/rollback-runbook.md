@@ -779,9 +779,10 @@ Only take this path if:
 
 Both backend task definitions take `POSTGRES_SERVER` from the database STACK's writer endpoint, and `POSTGRES_USER` and `POSTGRES_PASSWORD` from the generated secret of the stack, as CloudFormation imports, issue 78. A cluster restored beside the stack is not that endpoint, so there is no connection string in Secrets Manager to update, and a new deployment would bring the tasks back pointing at the original cluster -- while this runbook reported success. The restored cluster also keeps the master password of the snapshot, which is the one in the secret only if it has not been rotated since.
 
-So restoring to `$CLUSTER-restored` means one of:
+There is no restore that keeps the original cluster: both Aurora restore
+operations, point-in-time and from a snapshot, create a new cluster. So
+restoring to `$CLUSTER-restored` means one of:
 
-- restore IN PLACE instead, so the endpoint the tasks already resolve does not change, or
 - repoint the DNS name the tasks use at the restored cluster, or
 - change the database stack to own the restored cluster and `cdk deploy` it and the Fargate
   stack, which rewrites the imported endpoint.

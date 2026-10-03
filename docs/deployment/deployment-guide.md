@@ -325,11 +325,11 @@ After that hour, the response to a bad release is the Rollback workflow.
 
 ## 3. Every deploy
 
-> **Not yet run against a real AWS account.** The CodeDeploy forward deploy
-> described here, and the Rollback workflow, are tested against a simulated
-> `aws` only. The first staging deploy is the first time either runs against
-> AWS, so do that in staging before prod, and read the run and its summary
-> closely.
+> **What has run against a real AWS account.** The CodeDeploy forward deploy
+> described here has run to success on staging. The Rollback workflow has run
+> on staging but has not yet completed end to end there; its whole path has
+> been tested only against a simulated `aws`. Deploy to staging before prod, and read the
+> run and its summary closely.
 
 1. **A release tag.** release-please cuts them; the Release Gate runs on every
    push to `main`, so the tag's commit has a result. For a tag cut before that:
@@ -404,10 +404,10 @@ CodeDeploy swaps the two on every deployment. Both are polled for the whole
 deployment: before the approval, in the canary, and in the hour after the
 shift while CodeDeploy keeps the previous task set. While either is in ALARM,
 CodeDeploy stops the deployment and rolls the API back to the previous
-revision by itself. That is the expected behaviour, not yet observed: the
-first staging deploy's forced alarm (section 2) is where it is seen, in
-particular whether the hour after the shift and the time before the approval
-are watched. An alarm fires on a minute with at least 5 target 5xx
+revision by itself. That has been seen on staging: an alarm raised during a
+deploy's traffic shift stopped the deployment, and CodeDeploy moved the API
+back with no workflow involved. Whether the hour after the shift and the time
+before the approval are watched has not yet been observed. An alarm fires on a minute with at least 5 target 5xx
 **and** at least 5% of that target group's requests, for 2 minutes of 3; a
 minute with no requests counts as fine. These are starting values, to be
 measured against real traffic. What they do not catch:
@@ -471,8 +471,13 @@ in a later release, once nothing running reads it.
 A rollback relies on the same rule. The API tasks do not migrate on start, so
 a rolled-back release runs against the newer schema as it is; it works only if
 every migration since that release is backward-compatible. For one that is
-not, restore the snapshot the deploy took before migrating
-([Rollback Runbook](rollback-runbook.md#database-rollback-procedure)).
+not, the order matters: undo the migration while the release that contains it
+is still serving, and only then roll the API back
+([Rollback Runbook, Database Rollback Procedure](rollback-runbook.md#database-rollback-procedure),
+[Step 2](rollback-runbook.md#step-2-run-migration-downgrade-via-github-actions)). Once the API has been rolled back, the workflow can no longer
+undo it. The emergency route is then a point-in-time restore to a new cluster,
+which the API tasks cannot pick up today
+(the same procedure, Step 3).
 
 ---
 

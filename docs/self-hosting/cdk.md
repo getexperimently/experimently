@@ -273,8 +273,12 @@ through is Deploy's existing break-glass
 whether to use it is decided by a person at that moment.
 
 Rolling the API back runs the older release against the newer schema, which
-works only for backward-compatible migrations; for one that is not, restore the
-snapshot the Deploy took before migrating. See
+works only for backward-compatible migrations; for one that is not, undo the
+migration while the release that contains it is still serving, before rolling
+the API back
+([rollback runbook, Database Rollback Procedure](../deployment/rollback-runbook.md#database-rollback-procedure)).
+After the API has been rolled back, the emergency route is a point-in-time
+restore to a new cluster, which the API tasks cannot pick up today. See
 [On AWS, the API does not migrate](migrations.md#on-aws-the-api-does-not-migrate)
 for why, and for an environment whose Fargate stack was deployed before this
 setting existed. Deploy refuses to deploy an API revision that lacks the
