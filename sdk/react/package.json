@@ -34,5 +34,10 @@
     "ab-testing",
     "react"
   ],
-  "license": "MIT"
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/getexperimently/experimently",
+    "directory": "sdk/react"
+  }
 }

@@ -281,3 +281,48 @@ def test_the_npm_job_pins_checks_and_publishes_the_checked_tarball() -> None:
         )
     for i in (pin, view, pack, check, consumer, publish):
         assert "continue-on-error" not in steps[i], steps[i].get("name")
+
+
+# --------------------------------------------------------------------------
+# #775: every npm SDK names this repository, so provenance can be attached
+# --------------------------------------------------------------------------
+
+REPOSITORY_URL = "https://github.com/getexperimently/experimently"
+
+
+def npm_sdks() -> list[str]:
+    return sorted(name for name, eco in ecosystems().items() if eco == "npm")
+
+
+def test_the_npm_list_is_not_empty() -> None:
+    """The parametrised test below is vacuous if no SDK resolves to npm."""
+    assert npm_sdks(), "ECOSYSTEMS names no npm SDK"
+
+
+@pytest.mark.regression
+@pytest.mark.parametrize("sdk", npm_sdks())
+def test_every_npm_sdk_names_its_repository(sdk: str) -> None:
+    """#775: ``npm publish --provenance`` compares ``repository.url`` with the
+    repository that ran the workflow, and refuses a package that names none.
+
+    sdk/edge and sdk/react carried no ``repository`` at all, so their first
+    publish would have failed at the very last step. The URL is compared
+    exactly, in one form for every package, and ``directory`` must be the
+    package's own folder.
+    """
+    import json
+
+    manifest = json.loads((SDK_DIR / sdk / "package.json").read_text(encoding="utf-8"))
+    repository = manifest.get("repository")
+    assert isinstance(repository, dict), (
+        f"sdk/{sdk}/package.json has no repository object: {repository!r}"
+    )
+    assert repository.get("type") == "git", repository
+    assert repository.get("url") == REPOSITORY_URL, (
+        f"sdk/{sdk}/package.json repository.url is {repository.get('url')!r}, "
+        f"expected {REPOSITORY_URL!r}"
+    )
+    assert repository.get("directory") == f"sdk/{sdk}", (
+        f"sdk/{sdk}/package.json repository.directory is "
+        f"{repository.get('directory')!r}, expected 'sdk/{sdk}'"
+    )
