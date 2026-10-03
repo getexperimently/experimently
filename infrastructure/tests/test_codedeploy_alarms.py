@@ -291,6 +291,23 @@ def test_the_api_canary_is_fifteen_minutes(stacks, case):
 
 @pytest.mark.regression
 @pytest.mark.parametrize("case", CASES, ids=_ids)
+def test_deploy_expects_the_synthesised_deployment_config(stacks, case):
+    """#795 (PE C7 on #212): deploy.yml's pre-flight warns when the group's
+    deploymentConfigName differs from CODEDEPLOY_DEPLOYMENT_CONFIG in the
+    deploy job's env, so that value must be the one the stack synthesises, as
+    the alarm names passed as --expect are (test_workflow_names_exist)."""
+    deploy = yaml.safe_load((REPO_ROOT / ".github" / "workflows" / "deploy.yml").read_text())
+    (job,) = [j for j in deploy["jobs"].values() if "environment" in j]
+    expected = job["env"]["CODEDEPLOY_DEPLOYMENT_CONFIG"]
+    group = _group(stacks[case].template["Resources"])
+    assert expected == group["DeploymentConfigName"], (
+        f"deploy.yml expects {expected!r}; the {_ids(case)} synth gives the group "
+        f"{group['DeploymentConfigName']!r}"
+    )
+
+
+@pytest.mark.regression
+@pytest.mark.parametrize("case", CASES, ids=_ids)
 def test_the_shift_deadline_is_the_canary_plus_the_allowance(stacks, case):
     """deploy.yml's shift deadline runs from create-deployment and covers the
     canary in full (scripts/shift_traffic.py). A longer canary with the old

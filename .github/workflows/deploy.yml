@@ -298,6 +298,12 @@ jobs:
       # them.
       API_ALARM_BLUE: experimentation-api-5xx-blue-${{ inputs.environment }}
       API_ALARM_GREEN: experimentation-api-5xx-green-${{ inputs.environment }}
+      # The deployment config the Fargate stack gives the deployment group
+      # (#212, D47). Every forward deployment uses the group's own config; the
+      # before-build pre-flight warns if the group's differs from this
+      # (scripts/refuse_alarm_active.py --expect-config, #795).
+      # infrastructure/tests/test_codedeploy_alarms.py pins it to the synth.
+      CODEDEPLOY_DEPLOYMENT_CONFIG: CodeDeployDefault.ECSCanary10Percent15Minutes
       FARGATE_STACK: experimentation-fargate-${{ inputs.environment }}
       DATABASE_STACK: experimentation-database-${{ inputs.environment }}
       SECRETS_PREFIX: /${{ inputs.environment }}/experimentation
@@ -510,6 +516,9 @@ jobs:
       # ALARM is a warning and the deploy goes on unwatched. Advisory: an
       # alarm that fires after this passes still stops the deployment after
       # the migration, which is why it runs again just before the snapshot.
+      # This run also compares the group's deployment config with the
+      # stack's and warns, never refuses, on a difference (#795). Only this
+      # run passes --expect-config, so the warning shows once.
       - name: Refuse while an API alarm is firing (before the build)
         env:
           OVERRIDE_ALARMS: ${{ inputs.override_alarms }}
@@ -520,6 +529,7 @@ jobs:
           python3 scripts/refuse_alarm_active.py --stage before-build \
             --application "$CODEDEPLOY_APPLICATION" --group "$CODEDEPLOY_DEPLOYMENT_GROUP" \
             --environment "$TARGET_ENV" --expect "$API_ALARM_BLUE" --expect "$API_ALARM_GREEN" \
+            --expect-config "$CODEDEPLOY_DEPLOYMENT_CONFIG" \
             ${overridden[@]+"${overridden[@]}"}
 
       # For the rollback line in the summary: the revision serving BEFORE this
