@@ -18,7 +18,18 @@ from pydantic import (
     model_validator,
 )
 
+from backend.app.models.user import User as UserModel
 from backend.app.schemas.auth import RoleName
+
+#: The longest values the ``users`` columns hold, read from the model so a
+#: column change moves the request limit with it. ``full_name`` is stored
+#: split at its first space into ``first_name`` and ``last_name``; a name no
+#: longer than the shorter of those two columns fits whichever way it splits.
+EMAIL_MAX: int = UserModel.__table__.c.email.type.length
+FULL_NAME_MAX: int = min(
+    UserModel.__table__.c.first_name.type.length,
+    UserModel.__table__.c.last_name.type.length,
+)
 
 #: bcrypt reads at most 72 bytes of a password; the hashing library refuses a
 #: longer one outright, so the rule refuses it first, with a readable message.
@@ -81,7 +92,20 @@ class UserBase(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
-class UserCreate(UserBase):
+class _UserWrite(UserBase):
+    """The fields a request writes, limited to what the columns hold.
+
+    A longer value answers 422 naming the field (it was a 500 from the
+    database). The limits are here rather than on ``UserBase`` because
+    ``UserBase`` also describes responses (a report's ``owner``), and a stored
+    first and last name together can be longer than ``FULL_NAME_MAX``.
+    """
+
+    email: EmailStr = Field(..., max_length=EMAIL_MAX)
+    full_name: Optional[str] = Field(None, max_length=FULL_NAME_MAX)
+
+
+class UserCreate(_UserWrite):
     """User creation model."""
 
     password: SecretStr = Field(..., min_length=8)
@@ -112,7 +136,7 @@ class UserCreate(UserBase):
         return v
 
 
-class UserUpdate(UserBase):
+class UserUpdate(_UserWrite):
     """User update model."""
 
     # ``password`` sets ANOTHER account's password (a superuser's reset). Your

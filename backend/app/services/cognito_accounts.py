@@ -25,9 +25,11 @@ written):
                                                              ``legacy_unlinked``
 5  the identity has no email address                         refuse ``no_email``
 6  another row holds the address, in any letter case         refuse ``email_taken``
-7  otherwise                                                 create the row, role
+7  a value for the new row is longer than its column         refuse
+                                                             ``field_too_long``
+8  otherwise                                                 create the row, role
                                                              from the groups
-8  the create's commit fails                                 roll back, look the
+9  the create's commit fails                                 roll back, look the
                                                              ID up once more:
                                                              that row, or refuse
                                                              ``commit_failed``
@@ -62,7 +64,13 @@ REASON_LINKED_ELSEWHERE = "linked_elsewhere"
 REASON_LEGACY_UNLINKED = "legacy_unlinked"
 REASON_NO_EMAIL = "no_email"
 REASON_EMAIL_TAKEN = "email_taken"
+REASON_FIELD_TOO_LONG = "field_too_long"
 REASON_COMMIT_FAILED = "commit_failed"
+
+#: The columns a first sign-in fills from the identity, checked against their
+#: lengths before the insert (``first_name`` and ``last_name`` come from the
+#: ``given_name`` and ``family_name`` attributes).
+_CHECKED_COLUMNS = ("username", "email", "first_name", "last_name", "external_id")
 
 
 class CognitoSignInRefused(Exception):
@@ -79,28 +87,33 @@ class CognitoSignInRefused(Exception):
         cognito_username: Optional[str] = None,
         sub: Optional[str] = None,
         row_id: Any = None,
+        field: Optional[str] = None,
     ) -> None:
         super().__init__(reason)
         self.reason = reason
         self.cognito_username = cognito_username
         self.sub = sub
         self.row_id = row_id
+        self.field = field
 
 
 def log_sign_in_refused(refusal: CognitoSignInRefused) -> None:
-    """Record a refused sign-in: reason, Cognito username, sub and the id of
-    the row the identity was refused for (no email address)."""
+    """Record a refused sign-in: reason, Cognito username, sub, the id of
+    the row the identity was refused for and, for ``field_too_long``, the
+    column (no email address, and never the over-long value)."""
     sign_in_logger.warning(
-        "Cognito sign-in refused (%s): username=%s sub=%s row_id=%s",
+        "Cognito sign-in refused (%s): username=%s sub=%s row_id=%s field=%s",
         refusal.reason,
         refusal.cognito_username,
         refusal.sub,
         refusal.row_id,
+        refusal.field,
         extra={
             "reason": refusal.reason,
             "cognito_username": refusal.cognito_username,
             "sub": refusal.sub,
             "row_id": str(refusal.row_id) if refusal.row_id is not None else None,
+            "field": refusal.field,
         },
     )
 
@@ -114,6 +127,17 @@ def _role_from_groups(groups: list) -> Tuple[UserRole, bool]:
     is_superuser = should_be_superuser(groups)
     role = UserRole.ADMIN if is_superuser else map_cognito_groups_to_role(groups)
     return role, is_superuser
+
+
+def _too_long(user: User) -> Optional[str]:
+    """The first column of ``_CHECKED_COLUMNS`` whose value on ``user`` is
+    longer than the column holds, or ``None``."""
+    columns = User.__table__.c
+    for name in _CHECKED_COLUMNS:
+        value = getattr(user, name)
+        if isinstance(value, str) and len(value) > columns[name].type.length:
+            return name
+    return None
 
 
 def _text(value: Any) -> str:
@@ -177,7 +201,7 @@ def resolve_cognito_user(db: Session, user_data: Mapping[str, Any]) -> User:
     if holder is not None:
         raise refuse(REASON_EMAIL_TAKEN, holder.id)
 
-    # 7. A new account, linked to this Cognito user from the start.
+    # The new account's values.
     full_name = (
         f"{_text(attributes.get('given_name'))} {_text(attributes.get('family_name'))}"
     ).strip()
@@ -190,11 +214,24 @@ def resolve_cognito_user(db: Session, user_data: Mapping[str, Any]) -> User:
         is_superuser=is_superuser,
         external_id=external_id,
     )
+    # 7. A value the column cannot hold would fail the insert below and be
+    # recorded as ``commit_failed``. The record names the column; the
+    # username and sub are left out of it when they are the over-long value.
+    too_long = _too_long(user)
+    if too_long is not None:
+        raise CognitoSignInRefused(
+            REASON_FIELD_TOO_LONG,
+            cognito_username=None if too_long == "username" else username,
+            sub=None if too_long == "external_id" else sub,
+            field=too_long,
+        )
+
+    # 8. A new account, linked to this Cognito user from the start.
     db.add(user)
     try:
         db.commit()
     except SQLAlchemyError:
-        # 8. Most likely a concurrent first sign-in of the same identity
+        # 9. Most likely a concurrent first sign-in of the same identity
         # created the row first: use it if it is there.
         db.rollback()
         user = db.query(User).filter(User.external_id == external_id).first()

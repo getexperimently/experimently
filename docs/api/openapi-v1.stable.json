@@ -10871,12 +10871,14 @@
         "properties": {
           "email": {
             "format": "email",
+            "maxLength": 100,
             "title": "Email",
             "type": "string"
           },
           "full_name": {
             "anyOf": [
               {
+                "maxLength": 100,
                 "type": "string"
               },
               {
@@ -11162,12 +11164,14 @@
         "properties": {
           "email": {
             "format": "email",
+            "maxLength": 100,
             "title": "Email",
             "type": "string"
           },
           "full_name": {
             "anyOf": [
               {
+                "maxLength": 100,
                 "type": "string"
               },
               {

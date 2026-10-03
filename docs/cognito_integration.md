@@ -210,12 +210,16 @@ logger. Its `reason` field is one of these:
 | `legacy_unlinked` | an account with no password and no link has the user's username |
 | `no_email` | the user has no email address in the pool |
 | `email_taken` | another account has the user's email address, in any letter case |
+| `field_too_long` | the user's username, email address, given or family name, or Cognito user ID is longer than the platform stores; the record's `field` names which |
 | `commit_failed` | the new account could not be saved |
 
 The record also carries `cognito_username`, `sub` and, where an account was involved,
 `row_id`, that account's id. For `local_password`, `linked_elsewhere` and
 `legacy_unlinked`, `row_id` is the account to link
-(see [Linking an existing account](#linking-an-existing-account)).
+(see [Linking an existing account](#linking-an-existing-account)). For `field_too_long` it
+carries `field`, the column (`username`, `email`, `first_name`, `last_name` or `external_id`), and
+never the value: when the over-long value is the username or the Cognito user ID, that one is
+left out of the record.
 
 ## Configuration
 
