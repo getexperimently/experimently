@@ -202,7 +202,7 @@ python -m alembic -c backend/app/db/alembic.ini downgrade <core revision id>
 
 **Not `modules@base`.** `modules_0001_rbac` is a child of the core revision
 `a7b8c9d0e1f2`, not an alembic base, and with a single tree root alembic cannot
-filter a downgrade by branch label: `downgrade modules@base` resolves to **27
+filter a downgrade by branch label: `downgrade modules@base` resolves to **32
 revisions** — the whole core chain to base — and drops every table in the
 schema.
 
@@ -341,8 +341,7 @@ On AWS these are two runs of the Database Migration workflow: direction
 **Name `a89544fb1075`; do not use `-1`.** On a full install `downgrade -1` can
 step back the modules branch instead, and that downgrade drops the warehouse
 tables `modules_0002_warehouse_analysis` created. The Database Migration
-workflow's own help for its target still suggests `-1`; do not follow it here
-([#726](https://github.com/getexperimently/experimently/issues/726)).
+workflow refuses `-1`.
 
 Roll back to a specific revision:
 

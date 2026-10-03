@@ -13,6 +13,7 @@ import re
 from pathlib import Path
 
 import pytest
+import yaml
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 WORKFLOWS = REPO_ROOT / ".github" / "workflows"
@@ -438,3 +439,76 @@ def test_no_copy_advises_running_rollback_again():
                 flat[max(0, match.start() - 60) : match.end() + 40],
             )
     assert "Do not dispatch Rollback again while" in " ".join(texts["runbook"].split())
+
+
+# --- the Database Migration target (#726) -------------------------------------
+
+DB_MIGRATE = WORKFLOWS / "db-migrate.yml"
+#: Where an operator reads what to type into the Database Migration target.
+TARGET_DOCS = [
+    RUNBOOK,
+    GUIDE,
+    DOCS / "deployment" / "README.md",
+]
+#: `-1` as a token: not `-v-1H`, not `modules@-1`, not `2026-10-1`.
+_MINUS_ONE = re.compile(r"(?<![\w@-])-1\b")
+#: A sentence that mentions `-1` only to refuse it or warn against it.
+_REFUSING = re.compile(r"(?i)\b(refus\w*|not|never)\b")
+
+
+#: Clause boundaries: a sentence end, a dash aside, a list item, a paragraph.
+#: A refusal in the next clause does not excuse this one ("a revision id or
+#: `-1` to downgrade -- never the singular `head`").
+_CLAUSE = re.compile(r"(?<=[.!?;])\s+|\s--\s|\n\s*(?:[-*]|\d+\.)\s|\n\s*\n")
+
+
+def _sentences_recommending_minus_one(text: str) -> list[str]:
+    sentences = _CLAUSE.split(text)
+    return [
+        " ".join(s.split())
+        for s in sentences
+        if _MINUS_ONE.search(s) and not _REFUSING.search(s)
+    ]
+
+
+def _db_migrate_target_description() -> str:
+    document = yaml.safe_load(DB_MIGRATE.read_text(encoding="utf-8"))
+    document["on"] = document.pop(True, document.get("on"))
+    return document["on"]["workflow_dispatch"]["inputs"]["target"]["description"]
+
+
+@pytest.mark.regression
+def test_the_db_migrate_help_names_an_id_and_does_not_suggest_minus_one():
+    description = _db_migrate_target_description()
+    assert "a89544fb1075" in description
+    # PE v2 C8: the modules example is not there on a core image.
+    assert "modules_0001_rbac exists only in a full-profile image" in description
+    assert _sentences_recommending_minus_one(description) == []
+    # The whole workflow, comments and error text included (:112, :114): the
+    # two phrasings that offered a relative step as a valid target.
+    text = DB_MIGRATE.read_text(encoding="utf-8")
+    assert not re.search(r"(?i)\bor a relative step\b", text)
+    assert not re.search(r"(?i)relative step such as -1", text)
+
+
+@pytest.mark.regression
+@pytest.mark.parametrize("path", TARGET_DOCS, ids=lambda p: p.name)
+def test_no_deploy_doc_tells_an_operator_to_downgrade_by_minus_one(path):
+    assert _sentences_recommending_minus_one(path.read_text(encoding="utf-8")) == []
+
+
+@pytest.mark.regression
+def test_the_runbook_downgrade_names_the_down_revision():
+    text = RUNBOOK.read_text(encoding="utf-8")
+    (target,) = re.findall(r"^\s*- \*\*Target:\*\*.*$", text, re.M)
+    assert "down_revision" in target
+    assert "a7b8c9d0e1f2" in target, "the branch-point warning is gone"
+
+
+@pytest.mark.regression
+def test_the_migration_docs_do_not_say_the_workflow_suggests_minus_one():
+    self_hosting = (DOCS / "self-hosting" / "migrations.md").read_text(encoding="utf-8")
+    assert "still suggests" not in self_hosting
+    assert "The Database Migration\nworkflow refuses `-1`." in self_hosting
+    models = (DOCS / "architecture" / "models.md").read_text(encoding="utf-8")
+    assert not re.search(r"(?m)^\s*alembic downgrade -1\b", models)

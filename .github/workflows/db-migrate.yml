@@ -27,7 +27,7 @@ on:
         default: upgrade
         options: [upgrade, downgrade]
       target:
-        description: 'Alembic target: heads (upgrade), a revision id, or a relative step such as -1 (downgrade). Not "head": a full image has two heads.'
+        description: 'Alembic target. upgrade: heads. downgrade: the revision id to end at, e.g. a89544fb1075 (the down_revision of the migration you are undoing; modules_0001_rbac exists only in a full-profile image). Relative steps (-1, modules@-1), head and base are refused: a full image has two heads. A core id at or below a7b8c9d0e1f2 also unapplies the modules branch.'
         required: true
         type: string
         default: 'heads'
@@ -105,13 +105,34 @@ jobs:
       - name: Refuse a target alembic cannot take
         run: |
           set -euo pipefail
-          if [ "$TARGET" = "head" ]; then
-            echo "::error::target=head is refused: a full-profile image has two heads (the core chain and the modules branch) and alembic rejects the singular. Use heads."
+          # An allowlist: `heads` to upgrade, otherwise one revision id. A full
+          # image has two heads (the core chain and the modules branch), so a
+          # relative step (-1, +2), a branch-qualified one (modules@-1,
+          # modules@base), `head` and `base` either fail or leave alembic to
+          # pick a branch: `downgrade -1` exits 0 with only a warning, and was
+          # measured stepping the modules branch back (#726). Nothing here
+          # needs AWS, so a refusal costs no snapshot.
+          RUNBOOK="docs/deployment/rollback-runbook.md#step-2-run-migration-downgrade-via-github-actions"
+          NAME_THE_ID="Name the revision id to end at, e.g. a89544fb1075: to undo a release's migration, that is the down_revision line of the migration file it added (modules_0001_rbac exists only in a full-profile image). See ${RUNBOOK}"
+          if ! [[ "$TARGET" =~ ^[A-Za-z0-9_@+~^-]{1,64}$ ]]; then
+            # Not printed: it may hold anything, a newline included.
+            echo "::error title=Target refused::target must be heads or a revision id; this one has other characters in it, so nothing was migrated. ${NAME_THE_ID}"
             exit 1
           fi
-          # A revision id, heads/base, or a relative step (-1, +2, rev@-1).
-          if ! [[ "$TARGET" =~ ^[A-Za-z0-9_@+-]{1,64}$ ]]; then
-            echo "::error::target must be heads, base, a revision id or a relative step such as -1; this one has other characters in it."
+          if ! [[ "$TARGET" =~ ^[A-Za-z0-9_]{1,64}$ ]]; then
+            echo "::error title=Relative target refused::target=${TARGET} is refused, so nothing was migrated. A full install has two heads (the core chain and the modules branch), and a relative or branch-qualified step leaves alembic to pick what it unapplies: downgrade -1 has been measured stepping the modules branch back, which drops the warehouse analysis tables. ${NAME_THE_ID}"
+            exit 1
+          fi
+          if [ "$TARGET" = "head" ]; then
+            echo "::error title=Target refused::target=head is refused, so nothing was migrated: a full-profile image has two heads (the core chain and the modules branch) and alembic rejects the singular. To upgrade, use heads. ${NAME_THE_ID}"
+            exit 1
+          fi
+          if [ "$TARGET" = "base" ]; then
+            echo "::error title=Target refused::target=base is refused, so nothing was migrated: it unapplies every revision and drops every table. To go back further than one migration can, restore a snapshot (docs/deployment/rollback-runbook.md#step-3-emergency-restore-from-aurora-snapshot). ${NAME_THE_ID}"
+            exit 1
+          fi
+          if [ "$DIRECTION" = "downgrade" ] && [ "$TARGET" = "heads" ]; then
+            echo "::error title=Target refused::a downgrade to heads is refused, so nothing was migrated: it changes nothing and would still take a snapshot. ${NAME_THE_ID}"
             exit 1
           fi
           if [ "$DIRECTION" = "downgrade" ]; then

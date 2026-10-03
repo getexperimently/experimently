@@ -724,7 +724,7 @@ The current revision is printed by the Database Migration workflow's
 2. Fill in the required inputs:
    - **Environment:** `$ENV` (`staging` or `prod`)
    - **Direction:** `downgrade`
-   - **Target:** `-1` (reverts the single most recent migration)
+   - **Target:** the revision id to end at. To undo the migration a release added, open that migration file (`backend/app/db/migrations/versions/` for core, `modules/backend/app/db/migrations/versions/` for a module, which exists only in a full-profile image) and use its `down_revision`, e.g. `a89544fb1075`. Not `-1`: a full install has two heads, and the workflow refuses relative steps, `head` and `base`. A core id at or below `a7b8c9d0e1f2` also unapplies the modules branch.
 3. Click **Run workflow**
 
 After the downgrade completes, redeploy the previous application version using Method 1.
