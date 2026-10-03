@@ -1,6 +1,6 @@
 # JavaScript SDK
 
-`@getexperimently/js-sdk` (v1.1) is the JavaScript/TypeScript client for the
+`@getexperimently/js-sdk` (v0.1.0) is the JavaScript/TypeScript client for the
 Experimently public API: experiment assignment, feature flag evaluation and event
 tracking for Node >= 18 and browsers. Zero runtime dependencies — it uses the global `fetch`.
 
