@@ -69,7 +69,7 @@ when touched.
 | OpenFeature (Python) | `sdk/openfeature-python` | 79 (pytest) | yes | [openfeature.md](sdk/openfeature.md) |
 | Go | `sdk/go` | 51 (`go test -race`) | yes | [go.md](sdk/go.md) |
 | Java + Spring Boot starter | `sdk/java` | 77 + 30 (JUnit 5) | yes | [java.md](sdk/java.md) |
-| iOS (Swift) | `sdk/ios` | 71 (XCTest) | yes | [ios.md](sdk/ios.md) |
+| iOS (Swift) | `sdk/ios` | 71 (XCTest) | not yet (unit tests run in the nightly tier) | [ios.md](sdk/ios.md) |
 | Ruby | `sdk/ruby` | 109 (RSpec) | yes | [ruby.md](sdk/ruby.md) |
 | PHP | `sdk/php` | PHPUnit | in CI only (no PHP on the dev machine) | [php.md](sdk/php.md) |
 | .NET | `sdk/dotnet` | xUnit | in CI only (no .NET on the dev machine) | [dotnet.md](sdk/dotnet.md) |
