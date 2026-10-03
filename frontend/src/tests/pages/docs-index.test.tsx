@@ -38,3 +38,28 @@ describe('/docs hub', () => {
     expect(container.textContent ?? '').not.toMatch(pattern);
   });
 });
+
+/**
+ * Two hub entries describe methods that are not usable today: CUPED reduces
+ * almost no variance (#217) and the post-stratification route answers 501
+ * (#577). Each entry has to say so, so each must contain the word "not".
+ * Located by its link label; the description is in the same anchor.
+ */
+describe('/docs hub entries for methods that do not work yet', () => {
+  it.each([
+    ['CUPED', /^CUPED/],
+    ['Post-Stratification', /^Post-Stratification/],
+  ])('the %s entry says it is not available', (_name, label) => {
+    const { getAllByRole } = render(<DocsIndex />);
+    const links = getAllByRole('link').filter((a) => label.test(a.textContent ?? ''));
+    expect(links).toHaveLength(1);
+    expect(links[0].textContent ?? '').toMatch(/\bnot\b/i);
+  });
+
+  it('lists the Kubernetes (Helm) self-hosting guide', () => {
+    const { getAllByRole } = render(<DocsIndex />);
+    const helm = getAllByRole('link').filter((a) => /^Kubernetes \(Helm\)/.test(a.textContent ?? ''));
+    expect(helm).toHaveLength(1);
+    expect(helm[0].getAttribute('href')).toMatch(/self-hosting\/kubernetes/);
+  });
+});
