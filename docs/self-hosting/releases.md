@@ -41,7 +41,9 @@ that cannot read `VERSION` does not fail — setuptools warns and stamps
 A pre-release is cut by pushing the tag by hand — `git tag v1.2.0-rc.1 && git
 push origin v1.2.0-rc.1` — which does start `release.yml`. Pre-release tags
 publish the versioned image tags but deliberately do **not** move the floating
-`:core` / `:full` tags.
+`:core` / `:full` tags, and they do not deploy the documentation site: only a
+release tag with no `-` in it publishes the docs, so a release candidate never
+replaces the live site.
 
 [cc]: https://www.conventionalcommits.org/
 
