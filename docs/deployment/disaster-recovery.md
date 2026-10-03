@@ -153,8 +153,9 @@ aws logs filter-log-events \
 
 Step 4: restart the API. The API service uses the CodeDeploy deployment controller, so restart
 it with a CodeDeploy deployment that names the revision already serving, not with
-`aws ecs update-service --force-new-deployment`. The commands are at the end of
-"Step 3: Emergency — Point-in-time restore to a new cluster" in the [Rollback Runbook](rollback-runbook.md).
+`aws ecs update-service --force-new-deployment`. The commands are in
+[Restart the API on the revision it is serving](rollback-runbook.md#restart-the-api-on-the-revision-it-is-serving)
+in the Rollback Runbook.
 
 ### Verification
 
