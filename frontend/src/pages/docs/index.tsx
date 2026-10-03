@@ -33,7 +33,7 @@ const sections = [
     links: [
       { label: 'Running Experiments', href: docsUrl('guides/user-guide'), desc: 'End-to-end experiment lifecycle' },
       { label: 'Statistical Methods', href: docsUrl('api/sequential-testing'), desc: 'Sequential testing with mSPRT' },
-      { label: 'CUPED Variance Reduction', href: docsUrl('api/cuped'), desc: 'Beta: variance reduction; the covariate is not yet a pre-experiment metric' },
+      { label: 'CUPED (beta)', href: docsUrl('api/cuped'), desc: 'Not working yet: the covariate is not a pre-experiment metric, so it reduces almost no variance' },
       { label: 'Multi-Armed Bandits', href: docsUrl('api/multi-armed-bandit'), desc: 'Thompson Sampling, UCB1, Epsilon-Greedy' },
       { label: 'Split URL Testing', href: docsUrl('api/split-url'), desc: 'Full profile: send each variant to a different URL. The Lambda@Edge router is a construct you deploy yourself.' },
       { label: 'Mutual Exclusion Groups', href: docsUrl('api/mutual-exclusion-groups'), desc: 'Prevent cross-experiment contamination' },
@@ -52,7 +52,7 @@ const sections = [
   {
     category: 'SDKs',
     icon: '📦',
-    description: 'MIT-licensed client libraries for web, mobile and server.',
+    description: 'MIT-licensed client libraries for web, mobile and server. Not yet on package registries; each guide shows a from-source install.',
     links: [
       { label: 'JavaScript SDK', href: docsUrl('sdk/javascript'), desc: 'Browser and Node.js' },
       { label: 'Python SDK', href: docsUrl('sdk-guide'), desc: 'Server-side Python integration' },
@@ -114,10 +114,11 @@ const sections = [
   {
     category: 'Self-Hosting',
     icon: '🏗️',
-    description: 'Run Experimently yourself: a CDK app that works with AWS, or Docker Compose on one machine.',
+    description: 'Run Experimently yourself: Docker Compose on one machine, Helm on Kubernetes, or a CDK app that deploys to AWS.',
     links: [
       { label: 'AWS CDK Deployment', href: docsUrl('self-hosting/cdk'), desc: 'CDK app for ECS Fargate, Aurora and ElastiCache' },
       { label: 'Docker Compose', href: docsUrl('getting-started/docker-guide'), desc: 'Local development setup' },
+      { label: 'Kubernetes (Helm)', href: docsUrl('self-hosting/kubernetes'), desc: 'The Helm chart from each release, on the published images' },
       { label: 'Environment Variables', href: docsUrl('getting-started/environment-setup'), desc: 'Configuration reference' },
       { label: 'Database Migrations', href: docsUrl('self-hosting/migrations'), desc: 'Alembic migration guide' },
       { label: 'Monitoring', href: docsUrl('self-hosting/monitoring'), desc: 'CloudWatch dashboards, Prometheus metrics' },
@@ -140,7 +141,7 @@ const sections = [
     description: 'Deep dives into the statistical methods used by the platform.',
     links: [
       { label: 'Power Analysis & Sample Size', href: docsUrl('statistics/power-analysis'), desc: 'Pre-experiment planning: MDE, alpha, power, runtime estimation' },
-      { label: 'Post-Stratification', href: docsUrl('statistics/post-stratification'), desc: 'Variance reduction using post-experiment stratification' },
+      { label: 'Post-Stratification', href: docsUrl('statistics/post-stratification'), desc: 'The method, explained; not available through the API yet' },
       { label: 'FDR Correction', href: docsUrl('statistics/fdr-correction'), desc: 'Benjamini-Hochberg false discovery rate correction for multiple metrics' },
     ],
   },
@@ -185,8 +186,6 @@ export default function DocsIndex() {
                 <a
                   key={link.href}
                   href={link.href}
-                  target="_blank"
-                  rel="noreferrer"
                   className={`px-6 py-3 rounded-lg font-medium text-sm transition shadow-sm ${link.color}`}
                 >
                   {link.label}
@@ -202,7 +201,7 @@ export default function DocsIndex() {
             <svg className="w-4 h-4 text-gray-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
             </svg>
-            <a href={docsUrl('')} target="_blank" rel="noreferrer" className="text-sm text-gray-500 hover:text-gray-700">Browse the documentation →</a>
+            <a href={docsUrl('')} className="text-sm text-gray-500 hover:text-gray-700">Browse the documentation →</a>
           </div>
         </div>
 
@@ -212,7 +211,7 @@ export default function DocsIndex() {
             {sections.map((section) => (
               <div key={section.category} className="border border-gray-200 rounded-xl p-6 hover:border-blue-200 hover:shadow-sm transition">
                 <div className="flex items-center gap-3 mb-3">
-                  <span className="text-2xl">{section.icon}</span>
+                  <span className="text-2xl" aria-hidden="true">{section.icon}</span>
                   <h2 className="text-lg font-semibold text-gray-900">{section.category}</h2>
                 </div>
                 <p className="text-sm text-gray-500 mb-5">{section.description}</p>
@@ -221,8 +220,6 @@ export default function DocsIndex() {
                     <li key={link.href}>
                       <a
                         href={link.href}
-                        target="_blank"
-                        rel="noreferrer"
                         className="group flex items-start gap-2 text-sm"
                       >
                         <span className="text-blue-600 group-hover:text-blue-700 font-medium transition flex-shrink-0">
@@ -254,13 +251,13 @@ export default function DocsIndex() {
               <div className="flex flex-wrap gap-6 text-sm text-gray-400">
                 <Link href="/" className="hover:text-white transition">Home</Link>
                 <Link href="/docs" className="hover:text-white transition">Docs</Link>
-                <a href={docsUrl('api/endpoints')} target="_blank" rel="noreferrer" className="hover:text-white transition">API Reference</a>
-                <a href={docsUrl('sdk/javascript')} target="_blank" rel="noreferrer" className="hover:text-white transition">SDKs</a>
+                <a href={docsUrl('api/endpoints')} className="hover:text-white transition">API Reference</a>
+                <a href={docsUrl('sdk/javascript')} className="hover:text-white transition">SDKs</a>
                 <a href="mailto:hello@getexperimently.com" className="hover:text-white transition">Contact</a>
               </div>
             </div>
             <div className="border-t border-gray-800 mt-8 pt-8">
-              <p className="text-gray-500 text-sm text-center">
+              <p className="text-gray-400 text-sm text-center">
                 © 2024–2026 Experimently. Apache-2.0; SDKs MIT.
               </p>
             </div>
