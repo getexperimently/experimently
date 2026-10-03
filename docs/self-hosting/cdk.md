@@ -476,13 +476,23 @@ it needs the deploy workflow's role re-applied first
 
 ## Preview Changes with cdk diff
 
-Before deploying, preview what will change:
+Before deploying, preview what will change. On an environment that is
+already running, pass exactly the pins the deploy will pass
+([Deployment Guide, section 1.6](../deployment/deployment-guide.md#16-the-stacks)
+shows how to read them), or the diff shows the very changes those pins exist to
+prevent. Write the diff to a file rather than piping it:
 
 ```bash
-cdk diff experimentation-fargate-dev
+cdk diff "experimentation-fargate-$ENVIRONMENT" \
+  -c backend_image_tag="$BACKEND_TAG" -c api_live_target_group="$API_LIVE" \
+  -c dashboard_image_tag="$DASHBOARD_DIGEST" > "cdk-diff-$ENVIRONMENT.txt" 2>&1
 ```
 
-This shows additions, modifications, and deletions. Review carefully — some changes (like modifying an Aurora parameter group) require a replacement and will cause brief downtime.
+This shows additions, modifications, and deletions. Review carefully — some
+changes (like modifying an Aurora parameter group) require a replacement and
+will cause brief downtime. Do not deploy a diff with any line that names
+`AWS::EC2::SecurityGroupEgress` or `AWS::EC2::SecurityGroupIngress`: section
+1.6 of the Deployment Guide gives the stop rule and why.
 
 ---
 

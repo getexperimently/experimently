@@ -242,16 +242,48 @@ aws ecs describe-task-definition --task-definition "$RUNNING_TD" \
   --query "taskDefinition.containerDefinitions[?name=='backend'].image" --output text
 ```
 
-Then re-run both checks with the values you will pass (each exits non-zero on a
-mismatch), and deploy, passing the backend image's tag (or keeping `bootstrap`)
-and the two values the checks printed:
+Set the three values you will pass: `BACKEND_TAG` is the backend image's tag
+(or `bootstrap`), `API_LIVE` is what the first check printed (`blue` or
+`green`), and `DASHBOARD_DIGEST` is what the second printed (`sha256:` and the
+hex digest). Re-run both checks with them (each exits non-zero on a mismatch),
+then preview the deploy with the same pins, writing the diff to a file:
 
 ```bash
-python3 scripts/check_live_target_group.py --env "$ENVIRONMENT" --expect <blue|green>
-python3 scripts/check_dashboard_image.py --env "$ENVIRONMENT" --expect sha256:<hex>
+BACKEND_TAG=bootstrap
+API_LIVE=blue
+DASHBOARD_DIGEST=sha256:0000000000000000000000000000000000000000000000000000000000000000
+python3 scripts/check_live_target_group.py --env "$ENVIRONMENT" --expect "$API_LIVE" &&
+  python3 scripts/check_dashboard_image.py --env "$ENVIRONMENT" --expect "$DASHBOARD_DIGEST" &&
+  cdk diff "experimentation-fargate-$ENVIRONMENT" \
+    -c backend_image_tag="$BACKEND_TAG" -c api_live_target_group="$API_LIVE" \
+    -c dashboard_image_tag="$DASHBOARD_DIGEST" > "cdk-diff-$ENVIRONMENT.txt" 2>&1 &&
+  grep -cE 'AWS::EC2::SecurityGroup(Egress|Ingress)' "cdk-diff-$ENVIRONMENT.txt"
+```
+
+Replace the three example values with yours before running anything. Each step
+runs only if the one before it succeeded, so a check that refuses a value stops
+the diff, and a diff that fails prints no count at all, which is not a `0`.
+Read the whole file, not only the count. Do not pipe the diff into another command: a
+pipe reports the last command's exit status, so a failed diff can look like a
+clean one.
+
+**Stop if the diff touches an ingress or egress rule.** Any line marked `[-]`,
+`[+]` or `[~]` that names `AWS::EC2::SecurityGroupEgress` or
+`AWS::EC2::SecurityGroupIngress` means stop: the `grep -cE` above must print
+`0`. The load balancer reaches the API tasks over tcp 8000 and the dashboard
+tasks over tcp 8080. Losing the 8000 rule breaks every `/api/v1` and `/health`
+request through the load balancer, while the dashboard at `/` keeps working, so
+the dashboard looking fine proves nothing. Losing the 8080 rule breaks the
+dashboard at `/`. A count other than `0` is not something to fix at the
+console: do not deploy, re-run both checks, and open an issue with the diff
+file attached.
+
+When the count is `0`, deploy with exactly the same pins:
+
+```bash
 cdk deploy "experimentation-fargate-$ENVIRONMENT" --require-approval never \
-  -c backend_image_tag=<tag> -c api_live_target_group=<blue|green> \
-  -c dashboard_image_tag=sha256:<hex>
+  -c backend_image_tag="$BACKEND_TAG" -c api_live_target_group="$API_LIVE" \
+  -c dashboard_image_tag="$DASHBOARD_DIGEST"
 ```
 
 Every deploy's run summary also prints the digest the dashboard is running
@@ -264,7 +296,9 @@ image tag: a tag can be moved to other bytes, and the digest synthesises the
 image as `experimentation-platform/web@sha256:<hex>`, the exact image already
 running. If the check reports that the dashboard runs `:bootstrap` -- no release
 has reached it yet -- there is nothing to pin: leave `dashboard_image_tag` out
-and skip its `--expect`. If it reports any other tag, there is no digest to pin
+of both `cdk diff` and `cdk deploy`, and skip its `--expect`. An empty
+`DASHBOARD_DIGEST` is not the same thing: synth refuses
+`-c dashboard_image_tag=` with no value. If it reports any other tag, there is no digest to pin
 either: `-c dashboard_image_tag=<that tag>` names the same reference, which may
 since have been moved to other bytes.
 
