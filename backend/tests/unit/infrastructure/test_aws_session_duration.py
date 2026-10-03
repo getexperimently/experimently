@@ -1,7 +1,7 @@
 """Every job that assumes the AWS role keeps its session for as long as it can run.
 
 `aws-actions/configure-aws-credentials` asks STS for a one-hour session unless
-`role-duration-seconds` says otherwise. A deploy job may run for 150 minutes,
+`role-duration-seconds` says otherwise. A deploy job may run for 160 minutes,
 so without it the credentials expire mid-job with ``ExpiredToken`` -- after
 the first mutations, with nothing before then to say so.
 

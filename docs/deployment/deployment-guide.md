@@ -360,14 +360,15 @@ After that hour, the response to a bad release is the Rollback workflow.
    run checks that every target in the new task set's target group is
    `healthy` and that their number is the task set's desired count. Then it
    approves the shift (`continue-deployment --deployment-wait-type
-   READY_WAIT`). The canary sends 10% of traffic, waits five minutes, then
-   sends the rest. The step succeeds when the new revision is the PRIMARY task
-   set **and** `scripts/check_live_target_group.py` confirms that the `/api/*`
+   READY_WAIT`). The canary sends 10% of traffic, waits 15 minutes
+   ([why 15](README.md#deploy)), then sends the rest. The step succeeds when
+   the new revision is the PRIMARY task set **and** `scripts/check_live_target_group.py` confirms that the `/api/*`
    rule forwards to that task set's target group (`scripts/api_serving.py`).
    A rule still split between blue and green means the shift is in progress,
-   and the step waits. It gives up after `CODEDEPLOY_DEADLINE_SECONDS` (30
-   minutes) and **never stops the deployment**. CodeDeploy does, if one of
-   the deployment group's alarms goes into ALARM: it stops the deployment and
+   and the step waits. It gives up after `CODEDEPLOY_DEADLINE_SECONDS` (40
+   minutes: the canary's 15 and 25 for starting the tasks, the approval and
+   the final shift) and **never stops the deployment**. CodeDeploy does, if
+   one of the deployment group's alarms goes into ALARM: it stops the deployment and
    rolls the API back by itself, and the step ends "Rolled back by an alarm"
    (`result=alarm`), naming the alarm. There is nothing to roll back then; read
    [An alarm rolled the API back](rollback-runbook.md#an-alarm-rolled-the-api-back).
@@ -392,7 +393,7 @@ After that hour, the response to a bad release is the Rollback workflow.
    `-c dashboard_image_tag=sha256:<hex>` ([section 1.6](#16-the-stacks)), and a
    rollback line carrying both revisions.
 
-The deploy job's timeout is 150 minutes: every wait in it is a named bound
+The deploy job's timeout is 160 minutes: every wait in it is a named bound
 (snapshot, migration, traffic shift, dashboard rollout, the two smoke tests)
 and the sum leaves room for two uncached image builds.
 

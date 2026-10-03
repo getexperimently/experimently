@@ -69,7 +69,11 @@ checklist in [the deployment guide](deployment-guide.md#1-before-the-first-deplo
 deployment. When CodeDeploy reports it `Ready`, the deploy checks that every
 target in the new task set's target group is healthy, as many as the task set
 wants, and then approves the shift. The deployment group's canary sends 10%
-of traffic to the new revision, waits five minutes, then sends the rest. The
+of traffic to the new revision, waits 15 minutes, then sends the rest. The
+canary is 15 minutes because launch traffic is low: at 10% of a small number
+of requests, five minutes is often too short for a 5xx alarm to fire, which
+needs errors in 2 of 3 minutes plus CloudWatch's metric delay. It will be
+revisited once production has real traffic. The
 run succeeds when the new revision is the API's PRIMARY task set **and** the
 HTTPS listener's `/api/*` rule forwards to that task set's target group. The
 summary then prints the live group and the `-c api_live_target_group=<blue|green>`

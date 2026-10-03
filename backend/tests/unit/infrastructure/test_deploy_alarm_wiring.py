@@ -693,6 +693,19 @@ def test_the_cli_check_reads_the_workflows_exact_flags():
     assert tampered in cli.argv(rollback, tampered)
 
 
+@pytest.mark.regression
+def test_the_forward_deploy_uses_the_groups_own_config():
+    """#212 (D47): the forward create-deployment names no deployment config, so
+    every forward deploy gets the group's 15-minute canary. A
+    --deployment-config-name here would silently override it; only the
+    rollback passes one (ECSAllAtOnce)."""
+    cli = _cli_module()
+    deploy = cli.flags(DEPLOY)
+    assert "--application-name" in deploy and "--deployment-group-name" in deploy
+    assert "--deployment-config-name" not in deploy, deploy
+    assert "--deployment-config-name" in cli.flags(ROLLBACK)
+
+
 def _workflow_copies(tmp_path):
     workflows = tmp_path / "workflows"
     workflows.mkdir()

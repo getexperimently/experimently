@@ -30,6 +30,10 @@ both values of ``api_live_target_group``:
   collide (test_environments_do_not_collide.py checks every AlarmName too).
 * **Nothing is replaced** when ``api_live_target_group`` flips: the same
   logical ids under blue and green.
+* **The canary is 15 minutes** (#212, D47): the group's deployment config is
+  exactly ``CodeDeployDefault.ECSCanary10Percent15Minutes``, the alarm window
+  fits inside the canary that config gives, and deploy.yml's shift deadline is
+  that canary plus the same 1500 s allowance for everything else.
 """
 
 from __future__ import annotations
@@ -53,9 +57,22 @@ EXPRESSION = "IF(FILL(e,0) >= 5, FILL(e,0)/r, 0)"
 EVENTS = sorted(
     ["DEPLOYMENT_FAILURE", "DEPLOYMENT_STOP_ON_REQUEST", "DEPLOYMENT_STOP_ON_ALARM"]
 )
-#: The canary is five minutes. An alarm that needs longer than that to fire can
-#: never stop a deployment inside it.
-CANARY_SECONDS = 300
+#: The one deployment config the API's group may use (#212, D47).
+CANARY_CONFIG = "CodeDeployDefault.ECSCanary10Percent15Minutes"
+#: How long each predefined config holds traffic at the canary step. Explicit,
+#: so the canary length is derived from the synthesised name and a config not
+#: listed here fails rather than being guessed at. An alarm that needs longer
+#: than the canary to fire can never stop a deployment inside it.
+CANARY_SECONDS_BY_CONFIG = {
+    "CodeDeployDefault.ECSCanary10Percent15Minutes": 900,
+    "CodeDeployDefault.ECSCanary10Percent5Minutes": 300,
+    "CodeDeployDefault.ECSAllAtOnce": 0,
+}
+#: deploy.yml's CODEDEPLOY_DEADLINE_SECONDS minus the canary: starting the
+#: replacement tasks, the approval and the final shift. Three staging runs used
+#: 165-188 s of it. Equality, so the deadline neither shrinks below the canary
+#: nor drifts away from it.
+SHIFT_ALLOWANCE_SECONDS = 1500
 
 
 def _synth(environment: str, profile: str, live: str):
@@ -111,6 +128,15 @@ def _one(resources: dict, prefix: str, rtype: str) -> str:
 def _group(resources: dict) -> dict:
     (group,) = _of_type(resources, "AWS::CodeDeploy::DeploymentGroup").values()
     return group["Properties"]
+
+
+def _canary_seconds(resources: dict) -> int:
+    name = _group(resources)["DeploymentConfigName"]
+    assert name in CANARY_SECONDS_BY_CONFIG, (
+        f"unknown deployment config {name!r}: add its canary length to "
+        "CANARY_SECONDS_BY_CONFIG"
+    )
+    return CANARY_SECONDS_BY_CONFIG[name]
 
 
 def _group_alarms(resources: dict) -> dict[str, dict]:
@@ -249,9 +275,34 @@ def test_each_alarm_is_exactly_the_specified_one(stacks, case):
             "live -- in ALARM, and every deployment is stopped"
         )
         window = 60 * alarm["EvaluationPeriods"]
-        assert window <= CANARY_SECONDS, (
-            f"evaluation window {window}s exceeds the {CANARY_SECONDS}s canary"
+        canary = _canary_seconds(resources)
+        assert window <= canary, (
+            f"evaluation window {window}s exceeds the {canary}s canary"
         )
+
+
+@pytest.mark.regression
+@pytest.mark.parametrize("case", CASES, ids=_ids)
+def test_the_api_canary_is_fifteen_minutes(stacks, case):
+    """#212 (D47): every API deployment group uses the 15-minute canary."""
+    group = _group(stacks[case].template["Resources"])
+    assert group["DeploymentConfigName"] == CANARY_CONFIG
+
+
+@pytest.mark.regression
+@pytest.mark.parametrize("case", CASES, ids=_ids)
+def test_the_shift_deadline_is_the_canary_plus_the_allowance(stacks, case):
+    """deploy.yml's shift deadline runs from create-deployment and covers the
+    canary in full (scripts/shift_traffic.py). A longer canary with the old
+    deadline leaves too little for the tasks to start and the shift to finish:
+    a false red after an approved shift."""
+    deploy = yaml.safe_load((REPO_ROOT / ".github" / "workflows" / "deploy.yml").read_text())
+    deadline = int(deploy["env"]["CODEDEPLOY_DEADLINE_SECONDS"])
+    canary = _canary_seconds(stacks[case].template["Resources"])
+    assert deadline - canary == SHIFT_ALLOWANCE_SECONDS, (
+        f"CODEDEPLOY_DEADLINE_SECONDS {deadline} - the {canary}s canary == "
+        f"{deadline - canary}, expected {SHIFT_ALLOWANCE_SECONDS}"
+    )
 
 
 @pytest.mark.regression

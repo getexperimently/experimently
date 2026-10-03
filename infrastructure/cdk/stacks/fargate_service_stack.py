@@ -945,8 +945,8 @@ class FargateServiceStack(Stack):
         )
 
         # --- CodeDeploy Deployment Group ---
-        # Uses CANARY_10_PERCENT_5_MINUTES: once the shift is approved, 10% of
-        # the API's traffic goes to the replacement target group for 5
+        # Uses CANARY_10_PERCENT_15_MINUTES: once the shift is approved, 10% of
+        # the API's traffic goes to the replacement target group for 15
         # minutes, then the rest. Both 5xx alarms above, blue's and green's,
         # are in the group's AlarmConfiguration, which applies to the whole
         # deployment, not to a phase of it (the synth tests pin both). CDK's
@@ -958,8 +958,13 @@ class FargateServiceStack(Stack):
         # (`stopped_deployment`). Nothing else judges the canary: a release
         # that answers wrongly with a 2xx, or with fewer errors than the alarm
         # needs, goes to 100%. The alarms need 2 of 3 one-minute periods plus
-        # the metric delay, so a broken release is often caught after the
-        # shift rather than in the 5 minutes.
+        # the metric delay. Fifteen minutes rather than five (D47): at launch
+        # traffic, 10% of a few requests a minute often does not reach the
+        # alarm's thresholds inside five minutes, so a broken release went to
+        # 100% before the alarm could act. Revisit once production has real
+        # traffic. The forward deploy's shift deadline covers it
+        # (CODEDEPLOY_DEADLINE_SECONDS in deploy.yml; the synth tests pin the
+        # two together).
         self.deployment_group = codedeploy.EcsDeploymentGroup(
             self,
             "DeploymentGroup",
@@ -986,7 +991,7 @@ class FargateServiceStack(Stack):
                 # AttributeError before it produced a single template.
                 termination_wait_time=Duration.hours(1),
             ),
-            deployment_config=codedeploy.EcsDeploymentConfig.CANARY_10_PERCENT_5_MINUTES,
+            deployment_config=codedeploy.EcsDeploymentConfig.CANARY_10_PERCENT_15_MINUTES,
             role=codedeploy_role,
             # Both colours, for the reason given above the alarms. A failed
             # alarm read stops the deployment (fail closed); never ignored.

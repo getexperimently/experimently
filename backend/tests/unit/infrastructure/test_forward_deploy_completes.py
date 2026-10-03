@@ -867,13 +867,28 @@ def test_the_time_left_is_estimated_from_the_creation_time():
     sentence = refuse.describe(
         _info("InProgress", instanceTerminationWaitTimeStarted=True), created + 20 * 60
     )
-    # 30 approval + 15 shift allowance + 60 termination - 20 elapsed.
+    # 30 approval + 25 shift allowance + 60 termination - 20 elapsed.
     assert "created at 10:00 UTC, 20 minutes ago" in sentence
-    assert "about 85 more minutes" in sentence
+    assert "about 95 more minutes" in sentence
     assert "keeping the previous task set for up to 60 minutes" in sentence
     ready = refuse.describe(_info("Ready"), created)
     assert "waiting for approval" in ready and "30-minute approval wait" in ready
     assert refuse._when(created) == created  # `wire` timestamps: epoch seconds
+
+
+@pytest.mark.regression
+def test_the_estimate_counts_the_fifteen_minute_canary():
+    """#212 (D47): the shift allowance is starting the tasks plus the canary's
+    fifteen minutes, so the refusal's estimate is the exact sentence below."""
+    refuse = _refuse_module()
+    created = refuse._when("2026-09-26T10:00:00+00:00")
+    sentence = refuse.describe(_info("InProgress"), created)
+    assert sentence.endswith(
+        "It was created at 10:00 UTC, 0 minutes ago, and may stay active for "
+        "about 115 more minutes. That is an estimate: 30 minutes of approval "
+        "wait, plus about 25 minutes to shift, plus 60 minutes before the old "
+        "task set is terminated."
+    ), sentence
 
 
 def test_an_operator_typed_description_stays_on_one_line():

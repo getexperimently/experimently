@@ -102,7 +102,7 @@ The account also needs the GitHub OIDC provider
 
 Each environment role needs a **`MaxSessionDuration` of 10800 seconds (3
 hours)**. The workflows ask for a session as long as the job may run:
-`role-duration-seconds` is 9000 in `deploy.yml` (a 150-minute job) and 5400 in
+`role-duration-seconds` is 9600 in `deploy.yml` (a 160-minute job) and 5400 in
 `db-migrate.yml` and `rollback.yml` (90-minute jobs). IAM's default maximum is
 one hour, and a request above the role's maximum fails at the "Configure AWS
 credentials" step, before anything has changed.
