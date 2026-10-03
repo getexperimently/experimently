@@ -299,7 +299,7 @@ interface Assignment {
 - `bootstrapFlags`, `FeatureFlag`, `TargetingRule`, `FlagVariant`, `Experiment`, `BootstrapResponse`,
   `evaluateFlag`/`assignVariant`/`matchesRule` (local evaluator) and `isBootstrapped` are gone; the
   `/api/v1/edge/bootstrap` and `/api/v1/feature-flags/{key}` definition endpoints are no longer used.
-  `GET /api/v1/edge/bootstrap` has since been removed from the server (0.18.0); for server-side
+  `GET /api/v1/edge/bootstrap` has since been removed from the server (#737); for server-side
   local evaluation see [Local evaluation](local-evaluation.md).
 - `refreshFlags`, `loadFromKvOrApi` and `refreshAndStore` are deprecated no-ops.
 - `track` gained a fourth `options` argument and no longer posts to `/api/v1/events`.
