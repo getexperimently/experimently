@@ -106,13 +106,17 @@ env:
   # (deployment guide section 1.3); the CDK imports both by name.
   ECR_DASHBOARD_REPO: experimentation-platform/web
   # How long the forward deploy waits for the API to serve the new revision:
-  # the replacement tasks starting, the approval, the canary's five minutes
-  # and the final shift. It is a bound, not an estimate. When it passes, the
+  # the replacement tasks starting, the approval, the canary's fifteen minutes
+  # (900 s) and the final shift. The 1500 s left beside the canary is the
+  # allowance the deadline gave before the canary grew; three staging runs
+  # used 165-188 s of it. infrastructure/tests/test_codedeploy_alarms.py pins
+  # deadline - canary to 1500, so the two move together. It is a bound, not
+  # an estimate. When it passes, the
   # run goes red and nothing is stopped (scripts/shift_traffic.py). The
   # deployment group's own approval wait is 30 minutes, so a deadline that
   # passes before the approval leaves CodeDeploy to stop an unapproved
   # deployment, which is harmless.
-  CODEDEPLOY_DEADLINE_SECONDS: '1800'
+  CODEDEPLOY_DEADLINE_SECONDS: '2400'
   CODEDEPLOY_POLL_SECONDS: '10'
   # How long the deployment group keeps the old task set after the shift (its
   # termination_wait_time; infrastructure/tests/test_codedeploy_alarms.py
@@ -262,9 +266,9 @@ jobs:
     name: Deploy ${{ inputs.version }} to ${{ inputs.environment }}
     needs: preflight
     runs-on: ubuntu-latest
-    # The named waits above add up to about 115 minutes before two cold image
+    # The named waits above add up to about 125 minutes before two cold image
     # builds; the budget test states their allowance.
-    timeout-minutes: 150
+    timeout-minutes: 160
     environment: ${{ inputs.environment }}
     permissions:
       id-token: write
@@ -364,7 +368,7 @@ jobs:
           aws-region: ${{ env.AWS_REGION }}
           # timeout-minutes x 60 <= this <= the role's MaxSessionDuration (10800);
           # test_aws_session_duration.py. The default, 3600, expires mid-job.
-          role-duration-seconds: 9000
+          role-duration-seconds: 9600
           # The ASSUMED account, which the wrong-account check below may find
           # is not the configured one; the configured one is a secret already.
           mask-aws-account-id: true
@@ -899,6 +903,9 @@ jobs:
       - name: Shift traffic and confirm the API serves this revision
         id: api-serving
         env:
+          # The step runs for about 18 minutes; unbuffered, its progress lines
+          # appear as they happen instead of all at once when it exits.
+          PYTHONUNBUFFERED: '1'
           DEPLOYMENT_ID: ${{ steps.codedeploy.outputs.id }}
           TASK_DEFINITION: ${{ steps.api-td.outputs.arn }}
         run: |

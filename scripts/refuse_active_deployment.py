@@ -58,9 +58,9 @@ ACTIVE = ("Created", "Queued", "InProgress", "Baking", "Ready")
 #: deployment does not report them.
 DEFAULT_READY_WAIT_MINUTES = 30
 DEFAULT_TERMINATION_WAIT_MINUTES = 60
-#: Starting the replacement tasks, plus the canary's five minutes. This is an
-#: allowance for the estimate. It is not a measurement.
-SHIFT_ALLOWANCE_MINUTES = 15
+#: Starting the replacement tasks, plus the canary's fifteen minutes. This is
+#: an allowance for the estimate. It is not a measurement.
+SHIFT_ALLOWANCE_MINUTES = 25
 
 OK, REFUSED, UNKNOWN = 0, 1, 2
 

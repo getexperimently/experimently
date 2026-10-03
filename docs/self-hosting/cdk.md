@@ -456,7 +456,7 @@ deploy:
 1. The workflow registers a new task definition and creates a CodeDeploy deployment
 2. CodeDeploy starts the new tasks in the target group that is not live, and reports `Ready`
 3. When every new target is healthy, the workflow approves the shift
-4. The canary sends 10% of traffic to the new tasks, waits 5 minutes, then sends the rest
+4. The canary sends 10% of traffic to the new tasks, waits 15 minutes ([why 15](../deployment/README.md#deploy)), then sends the rest
 5. The old tasks are kept for an hour, so Rollback can put them back, and then terminated
 
 Alarms watch the API's canary and the hour after it. The Fargate stack creates

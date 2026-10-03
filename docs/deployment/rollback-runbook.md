@@ -400,10 +400,10 @@ APPSPEC=$(jq -cn --arg td "$PREV_TASK_DEF" '{
 ```
 
 `--deployment-config-name` is all-at-once, NOT the deployment group's
-CANARY_10_PERCENT_5_MINUTES. The canary is right going forward, on a revision
+CANARY_10_PERCENT_15_MINUTES. The canary is right going forward, on a revision
 nobody has run. Rolling back, the target was serving production minutes ago
 and the revision being replaced is the one hurting users -- a canary would
-leave 90% of traffic on it for another five minutes.
+leave 90% of traffic on it for another fifteen minutes.
 
 ```bash
 DEPLOYMENT_ID=$(aws deploy create-deployment \

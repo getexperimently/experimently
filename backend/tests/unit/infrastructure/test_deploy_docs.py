@@ -566,3 +566,113 @@ def test_the_runbook_undoes_a_migration_before_the_api_rollback():
     gap = section.index("Tracked as a gap in the deploy path.")
     assert "issue 78" in section[stop:gap]
     assert stop < gap < command, (stop, gap, command)
+
+
+# --- the canary's length (#212, D47) -------------------------------------------
+
+#: Every file that states how long the API's canary holds traffic at 10%.
+CANARY_LENGTH_SOURCES = [
+    DOCS / "deployment" / "README.md",
+    GUIDE,
+    RUNBOOK,
+    DOCS / "self-hosting" / "cdk.md",
+    DOCS / "integrations" / "aws.md",
+    WORKFLOWS / "deploy.yml",
+    WORKFLOWS / "rollback.yml",
+    REPO_ROOT / "infrastructure" / "cdk" / "stacks" / "fargate_service_stack.py",
+    REPO_ROOT / "scripts" / "refuse_active_deployment.py",
+]
+
+#: The canary was five minutes until #212. Anchored on the canary, so the
+#: rollback's own "under 5 minutes" target, the RPO figures and the README's
+#: "five minutes is often too short" (the reason for fifteen) do not match.
+STALE_CANARY_LENGTH = [
+    r"canary_10_percent_5_minutes",
+    r"ecscanary10percent5minutes",
+    r"canary(?:'s)?\s+(?:5|five)[- ]minutes?",
+    r"canary[^.]{0,160}?\b(?:waits?|for|another|further|in\s+the)\s+(?:5|five)\s+minutes",
+]
+CURRENT_CANARY_LENGTH = re.compile(
+    r"\b(?:15|fifteen)\s+minutes|canary_10_percent_15_minutes", re.I
+)
+
+
+def _whole_text(path: Path) -> str:
+    """The file as one line: a sentence that wraps, in prose or in a `#`
+    comment block, is matched whole."""
+    text = re.sub(r"\n[ \t]*(?:#:?|//)?[ \t]*", " ", path.read_text())
+    return " ".join(text.split())
+
+
+def _stale_canary_claims(text: str) -> list[str]:
+    return [
+        m.group(0)
+        for pattern in STALE_CANARY_LENGTH
+        for m in re.finditer(pattern, text, re.I)
+    ]
+
+
+@pytest.mark.regression
+@pytest.mark.parametrize("path", CANARY_LENGTH_SOURCES, ids=lambda p: p.name)
+def test_the_canary_is_described_as_fifteen_minutes(path):
+    """#212 (D47): nothing an operator reads still gives the canary five
+    minutes, and each source says fifteen."""
+    text = _whole_text(path)
+    hits = _stale_canary_claims(text)
+    assert not hits, (
+        f"{path.relative_to(REPO_ROOT)}: canary still described as 5 minutes: {hits}"
+    )
+    assert CURRENT_CANARY_LENGTH.search(text), (
+        f"{path.relative_to(REPO_ROOT)} does not say the canary is 15 minutes"
+    )
+
+
+def test_the_canary_length_check_is_not_vacuous():
+    """Each stale shape is caught, wrapped over a line break; the rollback's
+    "under 5 minutes" target is not."""
+    for stale in (
+        "The deployment group's canary sends 10%\nof traffic, waits five minutes, then",
+        "a canary would leave 90% of traffic on it for a further\n# five minutes",
+        "the canary's five minutes",
+        "NOT the group's CANARY_10_PERCENT_5_MINUTES",
+    ):
+        flat = " ".join(re.sub(r"\n[ \t]*(?:#:?|//)?[ \t]*", " ", stale).split())
+        assert _stale_canary_claims(flat), stale
+    assert not _stale_canary_claims(
+        "a canary would leave 90% of traffic on it for another fifteen minutes, "
+        'against a runbook target of "under 5 minutes from decision to rollback'
+    )
+
+
+def _deploy_job() -> dict:
+    return yaml.safe_load((WORKFLOWS / "deploy.yml").read_text())["jobs"]["deploy"]
+
+
+def _role_duration_seconds(job: dict) -> int:
+    (seconds,) = [
+        step["with"]["role-duration-seconds"]
+        for step in job["steps"]
+        if str(step.get("uses", "")).startswith("aws-actions/configure-aws-credentials")
+    ]
+    return int(seconds)
+
+
+@pytest.mark.regression
+def test_the_docs_give_the_deploy_jobs_own_timeout_and_session():
+    """PE C3: the docs' numbers are read from deploy.yml, not retyped."""
+    job = _deploy_job()
+    timeout = int(job["timeout-minutes"])
+    session = _role_duration_seconds(job)
+    deadline = int(
+        yaml.safe_load((WORKFLOWS / "deploy.yml").read_text())["env"][
+            "CODEDEPLOY_DEADLINE_SECONDS"
+        ]
+    )
+    guide = " ".join(GUIDE.read_text().split())
+    assert f"The deploy job's timeout is {timeout} minutes:" in guide
+    assert f"`CODEDEPLOY_DEADLINE_SECONDS` ({deadline // 60} minutes" in guide
+    iam = " ".join((DOCS / "deployment" / "iam-permissions.md").read_text().split())
+    assert (
+        f"`role-duration-seconds` is {session} in `deploy.yml` (a {timeout}-minute job)"
+        in iam
+    )

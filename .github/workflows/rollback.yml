@@ -499,11 +499,11 @@ jobs:
             }]
           }')"
           # CodeDeployDefault.ECSAllAtOnce, not the group's configured
-          # CANARY_10_PERCENT_5_MINUTES. The canary is right going forward, on
+          # CANARY_10_PERCENT_15_MINUTES. The canary is right going forward, on
           # a revision nobody has run. Rolling back, the target was serving
           # minutes ago and the version being replaced is the one hurting
-          # users -- a canary would leave 90% of traffic on it for a further
-          # five minutes, against a runbook target of "under 5 minutes from
+          # users -- a canary would leave 90% of traffic on it for another
+          # fifteen minutes, against a runbook target of "under 5 minutes from
           # decision to rollback complete".
           #
           # The alarms are overridden, always (#148): the release being rolled

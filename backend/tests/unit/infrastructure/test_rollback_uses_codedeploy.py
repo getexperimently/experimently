@@ -137,12 +137,12 @@ def test_the_rollback_approves_its_own_traffic_shift():
 
 @pytest.mark.regression
 def test_the_rollback_does_not_canary_its_way_back():
-    """The group's CANARY_10_PERCENT_5_MINUTES is wrong for a rollback.
+    """The group's CANARY_10_PERCENT_15_MINUTES is wrong for a rollback.
 
     Going forward it is right: the new revision is unproven. Rolling back, the
     target was serving production minutes ago and the revision being replaced
     is the one hurting users, so a canary leaves 90% of traffic on the broken
-    version for another five minutes.
+    version for another fifteen minutes.
     """
     runs = _run_text()
     assert "--deployment-config-name CodeDeployDefault.ECSAllAtOnce" in runs, (
