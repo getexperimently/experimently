@@ -13,6 +13,7 @@ import re
 from pathlib import Path
 
 import pytest
+import yaml
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 WORKFLOWS = REPO_ROOT / ".github" / "workflows"
@@ -438,3 +439,119 @@ def test_no_copy_advises_running_rollback_again():
                 flat[max(0, match.start() - 60) : match.end() + 40],
             )
     assert "Do not dispatch Rollback again while" in " ".join(texts["runbook"].split())
+
+
+# --- the Database Migration target (#726) -------------------------------------
+
+DB_MIGRATE = WORKFLOWS / "db-migrate.yml"
+#: Where an operator reads what to type into the Database Migration target.
+TARGET_DOCS = [
+    RUNBOOK,
+    GUIDE,
+    DOCS / "deployment" / "README.md",
+]
+#: `-1` as a token: not `-v-1H`, not `modules@-1`, not `2026-10-1`.
+_MINUS_ONE = re.compile(r"(?<![\w@-])-1\b")
+#: A sentence that mentions `-1` only to refuse it or warn against it.
+_REFUSING = re.compile(r"(?i)\b(refus\w*|not|never)\b")
+
+
+#: Clause boundaries: a sentence end, a dash aside, a list item, a paragraph.
+#: A refusal in the next clause does not excuse this one ("a revision id or
+#: `-1` to downgrade -- never the singular `head`").
+_CLAUSE = re.compile(r"(?<=[.!?;])\s+|\s--\s|\n\s*(?:[-*]|\d+\.)\s|\n\s*\n")
+
+
+def _sentences_recommending_minus_one(text: str) -> list[str]:
+    sentences = _CLAUSE.split(text)
+    return [
+        " ".join(s.split())
+        for s in sentences
+        if _MINUS_ONE.search(s) and not _REFUSING.search(s)
+    ]
+
+
+def _db_migrate_target_description() -> str:
+    document = yaml.safe_load(DB_MIGRATE.read_text(encoding="utf-8"))
+    document["on"] = document.pop(True, document.get("on"))
+    return document["on"]["workflow_dispatch"]["inputs"]["target"]["description"]
+
+
+@pytest.mark.regression
+def test_the_db_migrate_help_names_an_id_and_does_not_suggest_minus_one():
+    description = _db_migrate_target_description()
+    assert "a89544fb1075" in description
+    # PE v2 C8: the modules example is not there on a core image.
+    assert "modules_0001_rbac exists only in a full-profile image" in description
+    assert _sentences_recommending_minus_one(description) == []
+    # The whole workflow, comments and error text included (:112, :114): the
+    # two phrasings that offered a relative step as a valid target.
+    text = DB_MIGRATE.read_text(encoding="utf-8")
+    assert not re.search(r"(?i)\bor a relative step\b", text)
+    assert not re.search(r"(?i)relative step such as -1", text)
+
+
+@pytest.mark.regression
+@pytest.mark.parametrize("path", TARGET_DOCS, ids=lambda p: p.name)
+def test_no_deploy_doc_tells_an_operator_to_downgrade_by_minus_one(path):
+    assert _sentences_recommending_minus_one(path.read_text(encoding="utf-8")) == []
+
+
+@pytest.mark.regression
+def test_the_runbook_downgrade_names_the_down_revision():
+    text = RUNBOOK.read_text(encoding="utf-8")
+    (target,) = re.findall(r"^\s*- \*\*Target:\*\*.*$", text, re.M)
+    assert "down_revision" in target
+    assert "a7b8c9d0e1f2" in target, "the branch-point warning is gone"
+
+
+@pytest.mark.regression
+def test_the_migration_docs_do_not_say_the_workflow_suggests_minus_one():
+    self_hosting = (DOCS / "self-hosting" / "migrations.md").read_text(encoding="utf-8")
+    assert "still suggests" not in self_hosting
+    assert "The Database Migration\nworkflow refuses `-1`." in self_hosting
+    models = (DOCS / "architecture" / "models.md").read_text(encoding="utf-8")
+    assert not re.search(r"(?m)^\s*alembic downgrade -1\b", models)
+
+
+# --- undoing a migration (#726) -------------------------------------------------
+
+
+@pytest.mark.regression
+def test_the_runbook_undoes_a_migration_before_the_api_rollback():
+    """#726, PE v2 condition 6. db-migrate.yml takes its image from the API's
+    PRIMARY task set and has no image input, so once the API is rolled back
+    the serving image lacks the migration's file and `alembic` cannot locate
+    the database's revision: the workflow snapshots, then fails, and migrates
+    nothing. The runbook must put the downgrade first, say there is no
+    supported downgrade after an API or alarm rollback, and put the STOP
+    paragraph (the restored cluster is unreachable by the tasks today) ahead of
+    the point-in-time restore command, not after it."""
+    section = _runbook_section("Database Rollback Procedure")
+    flat = " ".join(section.split())
+    # (c) the old order is gone, from the section and from the decision tree.
+    assert "first or in parallel" not in flat
+    assert not re.search(r"redeploy the previous application version", flat)
+    assert "Method 1 + DB Rollback section" not in RUNBOOK.read_text()
+    assert "DATABASE FIRST, THEN APPLICATION" in RUNBOOK.read_text()
+    assert "Application rollback alone did not resolve the issue" not in flat
+    # (a) the downgrade works only while the migrating release is PRIMARY.
+    assert "Undo the migration before you roll the API back." in flat
+    assert "works only while the release that contains the migration is PRIMARY" in flat
+    # (b) no supported downgrade afterwards; the restore; the Engineering Lead.
+    assert (
+        "After an API rollback or an alarm rollback, there is no supported "
+        "downgrade through the workflow." in flat
+    )
+    assert "Call the Engineering Lead now." in flat
+    # Never "snapshot restore" while the command is a point-in-time restore.
+    assert not re.search(
+        r"snapshot restore|restore from (aurora )?snapshot", flat, re.I
+    )
+    assert not re.search(r"restore the snapshot", RUNBOOK.read_text(), re.I)
+    # The STOP paragraph and its gap reference come before the command.
+    command = section.index("aws rds restore-db-cluster-to-point-in-time")
+    stop = section.index("**STOP. A restore to a NEW cluster cannot be picked up")
+    gap = section.index("Tracked as a gap in the deploy path.")
+    assert "issue 78" in section[stop:gap]
+    assert stop < gap < command, (stop, gap, command)

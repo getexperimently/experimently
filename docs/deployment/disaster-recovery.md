@@ -154,7 +154,7 @@ aws logs filter-log-events \
 Step 4: restart the API. The API service uses the CodeDeploy deployment controller, so restart
 it with a CodeDeploy deployment that names the revision already serving, not with
 `aws ecs update-service --force-new-deployment`. The commands are at the end of
-"Step 3: Emergency — Restore from Aurora Snapshot" in the [Rollback Runbook](rollback-runbook.md).
+"Step 3: Emergency — Point-in-time restore to a new cluster" in the [Rollback Runbook](rollback-runbook.md).
 
 ### Verification
 
@@ -302,7 +302,7 @@ definitions take the database host from the database stack's writer endpoint, an
 credentials from that stack's secret, as CloudFormation imports. A cluster restored beside the
 stack has a different endpoint, and the application reads no override. Decide before an
 incident which of the options in the [Rollback Runbook](rollback-runbook.md) ("Step 3:
-Emergency — Restore from Aurora Snapshot") you will use. Then restart the API through
+Emergency — Point-in-time restore to a new cluster") you will use. Then restart the API through
 CodeDeploy, as in Scenario 2, Step 4.
 
 A cluster restored beside the stack is not watched by `AuroraHighCPU-$ENV` either. The alarm

@@ -57,8 +57,11 @@ answer 404 and an administrator creates your account
 ### Standard Login
 
 1. Navigate to the login page at `/login`
-2. Enter your username or email and password
-3. Click "Login" to authenticate
+2. Enter your email address and password
+3. Click "Sign in"
+
+This is the sign-in for `AUTH_PROVIDER=local`. With `cognito`, the dashboard does not yet
+sign in; see the note at the top of this page.
 
 ### Login Security Features
 
@@ -77,20 +80,37 @@ Once logged in successfully:
 
 ### Password Reset Process
 
-If you forget your password:
+The dashboard has no reset page and no reset link, under any `AUTH_PROVIDER`. The login
+page's **Forgot password?** only says "Ask an administrator to reset it." What happens
+next depends on the provider.
 
-1. Click "Forgot Password" on the login page
-2. Enter your username or email
-3. Check your email for a password reset code
-4. Enter the code and your new password on the reset page
-5. Submit the form to update your password
-6. Log in with your new password
+**With `AUTH_PROVIDER=local` (the default)** there is no self-service reset. An
+administrator with a superuser account sets a new password for you through the API, without
+knowing the old one: `PUT /api/v1/admin/users/{user_id}` with a JSON body of
+`{"password": "<new password>"}` and the administrator's bearer token.
+`PUT /api/v1/users/{user_id}` accepts the same `password` field. The dashboard's **Edit**
+dialog on **Admin → Users** changes the role and whether the account is active, not the
+password. Nobody can reset their own password this way, administrators included; sign in
+with the new password and then change it yourself (see
+[Changing Your Password](#changing-your-password)).
+
+**With `AUTH_PROVIDER=cognito`** the password lives in the Cognito user pool, and either of
+these works:
+
+- an administrator sets it with
+  `aws cognito-idp admin-set-user-password ... --permanent`, as in step 3 of
+  [Adding a user](../cognito_integration.md#adding-a-user);
+- you reset it yourself through the API, if your account's email address is verified
+  (`email_verified=true`): `POST /api/v1/auth/forgot-password` with
+  `{"username": "..."}` emails you a code, and `POST /api/v1/auth/reset-password` with
+  `username`, `confirmation_code` and `new_password` sets the new password. Then sign in
+  with `POST /api/v1/auth/token`.
 
 ### Password Reset Notes
 
-- The reset flow above is the Cognito one; with the default `local` provider there is no
-  self-service reset. If you have forgotten your password, ask an administrator to reset it.
 - New passwords must meet the same requirements as registration
+- Under `cognito`, a password set in the dashboard's database (the `local` route above)
+  does not change the Cognito password, so it does not change how you sign in
 
 ### Changing Your Password
 
@@ -243,11 +263,15 @@ deleted the account; closing the dialog refreshes the list.
 
 ### Password Reset Errors
 
-| Error | Cause | Solution |
+These come from the Cognito API routes only. The route answers `400` with Cognito's own
+message, which names the error:
+
+| Error in the message | Cause | Solution |
 |-------|-------|----------|
-| "Invalid verification code" | Code doesn't match or expired | Request a new code |
-| "Password recently used" | New password same as old one | Choose a different password |
-| "Code expired" | Reset code is more than 15 minutes old | Request a new code |
+| `CodeMismatchException` | The code does not match the one emailed | Check the code, or request a new one |
+| `ExpiredCodeException` | The code has expired | Request a new code with `/auth/forgot-password` |
+| `InvalidPasswordException` | The new password does not meet the pool's policy | Follow the pool's password requirements |
+| `LimitExceededException` | Too many attempts | Wait before trying again |
 
 ## Security Best Practices
 

@@ -50,6 +50,7 @@ from backend.tests.unit.infrastructure.test_forward_deploy_completes import (
     OLD,
     RULES_BLUE,
     RULES_GREEN,
+    _split,
 )
 
 pytestmark = pytest.mark.skipif(
@@ -701,3 +702,316 @@ def test_a_refused_run_with_a_dashboard_target_says_nothing_was_stopped(runner):
     assert outputs["summary"]["slack"].endswith(
         "dashboard NOT rolled back (not reached)"
     )
+
+
+# --- #755: after the run's own steps did not finish, say what is serving ----------------
+#
+# Run 37080696791: the stop step stopped the bad deployment with auto-rollback,
+# traffic went back to the target, CreateDeployment was refused AccessDenied,
+# the verify step was skipped, and the headline said "API NOT rolled back
+# (its verify step: skipped); dashboard NOT rolled back (not reached)". The
+# summary now reads what is serving (scripts/api_serving.py, read-only) and
+# words the API's clause from that read. Headlines are matched whole or by
+# prefix, never by substring.
+
+DASHBOARD = "experimentation-dashboard-staging:6"
+SERVING_ON_TARGET = (
+    "staging: API is serving experimentation-backend-staging:42, read at the end "
+    "of the run, but this run did not finish its own steps"
+)
+DIFFERENT_RELEASES = (
+    "dashboard NOT rolled back (not reached), so the API and dashboard are on "
+    "different releases: put the dashboard back with "
+    "docs/deployment/rollback-runbook.md Method 2, the dashboard block"
+)
+NOT_CONFIRMED = (
+    "staging: API not confirmed on experimentation-backend-staging:42 at the end "
+    "of the run (scripts/api_serving.py exit "
+)
+ACCESS_DENIED = {
+    "error": "An error occurred (AccessDeniedException) when calling the "
+    "CreateDeployment operation: User is not authorized to perform: "
+    "codedeploy:GetApplicationRevision"
+}
+
+
+def _serving_reads(runner: Runner) -> list[list[str]]:
+    """The API service reads api_serving.py makes (the verify step's read
+    carries a --query, so it is not one of them)."""
+    return [
+        c
+        for c in runner.calls()
+        if c[:2] == ["ecs", "describe-services"]
+        and "experimentation-backend-staging" in c
+        and "--query" not in c
+    ]
+
+
+def _read_exit(summary: str) -> str:
+    (row,) = [
+        x for x in summary.splitlines() if x.startswith("| API at the end of the run |")
+    ]
+    match = re.search(r"\(scripts/api_serving\.py exit (\d)\) \|$", row)
+    assert match, row
+    return match.group(1)
+
+
+def _run_summary(
+    runner: Runner, rules: list, outputs: dict, dashboard: str = "", **env: str
+):
+    runner.scenario(rules)
+    return runner.run(
+        ROLLBACK,
+        _step(ROLLBACK, "Run summary"),
+        outputs,
+        {"dashboard_task_definition_arn": dashboard, "job.status": "failure"},
+        **env,
+    )
+
+
+@pytest.mark.regression
+def test_a_stop_that_put_the_target_back_is_reported_when_the_rollback_then_fails(
+    runner,
+):
+    """EM C5(a), V18': the run-37080696791 replay, through every step from the
+    stop on. The read answers 0, so the headline says the API is serving the
+    target, and the dashboard clause says the two are on different releases.
+    The job still fails. Planted defect: key the headline on API_VERIFY again
+    (main's line)."""
+    rules = [
+        rule("deploy list-deployments", answers=[BAD_ID]),
+        rule("deploy get-deployment", BAD_ID, "creator", answers=["user\tNone"]),
+        rule("deploy stop-deployment", BAD_ID, answers=[""]),
+        rule(
+            "deploy get-deployment",
+            BAD_ID,
+            "deploymentInfo.status",
+            answers=["Stopped"],
+        ),
+        rule("deploy create-deployment", answers=[ACCESS_DENIED]),
+        *dashboard_rules([]),
+        # PRIMARY is the target in blue and /api/* forwards to blue alone.
+        *api_rules(BEFORE, RULES_BLUE),
+    ]
+    outputs, results, summary = _run_from_stop(runner, rules, dashboard=DASHBOARD)
+    assert outputs["stop"]["__outcome__"] == "success"
+    assert outputs["codedeploy"]["__outcome__"] == "failure"
+    assert outputs["api-verify"]["__outcome__"] == "skipped"
+    assert outputs["dashboard-rollback"]["__outcome__"] == "skipped"
+    headline = _headline(summary)
+    expected = f"{SERVING_ON_TARGET} (its verify step: skipped); {DIFFERENT_RELEASES}"
+    assert headline == f"## Rollback of {expected}", headline
+    assert outputs["summary"]["slack"] == expected
+    assert _read_exit(summary) == "0"
+    # Stopped at the first 0.
+    assert len(_serving_reads(runner)) == 1, runner.calls()
+    assert "Job status: failure." in summary
+    assert "| CodeDeploy deployment | `not created` |" in summary
+    assert "123456789012" not in summary
+    assert "123456789012" not in results["Run summary"][1]
+
+
+@pytest.mark.regression
+@pytest.mark.parametrize(
+    "services, rules_answer, sentence",
+    [
+        # The target is PRIMARY but the /api/* rule still splits traffic: a
+        # revert reroute in progress.
+        (
+            BEFORE,
+            _split(50, 50),
+            "NOT YET: the PRIMARY task set runs experimentation-backend-staging:42; ",
+        ),
+        # The bad release is still PRIMARY.
+        (
+            AFTER,
+            RULES_GREEN,
+            "NOT YET: the PRIMARY task set runs experimentation-backend-staging:43, "
+            "not experimentation-backend-staging:42",
+        ),
+    ],
+    ids=["split-listener", "primary-other"],
+)
+def test_a_read_answering_1_is_never_reported_as_not_rolled_back(
+    runner, services, rules_answer, sentence
+):
+    """EM C5(b): exit 1 is also a listener mid-reroute, so the headline says
+    "not confirmed" and quotes api_serving.py, never "NOT rolled back".
+    Polled to the limit on 1, decided on the last answer. Planted defect: map
+    a non-zero read to the retired string."""
+    outputs = {
+        "target": {"arn": TARGET},
+        "stop": {"__outcome__": "success"},
+        "codedeploy": {"__outcome__": "failure"},
+        "api-verify": {"__outcome__": "skipped"},
+    }
+    code, out, written, summary = _run_summary(
+        runner, api_rules(services, rules_answer), outputs, SUMMARY_SERVING_POLLS="4"
+    )
+    assert code == 0, out
+    assert _read_exit(summary) == "1"
+    assert len(_serving_reads(runner)) == 4, runner.calls()
+    slack = written["slack"]
+    assert slack.startswith(f"{NOT_CONFIRMED}1: {sentence}"), slack
+    assert slack.endswith(
+        "; this run did not finish its own steps (its verify step: skipped); "
+        "dashboard left as it is"
+    ), slack
+    assert "NOT rolled back" not in slack, slack
+    assert _headline(summary) == f"## Rollback of {slack}"
+
+
+@pytest.mark.regression
+@pytest.mark.parametrize(
+    "stop",
+    [
+        {
+            "refused": "codeDeployRollback",
+            "refused_id": CD_ROLLBACK_ID,
+            "primary": "x:1",
+        },
+        {"refused": "unreadable", "refused_id": BAD_ID},
+        {"already_serving": "true"},
+    ],
+    ids=["refused-rollback", "refused-unreadable", "already-serving"],
+)
+def test_a_decided_run_reads_nothing_from_the_summary(runner, stop):
+    """EM C5(c), PE v2 C7: a refused or already-serving run's verdict is
+    decided, so the summary makes no describe-services call. The reads are
+    supplied (and would answer 0), so a call would be seen, not fail.
+    Planted defect: drop the refused/already-serving conditions."""
+    outputs = {
+        "target": {"arn": TARGET},
+        "stop": {**stop, "__outcome__": "failure" if "refused" in stop else "success"},
+        "codedeploy": {"__outcome__": "skipped"},
+        "api-verify": {"__outcome__": "skipped" if "refused" in stop else "success"},
+    }
+    if "already_serving" in stop:
+        outputs["api-verify"]["__outcome__"] = "failure"
+    code, out, written, summary = _run_summary(
+        runner, api_rules(BEFORE, RULES_BLUE), outputs
+    )
+    assert code == 0, out
+    assert runner.calls() == [], runner.calls()
+    assert "| API at the end of the run |" not in summary
+    assert written["slack"].startswith("staging: API NOT rolled back: "), written
+
+
+@pytest.mark.regression
+@pytest.mark.parametrize(
+    "error",
+    [
+        "An error occurred (ThrottlingException) when calling the DescribeServices "
+        "operation: Rate exceeded",
+        'Unable to locate credentials. You can configure credentials by running "aws configure".',
+        # AWS's own text names the role, and with it the account.
+        "An error occurred (AccessDeniedException) when calling the "
+        "DescribeServices operation: User: arn:aws:sts::123456789012:"
+        "assumed-role/deploy/x is not authorized",
+    ],
+    ids=["throttled", "no-credentials", "access-denied-names-the-account"],
+)
+def test_a_read_that_cannot_tell_still_writes_the_result(runner, error):
+    """EM C5(d): the read exits 2 (a failed AWS call, or credentials never
+    configured). The step does not die under `set -e`, `slack=` is written,
+    and the headline is "not confirmed", quoting the read. Planted defect:
+    drop the `|| rc=$?` capture."""
+    outputs = {
+        "target": {"arn": TARGET},
+        "codedeploy": {"__outcome__": "failure"},
+        "api-verify": {"__outcome__": "skipped"},
+    }
+    rules = [
+        rule(
+            "ecs describe-services",
+            "experimentation-backend-staging",
+            answers=[{"error": error}],
+        ),
+        *api_rules(BEFORE, RULES_BLUE),
+    ]
+    code, out, written, summary = _run_summary(
+        runner, rules, outputs, SUMMARY_SERVING_POLLS="2"
+    )
+    assert code == 0, out
+    assert _read_exit(summary) == "2"
+    assert len(_serving_reads(runner)) == 2, runner.calls()
+    assert written["slack"].startswith(
+        f"{NOT_CONFIRMED}2: UNKNOWN: could not tell: "
+    ), written
+    assert "NOT rolled back" not in written["slack"]
+    # The summary and the log are public: no account, even from AWS's text.
+    for text in (summary, out, written["slack"]):
+        assert "123456789012" not in text, text
+
+
+@pytest.mark.regression
+def test_a_target_serving_with_the_dashboard_not_reached_names_the_split(runner):
+    """EM C5(e): read 0, a dashboard target given and not reached, and this
+    run's own deployment created (the shift then failed). The headline says
+    the API and dashboard are on different releases and points to Method 2;
+    the page warns against a second dispatch while that deployment is active,
+    in the one allowed form. Planted defect: drop the different-releases
+    clause."""
+    outputs = {
+        "target": {"arn": TARGET},
+        "codedeploy": {"deployment-id": ROLLBACK_ID, "__outcome__": "success"},
+        "api-verify": {"__outcome__": "skipped"},
+        "dashboard-target": {"arn": DASHBOARD},
+        "dashboard-rollback": {"__outcome__": "skipped"},
+    }
+    rules = [*dashboard_rules([]), *api_rules(BEFORE, RULES_BLUE)]
+    code, out, written, summary = _run_summary(
+        runner, rules, outputs, dashboard=DASHBOARD
+    )
+    assert code == 0, out
+    assert _read_exit(summary) == "0"
+    assert written["slack"] == (
+        f"{SERVING_ON_TARGET} (its verify step: skipped); {DIFFERENT_RELEASES}"
+    )
+    assert (
+        "the API and dashboard are on different releases, the newer-dashboard"
+        in summary
+    )
+    assert (
+        f"Do not dispatch Rollback again while CodeDeploy deployment {ROLLBACK_ID} "
+        "is active" in summary
+    )
+
+
+def test_an_unresolved_target_keeps_todays_copy_and_reads_nothing(runner):
+    """EM C4: no target resolved, nothing to read against."""
+    outputs = {"api-verify": {"__outcome__": "skipped"}}
+    code, out, written, summary = _run_summary(
+        runner, api_rules(BEFORE, RULES_BLUE), outputs
+    )
+    assert code == 0, out
+    assert runner.calls() == []
+    assert written["slack"] == (
+        "staging: API NOT rolled back (its verify step: skipped); dashboard left as it is"
+    )
+
+
+def test_the_poll_starts_no_read_after_its_deadline(runner):
+    """EM C7: the wall-clock bound. With the deadline already passed, one
+    read is made and decided on, whatever the poll count."""
+    outputs = {"target": {"arn": TARGET}, "api-verify": {"__outcome__": "failure"}}
+    code, out, written, summary = _run_summary(
+        runner,
+        api_rules(AFTER, RULES_GREEN),
+        outputs,
+        SUMMARY_SERVING_POLLS="12",
+        SUMMARY_SERVING_DEADLINE_SECONDS="0",
+    )
+    assert code == 0, out
+    assert _read_exit(summary) == "1"
+    assert len(_serving_reads(runner)) == 1, runner.calls()
+
+
+def test_the_poll_defaults_are_stated_and_bounded():
+    """EM C7: env-overridable, the default called a guess, worst case under
+    two minutes."""
+    code = _step(ROLLBACK, "Run summary")["run"]
+    assert 'polls="${SUMMARY_SERVING_POLLS:-12}"' in code
+    assert 'poll_seconds="${SUMMARY_SERVING_POLL_SECONDS:-5}"' in code
+    assert "${SUMMARY_SERVING_DEADLINE_SECONDS:-90}" in code
+    assert "is a guess" in code

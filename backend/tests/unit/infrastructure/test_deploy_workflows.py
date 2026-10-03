@@ -971,11 +971,100 @@ def test_db_migrate_runs_the_serving_image_and_refuses_when_there_is_none():
     assert registration["env"]["IMAGE"] == "${{ steps.serving.outputs.image }}"
 
 
-@pytest.mark.regression
-def test_db_migrate_refuses_the_singular_head():
+#: The step, by name, and what it must refuse and accept (#726). A full image
+#: has two heads, so anything alembic resolves relative to "the" head, or to
+#: the whole graph, leaves alembic to choose what it unapplies: `downgrade -1`
+#: exits 0 with only a warning and was measured stepping the modules branch
+#: back. Only a revision id (or `heads`, to upgrade) is accepted.
+DB_MIGRATE_TARGET_STEP = "Refuse a target alembic cannot take"
+DB_MIGRATE_REFUSED = [
+    ("downgrade", "-1"),
+    ("downgrade", "-2"),
+    ("downgrade", "-12"),
+    ("downgrade", " -1"),
+    ("upgrade", "+1"),
+    ("downgrade", "modules@-1"),
+    ("downgrade", "modules@-2"),
+    ("downgrade", "modules@base"),
+    ("downgrade", "modules@head"),
+    ("downgrade", "1ab99332f0ba-1"),
+    ("downgrade", "1ab99332f0ba@-1"),
+    ("downgrade", "head-1"),
+    ("downgrade", "^"),
+    ("downgrade", "~1"),
+    ("downgrade", "base"),
+    ("upgrade", "base"),
+    ("downgrade", "head"),
+    ("upgrade", "head"),
+    ("downgrade", "heads"),
+    ("downgrade", "x;y"),
+    ("downgrade", "a89544fb1075\n::warning::x"),
+    ("downgrade", ""),
+    ("downgrade", "a" * 65),
+]
+DB_MIGRATE_ACCEPTED = [
+    ("upgrade", "heads"),
+    ("downgrade", "a89544fb1075"),
+    ("downgrade", "modules_0001_rbac"),
+    ("downgrade", "ep057_workspaces"),
+    ("downgrade", "a7b8c9d0e1f2"),
+    ("upgrade", "1ab99332f0ba"),
+    ("downgrade", "a" * 64),
+]
+
+
+def _run_db_migrate_target_step(runner, direction: str, target: str):
     (job,) = _environment_jobs(DB_MIGRATE).values()
-    code = "\n".join(_run_of(s) for s in _steps(job))
-    assert 'if [ "$TARGET" = "head" ]; then' in code
+    (step,) = [s for s in _steps(job) if s.get("name") == DB_MIGRATE_TARGET_STEP]
+    return runner.run(
+        DB_MIGRATE,
+        step,
+        inputs={"direction": direction, "target": target},
+        GITHUB_ACTOR="octocat",
+    )
+
+
+@pytest.fixture
+def migrate_runner(tmp_path):
+    from backend.tests.unit.infrastructure.test_dashboard_deploy_wiring import Runner
+
+    return Runner(tmp_path)
+
+
+@pytest.mark.regression
+@pytest.mark.parametrize("direction, target", DB_MIGRATE_REFUSED)
+def test_db_migrate_refuses_relative_and_whole_graph_targets(
+    migrate_runner, direction, target
+):
+    """Replaces the literal pin `test_db_migrate_refuses_the_singular_head`.
+
+    Runs the step's own script, so the refusal is what bash does with it, not
+    what a string in the YAML looks like.
+    """
+    code, log, _, _ = _run_db_migrate_target_step(migrate_runner, direction, target)
+    assert code == 1, f"{direction} {target!r} was accepted:\n{log}"
+    (error,) = [line for line in log.splitlines() if line.startswith("::error")]
+    assert "nothing was migrated" in error
+    assert "a89544fb1075" in error, "the refusal does not show an id to name"
+    # The target is printed only when it is made of safe characters, so an
+    # operator's text cannot write a workflow command of its own.
+    assert not any(line.startswith("::warning") for line in log.splitlines())
+    assert migrate_runner.calls() == [], "the refusal called AWS"
+
+
+@pytest.mark.regression
+@pytest.mark.parametrize("direction, target", DB_MIGRATE_ACCEPTED)
+def test_db_migrate_accepts_a_revision_id_and_heads(migrate_runner, direction, target):
+    code, log, _, _ = _run_db_migrate_target_step(migrate_runner, direction, target)
+    assert code == 0, f"{direction} {target!r} was refused:\n{log}"
+    assert "::error" not in log
+
+
+def test_db_migrate_refuses_its_target_before_any_credentials():
+    (job,) = _environment_jobs(DB_MIGRATE).values()
+    names = [s.get("name") or s.get("uses", "") for s in _steps(job)]
+    credentials = names.index("Configure AWS credentials")
+    assert names.index(DB_MIGRATE_TARGET_STEP) < credentials
 
 
 # --- concurrency and the run summary ------------------------------------------

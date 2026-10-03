@@ -297,12 +297,6 @@
         "summary": "Reset counters (ADMIN only)"
       }
     },
-    "/api/v1/edge/bootstrap": {
-      "get": {
-        "operationId": "get_edge_bootstrap_api_v1_edge_bootstrap_get",
-        "summary": "Flags and experiments owned by the API key's user (deprecated)"
-      }
-    },
     "/api/v1/etl/crawler/run": {
       "post": {
         "operationId": "run_crawler_api_v1_etl_crawler_run_post",
@@ -873,12 +867,6 @@
       "post": {
         "operationId": "send_test_notification_api_v1_notifications_test_post",
         "summary": "Send Test Notification"
-      }
-    },
-    "/api/v1/openfeature/flags": {
-      "get": {
-        "operationId": "get_openfeature_flags_api_v1_openfeature_flags_get",
-        "summary": "Flag definitions for the API key's user (deprecated)"
       }
     },
     "/api/v1/power/curve": {

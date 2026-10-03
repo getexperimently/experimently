@@ -311,17 +311,3 @@ It prints `{"enabled":true,"reason":"targeting_rule"}`: `country` in the context
 | "… a format this SDK does not understand …" | The server is newer than the SDK | Upgrade the SDK. |
 | `status()` lists server-evaluated flags | Those flags use rules that are evaluated on the server | Nothing to fix; they keep working with a request each. |
 | `evaluate` error: "Local evaluation failed; asking the server instead: …" | A defect in the SDK's evaluator | The call was answered by the server; please report it. |
-
-## Other ways to list flags
-
-`GET /api/v1/sdk/ruleset` is the way to obtain flag definitions for local evaluation. Two older
-routes also list flags to any valid key. Both are **deprecated**, still answer as before, and may
-be removed in a later release (see [API stability](../api/stability.md#deprecated-operations)):
-
-- `GET /api/v1/edge/bootstrap` returns only the flags and experiments owned by the user who
-  created the key, and only rules stored in the legacy list shape: a flag with rules written in
-  the dashboard's shape comes back with `rules: []`. No Experimently SDK calls it.
-- `GET /api/v1/openfeature/flags` returns the flags visible to the user who created the key, with
-  the same limit on rules. Neither OpenFeature provider calls it.
-
-Do not build local evaluation on either of them; use the ruleset.

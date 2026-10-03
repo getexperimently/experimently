@@ -182,7 +182,7 @@ Upgrade to the latest version:
 python -m alembic -c backend/app/db/alembic.ini upgrade heads
 ```
 
-Downgrade the previous revision of one branch. With two heads a bare `downgrade -1` is ambiguous -- alembic warns and picks one -- so name the branch: `modules@-1` for a module's, the revision id for a core one. NOT `modules@base`: modules_0001_rbac is a child of core a7b8c9d0e1f2, not an alembic base, and `modules@base` resolves to the whole core chain -- 27 revisions, every table dropped:
+Downgrade the previous revision of one branch. With two heads a bare `downgrade -1` is ambiguous -- alembic warns and picks one -- so name the branch: `modules@-1` for a module's, the revision id for a core one. NOT `modules@base`: modules_0001_rbac is a child of core a7b8c9d0e1f2, not an alembic base, and `modules@base` resolves to the whole core chain -- 32 revisions, every table dropped:
 
 ```bash
 alembic -c backend/app/db/alembic.ini downgrade modules@-1

@@ -7,27 +7,22 @@
  * Now the dashboard links out, and `docsUrl()` is the single place that
  * decides where "out" is.
  *
- * DEFAULT: THE REPOSITORY, NOT THE MKDOCS SITE. `mkdocs.yml` declares
- * `site_url: https://getexperimently.github.io/experimently/`, and that site
- * does not exist. `.github/workflows/docs.yml` builds the docs on every pull
- * request but its `deploy` job is gated on
+ * DEFAULT: THE REPOSITORY, NOT THE MKDOCS SITE. The published site
+ * (`mkdocs.yml` `site_url`, `MKDOCS_SITE_URL` below) is built and deployed by
+ * `.github/workflows/docs.yml` from release tags only, so it follows the
+ * latest release rather than `main`. A dashboard someone runs themselves may
+ * be any version, and the repository's markdown is the copy that cannot be
+ * missing: GitHub renders it, with no dependency on the release pipeline. So
+ * the default is a GitHub blob URL. (The default once was the site, before it
+ * had ever been deployed, and every link -- the homepage's primary button
+ * among them -- answered 404. `docs.test.ts` pins that it is not again.)
  *
- *     startsWith(github.ref, 'refs/tags/v') && github.repository == 'getexperimently/experimently'
- *
- * — a release tag, from the public repository. The public repository has no
- * tags and is not yet public, so the site has never been built once, and every
- * link that pointed at it answered 404. It was the homepage's primary button.
- *
- * So the default is a GitHub blob URL. GitHub renders markdown, so the links
- * work the moment the repository is public, with no Pages site, no release
- * tag and no dependency on the release pipeline. They are still 404 while the
- * repository is private — there is no destination that is not, and pretending
- * otherwise is what caused this.
- *
- * `NEXT_PUBLIC_DOCS_URL` overrides that with the origin of a *built* site, for
- * anyone self-hosting `mkdocs build` output, and then the URLs take MkDocs's
- * `use_directory_urls` shape instead. Set it to `MKDOCS_SITE_URL` once the
- * published site exists. Read at build time, like every `NEXT_PUBLIC_*`.
+ * `NEXT_PUBLIC_DOCS_URL` overrides that with the origin of a *built* site, and
+ * the URLs then take MkDocs's `use_directory_urls` shape instead. The
+ * marketing build (`npm run build:marketing`) sets it to the published site,
+ * which is where getexperimently.com's links go; anyone serving their own
+ * `mkdocs build` output can set it to that. Read at build time, like every
+ * `NEXT_PUBLIC_*`.
  *
  * `url-literals.test.ts` does this for `/api/v1/` paths; `docs-links.test.ts`
  * does it here — every `docsUrl('...')` literal in the dashboard must resolve
@@ -40,7 +35,7 @@
 export const DOCS_REPO = 'https://github.com/getexperimently/experimently';
 export const DOCS_BRANCH = 'main';
 
-/** Where the MkDocs site will live once a release tag builds it (mkdocs.yml `site_url`). */
+/** The published MkDocs site, deployed from release tags (mkdocs.yml `site_url`). */
 export const MKDOCS_SITE_URL = 'https://getexperimently.github.io/experimently';
 
 /** A self-hosted built site, if one is configured. Empty means "use the repository". */

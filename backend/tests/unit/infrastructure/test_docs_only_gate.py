@@ -137,9 +137,6 @@ NOT_DOCS_TESTS = {
     "backend/tests/unit/api/test_wizard_docs_routes.py": "docs/api only",
     # Reads only docs/api/warehouse-analytics.md (same reason as above).
     "modules/backend/tests/unit/test_warehouse_docs_availability.py": "docs/api only",
-    # Names docs/api/stability.md in a docstring (the claim its header test
-    # pins); opens no file under docs/, and docs/api/** is never docs-only.
-    "backend/tests/integration/api/test_edge_api.py": "docstring mention only",
     # Runs the runbook SQL of docs/self-hosting/migrations.md against
     # PostgreSQL, which the docs-only lane does not have. It reads the page
     # through backend/tests/unit/docs/test_email_case_runbook.py, which is in
@@ -170,6 +167,9 @@ NOT_DOCS_TESTS = {
         "printed link strings only"
     ),
     "backend/tests/unit/infrastructure/test_deploy_secrets_preflight.py": (
+        "printed link strings only"
+    ),
+    "backend/tests/unit/infrastructure/test_rollback_false_success.py": (
         "printed link strings only"
     ),
 }
