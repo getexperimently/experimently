@@ -1,8 +1,9 @@
 """
 Workspace API endpoints for EP-057: Multi-Tenant Team Workspaces.
 
-Provides REST endpoints for workspace CRUD, member management,
-invite lifecycle, and workspace-scoped API key management.
+Provides REST endpoints for workspace CRUD, member management and the
+invite lifecycle. Workspaces have no plan and no limits, and issue no API
+keys: SDKs and integrations use platform API keys (``/api/v1/api-keys``).
 """
 
 import uuid
@@ -22,14 +23,11 @@ from modules.backend.app.models.workspace import (
 )
 from modules.backend.app.schemas.workspaces import (
     AddMemberRequest,
-    CreateAPIKeyRequest,
-    CreateAPIKeyResponse,
     CreateInviteRequest,
     CreateWorkspaceRequest,
     InviteEmailMismatchResponse,
     UpdateMemberRoleRequest,
     UpdateWorkspaceRequest,
-    WorkspaceAPIKeyResponse,
     WorkspaceInviteResponse,
     WorkspaceMemberResponse,
     WorkspaceResponse,
@@ -39,14 +37,12 @@ from modules.backend.app.services.workspace_service import (
     INVITE_EMAIL_MISMATCH_CODE,
     INVITE_EMAIL_MISMATCH_MESSAGE,
     AlreadyMember,
-    APIKeyNotFound,
     CannotDemoteLastOwner,
     CannotRemoveLastOwner,
     InviteAlreadyAccepted,
     InviteEmailMismatch,
     InviteExpired,
     InviteNotFound,
-    PlanLimitExceeded,
     WorkspaceMemberNotFound,
     WorkspaceNotFound,
     WorkspaceSlugInvalid,
@@ -161,7 +157,6 @@ def create_workspace(
             name=payload.name,
             slug=payload.slug,
             owner_id=current_user.id,
-            plan=payload.plan,
             description=payload.description,
         )
     except WorkspaceSlugInvalid as exc:
@@ -175,12 +170,7 @@ def create_workspace(
         name=workspace.name,
         slug=workspace.slug,
         description=workspace.description,
-        plan=workspace.plan.value,
         is_active=workspace.is_active,
-        max_experiments=workspace.max_experiments,
-        max_feature_flags=workspace.max_feature_flags,
-        max_members=workspace.max_members,
-        max_api_keys=workspace.max_api_keys,
         created_at=workspace.created_at,
         updated_at=workspace.updated_at,
     )
@@ -199,12 +189,7 @@ def list_my_workspaces(
             name=w.name,
             slug=w.slug,
             description=w.description,
-            plan=w.plan.value,
             is_active=w.is_active,
-            max_experiments=w.max_experiments,
-            max_feature_flags=w.max_feature_flags,
-            max_members=w.max_members,
-            max_api_keys=w.max_api_keys,
             created_at=w.created_at,
             updated_at=w.updated_at,
         )
@@ -232,18 +217,10 @@ def get_workspace(
         name=workspace.name,
         slug=workspace.slug,
         description=workspace.description,
-        plan=workspace.plan.value,
         is_active=workspace.is_active,
-        max_experiments=workspace.max_experiments,
-        max_feature_flags=workspace.max_feature_flags,
-        max_members=workspace.max_members,
-        max_api_keys=workspace.max_api_keys,
         created_at=workspace.created_at,
         updated_at=workspace.updated_at,
         member_count=stats.member_count if stats else 0,
-        experiment_count=stats.experiment_count if stats else 0,
-        flag_count=stats.flag_count if stats else 0,
-        api_key_count=stats.api_key_count if stats else 0,
     )
 
 
@@ -268,12 +245,7 @@ def update_workspace(
         name=workspace.name,
         slug=workspace.slug,
         description=workspace.description,
-        plan=workspace.plan.value,
         is_active=workspace.is_active,
-        max_experiments=workspace.max_experiments,
-        max_feature_flags=workspace.max_feature_flags,
-        max_members=workspace.max_members,
-        max_api_keys=workspace.max_api_keys,
         created_at=workspace.created_at,
         updated_at=workspace.updated_at,
     )
@@ -344,10 +316,6 @@ def add_member(
         )
     except AlreadyMember as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc))
-    except PlanLimitExceeded as exc:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
-        )
 
     return _member_to_response(member)
 
@@ -585,131 +553,9 @@ def accept_invite(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
     except InviteAlreadyAccepted as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc))
-    except (AlreadyMember, PlanLimitExceeded) as exc:
+    except AlreadyMember as exc:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
         )
 
     return _member_to_response(member)
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# API Keys
-# ─────────────────────────────────────────────────────────────────────────────
-
-
-@router.get(
-    "/{workspace_id}/api-keys",
-    response_model=List[WorkspaceAPIKeyResponse],
-)
-def list_api_keys(
-    workspace_id: uuid.UUID = Path(...),
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user),
-):
-    """List workspace API keys. Requires ADMIN role."""
-    _get_workspace_or_404(db, workspace_id)
-    _require_role(db, workspace_id, current_user.id, "ADMIN")
-
-    keys = workspace_service.list_api_keys(db, workspace_id)
-    return [
-        WorkspaceAPIKeyResponse(
-            id=str(k.id),
-            name=k.name,
-            key_prefix=k.key_prefix,
-            scopes=k.scopes or [],
-            is_active=k.is_active,
-            last_used_at=k.last_used_at,
-            expires_at=k.expires_at,
-            created_at=k.created_at,
-        )
-        for k in keys
-    ]
-
-
-@router.post(
-    "/{workspace_id}/api-keys",
-    response_model=CreateAPIKeyResponse,
-    status_code=status.HTTP_201_CREATED,
-)
-def create_api_key(
-    workspace_id: uuid.UUID = Path(...),
-    payload: CreateAPIKeyRequest = ...,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user),
-):
-    """Create a workspace API key. Plaintext key is returned exactly once."""
-    _get_workspace_or_404(db, workspace_id)
-    _require_role(db, workspace_id, current_user.id, "ADMIN")
-
-    try:
-        api_key, plaintext = workspace_service.create_api_key(
-            db,
-            workspace_id=workspace_id,
-            name=payload.name,
-            scopes=payload.scopes,
-            expires_at=payload.expires_at,
-        )
-    except PlanLimitExceeded as exc:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
-        )
-
-    return CreateAPIKeyResponse(
-        id=str(api_key.id),
-        name=api_key.name,
-        key_prefix=api_key.key_prefix,
-        key=plaintext,
-        scopes=api_key.scopes or [],
-        created_at=api_key.created_at,
-    )
-
-
-@router.delete(
-    "/{workspace_id}/api-keys/{key_id}",
-    status_code=status.HTTP_204_NO_CONTENT,
-)
-def revoke_api_key(
-    workspace_id: uuid.UUID = Path(...),
-    key_id: uuid.UUID = Path(...),
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user),
-):
-    """Revoke (deactivate) a workspace API key. Requires ADMIN role."""
-    _get_workspace_or_404(db, workspace_id)
-    _require_role(db, workspace_id, current_user.id, "ADMIN")
-
-    try:
-        workspace_service.revoke_api_key(db, workspace_id, key_id)
-    except APIKeyNotFound as exc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc))
-
-
-@router.post(
-    "/{workspace_id}/api-keys/{key_id}/rotate",
-    response_model=CreateAPIKeyResponse,
-    status_code=status.HTTP_201_CREATED,
-)
-def rotate_api_key(
-    workspace_id: uuid.UUID = Path(...),
-    key_id: uuid.UUID = Path(...),
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user),
-):
-    """Rotate a workspace API key. Old key is revoked; new plaintext is returned once."""
-    _get_workspace_or_404(db, workspace_id)
-    _require_role(db, workspace_id, current_user.id, "ADMIN")
-
-    try:
-        new_key, plaintext = workspace_service.rotate_api_key(db, workspace_id, key_id)
-    except APIKeyNotFound as exc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc))
-
-    return CreateAPIKeyResponse(
-        id=str(new_key.id),
-        name=new_key.name,
-        key_prefix=new_key.key_prefix,
-        key=plaintext,
-        scopes=new_key.scopes or [],
-        created_at=new_key.created_at,
-    )

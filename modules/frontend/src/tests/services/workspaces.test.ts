@@ -169,44 +169,6 @@ describe('workspaceService.acceptInvite', () => {
   });
 });
 
-describe('workspaceService.listAPIKeys', () => {
-  it('calls correct URL', async () => {
-    mockOk([]);
-    await workspaceService.listAPIKeys('w1');
-    expect(mockFetch).toHaveBeenCalledWith(`${BASE}/api/v1/workspaces/w1/api-keys`, expect.any(Object));
-  });
-});
-
-describe('workspaceService.createAPIKey', () => {
-  it('sends POST with name and scopes', async () => {
-    const data = { name: 'key1', scopes: ['read'] };
-    mockOk({ id: 'k1', ...data, key: 'secret' });
-    await workspaceService.createAPIKey('w1', data);
-    const [url, opts] = mockFetch.mock.calls[0];
-    expect(url).toBe(`${BASE}/api/v1/workspaces/w1/api-keys`);
-    expect(opts.method).toBe('POST');
-    expect(JSON.parse(opts.body)).toEqual(data);
-  });
-});
-
-describe('workspaceService.revokeAPIKey', () => {
-  it('sends DELETE', async () => {
-    mockFetch.mockResolvedValueOnce({ ok: true } as Response);
-    await workspaceService.revokeAPIKey('w1', 'k1');
-    expect(mockFetch).toHaveBeenCalledWith(`${BASE}/api/v1/workspaces/w1/api-keys/k1`, deleteInit);
-  });
-});
-
-describe('workspaceService.rotateAPIKey', () => {
-  it('sends POST', async () => {
-    mockOk({ id: 'k1', key: 'new-secret' });
-    await workspaceService.rotateAPIKey('w1', 'k1');
-    const [url, opts] = mockFetch.mock.calls[0];
-    expect(url).toBe(`${BASE}/api/v1/workspaces/w1/api-keys/k1/rotate`);
-    expect(opts.method).toBe('POST');
-  });
-});
-
 describe('error handling', () => {
   it('throws with body text on error', async () => {
     mockError(400, 'Validation failed');

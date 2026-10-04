@@ -4,7 +4,7 @@ Pydantic schemas for EP-057: Multi-Tenant Team Workspaces.
 
 import re
 from datetime import datetime
-from typing import List, Optional
+from typing import Optional
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -16,12 +16,17 @@ _SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9\-]{1,48}[a-z0-9]$")
 
 
 class CreateWorkspaceRequest(BaseModel):
-    """Payload for creating a new workspace."""
+    """Payload for creating a new workspace.
+
+    Workspaces have no plan and no limits, so ``plan`` (or any other field not
+    listed here) is refused with 422 rather than silently ignored.
+    """
+
+    model_config = ConfigDict(extra="forbid")
 
     name: str
     slug: str
     description: str = ""
-    plan: str = "free"
 
     @field_validator("slug")
     @classmethod
@@ -43,21 +48,17 @@ class CreateWorkspaceRequest(BaseModel):
             raise ValueError("name must be at most 200 characters")
         return v
 
-    @field_validator("plan")
-    @classmethod
-    def validate_plan(cls, v: str) -> str:
-        allowed = {"free", "pro", "enterprise"}
-        if v not in allowed:
-            raise ValueError(f"plan must be one of {sorted(allowed)}")
-        return v
-
 
 class UpdateWorkspaceRequest(BaseModel):
-    """Payload for updating an existing workspace (all fields optional)."""
+    """Payload for updating an existing workspace (all fields optional).
+
+    Any other field, ``plan`` included, is refused with 422.
+    """
+
+    model_config = ConfigDict(extra="forbid")
 
     name: Optional[str] = None
     description: Optional[str] = None
-    plan: Optional[str] = None
 
 
 class WorkspaceResponse(BaseModel):
@@ -69,12 +70,7 @@ class WorkspaceResponse(BaseModel):
     name: str
     slug: str
     description: Optional[str]
-    plan: str
     is_active: bool
-    max_experiments: int
-    max_feature_flags: int
-    max_members: int
-    max_api_keys: int
     created_at: datetime
     updated_at: datetime
 
@@ -83,21 +79,11 @@ class WorkspaceResponse(BaseModel):
     def coerce_id(cls, v):
         return str(v)
 
-    @field_validator("plan", mode="before")
-    @classmethod
-    def coerce_plan(cls, v):
-        if hasattr(v, "value"):
-            return v.value
-        return str(v)
-
 
 class WorkspaceWithStatsResponse(WorkspaceResponse):
-    """Workspace response enriched with live resource counts."""
+    """Workspace response with its member count."""
 
     member_count: int = 0
-    experiment_count: int = 0
-    flag_count: int = 0
-    api_key_count: int = 0
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -264,55 +250,4 @@ class WorkspaceInviteResponse(BaseModel):
     def coerce_role(cls, v):
         if hasattr(v, "value"):
             return v.value
-        return str(v)
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# API Keys
-# ─────────────────────────────────────────────────────────────────────────────
-
-
-class CreateAPIKeyRequest(BaseModel):
-    """Payload for creating a new workspace-scoped API key."""
-
-    name: str
-    scopes: List[str] = ["flags:read", "experiments:read", "track:write"]
-    expires_at: Optional[datetime] = None
-
-
-class CreateAPIKeyResponse(BaseModel):
-    """Response schema returned exactly once when a new API key is created."""
-
-    model_config = ConfigDict(from_attributes=True)
-
-    id: str
-    name: str
-    key_prefix: str
-    key: str  # plaintext — shown ONCE only
-    scopes: List[str]
-    created_at: datetime
-
-    @field_validator("id", mode="before")
-    @classmethod
-    def coerce_id(cls, v):
-        return str(v)
-
-
-class WorkspaceAPIKeyResponse(BaseModel):
-    """Safe response schema for listing API keys (no plaintext)."""
-
-    model_config = ConfigDict(from_attributes=True)
-
-    id: str
-    name: str
-    key_prefix: str
-    scopes: List[str]
-    is_active: bool
-    last_used_at: Optional[datetime]
-    expires_at: Optional[datetime]
-    created_at: datetime
-
-    @field_validator("id", mode="before")
-    @classmethod
-    def coerce_id(cls, v):
         return str(v)

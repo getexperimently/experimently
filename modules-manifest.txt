@@ -45,9 +45,10 @@
 # ─────────────────────────────────────────────────────────────────────────────
 # 1. Workspaces / multi-tenancy  (EP-057)
 # Core without it: yes. Nothing in backend/app reads Experiment.workspace_id
-# or FeatureFlag.workspace_id except workspace_service.get_workspace_stats
-# (workspace_service.py:642-659). deps.get_api_key never consults
-# WorkspaceAPIKey. useWorkspace() has 0 consumers.
+# or FeatureFlag.workspace_id; only WorkspaceService.delete_workspace clears
+# them. Workspaces issue no API keys and have no plan or limits (#263, #264):
+# deps.get_api_key never consults WorkspaceAPIKey, whose table is retained,
+# unused. useWorkspace() has 0 consumers.
 # Crossing to cut: the two FK constraints (experiment.py:144-150,
 # feature_flag.py:56-62) → bare indexed UUID.
 # ─────────────────────────────────────────────────────────────────────────────
@@ -62,6 +63,7 @@ modules/frontend/src/tests/services/workspaces.test.ts
 modules/backend/tests/integration/api/test_workspaces_api.py
 modules/backend/tests/unit/services/test_workspace_service.py
 modules/backend/tests/realistic/scenarios/multi_tenant_isolation.py
+modules/backend/tests/smoke/test_workspace_routes_contract.py
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 2. HIPAA / PHI / BAA  (EP-050)

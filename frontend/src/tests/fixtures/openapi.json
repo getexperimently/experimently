@@ -1447,28 +1447,6 @@
         "summary": "Update Workspace"
       }
     },
-    "/api/v1/workspaces/{workspace_id}/api-keys": {
-      "get": {
-        "operationId": "list_api_keys_api_v1_workspaces__workspace_id__api_keys_get",
-        "summary": "List Api Keys"
-      },
-      "post": {
-        "operationId": "create_api_key_api_v1_workspaces__workspace_id__api_keys_post",
-        "summary": "Create Api Key"
-      }
-    },
-    "/api/v1/workspaces/{workspace_id}/api-keys/{key_id}": {
-      "delete": {
-        "operationId": "revoke_api_key_api_v1_workspaces__workspace_id__api_keys__key_id__delete",
-        "summary": "Revoke Api Key"
-      }
-    },
-    "/api/v1/workspaces/{workspace_id}/api-keys/{key_id}/rotate": {
-      "post": {
-        "operationId": "rotate_api_key_api_v1_workspaces__workspace_id__api_keys__key_id__rotate_post",
-        "summary": "Rotate Api Key"
-      }
-    },
     "/api/v1/workspaces/{workspace_id}/invites": {
       "post": {
         "operationId": "create_invite_api_v1_workspaces__workspace_id__invites_post",

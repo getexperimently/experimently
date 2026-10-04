@@ -6,52 +6,6 @@ import Link from 'next/link';
 import { useRouter } from 'next/router';
 import { Workspace, workspaceService } from '@modules/services/workspaces';
 
-const PLAN_BADGE: Record<Workspace['plan'], { label: string; className: string }> = {
-  free: { label: 'Free', className: 'bg-gray-100 text-gray-700' },
-  pro: { label: 'Pro', className: 'bg-blue-100 text-blue-700' },
-  enterprise: { label: 'Enterprise', className: 'bg-purple-100 text-purple-700' },
-};
-
-interface UsageBarProps {
-  label: string;
-  used: number;
-  max: number;
-  href: string;
-  colorClass?: string;
-}
-
-function UsageBar({ label, used, max, href, colorClass = 'bg-blue-500' }: UsageBarProps) {
-  const pct = max > 0 ? Math.min((used / max) * 100, 100) : 0;
-  const isWarning = pct >= 80;
-  const barColor = isWarning ? 'bg-amber-500' : colorClass;
-
-  return (
-    <Link
-      href={href}
-      className="block bg-white border border-slate-200 rounded-xl p-5 hover:border-blue-300 hover:shadow-sm transition-all group"
-    >
-      <div className="flex items-center justify-between mb-2">
-        <span className="text-sm font-medium text-slate-700">{label}</span>
-        <span className="text-sm text-slate-500">
-          <span className={`font-semibold ${isWarning ? 'text-amber-600' : 'text-slate-800'}`}>
-            {used}
-          </span>
-          {' '}/ {max}
-        </span>
-      </div>
-      <div className="w-full bg-slate-100 rounded-full h-2">
-        <div
-          className={`h-2 rounded-full transition-all ${barColor}`}
-          style={{ width: `${pct}%` }}
-        />
-      </div>
-      {isWarning && (
-        <p className="mt-1.5 text-xs text-amber-600">Approaching limit</p>
-      )}
-    </Link>
-  );
-}
-
 interface StatCardProps {
   label: string;
   value: number | string;
@@ -222,7 +176,6 @@ function WorkspaceOverviewPage() {
     );
   }
 
-  const badge = PLAN_BADGE[workspace.plan] ?? PLAN_BADGE.free;
   const wsId = workspace.id;
 
   return (
@@ -248,11 +201,6 @@ function WorkspaceOverviewPage() {
               <div className="flex-1">
                 <div className="flex items-center gap-3 mb-1">
                   <h1 className="text-2xl font-bold text-slate-900">{workspace.name}</h1>
-                  <span
-                    className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${badge.className}`}
-                  >
-                    {badge.label}
-                  </span>
                   {!workspace.is_active && (
                     <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-700">
                       Inactive
@@ -281,16 +229,10 @@ function WorkspaceOverviewPage() {
             >
               Manage Members
             </Link>
-            <Link
-              href={`/workspaces/${wsId}/api-keys`}
-              className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-blue-700 bg-blue-50 border border-blue-200 rounded-lg hover:bg-blue-100 transition-colors"
-            >
-              API Keys
-            </Link>
           </div>
 
           {/* Stats grid */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-6">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
             <StatCard
               label="Members"
               value={workspace.member_count ?? 0}
@@ -301,63 +243,6 @@ function WorkspaceOverviewPage() {
                 </svg>
               }
             />
-            <StatCard
-              label="Experiments"
-              value={workspace.experiment_count ?? 0}
-              href={`/experiments`}
-              icon={
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
-                </svg>
-              }
-            />
-            <StatCard
-              label="Feature Flags"
-              value={workspace.feature_flag_count ?? 0}
-              href={`/feature-flags`}
-              icon={
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 21v-4m0 0V5a2 2 0 012-2h6.5l1 1H21l-3 6 3 6h-8.5l-1-1H5a2 2 0 00-2 2zm9-13.5V9" />
-                </svg>
-              }
-            />
-            <StatCard
-              label="API Keys"
-              value={workspace.api_key_count ?? 0}
-              href={`/workspaces/${wsId}/api-keys`}
-              icon={
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z" />
-                </svg>
-              }
-            />
-          </div>
-
-          {/* Usage / limits */}
-          <div className="mb-2">
-            <h2 className="text-sm font-semibold text-slate-700 mb-3">Usage &amp; Limits</h2>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-              <UsageBar
-                label="Members"
-                used={workspace.member_count ?? 0}
-                max={workspace.max_members}
-                href={`/workspaces/${wsId}/members`}
-              />
-              <UsageBar
-                label="Experiments"
-                used={workspace.experiment_count ?? 0}
-                max={workspace.max_experiments}
-                href={`/experiments`}
-                colorClass="bg-green-500"
-              />
-              <UsageBar
-                label="Feature Flags"
-                used={workspace.feature_flag_count ?? 0}
-                max={workspace.max_feature_flags}
-                href={`/feature-flags`}
-                colorClass="bg-purple-500"
-              />
-            </div>
           </div>
         </div>
       </div>
