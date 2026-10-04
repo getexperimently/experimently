@@ -641,7 +641,10 @@ response.
 - `GET /api/v1/results/{experiment_id}`, its alias
   `GET /api/v1/experiments/{experiment_id}/results`,
   `GET /api/v1/results/{experiment_id}/sample-size`, the data export and the
-  experiment report use the stored values. `?correction_method=` and
+  experiment report use the stored values, and so does the interaction test
+  of `GET /api/v1/interactions/{exp_a_id}/{exp_b_id}` (beta): the correction
+  across one experiment's treatments, and the level for `is_significant`.
+  `?correction_method=` and
   `?confidence_level=` on the first and third apply to that request only; the
   response's `correction_method` and `confidence_level` say what the numbers
   were computed under. `?correction_method=none` shows the uncorrected
@@ -663,7 +666,7 @@ response.
 - Not affected: the breakdown (`?breakdown=`) uses the stored confidence
   level only as its base alpha, with its own Bonferroni correction over
   segments; sequential testing (its own `alpha`) does not follow the stored
-  level (CUPED does, and applies the stored correction); the Bayesian results, interaction detection,
+  level (CUPED does, and applies the stored correction); the Bayesian results,
   post-stratification, live results (a fixed, uncorrected 0.05), the AI
   interpretation, the power calculator (`GET
   /api/v1/experiments/analysis/sample-size`) and warehouse analysis runs are
@@ -2041,12 +2044,11 @@ PUT  /api/v1/bandit/{experiment_id}/weights   — Override weights manually (ADM
 See [Interaction Detection Guide](interaction-detection.md) for full documentation.
 
 ```
-GET /api/v1/interactions/scan                          — Scan all active experiments
-GET /api/v1/interactions/{exp_a_id}/{exp_b_id}         — Pairwise analysis (beta: overlap only, #219)
-GET /api/v1/interactions/{exp_a_id}/{exp_b_id}/novelty — Novelty sub-analysis (beta: not computed, #219)
+GET /api/v1/interactions/scan                  — Overlap of every pair of active experiments
+GET /api/v1/interactions/{exp_a_id}/{exp_b_id} — Pairwise analysis (beta: overlap, and an interaction test on each primary metric)
 ```
 
-Access: DEVELOPER and above (VIEWER returns 403).
+Access: ANALYST, DEVELOPER or ADMIN (VIEWER returns 403).
 
 ---
 

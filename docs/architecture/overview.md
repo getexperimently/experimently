@@ -332,7 +332,7 @@ The following capabilities were added after the initial platform release. See th
 | CUPED Variance Reduction (#21, #217) | Covariate adjustment (pooled OLS θ) for each user's own events before assignment, every treatment against the control | [cuped.md](../api/cuped.md) |
 | Multi-Armed Bandit (#22) | Thompson Sampling, UCB1, Epsilon-Greedy; background MAB scheduler | [multi-armed-bandit.md](../api/multi-armed-bandit.md) |
 | Dimensional Analysis (#28) | Per-segment breakdowns with Bonferroni correction, HTE detection | [dimensional-analysis.md](../api/dimensional-analysis.md) |
-| Interaction Detection (#25), beta | Jaccard overlap between experiments; the interaction, novelty and SUTVA analyses are not computed yet (#219) | [interaction-detection.md](../api/interaction-detection.md) |
+| Interaction Detection (#25), beta | Jaccard overlap between experiments; (beta) whether one experiment's lift on its primary conversion metric differs across another's arms | [interaction-detection.md](../api/interaction-detection.md) |
 
 ### Traffic Management
 
