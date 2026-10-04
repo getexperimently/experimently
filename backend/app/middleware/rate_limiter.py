@@ -19,7 +19,12 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import Response
 from starlette.types import ASGIApp
 
+from backend.app.core.logger import get_logger
+
 logger = logging.getLogger(__name__)
+#: The fallback transitions log through structlog so their keyword fields
+#: survive the production JSON renderer (stdlib ``extra=`` fields do not).
+log = get_logger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -75,6 +80,15 @@ class SlidingWindowRateLimiter:
 #: Redis again. A constant, not a setting.
 REDIS_RETRY_SECONDS = 30.0
 
+#: Log messages for the fallback transitions. Every line also carries a
+#: ``rate_limiter`` field: ``per_process`` or ``redis``.
+FALLBACK_MESSAGE = (
+    "rate limiter: Redis unavailable, counting requests per process; "
+    f"retrying Redis every {int(REDIS_RETRY_SECONDS)} s"
+)
+STILL_UNAVAILABLE_MESSAGE = "rate limiter: Redis still unavailable"
+RECOVERED_MESSAGE = "rate limiter: Redis reachable again, counting requests in Redis"
+
 
 class RedisRateLimiter:
     """
@@ -123,6 +137,8 @@ class RedisRateLimiter:
         self._redis_available: bool = True
         #: While ``_redis_available`` is False, Redis is not touched before this.
         self._retry_at: float = 0.0
+        #: When this fallback began (``clock()``), for ``fallback_seconds``.
+        self._fallback_since: float = 0.0
         self._clock = clock
         self._fallback = SlidingWindowRateLimiter()
 
@@ -155,20 +171,54 @@ class RedisRateLimiter:
         return self._redis_client
 
     def _enter_fallback(self, exc: BaseException) -> None:
-        """Count per process until ``REDIS_RETRY_SECONDS`` from now."""
+        """Count per process until ``REDIS_RETRY_SECONDS`` from now.
+
+        Logs a warning on the switch from Redis, and only debug for a failed
+        retry, so an outage is one warning per process however long it lasts.
+        ``detail`` (the exception text, which can name the Redis host) goes to
+        the log only, truncated, and never into a metric or a response.
+        """
         was_available = self._redis_available
+        now = self._clock()
         self._redis_available = False
-        self._retry_at = self._clock() + REDIS_RETRY_SECONDS
+        self._retry_at = now + REDIS_RETRY_SECONDS
         if was_available:
-            logger.warning(
-                "Rate limiter Redis unavailable, using in-memory fallback: %s",
-                str(exc)[:200],
+            self._fallback_since = now
+            log.warning(
+                FALLBACK_MESSAGE,
+                rate_limiter="per_process",
+                reason=type(exc).__name__,
+                detail=str(exc)[:200],
+                retry_seconds=int(REDIS_RETRY_SECONDS),
+            )
+            try:
+                from backend.app.core.metrics import record_rate_limit_redis_fallback
+
+                record_rate_limit_redis_fallback()
+            except Exception:
+                pass  # Metrics are best-effort
+        else:
+            log.debug(
+                STILL_UNAVAILABLE_MESSAGE,
+                rate_limiter="per_process",
+                reason=type(exc).__name__,
+                fallback_seconds=round(now - self._fallback_since, 1),
             )
 
     def _leave_fallback(self) -> None:
         """Redis answered a retry: count in Redis again."""
         self._redis_available = True
-        logger.warning("Rate limiter using Redis again")
+        log.warning(
+            RECOVERED_MESSAGE,
+            rate_limiter="redis",
+            fallback_seconds=round(self._clock() - self._fallback_since, 1),
+        )
+        try:
+            from backend.app.core.metrics import record_rate_limit_redis_recovery
+
+            record_rate_limit_redis_recovery()
+        except Exception:
+            pass  # Metrics are best-effort
 
     def is_allowed(self, key: str, limit: int, window_seconds: int) -> Tuple[bool, int]:
         """

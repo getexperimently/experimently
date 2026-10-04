@@ -9,10 +9,16 @@ Covers:
 - Route-specific rate limit configuration
 """
 
+import contextlib
+import inspect
+import io
+import json
+import logging
 import time
 from unittest.mock import MagicMock, PropertyMock, patch
 
 import pytest
+import structlog
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -429,6 +435,211 @@ class TestNoClientRetries:
         assert limiter.is_allowed("k", limit=5, window_seconds=60) == (True, 4)
         assert limiter._redis_available is False
         assert connects == [1], f"{len(connects)} connect attempts, not 1"
+
+
+@contextlib.contextmanager
+def _json_logs(level: str = "DEBUG"):
+    """Render every log record as the production JSON line, into a buffer.
+
+    The real renderer, not caplog: caplog sees stdlib ``extra=`` attributes
+    that production drops, and does not see structlog lines at all unless
+    logging has been configured.
+
+    The unit conftest replaces ``logging.getLogger`` with a mock, which
+    structlog's stdlib logger factory calls, so the real one is put back for
+    the duration.
+    """
+    from backend.app.core.logger import configure_logging
+
+    def real_get_logger(name=None):
+        return logging.Logger.manager.getLogger(name) if name else logging.root
+
+    root = logging.root
+    handlers, root_level = list(root.handlers), root.level
+    saved = structlog.get_config()
+    buffer = io.StringIO()
+    with patch("logging.getLogger", real_get_logger):
+        configure_logging(log_level=level, json_logs=True, stream=buffer)
+        try:
+            yield buffer
+        finally:
+            _restore_logging(root, handlers, root_level, saved)
+
+
+def _restore_logging(root, handlers, root_level, saved) -> None:
+    for handler in list(root.handlers):
+        root.removeHandler(handler)
+    for handler in handlers:
+        root.addHandler(handler)
+    root.setLevel(root_level)
+    structlog.configure(**saved)
+
+
+def _limiter_lines(buffer: io.StringIO) -> list:
+    lines = [json.loads(line) for line in buffer.getvalue().splitlines() if line]
+    return [
+        line
+        for line in lines
+        if line.get("logger") == "backend.app.middleware.rate_limiter"
+    ]
+
+
+def _one_episode(clock: FakeClock, client: RecordingClient, limiter) -> None:
+    """Fail at t=0, 30 requests in the window, a failed retry at t=30, recovery at t=60."""
+    client.fail = True
+    limiter.is_allowed("k", limit=1000, window_seconds=60)
+    clock.now = 10.0
+    for _ in range(30):
+        limiter.is_allowed("k", limit=1000, window_seconds=60)
+    clock.now = REDIS_RETRY_SECONDS
+    limiter.is_allowed("k", limit=1000, window_seconds=60)
+    client.fail = False
+    clock.now = 2 * REDIS_RETRY_SECONDS
+    limiter.is_allowed("k", limit=1000, window_seconds=60)
+    assert limiter._redis_available is True
+
+
+def _sample(name: str) -> float:
+    from prometheus_client import REGISTRY
+
+    value = REGISTRY.get_sample_value(name)
+    assert value is not None, f"{name} is not registered"
+    return value
+
+
+@pytest.mark.unit
+@pytest.mark.regression
+class TestFallbackVisibility:
+    """What an operator sees: one warning per transition, and two metrics."""
+
+    def test_one_warning_on_entry_and_one_on_recovery(self, no_client_build):
+        clock = FakeClock()
+        client = RecordingClient()
+        limiter = _limiter_on(client, clock)
+
+        with _json_logs() as buffer:
+            _one_episode(clock, client, limiter)
+        lines = _limiter_lines(buffer)
+
+        warnings = [line for line in lines if line["level"] == "warning"]
+        debugs = [line for line in lines if line["level"] == "debug"]
+        assert len(lines) == 3, lines
+        assert len(warnings) == 2, lines
+        assert len(debugs) == 1, lines
+        assert [line for line in lines if line["level"] == "error"] == []
+
+        entered, recovered = warnings
+        assert entered["event"] == (
+            "rate limiter: Redis unavailable, counting requests per process; "
+            "retrying Redis every 30 s"
+        )
+        assert entered["rate_limiter"] == "per_process"
+        assert entered["reason"] == "ConnectionError"
+        assert entered["detail"] == "Error 111 connecting to redis.example:6379."
+        assert entered["retry_seconds"] == 30
+
+        retried = debugs[0]
+        assert retried["event"] == "rate limiter: Redis still unavailable"
+        assert retried["rate_limiter"] == "per_process"
+        assert retried["reason"] == "ConnectionError"
+        assert retried["fallback_seconds"] == 30.0
+
+        assert recovered["event"] == (
+            "rate limiter: Redis reachable again, counting requests in Redis"
+        )
+        assert recovered["rate_limiter"] == "redis"
+        assert recovered["fallback_seconds"] == 60.0
+
+    def test_a_failed_retry_is_not_logged_at_info(self, no_client_build):
+        """At the production level (INFO) an outage is the two warnings only."""
+        clock = FakeClock()
+        client = RecordingClient()
+        limiter = _limiter_on(client, clock)
+
+        with _json_logs("INFO") as buffer:
+            _one_episode(clock, client, limiter)
+        lines = _limiter_lines(buffer)
+
+        assert [line["level"] for line in lines] == ["warning", "warning"]
+        assert [line["rate_limiter"] for line in lines] == ["per_process", "redis"]
+
+    def test_the_detail_is_truncated(self, no_client_build):
+        clock = FakeClock()
+        limiter = RedisRateLimiter(clock=clock)
+
+        with _json_logs() as buffer:
+            limiter._enter_fallback(ConnectionError("x" * 500))
+        lines = _limiter_lines(buffer)
+
+        assert len(lines) == 1
+        assert lines[0]["detail"] == "x" * 200
+
+    def test_the_old_messages_are_gone(self):
+        import backend.app.middleware.rate_limiter as module
+
+        source = inspect.getsource(module)
+        assert "rate limiter: Redis unavailable" in source
+        assert "using in-memory fallback" not in source
+        assert "falling back to in-memory" not in source
+
+    def test_the_metrics_follow_the_state(self, no_client_build):
+        clock = FakeClock()
+        client = RecordingClient()
+        limiter = _limiter_on(client, clock)
+        before = _sample("rate_limit_redis_fallbacks_total")
+
+        client.fail = True
+        limiter.is_allowed("k", limit=1000, window_seconds=60)
+        assert _sample("rate_limit_redis_fallback_active") == 1
+        assert _sample("rate_limit_redis_fallbacks_total") == before + 1
+
+        clock.now = REDIS_RETRY_SECONDS  # a failed retry is not a new switch
+        limiter.is_allowed("k", limit=1000, window_seconds=60)
+        assert _sample("rate_limit_redis_fallback_active") == 1
+        assert _sample("rate_limit_redis_fallbacks_total") == before + 1
+
+        client.fail = False
+        clock.now = 2 * REDIS_RETRY_SECONDS
+        limiter.is_allowed("k", limit=1000, window_seconds=60)
+        assert _sample("rate_limit_redis_fallback_active") == 0
+        assert _sample("rate_limit_redis_fallbacks_total") == before + 1
+
+    def test_the_metric_names_and_help_are_exported(self):
+        from prometheus_client import generate_latest
+
+        import backend.app.core.metrics  # registers the metrics
+
+        text = generate_latest().decode()
+        assert (
+            "# HELP rate_limit_redis_fallback_active 1 while this process counts "
+            "rate limits per process because Redis is unavailable; 0 while it "
+            "counts them in Redis\n"
+        ) in text
+        assert "# TYPE rate_limit_redis_fallback_active gauge\n" in text
+        assert (
+            "# HELP rate_limit_redis_fallbacks_total Times this process switched "
+            "rate limiting from Redis to per-process counting\n"
+        ) in text
+        assert "# TYPE rate_limit_redis_fallbacks_total counter\n" in text
+
+    def test_the_metrics_carry_no_labels(self):
+        """No reason or error text on a metric: they go to the log only."""
+        from prometheus_client import REGISTRY
+
+        from backend.app.core import metrics
+
+        assert metrics.rate_limit_redis_fallback_active._labelnames == ()
+        assert metrics.rate_limit_redis_fallbacks_total._labelnames == ()
+        seen = 0
+        for family in REGISTRY.collect():
+            if family.name in (
+                "rate_limit_redis_fallback_active",
+                "rate_limit_redis_fallbacks",
+            ):
+                for sample in family.samples:
+                    seen += 1
+                    assert sample.labels == {}, sample
+        assert seen >= 2
 
 
 # ---------------------------------------------------------------------------
