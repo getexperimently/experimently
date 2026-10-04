@@ -208,8 +208,8 @@ A PyPI release (`sdk/python`, `sdk/openfeature-python`) runs in two jobs:
 Write a Python version in its PEP 440 spelling (`1.0.0rc1`, not
 `1.0.0-rc.1`), in the manifest and the tag alike; the build job refuses any
 other spelling. If the publish job fails after approval, use **Re-run failed
-jobs**, which reuses the files the build job checked, not **Re-run all
-jobs**.
+jobs**, not **Re-run all jobs**. Re-run failed jobs is meant to reuse the
+files the build job checked (not yet seen on a real release).
 
 Publish `sdk/js` before `sdk/openfeature`; the provider's release refuses until
 the matching `@getexperimently/js-sdk` is on npm. The provider's source depends
