@@ -200,7 +200,7 @@ curl -X GET "http://localhost:8000/api/v1/feature-flags/user/123" \
 
 ### 4. Tracking Events
 
-Step 1: Assign a user to an experiment (sticky; records an exposure event):
+Step 1: Assign a user to an experiment (sticky; every call for an enrolled user records that the user saw the experiment):
 
 ```bash
 curl -X POST "http://localhost:8000/api/v1/tracking/assign" \
@@ -697,7 +697,12 @@ public `key`. They share the per-IP `SDK_RATE_LIMIT_PER_MINUTE` ceiling (default
 ### Assign User to Experiment
 - **Endpoint**: `POST /api/v1/tracking/assign`
 - **Description**: Return the user's variant for an ACTIVE experiment. Sticky per user; bandit experiments
-  route new users by the current `BanditState` weights. Records an exposure event.
+  route new users by the current `BanditState` weights. Every call for an enrolled user records a view
+  event (the user saw the experiment): the first call and every later sticky call alike.
+- **Eligibility**: a new user is first checked against the global holdout, the experiment's mutual
+  exclusion group and its targeting rules (evaluated against `context`). An ineligible user still gets
+  200 OK with the control variant, `assigned: false` and `reason` set to `holdout`, `mutual_exclusion` or
+  `targeting`; nothing is recorded for them. A user who already has an assignment keeps it.
 - **Headers**: X-API-Key: {api_key}
 - **Body**: `{"experiment_key": string, "user_id": string, "context": object?}`
 - **Response**: 200 OK
@@ -708,9 +713,13 @@ public `key`. They share the per-IP `SDK_RATE_LIMIT_PER_MINUTE` ceiling (default
     "variant_id": "uuid",
     "variant_name": "string",
     "is_control": false,
-    "configuration": {}
+    "configuration": {},
+    "assigned": true,
+    "reason": "assigned"
   }
   ```
+  `assigned` is `false` when the user was not enrolled; `reason` is `assigned`, `holdout`,
+  `mutual_exclusion` or `targeting`.
 - **Errors**: 404 when no ACTIVE experiment has that key
 
 ### Track Event
@@ -1046,7 +1055,7 @@ Response (429 Too Many Requests):
 
 ```json
 {
-  "detail": "Too many requests. Please try again in 60 seconds."
+  "detail": "Too Many Requests. Please slow down and retry after a moment."
 }
 ```
 

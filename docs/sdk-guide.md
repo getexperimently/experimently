@@ -14,7 +14,7 @@ No other SDK buckets locally, and experiments are always assigned by the server.
 
 | Purpose | Method and path | Body / query | Response |
 |---|---|---|---|
-| Assign a user to an experiment (sticky) | `POST /api/v1/tracking/assign` | `{experiment_key, user_id, context?}` | `{experiment_key, user_id, variant_id, variant_name, is_control, configuration}` |
+| Assign a user to an experiment (sticky) | `POST /api/v1/tracking/assign` | `{experiment_key, user_id, context?}` | `{experiment_key, user_id, variant_id, variant_name, is_control, configuration, assigned, reason}` |
 | Evaluate a flag | `GET /api/v1/feature-flags/evaluate/{flag_key}?user_id=…&context=<url-encoded JSON, optional>` | — | `{key, enabled, config, reason}` |
 | All flags for a user | `GET /api/v1/feature-flags/user/{user_id}` | — | `{flag_key: boolean, …}` |
 | Track one event | `POST /api/v1/tracking/track` | `{event_type, event_name?, user_id, experiment_key? \| feature_flag_key?, value?, metadata?, timestamp?}` | stored event |
@@ -25,6 +25,11 @@ Each entry of the batch response's `errors` is `{index, event_type, user_id, err
 why the item was refused (for example, neither key was found), or reads
 `Could not store this event (request ID: <id>).` when the server failed to store it; quote that ID
 when you report the failure.
+
+An assign call for a user who is not eligible (global holdout, mutual exclusion group or targeting
+rules) still answers 200 with the control variant, `assigned: false` and `reason` set to `holdout`,
+`mutual_exclusion` or `targeting`; nothing is recorded for that user. Otherwise `assigned` is `true`,
+`reason` is `assigned`, and every call, sticky ones included, records that the user saw the experiment.
 
 Conversions are matched to experiment metrics by `event_name` (exposures excluded), whatever `event_type`
 an SDK sends. Full request/response examples: [API Specs](api/specs.md#tracking-api-sdk). Per-IP rate
