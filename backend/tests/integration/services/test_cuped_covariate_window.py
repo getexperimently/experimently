@@ -99,6 +99,9 @@ def test_w1_boundary_table(db_session, rows, fraction):
         assigned_at[user] = assigned
         happened = assigned + offset
         rows.append(_event(user, happened, assigned - timedelta(days=8)))
+    # A user assigned a day later widens the query's own upper bound, so the
+    # boundary is decided by each user's window, not by the query's.
+    assigned_at[f"w1-{prefix}-later"] = assigned + timedelta(days=1)
     db_session.add_all(rows)
     db_session.commit()
 
