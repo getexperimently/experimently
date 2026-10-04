@@ -28,6 +28,10 @@ from sqlalchemy.exc import DataError, IntegrityError
 from sqlalchemy.orm import Session
 
 from backend.app.api import deps
+from backend.app.api.segment_rules import (
+    refuse_clone_with_unusable_segments,
+    refuse_unusable_segments,
+)
 from backend.app.api.v1.endpoints import results as results_endpoints
 from backend.app.core.logger import failure_detail, unexpected_failure
 from backend.app.core.logging import logger
@@ -390,6 +394,9 @@ async def create_experiment(
         raise _refuse_status(STATUS_ON_CREATE)
 
     _reject_unroutable_split_url(getattr(experiment_in, "experiment_type", None))
+
+    # Every segment the rules name exists and is active (#440).
+    refuse_unusable_segments(db, experiment_in.targeting_rules)
 
     try:
         # Create experiment service
@@ -754,6 +761,10 @@ async def update_experiment(
         if "status" in fields_sent:
             if _status_text(experiment_in.status) != _status_text(experiment.status):
                 raise _refuse_status(STATUS_THROUGH_LIFECYCLE)
+
+        # Every segment the rules name exists and is active (#440).
+        if sends_targeting:
+            refuse_unusable_segments(db, experiment_in.targeting_rules)
 
         # Get update data. The status, equal to the stored one if present, is
         # never written by an update.
@@ -1649,6 +1660,10 @@ async def clone_experiment(
         # to the same rule as create: a build that cannot route split-URL
         # traffic must not mint a second split-URL experiment from a legacy one.
         _reject_unroutable_split_url(experiment.experiment_type)
+
+        # The clone's rules are the source's, and every segment they name
+        # must still be usable (#440).
+        refuse_clone_with_unusable_segments(db, experiment.targeting_rules)
 
         # Create experiment service
         experiment_service = ExperimentService(db)

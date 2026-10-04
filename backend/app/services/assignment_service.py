@@ -13,10 +13,12 @@ from sqlalchemy.orm import Session, joinedload
 
 from backend.app.core.consistent_hash import bucket_of
 from backend.app.core.log_once import EVALUATION_NOTES
+from backend.app.core.rules_engine import SegmentMembershipUnavailable
 from backend.app.core.targeting_adapter import (
     _is_dashboard_rules_shape,
     expand_context,
     normalise_targeting_rules,
+    segment_ids_in,
 )
 from backend.app.models.assignment import Assignment
 from backend.app.models.experiment import Experiment, ExperimentStatus, Variant
@@ -27,6 +29,11 @@ from backend.app.services.event_service import EventService
 from backend.app.services.global_holdout_service import GlobalHoldoutService
 from backend.app.services.mutual_exclusion_service import MutualExclusionService
 from backend.app.services.rules_evaluation_service import RulesEvaluationService
+from backend.app.services.segment_membership import (
+    log_unavailable,
+    resolve_segment_memberships,
+    with_memberships,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -372,7 +379,7 @@ class AssignmentService:
         if getattr(experiment, "targeting_rules", None):
             targeting_context = self._build_targeting_context(user_id, context)
             targeting = self._evaluate_experiment_targeting(
-                experiment, targeting_context
+                experiment, targeting_context, user_id=user_id
             )
             if not targeting["eligible"]:
                 return {
@@ -594,7 +601,10 @@ class AssignmentService:
 
         # Evaluate targeting rules if experiment has them
         targeting_result = self._evaluate_experiment_targeting(
-            experiment, user_context, validate_attributes
+            experiment,
+            user_context,
+            validate_attributes,
+            user_id=user_id,
         )
 
         if not targeting_result["eligible"]:
@@ -667,14 +677,23 @@ class AssignmentService:
         experiment: Experiment,
         user_context: Dict[str, Any],
         validate_attributes: bool = True,
+        user_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Evaluate if a user meets experiment targeting criteria.
 
+        A rule that uses a segment (#440) is matched on membership resolved
+        for ``user_id`` -- the request's user, never a ``user_id`` in the
+        context -- by :mod:`backend.app.services.segment_membership`. When a
+        referenced segment's membership cannot be decided, the user is not
+        eligible and one WARNING names the segments.
+
         Args:
             experiment: The experiment model
-            user_context: User context for evaluation
+            user_context: User context for evaluation (expanded by
+                ``check_eligibility``)
             validate_attributes: Whether to validate attributes
+            user_id: The user being assigned
 
         Returns:
             Dictionary with targeting evaluation results
@@ -706,13 +725,28 @@ class AssignmentService:
                     "validation_passed": True,
                 }
 
+            # Segment membership, resolved from the database (#440). The
+            # context's own membership key is always removed.
+            segment_ids = segment_ids_in(targeting_rules)
+            members = None
+            if segment_ids:
+                if user_id is None:
+                    raise SegmentMembershipUnavailable(segment_ids)
+                memberships = resolve_segment_memberships(
+                    self.db, user_id, user_context, segment_ids
+                )
+                undecided = memberships.undecided(segment_ids)
+                if undecided:
+                    raise SegmentMembershipUnavailable(undecided)
+                members = memberships.members
+
             # Evaluate rules with validation
             (
                 matched_rule,
                 metrics,
             ) = self.rules_evaluation_service.evaluate_rules_with_validation(
                 targeting_rules=targeting_rules,
-                user_context=user_context,
+                user_context=with_memberships(user_context, members),
                 validate_attributes=validate_attributes,
                 track_metrics=True,
                 owner=owner,
@@ -734,6 +768,17 @@ class AssignmentService:
                     "validation_passed": metrics.error is None if metrics else True,
                     "metrics": metrics,
                 }
+
+        except SegmentMembershipUnavailable as exc:
+            log_unavailable(
+                f"experiment:{getattr(experiment, 'id', None)}", exc.segment_ids
+            )
+            return {
+                "eligible": False,
+                "rule_id": None,
+                "reason": "Segment membership could not be decided",
+                "validation_passed": False,
+            }
 
         except Exception as e:
             # The type only: the exception's text can repeat an attribute value.

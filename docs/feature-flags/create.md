@@ -269,7 +269,8 @@ legacy (list-shaped) rules hold a condition with an operator other than `eq`, `n
 Operators: `equals`, `not_equals`, `contains`, `not_contains`, `starts_with`, `ends_with`,
 `greater_than`, `less_than`, `greater_than_or_equal`, `less_than_or_equal`, `in`, `not_in`,
 `regex`, `is_null`, `is_not_null`, `semver_eq`, `semver_gt`, `semver_lt`, `semver_gte`,
-`semver_lte`, `geo_within_radius`, `time_window`, `array_contains`, `array_intersects`.
+`semver_lte`, `geo_within_radius`, `time_window`, `array_contains`, `array_intersects`,
+`in_segment`, `not_in_segment`.
 Values typed in the dashboard are strings; they are compared leniently against typed
 context values (`"true"` matches `true`, `"17"` matches `17`, `"beta, internal"` is a list
 for `in`/`not_in`, `"17.4"` is padded to `17.4.0` for `semver_*`).
@@ -282,6 +283,28 @@ not valid`). A flag whose rules were stored with such a pattern before this chec
 context value cannot be evaluated, evaluates disabled with reason `error` rather than falling
 through to the rollout; `python -m backend.scripts.check_targeting_rules` lists those flags.
 See the [rules engine reference](../Enhanced_Rules_Engine_Reference.md#match_regex-match_regex).
+
+**`in_segment`, `not_in_segment`.** `{"attribute": "segment", "operator": "in_segment", "value": "<segment id>"}`.
+One segment per condition; to match any of several, put one condition per segment in an `OR`
+group. A ruleset can use at most 10 different segments. A user is a member of an ID-list segment
+when the user the flag or experiment is evaluated for (the request's `user_id`) is in its list,
+and of a rules segment when the attributes sent with the request match its rules; in a segment's
+rules, `user_id` is that same user, whatever the context says. Membership is decided by the
+server from its own records: nothing in the context you send makes a user a member. A condition
+on the attribute `segment` with any other operator, such as `equals`, compares the context value
+as before. Saving rules that name a segment that is unknown, inactive or archived, or whose rules
+are not valid, answers 422, and a segment condition in a native `default_rule` (returned without
+its conditions being evaluated) is refused. When the server cannot decide a user's membership of
+a segment the rules name (a flag unarchived after its segment was archived, a segment rule whose
+pattern cannot be evaluated for this context), it does not guess: the flag answers
+`enabled: false` with `reason: "error"` and the experiment does not enrol the user
+(`reason: "targeting"`), whichever of the two operators the condition uses. Flags that use a
+segment are always evaluated by the server, never by an SDK's local evaluation.
+A segment condition requires nothing from the context, but on experiments every other attribute a
+rule names is required (#822): a user who lacks an attribute used only in another `OR` branch is
+not enrolled even when the segment branch matches, while a flag would match them.
+
+See [Segments](../guides/segments.md#target-a-flag-or-an-experiment-at-a-segment).
 
 Users who match a rule are bucketed with the rule's `rollout_percentage` (100 unless set on
 the rules object); users who match no rule fall through to the flag's global

@@ -89,8 +89,9 @@ REFUSED = [
         "groups[0].conditions[0].operator: unknown operator",
     ),
     (
+        # A flag operator since #440 PR C, but never inside a segment.
         _rules([_cond(operator="equals ")], [_cond(operator="in_segment")]),
-        "groups[1].conditions[0].operator: unknown operator",
+        "groups[1].conditions[0].operator: a segment cannot refer to a segment",
     ),
     (
         {"groups": [{"groups": [{"conditions": [_cond()]}]}]},

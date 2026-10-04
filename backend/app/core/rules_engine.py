@@ -57,6 +57,63 @@ def _note_rule_problem(operator: Any, reason: str) -> None:
         )
 
 
+# ---------------------------------------------------------------------------
+# Segment membership (#440)
+# ---------------------------------------------------------------------------
+
+#: The context key that carries the user's segment memberships: a
+#: ``frozenset`` of the ids of the referenced segments the user is a member
+#: of. The caller (the flag service, experiment assignment) resolves it from
+#: the database and assigns it after ``expand_context``, removing whatever the
+#: request sent under this name. ``$`` cannot appear in a rule attribute
+#: (``Condition.validate_attribute_name``), so no rule can read it directly.
+SEGMENT_MEMBERSHIP_KEY = "$segments"
+
+#: The operators whose answer is membership, not an attribute comparison.
+SEGMENT_OPERATORS = frozenset({OperatorType.IN_SEGMENT, OperatorType.NOT_IN_SEGMENT})
+
+
+class SegmentMembershipUnavailable(Exception):
+    """Membership of a referenced segment could not be decided.
+
+    The whole ruleset is abandoned, as for ``PatternUnevaluable``: answering
+    "not a member" instead would let ``not_in_segment``, or a ``NOT`` group,
+    admit users whose membership is unknown. ``segment_ids`` names the
+    segments (ids only, never a user's id or attributes).
+    """
+
+    def __init__(self, segment_ids: Any = ()) -> None:
+        # Logged by the callers: only short text, which is what a segment
+        # id is; anything else a stored rule holds is named, not repeated.
+        self.segment_ids = tuple(
+            sorted(
+                s if isinstance(s, str) and len(s) <= 64 else "(not a segment id)"
+                for s in segment_ids
+            )
+        )
+        super().__init__("segment membership could not be decided")
+
+
+def segment_condition_holds(condition: Condition, user_context: UserContext):
+    """The answer to a segment condition, or ``None`` for any other condition.
+
+    Called by both evaluators before the attribute lookup. Membership is
+    read only from :data:`SEGMENT_MEMBERSHIP_KEY`, and only when it is a
+    ``frozenset``; absent, or any other type (a list sent in a request, for
+    example), raises :class:`SegmentMembershipUnavailable`. The condition's
+    ``attribute`` is never read, so a context attribute named ``segment``
+    has no effect on it.
+    """
+    operator = condition.operator
+    if operator not in SEGMENT_OPERATORS:
+        return None
+    members = user_context.get(SEGMENT_MEMBERSHIP_KEY)
+    if not isinstance(members, frozenset) or not isinstance(condition.value, str):
+        raise SegmentMembershipUnavailable((condition.value,))
+    inside = condition.value in members
+    return inside if operator == OperatorType.IN_SEGMENT else not inside
+
+
 def evaluate_targeting_rules(
     targeting_rules: TargetingRules, user_context: UserContext
 ) -> Optional[TargetingRule]:
@@ -166,6 +223,12 @@ def evaluate_condition(condition: Condition, user_context: UserContext) -> bool:
     Returns:
         True if the condition matches, False otherwise
     """
+    # A segment condition is answered from the resolved membership, before
+    # (and instead of) any attribute lookup.
+    segment_answer = segment_condition_holds(condition, user_context)
+    if segment_answer is not None:
+        return segment_answer
+
     attribute = condition.attribute
     operator = condition.operator
     expected_value = condition.value
@@ -256,6 +319,11 @@ def apply_operator(
     Returns:
         True if the operator evaluates to true, False otherwise
     """
+    if operator in SEGMENT_OPERATORS:
+        # Unreachable: both evaluators answer a segment condition with
+        # segment_condition_holds before looking up an attribute. A caller
+        # that gets here has no membership to compare, so it fails closed.
+        raise SegmentMembershipUnavailable((expected_value,))
     # Presence operators ignore expected_value entirely
     if operator == OperatorType.IS_NULL:
         return _is_empty_value(actual_value)

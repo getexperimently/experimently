@@ -256,9 +256,21 @@ def get_segment(
     summary="Update an audience segment",
     description=(
         "Update segment name, description, rules, or status. A segment's kind "
-        "cannot be changed, and an id_list segment takes no rules (422). "
-        "Requires DEVELOPER or ADMIN role."
+        "cannot be changed, and an id_list segment takes no rules (422). A "
+        "status other than active is refused (409) while targeting rules use "
+        "the segment. Requires DEVELOPER or ADMIN role."
     ),
+    responses={
+        409: {
+            "description": (
+                "The segment is used by the targeting rules of a flag that is "
+                "not archived or an experiment that is draft, active or paused. "
+                '`detail` is `{"code": "segment_in_use", "message", '
+                '"feature_flags": [{id, key, name}], "experiments": '
+                "[{id, key, name, status}]}`."
+            )
+        }
+    },
     tags=["Segments"],
 )
 def update_segment(
@@ -300,9 +312,20 @@ def update_segment(
     status_code=status.HTTP_204_NO_CONTENT,
     summary="Archive an audience segment",
     description=(
-        "Soft-delete a segment by setting its status to ARCHIVED. "
-        "Requires DEVELOPER or ADMIN role."
+        "Soft-delete a segment by setting its status to ARCHIVED. Refused (409) "
+        "while targeting rules use the segment. Requires DEVELOPER or ADMIN role."
     ),
+    responses={
+        409: {
+            "description": (
+                "The segment is used by the targeting rules of a flag that is "
+                "not archived or an experiment that is draft, active or paused. "
+                '`detail` is `{"code": "segment_in_use", "message", '
+                '"feature_flags": [{id, key, name}], "experiments": '
+                "[{id, key, name, status}]}`."
+            )
+        }
+    },
     tags=["Segments"],
 )
 def delete_segment(
@@ -315,6 +338,8 @@ def delete_segment(
     before = _segment_before(db, segment_id)
     try:
         AudienceService.delete_segment(db, segment_id)
+    except SegmentChangeRefused as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.message) from None
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc))
     segment = AudienceService.get_segment(db, segment_id)

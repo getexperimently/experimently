@@ -5,10 +5,10 @@
 "local_operators": ["contains","ends_with","eq","gt","gte","in","is_not_null","is_null","lt","lte","neq","not_contains","not_in","starts_with"],
 "max_safe_integer": 9007199254740991,
 "whitespace_code_points": [9,10,11,12,13,28,29,30,31,32,133,160,5760,8192,8193,8194,8195,8196,8197,8198,8199,8200,8201,8202,8232,8233,8239,8287,12288,65279],
-"counts": {"cases":2172,"flags":144,"must_local":1294},
+"counts": {"cases":2181,"flags":147,"must_local":1294},
 "ruleset": {
   "schema": 1,
-  "version": "4016f4c8b1d4f61603829dd5253fe098acc9ff65c0651a8906806acdc9887d4f",
+  "version": "d9816618eee10b661e755c2d33896fd4dd0e0565f491424bedb97122142f3974",
   "bucketing": "md5-mod100-v1",
   "flags": [
   {"active":true,"default_rule":null,"evaluation":"local","key":"alias-device","rollout_percentage":0,"rules":[{"id":"dashboard","match":{"conditions":[],"groups":[{"conditions":[{"attribute":"device.os","operator":"eq","value":"ios"}],"groups":[],"op":"and"}],"op":"and"},"rollout_percentage":100}]},
@@ -140,6 +140,9 @@
   {"active":true,"evaluation":"remote","key":"rv-neq-null"},
   {"active":true,"evaluation":"remote","key":"rv-not-in-nested"},
   {"active":true,"evaluation":"remote","key":"rv-starts-list"},
+  {"active":true,"evaluation":"remote","key":"segment-in"},
+  {"active":true,"evaluation":"remote","key":"segment-not-in"},
+  {"active":true,"evaluation":"remote","key":"segment-unknown"},
   {"active":false,"key":"status-archived"},
   {"active":false,"key":"status-inactive"},
   {"active":true,"default_rule":null,"evaluation":"local","key":"str-contains-0","rollout_percentage":0,"rules":[{"id":"dashboard","match":{"conditions":[],"groups":[{"conditions":[{"attribute":"a","operator":"contains","value":"b"}],"groups":[],"op":"and"}],"op":"and"},"rollout_percentage":100}]},
@@ -286,6 +289,9 @@
   {"key":"rv-neq-null","status":"ACTIVE","rollout_percentage":0,"targeting_rules":{"rules":[{"id":"r1","rule":{"operator":"and","conditions":[{"attribute":"a","operator":"neq","value":null}],"groups":[]},"rollout_percentage":100,"priority":0}]}},
   {"key":"rv-not-in-nested","status":"ACTIVE","rollout_percentage":0,"targeting_rules":{"rules":[{"id":"r1","rule":{"operator":"and","conditions":[{"attribute":"a","operator":"not_in","value":[["x"]]}],"groups":[]},"rollout_percentage":100,"priority":0}]}},
   {"key":"rv-starts-list","status":"ACTIVE","rollout_percentage":0,"targeting_rules":{"rules":[{"id":"r1","rule":{"operator":"and","conditions":[{"attribute":"a","operator":"starts_with","value":["x"]}],"groups":[]},"rollout_percentage":100,"priority":0}]}},
+  {"key":"segment-in","status":"ACTIVE","rollout_percentage":0,"targeting_rules":{"logical_operator":"AND","groups":[{"logical_operator":"AND","conditions":[{"attribute":"segment","operator":"in_segment","value":"5e9a1c00-0000-4000-8000-000000000440"}]}]}},
+  {"key":"segment-not-in","status":"ACTIVE","rollout_percentage":0,"targeting_rules":{"logical_operator":"AND","groups":[{"logical_operator":"AND","conditions":[{"attribute":"segment","operator":"not_in_segment","value":"5e9a1c00-0000-4000-8000-000000000440"}]}]}},
+  {"key":"segment-unknown","status":"ACTIVE","rollout_percentage":0,"targeting_rules":{"logical_operator":"AND","groups":[{"logical_operator":"AND","conditions":[{"attribute":"segment","operator":"in_segment","value":"5e9a1c00-0000-4000-8000-00000000dead"}]}]}},
   {"key":"status-archived","status":"ARCHIVED","rollout_percentage":100,"targeting_rules":{"logical_operator":"AND","groups":[{"logical_operator":"AND","conditions":[{"attribute":"country","operator":"equals","value":"US"}]}]}},
   {"key":"status-inactive","status":"INACTIVE","rollout_percentage":100,"targeting_rules":{"logical_operator":"AND","groups":[{"logical_operator":"AND","conditions":[{"attribute":"country","operator":"equals","value":"US"}]}]}},
   {"key":"str-contains-0","status":"ACTIVE","rollout_percentage":0,"targeting_rules":{"logical_operator":"AND","groups":[{"logical_operator":"AND","conditions":[{"attribute":"a","operator":"contains","value":"b"}]}]}},
@@ -2474,6 +2480,15 @@
   {"id":"legacy-context#2","flag":"legacy-context","user_id":"user-7","context":{"plan":"pro"},"expected":{"enabled":true,"reason":"targeting_rule"},"must_local":false},
   {"id":"op-semver#3","flag":"op-semver","user_id":"user-1","context":{"v":"1.2.99999999999999999999"},"expected":{"enabled":true,"reason":"targeting_rule"},"must_local":false},
   {"id":"op-regex#3","flag":"op-regex","user_id":"user-1","context":{"email":"abc"},"expected":{"enabled":true,"reason":"targeting_rule"},"must_local":false},
-  {"id":"op-array-contains#3","flag":"op-array-contains","user_id":"user-1","context":{"tags":["a","b"]},"expected":{"enabled":true,"reason":"targeting_rule"},"must_local":false}
+  {"id":"op-array-contains#3","flag":"op-array-contains","user_id":"user-1","context":{"tags":["a","b"]},"expected":{"enabled":true,"reason":"targeting_rule"},"must_local":false},
+  {"id":"segment-in#1","flag":"segment-in","user_id":"user-1","context":null,"expected":{"enabled":true,"reason":"targeting_rule"},"must_local":false},
+  {"id":"segment-in#2","flag":"segment-in","user_id":"user-7","context":null,"expected":{"enabled":false,"reason":"rollout"},"must_local":false},
+  {"id":"segment-in#3","flag":"segment-in","user_id":"user-7","context":{"$segments":["5e9a1c00-0000-4000-8000-000000000440"]},"expected":{"enabled":false,"reason":"rollout"},"must_local":false},
+  {"id":"segment-not-in#1","flag":"segment-not-in","user_id":"user-1","context":null,"expected":{"enabled":false,"reason":"rollout"},"must_local":false},
+  {"id":"segment-not-in#2","flag":"segment-not-in","user_id":"user-7","context":null,"expected":{"enabled":true,"reason":"targeting_rule"},"must_local":false},
+  {"id":"segment-not-in#3","flag":"segment-not-in","user_id":"user-7","context":{"$segments":["5e9a1c00-0000-4000-8000-000000000440"]},"expected":{"enabled":true,"reason":"targeting_rule"},"must_local":false},
+  {"id":"segment-unknown#1","flag":"segment-unknown","user_id":"user-1","context":null,"expected":{"enabled":false,"reason":"error"},"must_local":false},
+  {"id":"segment-unknown#2","flag":"segment-unknown","user_id":"user-7","context":null,"expected":{"enabled":false,"reason":"error"},"must_local":false},
+  {"id":"segment-unknown#3","flag":"segment-unknown","user_id":"user-7","context":{"$segments":["5e9a1c00-0000-4000-8000-000000000440"]},"expected":{"enabled":false,"reason":"error"},"must_local":false}
 ]
 }

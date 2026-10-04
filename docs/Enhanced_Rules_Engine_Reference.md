@@ -359,6 +359,40 @@ Condition(
 - Timestamps: Unix timestamp
 - datetime objects: Converted automatically
 
+### Segment Operators
+
+#### IN_SEGMENT (`in_segment`), NOT_IN_SEGMENT (`not_in_segment`)
+
+**`in_segment`, `not_in_segment`.** `{"attribute": "segment", "operator": "in_segment", "value": "<segment id>"}`.
+One segment per condition; to match any of several, put one condition per segment in an `OR`
+group. A ruleset can use at most 10 different segments. A user is a member of an ID-list segment
+when the user the flag or experiment is evaluated for (the request's `user_id`) is in its list,
+and of a rules segment when the attributes sent with the request match its rules; in a segment's
+rules, `user_id` is that same user, whatever the context says. Membership is decided by the
+server from its own records: nothing in the context you send makes a user a member. A condition
+on the attribute `segment` with any other operator, such as `equals`, compares the context value
+as before. Saving rules that name a segment that is unknown, inactive or archived, or whose rules
+are not valid, answers 422, and a segment condition in a native `default_rule` (returned without
+its conditions being evaluated) is refused. When the server cannot decide a user's membership of
+a segment the rules name (a flag unarchived after its segment was archived, a segment rule whose
+pattern cannot be evaluated for this context), it does not guess: the flag answers
+`enabled: false` with `reason: "error"` and the experiment does not enrol the user
+(`reason: "targeting"`), whichever of the two operators the condition uses. Flags that use a
+segment are always evaluated by the server, never by an SDK's local evaluation.
+A segment condition requires nothing from the context, but on experiments every other attribute a
+rule names is required (#822): a user who lacks an attribute used only in another `OR` branch is
+not enrolled even when the segment branch matches, while a flag would match them.
+
+See [Segments](guides/segments.md#target-a-flag-or-an-experiment-at-a-segment).
+
+```python
+Condition(
+    attribute="segment",
+    operator=OperatorType.IN_SEGMENT,
+    value="5e9a1c00-0000-4000-8000-000000000440",
+)
+```
+
 ### Date/Time Operators
 
 #### BEFORE (`before`)
