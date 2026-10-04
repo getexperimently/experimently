@@ -24,8 +24,8 @@ generated from the code and pinned by ``test_openapi_snapshot.py`` and
 
 ``mkdocs.yml`` IS documentation.  It configures the site and nothing else
 imports it; the one test that reads it (``test_doc_examples.py``, which renders
-through its ``markdown_extensions``) is among the docs tests the core leg of
-``profile-build`` still runs on a docs-only pull request.
+through its ``markdown_extensions``) is among the docs tests ``core-build`` still
+runs on a docs-only pull request.
 
 An empty list is NOT documentation only: nothing to classify means nothing was
 proven, so the full gate runs.

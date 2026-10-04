@@ -60,8 +60,8 @@ def test_mkdocs_yml_alone_is_documentation():
     """The chosen rule: the site configuration is documentation.
 
     Nothing imports it; the one test that reads it (``test_doc_examples.py``,
-    through ``markdown_extensions``) is among those the core leg of
-    ``profile-build`` still runs on a docs-only change.
+    through ``markdown_extensions``) is among those ``core-build`` still runs
+    on a docs-only change.
     """
     assert cc.classify(["mkdocs.yml"]) == (True, [])
     assert _run("mkdocs.yml\n") == "docs_only=true\n"
