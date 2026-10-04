@@ -350,8 +350,11 @@ def test_a_rollback_to_the_revision_already_serving_is_refused_before_any_write(
     assert "The dashboard was left as it is." in log
     assert "rollback-runbook.md Method 2" in log
     headline = _headline(summary)
-    assert "API NOT rolled back: it was already on" in headline, headline
-    assert "API rolled back to" not in headline
+    assert headline == (
+        "## Rollback of staging: REFUSED: the API was already on "
+        "experimentation-backend-staging:42 with nothing in flight, so this run "
+        "stopped nothing and created no deployment; dashboard left as it is"
+    ), headline
 
 
 @pytest.mark.regression
@@ -483,8 +486,12 @@ def test_a_failed_verify_in_the_already_serving_case_says_the_dashboard_did_not_
     ), log
     assert "ran as asked" not in log
     headline = _headline(summary)
-    assert "API NOT rolled back: it was already on" in headline, headline
-    assert "dashboard NOT rolled back" in headline, headline
+    assert headline == (
+        "## Rollback of staging: REFUSED: the API was already on "
+        "experimentation-backend-staging:42 with nothing in flight, so this run "
+        "stopped nothing and created no deployment; dashboard NOT rolled back "
+        "(not reached)"
+    ), headline
 
 
 # --- (b) the stop step's auto-rollback already put the target back -------------------
@@ -660,7 +667,8 @@ def test_a_group_still_busy_at_the_cap_creates_nothing_and_says_so(runner):
     ops = _ops(runner)
     assert "deploy create-deployment" not in ops, ops
     assert ops.count("deploy stop-deployment") == 1, ops
-    assert ops.count("deploy list-deployments") == 1 + 60, ops
+    # The pre-stop read, the 60 of the wait, and the summary's one (#759).
+    assert ops.count("deploy list-deployments") == 1 + 60 + 1, ops
     (line,) = [
         x
         for x in log.splitlines()
@@ -688,7 +696,12 @@ def test_a_group_still_busy_at_the_cap_creates_nothing_and_says_so(runner):
     }, outputs["stop"]
     assert outputs["codedeploy"]["__outcome__"] == "skipped"
     headline = _headline(summary)
-    expected = f"{SERVING_ON_TARGET} (its verify step: skipped); {DIFFERENT_RELEASES}"
+    # The read says the target is serving, which wins over the wait (#759):
+    # CodeDeploy's revert, still listed, gets the per-id sentence.
+    expected = (
+        f"{SERVING_ON_TARGET} (its verify step: skipped); {DIFFERENT_RELEASES}. "
+        f"{_t32(CD_REVERT_ID)}"
+    )
     assert headline == f"## Rollback of {expected}", headline
     assert "| CodeDeploy deployment | `not created` |" in summary
     assert not re.search(r"\d{12}", log + summary)
@@ -915,10 +928,11 @@ def test_the_refused_run_says_so_in_the_summary_and_slack(runner):
     outputs, results, summary = _run_from_stop(runner, rules)
     assert outputs["codedeploy"]["__outcome__"] == "skipped"
     headline = _headline(summary)
-    assert (
-        f"API NOT rolled back: CodeDeploy's own rollback {CD_ROLLBACK_ID} is still "
-        "active, so this run stopped nothing (the API is on "
-        "experimentation-backend-staging:43)" in headline
+    assert headline == (
+        f"## Rollback of staging: REFUSED: CodeDeploy's own rollback "
+        f"{CD_ROLLBACK_ID} is still active, so this run stopped nothing and "
+        "created no deployment (the API is on experimentation-backend-staging:43); "
+        "dashboard left as it is"
     ), headline
     notify = _step(ROLLBACK, "Notify rollback result")
     assert notify["if"] == "always() && env.SLACK_ON == 'true'"
@@ -962,11 +976,15 @@ def test_a_refused_run_with_a_dashboard_target_says_nothing_was_stopped(runner):
         assert outputs[key]["__outcome__"] == "skipped", key
     assert "Refuse a rollback to the revision already serving" not in results
     code, out = results["Run summary"]
-    assert code == 0, out
+    # Every verdict but ROLLED BACK fails the summary (#759).
+    assert code == 1, out
     assert "the API half refused, and nothing was stopped" in summary, summary
     assert "If the stop step already reverted the API" not in summary
-    assert outputs["summary"]["slack"].endswith(
-        "dashboard NOT rolled back (not reached)"
+    assert outputs["summary"]["slack"] == (
+        f"staging: REFUSED: CodeDeploy's own rollback {CD_ROLLBACK_ID} is still "
+        "active, so this run stopped nothing and created no deployment (the API "
+        "is on experimentation-backend-staging:43); dashboard NOT rolled back "
+        "(not reached)"
     )
 
 
@@ -982,18 +1000,27 @@ def test_a_refused_run_with_a_dashboard_target_says_nothing_was_stopped(runner):
 
 DASHBOARD = "experimentation-dashboard-staging:6"
 SERVING_ON_TARGET = (
-    "staging: API is serving experimentation-backend-staging:42, read at the end "
-    "of the run, but this run did not finish its own steps"
+    "staging: API BACK, DASHBOARD NOT: API is serving "
+    "experimentation-backend-staging:42, read at the end of the run, but this "
+    "run did not finish its own steps"
 )
 DIFFERENT_RELEASES = (
     "dashboard NOT rolled back (not reached), so the API and dashboard are on "
     "different releases: put the dashboard back with "
     "docs/deployment/rollback-runbook.md Method 2, the dashboard block"
 )
-NOT_CONFIRMED = (
-    "staging: API not confirmed on experimentation-backend-staging:42 at the end "
-    "of the run (scripts/api_serving.py exit "
-)
+
+
+def _t32(deployment: str) -> str:
+    """The per-id sentence (#759, T32), whole, as the headline ends with it."""
+    return (
+        f"Do not dispatch Rollback again while deployment {deployment} is active: "
+        "a new Rollback stops any deployment that is not CodeDeploy's own "
+        "rollback, with auto-rollback, which reverts what it shifted, and it "
+        "refuses while CodeDeploy's own rollback is active."
+    )
+
+
 ACCESS_DENIED = {
     "error": "An error occurred (AccessDeniedException) when calling the "
     "CreateDeployment operation: User is not authorized to perform: "
@@ -1065,14 +1092,15 @@ def test_a_stop_that_put_the_target_back_is_reported_when_the_rollback_then_fail
     assert outputs["api-verify"]["__outcome__"] == "skipped"
     assert outputs["dashboard-rollback"]["__outcome__"] == "skipped"
     headline = _headline(summary)
-    expected = f"{SERVING_ON_TARGET} (its verify step: skipped); {DIFFERENT_RELEASES}"
+    expected = f"{SERVING_ON_TARGET} (its verify step: skipped); {DIFFERENT_RELEASES}."
     assert headline == f"## Rollback of {expected}", headline
     assert outputs["summary"]["slack"] == expected
     assert _read_exit(summary) == "0"
     # Stopped at the first 0.
     assert len(_serving_reads(runner)) == 1, runner.calls()
-    # The pre-stop read, then the wait (#783): busy, empty, empty.
-    assert _ops(runner).count("deploy list-deployments") == 4, runner.calls()
+    # The pre-stop read, then the wait (#783): busy, empty, empty; then the
+    # summary's list of what is active (#759), which reads nothing.
+    assert _ops(runner).count("deploy list-deployments") == 5, runner.calls()
     assert "Job status: failure." in summary
     assert "| CodeDeploy deployment | `not created` |" in summary
     assert "123456789012" not in summary
@@ -1088,7 +1116,9 @@ def test_a_stop_that_put_the_target_back_is_reported_when_the_rollback_then_fail
         (
             BEFORE,
             _split(50, 50),
-            "NOT YET: the PRIMARY task set runs experimentation-backend-staging:42; ",
+            "NOT YET: the PRIMARY task set runs experimentation-backend-staging:42; "
+            "the /api/* rule forwards to 2 target groups with weight: a CodeDeploy "
+            "traffic shift is in progress. Wait for it to finish.",
         ),
         # The bad release is still PRIMARY.
         (
@@ -1103,27 +1133,33 @@ def test_a_stop_that_put_the_target_back_is_reported_when_the_rollback_then_fail
 def test_a_read_answering_1_is_never_reported_as_not_rolled_back(
     runner, services, rules_answer, sentence
 ):
-    """EM C5(b): exit 1 is also a listener mid-reroute, so the headline says
-    "not confirmed" and quotes api_serving.py, never "NOT rolled back".
-    Polled to the limit on 1, decided on the last answer. Planted defect: map
-    a non-zero read to the retired string."""
+    """EM C5(b): exit 1 is also a listener mid-reroute, so with CodeDeploy's
+    revert still active the verdict is STILL MOVING, quoting api_serving.py,
+    never "NOT rolled back" (#759 C5). Polled to the limit on 1, decided on
+    the last answer. Planted defect: map a non-zero read to the retired
+    string."""
     outputs = {
         "target": {"arn": TARGET},
-        "stop": {"__outcome__": "success"},
+        "stop": {"stopped": BAD_ID, "stop_wait": "ok", "__outcome__": "success"},
         "codedeploy": {"__outcome__": "failure"},
         "api-verify": {"__outcome__": "skipped"},
     }
+    rules = [
+        *api_rules(services, rules_answer),
+        rule("deploy list-deployments", answers=[CD_REVERT_ID]),
+    ]
     code, out, written, summary = _run_summary(
-        runner, api_rules(services, rules_answer), outputs, SUMMARY_SERVING_POLLS="4"
+        runner, rules, outputs, SUMMARY_SERVING_POLLS="4"
     )
-    assert code == 0, out
+    assert code == 1, out
     assert _read_exit(summary) == "1"
     assert len(_serving_reads(runner)) == 4, runner.calls()
     slack = written["slack"]
-    assert slack.startswith(f"{NOT_CONFIRMED}1: {sentence}"), slack
-    assert slack.endswith(
-        "; this run did not finish its own steps (its verify step: skipped); "
-        "dashboard left as it is"
+    assert slack == (
+        "staging: STILL MOVING: the API is not yet on "
+        f"experimentation-backend-staging:42 (scripts/api_serving.py exit 1: "
+        f"{sentence}) while deployment {CD_REVERT_ID} is active; dashboard left "
+        f"as it is. {_t32(CD_REVERT_ID)}"
     ), slack
     assert "NOT rolled back" not in slack, slack
     assert _headline(summary) == f"## Rollback of {slack}"
@@ -1159,10 +1195,10 @@ def test_a_decided_run_reads_nothing_from_the_summary(runner, stop):
     code, out, written, summary = _run_summary(
         runner, api_rules(BEFORE, RULES_BLUE), outputs
     )
-    assert code == 0, out
+    assert code == 1, out
     assert runner.calls() == [], runner.calls()
     assert "| API at the end of the run |" not in summary
-    assert written["slack"].startswith("staging: API NOT rolled back: "), written
+    assert written["slack"].startswith("staging: REFUSED: "), written
 
 
 @pytest.mark.regression
@@ -1186,6 +1222,7 @@ def test_a_read_that_cannot_tell_still_writes_the_result(runner, error):
     drop the `|| rc=$?` capture."""
     outputs = {
         "target": {"arn": TARGET},
+        "stop": {"stopped": BAD_ID, "stop_wait": "ok"},
         "codedeploy": {"__outcome__": "failure"},
         "api-verify": {"__outcome__": "skipped"},
     }
@@ -1196,15 +1233,21 @@ def test_a_read_that_cannot_tell_still_writes_the_result(runner, error):
             answers=[{"error": error}],
         ),
         *api_rules(BEFORE, RULES_BLUE),
+        # The list of what is active fails the same way (#759).
+        rule("deploy list-deployments", answers=[{"error": error}]),
     ]
     code, out, written, summary = _run_summary(
         runner, rules, outputs, SUMMARY_SERVING_POLLS="2"
     )
-    assert code == 0, out
+    assert code == 1, out
     assert _read_exit(summary) == "2"
     assert len(_serving_reads(runner)) == 2, runner.calls()
     assert written["slack"].startswith(
-        f"{NOT_CONFIRMED}2: UNKNOWN: could not tell: "
+        "staging: OUTCOME UNKNOWN: this run could not tell what the API is "
+        "serving (scripts/api_serving.py exit 2: UNKNOWN: could not tell: "
+    ), written
+    assert written["slack"].endswith(
+        "); its verify step: skipped; dashboard left as it is."
     ), written
     assert "NOT rolled back" not in written["slack"]
     # The summary and the log are public: no account, even from AWS's text.
@@ -1227,22 +1270,24 @@ def test_a_target_serving_with_the_dashboard_not_reached_names_the_split(runner)
         "dashboard-target": {"arn": DASHBOARD},
         "dashboard-rollback": {"__outcome__": "skipped"},
     }
-    rules = [*dashboard_rules([]), *api_rules(BEFORE, RULES_BLUE)]
+    rules = [
+        *dashboard_rules([]),
+        *api_rules(BEFORE, RULES_BLUE),
+        rule("deploy list-deployments", answers=[ROLLBACK_ID]),
+    ]
     code, out, written, summary = _run_summary(
         runner, rules, outputs, dashboard=DASHBOARD
     )
-    assert code == 0, out
+    assert code == 1, out
     assert _read_exit(summary) == "0"
+    # The warning against a second dispatch is the headline's own (#759).
     assert written["slack"] == (
-        f"{SERVING_ON_TARGET} (its verify step: skipped); {DIFFERENT_RELEASES}"
+        f"{SERVING_ON_TARGET} (its verify step: skipped); {DIFFERENT_RELEASES}. "
+        f"{_t32(ROLLBACK_ID)}"
     )
     assert (
         "the API and dashboard are on different releases, the newer-dashboard"
         in summary
-    )
-    assert (
-        f"Do not dispatch Rollback again while CodeDeploy deployment {ROLLBACK_ID} "
-        "is active" in summary
     )
 
 
@@ -1252,25 +1297,30 @@ def test_an_unresolved_target_keeps_todays_copy_and_reads_nothing(runner):
     code, out, written, summary = _run_summary(
         runner, api_rules(BEFORE, RULES_BLUE), outputs
     )
-    assert code == 0, out
+    assert code == 1, out
     assert runner.calls() == []
     assert written["slack"] == (
-        "staging: API NOT rolled back (its verify step: skipped); dashboard left as it is"
+        "staging: NOTHING CHANGED: the target revision was not resolved, so this "
+        "run stopped nothing and created no deployment; dashboard left as it is"
     )
 
 
 def test_the_poll_starts_no_read_after_its_deadline(runner):
     """EM C7: the wall-clock bound. With the deadline already passed, one
     read is made and decided on, whatever the poll count."""
-    outputs = {"target": {"arn": TARGET}, "api-verify": {"__outcome__": "failure"}}
+    outputs = {
+        "target": {"arn": TARGET},
+        "codedeploy": {"deployment-id": ROLLBACK_ID},
+        "api-verify": {"__outcome__": "failure"},
+    }
     code, out, written, summary = _run_summary(
         runner,
-        api_rules(AFTER, RULES_GREEN),
+        [*api_rules(AFTER, RULES_GREEN), rule("deploy list-deployments", answers=[""])],
         outputs,
         SUMMARY_SERVING_POLLS="12",
         SUMMARY_SERVING_DEADLINE_SECONDS="0",
     )
-    assert code == 0, out
+    assert code == 1, out
     assert _read_exit(summary) == "1"
     assert len(_serving_reads(runner)) == 1, runner.calls()
 
@@ -1746,9 +1796,10 @@ def test_a_rollback_after_a_shift_rolls_the_dashboard_back_too(runner, step):
         assert outputs["api-verify"]["__outcome__"] == "success", results[VERIFY_STEP]
         assert outputs["dashboard-rollback"]["__outcome__"] == "success"
         assert headline == (
-            "## Rollback of staging: API rolled back to "
-            "experimentation-backend-staging:42; dashboard rolled back to "
-            "experimentation-dashboard-staging:6"
+            "## Rollback of staging: ROLLED BACK: API rolled back to "
+            f"experimentation-backend-staging:42 (CodeDeploy deployment {ROLLBACK_ID}, "
+            "verified); dashboard rolled back to experimentation-dashboard-staging:6. "
+            f"{_t32(ROLLBACK_ID)}"
         ), headline
     else:
         assert outputs["api-verify"]["__outcome__"] == "failure"
@@ -1756,7 +1807,7 @@ def test_a_rollback_after_a_shift_rolls_the_dashboard_back_too(runner, step):
         assert outputs["dashboard-rollback"]["__outcome__"] == "skipped"
         assert headline == (
             f"## Rollback of {SERVING_ON_TARGET} (its verify step: failure); "
-            f"{DIFFERENT_RELEASES}"
+            f"{DIFFERENT_RELEASES}."
         ), headline
 
 

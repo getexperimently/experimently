@@ -137,9 +137,9 @@ an approval from the console also counts, as long as the run saw the
 deployment waiting for approval first. A deployment the run never saw waiting
 for approval is not counted, and the run then fails and says so.
 
-**If the API went back and the dashboard did not**, the run says so (its Slack
-line reads "API rolled back to …; dashboard NOT rolled back (…)"), and the
-system is in the newer-dashboard, older-API state. Put the dashboard back with
+**If the API went back and the dashboard did not**, the run says so (its
+verdict is `API BACK, DASHBOARD NOT`), and the system is in the
+newer-dashboard, older-API state. Put the dashboard back with
 Method 2's dashboard block. Do not dispatch Rollback again while the rollback's
 own CodeDeploy deployment is active (about an hour after its shift): its stop
 step would stop that deployment with auto-rollback and put the API back on the
@@ -147,19 +147,35 @@ release you rolled back from.
 
 ### Reading the result
 
-The run's headline, which is also the first line of its Slack message, starts
-with the API's half. When the run's own steps did not finish (its verify step
-did not succeed), the summary reads what the API is serving at the end of the
+The run ends with one verdict. It starts the run's headline, which is also the
+first line of its Slack message: `<environment>: <VERDICT>: <what happened>`.
+`scripts/rollback_verdict.py` chooses it from a fixed order of rules, the first
+that matches winning, and the run succeeds only when the verdict is
+`ROLLED BACK`. When the run's own steps did not finish (its verify step did not
+succeed), the summary first reads what the API is serving at the end of the
 run, with `scripts/api_serving.py` (read-only, the same check the stop step
-uses), and the API's half says what that read found. The run fails either way.
+uses), and lists the deployment group's active deployments once; the headline
+quotes what the read said. The summary's table also says what the stop step
+stopped and how its wait ended.
 
-| The API's half starts with | What it means | What to do |
+A headline that names a deployment that may still be active ends with
+"Do not dispatch Rollback again while deployment `<id>` is active": a new
+Rollback stops any deployment that is not CodeDeploy's own rollback, with
+auto-rollback, which reverts what it shifted, and it refuses while CodeDeploy's
+own rollback is active. Check one with
+`aws deploy get-deployment --deployment-id <id> --query deploymentInfo.status`.
+
+| Verdict | What it means | What to do |
 |---|---|---|
-| `API rolled back to <target>` | This run's deployment was approved and verified. | Nothing for the API. Read the dashboard's half. |
-| `API is serving <target>, read at the end of the run, but this run did not finish its own steps` | The API is on the target, most often because stopping the bad deployment with auto-rollback put it back, and a later step then failed (the step's error says which; `Deployment group still busy` means CodeDeploy's own revert of the stopped deployment was still active after the wait). | Nothing more for the API. Fix what the failed step names before the next deploy or rollback. If the dashboard's half adds "so the API and dashboard are on different releases", put the dashboard back with Method 2's dashboard block. Do not dispatch Rollback again while a CodeDeploy deployment the summary names is active. |
-| `API not confirmed on <target> at the end of the run` | The read did not find the target serving. It quotes `api_serving.py`: `NOT YET` (another revision is PRIMARY, or traffic is still split between blue and green), `WRONG` (the target is PRIMARY but the `/api/*` rule forwards elsewhere) or `UNKNOWN` (the read failed). | Check what is serving and whether a deployment is active before acting: run `python3 scripts/api_serving.py experimentation-$ENV experimentation-backend-$ENV <target>` (exit 0 means on the target) and list the deployment group's active deployments. |
-| `API NOT rolled back: ...` | The run refused, and says why (already on the target, CodeDeploy's own rollback active, or a deployment it could not classify). | Follow the reason in the line. |
-| `API NOT rolled back (its verify step: ...)` | The target revision was never resolved, so nothing was read. | Fix what the target check's error names. |
+| `ROLLED BACK` | This run's deployment was approved and verified, and the dashboard was rolled back or not asked for. | Nothing more. The deployment the headline names stays active for about an hour while CodeDeploy keeps the replaced task set. |
+| `API BACK, DASHBOARD NOT` | The API is on the target (verified, or read at the end of the run), and the dashboard was asked for and was not rolled back, so the API and dashboard are on different releases. | Put the dashboard back with Method 2's dashboard block. Fix what the failed step names before the next deploy or rollback. |
+| `API BACK, RUN FAILED` | The API is on the target, read at the end of the run, most often because stopping the bad deployment with auto-rollback put it back, and a later step then failed (the step's error says which). | Nothing more for the API. Fix what the failed step names before the next deploy or rollback. |
+| `NOT FINISHED` | This run stopped a deployment, and its wait for the deployment group to have no active deployment timed out (about 5 minutes) or could not read the group, so it created no rollback deployment. The headline quotes what the API was serving at the end. | Wait until the deployments it names have finished, then read what is serving: `python3 scripts/api_serving.py experimentation-$ENV experimentation-backend-$ENV <target>` (exit 0 means on the target). |
+| `STILL MOVING` | The API is not yet on the target, and a deployment is active or the `/api/*` rule still splits traffic between blue and green. | Wait, then read it again with the command above. If the rule still splits traffic and no deployment is active, the listener is stuck and needs a person: call the next person in the table at the end of this page, and do not dispatch anything until they have looked. |
+| `NOT ROLLED BACK` | The API is not on the target, and no deployment is active. The quoted read says why: `NOT YET` (another revision is PRIMARY) or `WRONG` (the target is PRIMARY but the `/api/*` rule forwards elsewhere). | Act on the quoted read. Nothing is active, so a new Rollback is not stopping anything in flight. |
+| `OUTCOME UNKNOWN` | This run could not tell: the read failed (`UNKNOWN`, exit 2), the active deployments could not be listed, the summary got a value it does not recognise, or the verdict script did not run. | Before acting, read what is serving with the command above, and list the deployment group's active deployments: `aws deploy list-deployments --application-name experimentation-platform-$ENV --deployment-group-name experimentation-$ENV --include-only-statuses Created Queued InProgress Baking Ready --query deployments --output text`. |
+| `REFUSED` | The run refused, and says why: the API was already on the target, CodeDeploy's own rollback is active, or an in-flight deployment could not be classified. | Follow the reason in the line. |
+| `NOTHING CHANGED` | The run stopped nothing and created no deployment: the target revision was not resolved, or a step failed before anything changed. The API is as it was. | Fix what the failed step names. |
 
 ### The rolled-back API runs against the current schema
 

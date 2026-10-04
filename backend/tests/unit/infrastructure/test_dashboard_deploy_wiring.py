@@ -1135,6 +1135,9 @@ ROLLBACK_READ_ALLOWANCE_SECONDS = 2
 #: Checkout, OIDC, the target checks, the stop step's first reads, the
 #: create and the summary's own calls.
 ROLLBACK_STEPS_ALLOWANCE_SECONDS = 5 * 60
+#: The summary's list of the deployment group's active deployments, once,
+#: after its last read of what is serving (#759).
+ROLLBACK_SUMMARY_LIST_READS = 1
 
 
 def _stop_step_value(name: str) -> int:
@@ -1174,6 +1177,8 @@ def _rollback_budget(env: dict[str, str]) -> int:
         # the summary's read of what is serving, and one read past it
         + int(summary_deadline)
         + 4 * read
+        # ... and its list of what is active
+        + ROLLBACK_SUMMARY_LIST_READS * read
         + ROLLBACK_STEPS_ALLOWANCE_SECONDS
         + MARGIN_SECONDS
     )
@@ -1198,6 +1203,8 @@ def test_the_rollback_job_timeout_covers_every_named_wait():
     assert 'for _ in $(seq 1 "$STOP_WAIT_POLLS"); do' in code
     assert 'for n in $(seq 1 "$GROUP_IDLE_POLLS"); do' in code
     assert 'sleep "$GROUP_IDLE_POLL_SECONDS"' in code
+    summary = _code(_step(ROLLBACK, "Run summary")["run"])
+    assert summary.count("aws deploy list-deployments") == ROLLBACK_SUMMARY_LIST_READS
 
 
 def test_the_rollback_budget_is_not_vacuous():
@@ -1752,16 +1759,19 @@ def test_the_rollback_summary_says_what_happened_to_the_dashboard(runner, given)
     """UX-10 / QA 4b: "Only the API was rolled back." is not unconditional,
     and an API-only rollback says what the dashboard is serving (PE 9)."""
     runner.scenario([])
+    # A verified rollback (#759: ROLLED BACK is the only verdict that exits 0).
     outputs = {
         "target": {"arn": API_FAMILY_REVISION},
         "codedeploy": {"deployment-id": "d-ROLLBACK1"},
+        "api-verify": {"__outcome__": "success"},
         "dashboard-target": (
             {"serving_arn": DASH_NEW, "serving_image": WEB_IMAGE}
             if not given
             else {"arn": DASH_OLD, "expect": DASH_NEW}
         ),
         "dashboard-rollback": {
-            "result": "rolled back to experimentation-dashboard-staging:6"
+            "result": "rolled back to experimentation-dashboard-staging:6",
+            "__outcome__": "success" if given else "skipped",
         },
     }
     code, out, _, summary = runner.run(
@@ -1941,6 +1951,14 @@ def _summary(
     )
 
 
+#: The per-id sentence (#759, T32) for this run's deployment.
+T32_ROLLBACK1 = (
+    "Do not dispatch Rollback again while deployment d-ROLLBACK1 is active: a "
+    "new Rollback stops any deployment that is not CodeDeploy's own rollback, "
+    "with auto-rollback, which reverts what it shifted, and it refuses while "
+    "CodeDeploy's own rollback is active."
+)
+
 #: scripts/api_serving.py's answer when the bad release is still PRIMARY.
 NOT_YET_43 = (
     "NOT YET: the PRIMARY task set runs experimentation-backend-staging:43, "
@@ -1957,34 +1975,44 @@ NOT_YET_43 = (
             "",
             "",
             "",
-            "staging: API rolled back to experimentation-backend-staging:42; dashboard left as it is",
+            "staging: ROLLED BACK: API rolled back to experimentation-backend-staging:42 "
+            "(CodeDeploy deployment d-ROLLBACK1, verified); dashboard left as it is. "
+            f"{T32_ROLLBACK1}",
         ),
         (
             "success",
             "success",
             "experimentation-dashboard-staging:6",
             "rolled back to experimentation-dashboard-staging:6",
-            "staging: API rolled back to experimentation-backend-staging:42; dashboard rolled back to experimentation-dashboard-staging:6",
+            "staging: ROLLED BACK: API rolled back to experimentation-backend-staging:42 "
+            "(CodeDeploy deployment d-ROLLBACK1, verified); dashboard rolled back to "
+            f"experimentation-dashboard-staging:6. {T32_ROLLBACK1}",
         ),
         (
             "success",
             "failure",
             "experimentation-dashboard-staging:6",
             "rejected by ECS's circuit breaker; serving experimentation-dashboard-staging:7",
-            "staging: API rolled back to experimentation-backend-staging:42; dashboard NOT rolled back (rejected by ECS's circuit breaker; serving experimentation-dashboard-staging:7)",
+            "staging: API BACK, DASHBOARD NOT: API rolled back to "
+            "experimentation-backend-staging:42 (CodeDeploy deployment d-ROLLBACK1, "
+            "verified); dashboard NOT rolled back (rejected by ECS's circuit breaker; "
+            "serving experimentation-dashboard-staging:7), so the API and dashboard "
+            "are on different releases: put the dashboard back with docs/deployment/"
+            "rollback-runbook.md Method 2, the dashboard block. "
+            f"{T32_ROLLBACK1}",
         ),
         (
             "failure",
             "",
             "",
             "",
-            # Verify failed and the read says the bad release is PRIMARY:
-            # not confirmed, quoting the read, never the absolute "API NOT
-            # rolled back" (#755).
-            "staging: API not confirmed on experimentation-backend-staging:42 at "
-            f"the end of the run (scripts/api_serving.py exit 1: {NOT_YET_43}); "
-            "this run did not finish its own steps (its verify step: failure); "
-            "dashboard left as it is",
+            # Verify failed, the read says the bad release is PRIMARY, and this
+            # run's deployment is still active: STILL MOVING, quoting the
+            # read, never the absolute "NOT rolled back" (#755, #759).
+            "staging: STILL MOVING: the API is not yet on "
+            "experimentation-backend-staging:42 (scripts/api_serving.py exit 1: "
+            f"{NOT_YET_43}) while deployment d-ROLLBACK1 is active; dashboard left "
+            f"as it is. {T32_ROLLBACK1}",
         ),
     ],
     ids=["api-only-ok", "both-ok", "api-ok-dashboard-failed", "api-failed"],
@@ -1995,7 +2023,12 @@ def test_the_result_line_keys_on_the_api_verify_step(
     """EM ruling C2 (the code review's CRITICAL): never "NOT rolled back" for
     an API that was rolled back and verified. Every row supplies the reads
     of what is serving; only the row whose verify step failed makes them."""
-    runner.scenario(api_rules(API_AFTER, RULES_GREEN))
+    runner.scenario(
+        [
+            *api_rules(API_AFTER, RULES_GREEN),
+            rule("deploy list-deployments", answers=["d-ROLLBACK1"]),
+        ]
+    )
     code, out, written, summary = _summary(
         runner,
         api_verify,
@@ -2004,7 +2037,8 @@ def test_the_result_line_keys_on_the_api_verify_step(
         result,
         SUMMARY_SERVING_POLLS="3",
     )
-    assert code == 0, out
+    # Exit 0 only for ROLLED BACK (#759).
+    assert code == (0 if slack.startswith("staging: ROLLED BACK: ") else 1), out
     assert written["slack"] == slack
     assert summary.startswith(f"## Rollback of {slack}\n")
     reads = [c for c in runner.calls() if c[:2] == ["ecs", "describe-services"]]
@@ -2045,6 +2079,7 @@ def test_a_dashboard_half_never_reached_is_read_and_named(runner):
                 answers=[_task_definition(DASH_NEW, WEB_IMAGE)],
             ),
             *api_rules(API_AFTER, RULES_GREEN),
+            rule("deploy list-deployments", answers=["d-ROLLBACK1"]),
         ]
     )
     code, out, written, summary = _summary(
@@ -2054,12 +2089,12 @@ def test_a_dashboard_half_never_reached_is_read_and_named(runner):
         "experimentation-dashboard-staging:6",
         SUMMARY_SERVING_POLLS="1",
     )
-    assert code == 0, out
+    assert code == 1, out
     assert written["slack"] == (
-        "staging: API not confirmed on experimentation-backend-staging:42 at the "
-        f"end of the run (scripts/api_serving.py exit 1: {NOT_YET_43}); this run "
-        "did not finish its own steps (its verify step: failure); dashboard NOT "
-        "rolled back (not reached)"
+        "staging: STILL MOVING: the API is not yet on "
+        "experimentation-backend-staging:42 (scripts/api_serving.py exit 1: "
+        f"{NOT_YET_43}) while deployment d-ROLLBACK1 is active; dashboard NOT "
+        f"rolled back (not reached). {T32_ROLLBACK1}"
     )
     assert "(scripts/api_serving.py exit 1) |" in summary
     assert (
@@ -2070,6 +2105,7 @@ def test_a_dashboard_half_never_reached_is_read_and_named(runner):
     assert {tuple(c[:2]) for c in runner.calls()} == {
         ("ecs", "describe-services"),
         ("ecs", "describe-task-definition"),
+        ("deploy", "list-deployments"),
     }
 
 

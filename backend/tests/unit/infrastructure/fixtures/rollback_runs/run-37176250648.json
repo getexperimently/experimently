@@ -73,5 +73,66 @@
     "stopped": "d-1J9383JAL",
     "stop_wait": "ok"
   },
-  "outputs_source": "expected, not captured: the run predates these outputs (#759); they are what the step writes for the printed lines above"
+  "outputs_source": "expected, not captured: the run predates these outputs (#759); they are what the step writes for the printed lines above",
+  "summary": {
+    "about": "The Run summary step's inputs in the same run, from its env header, and the one read it made. The verify step is the one from before #816 (T120), which failed this run on the service's counts. The deployment group's active list was not read then; its answer here is inferred.",
+    "env": {
+      "TARGET_ARN": {
+        "value": "arn:aws:ecs:us-west-2:123456789012:task-definition/experimentation-backend-staging:2",
+        "source": "verbatim from the Run summary step's env header, the masked account replaced inside the ARN's account field"
+      },
+      "DEPLOYMENT_ID": {
+        "value": "d-JQJ7FPJAL",
+        "source": "verbatim from the Run summary step's env header"
+      },
+      "DASHBOARD_INPUT": {
+        "value": "experimentation-dashboard-staging:6",
+        "source": "verbatim from the Run summary step's env header"
+      },
+      "DASHBOARD_TARGET_ARN": {
+        "value": "arn:aws:ecs:us-west-2:123456789012:task-definition/experimentation-dashboard-staging:6",
+        "source": "verbatim from the Run summary step's env header, the masked account replaced inside the ARN's account field"
+      },
+      "DASHBOARD_RESULT": {
+        "value": "",
+        "source": "verbatim from the Run summary step's env header"
+      },
+      "DASHBOARD_OUTCOME": {
+        "value": "skipped",
+        "source": "verbatim from the Run summary step's env header"
+      },
+      "API_VERIFY": {
+        "value": "failure",
+        "source": "verbatim from the Run summary step's env header"
+      },
+      "ALREADY_SERVING": {
+        "value": "",
+        "source": "verbatim from the Run summary step's env header"
+      },
+      "REFUSED": {
+        "value": "",
+        "source": "verbatim from the Run summary step's env header"
+      },
+      "REFUSED_ID": {
+        "value": "",
+        "source": "verbatim from the Run summary step's env header"
+      },
+      "REFUSED_PRIMARY": {
+        "value": "",
+        "source": "verbatim from the Run summary step's env header"
+      },
+      "JOB_STATUS": {
+        "value": "failure",
+        "source": "verbatim from the Run summary step's env header"
+      }
+    },
+    "read": {
+      "line": "what the API is serving, read 1 of 12: exit 0: serving: experimentation-backend-staging:2 is the PRIMARY task set and the /api/* rule forwards to blue alone",
+      "source": "verbatim, with the runner's timestamp stripped"
+    },
+    "active": {
+      "answer": "d-JQJ7FPJAL",
+      "source": "reconstructed: that run's tooling did not list the active deployments; its own deployment is taken as still active, in the hour CodeDeploy keeps the replaced task set"
+    }
+  }
 }
