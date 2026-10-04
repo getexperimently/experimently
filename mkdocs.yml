@@ -16,7 +16,13 @@ site_url: https://getexperimently.github.io/experimently/
 repo_url: https://github.com/getexperimently/experimently
 repo_name: getexperimently/experimently
 edit_uri: edit/main/docs/
-copyright: Copyright &copy; 2024-2026 Experimently. Apache-2.0.
+copyright: 'Copyright &copy; 2024-2026 Experimently. Apache-2.0. Built by <a href="https://www.linkedin.com/in/ashish-markanday/"
+  target="_blank" rel="noopener noreferrer">Ashish Markanday</a>.'
+extra:
+  social:
+  - icon: fontawesome/brands/github
+    link: https://github.com/getexperimently/experimently
+    name: Experimently on GitHub
 docs_dir: docs
 site_dir: site
 exclude_docs: 'planning/
