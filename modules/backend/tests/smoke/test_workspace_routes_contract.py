@@ -1,30 +1,20 @@
-"""Workspaces serve no API-key routes and describe no plan or limits (#263, #264).
+"""Workspaces serve no API-key routes and publish no plan or limits (#263, #264).
 
-The four workspace API-key operations were removed. This checks both places
-that could still carry them:
+The four workspace API-key operations were removed. This checks the live
+application's OpenAPI document (``app.openapi()``), which is what the router
+actually mounts. The same absence in the committed full snapshot is checked by
+the core docs test ``backend/tests/unit/docs/test_workspaces_docs.py``, which
+reads the JSON alone and so runs in a core tree too.
 
-* the live application's OpenAPI document (``app.openapi()``), which is what
-  the router actually mounts;
-* the committed full snapshot (``docs/api/openapi-v1.full.json``), which is
-  what the docs and the dashboard's URL fixture are generated from. After
-  ``make openapi`` the snapshot comparison is green whatever happened to the
-  routes, so the absence is asserted here explicitly.
-
-The positive control (the members route) must be present in both, so a
-registration that mounted nothing cannot pass the absence checks.
+The positive control (the members route) must be present, so a registration
+that mounted nothing cannot pass the absence checks.
 """
 
 from __future__ import annotations
 
-import json
-from pathlib import Path
-
 import pytest
 
 pytestmark = pytest.mark.smoke
-
-REPO_ROOT = Path(__file__).resolve().parents[4]
-FULL_SNAPSHOT = REPO_ROOT / "docs" / "api" / "openapi-v1.full.json"
 
 WORKSPACES = "/api/v1/workspaces"
 POSITIVE_CONTROL = "/api/v1/workspaces/{workspace_id}/members"
@@ -70,31 +60,21 @@ def live() -> dict:
     return app.openapi()
 
 
-@pytest.fixture(scope="module")
-def snapshot() -> dict:
-    return json.loads(FULL_SNAPSHOT.read_text(encoding="utf-8"))
-
-
-@pytest.fixture(params=["live", "snapshot"])
-def document(request, live, snapshot) -> dict:
-    return {"live": live, "snapshot": snapshot}[request.param]
-
-
-def test_the_positive_control_is_present(document):
-    assert POSITIVE_CONTROL in document["paths"], (
-        "the workspaces routes are not in this document; the absence checks "
-        "below prove nothing until they are"
+def test_the_positive_control_is_present(live):
+    assert POSITIVE_CONTROL in live["paths"], (
+        "the workspaces routes are not mounted; the absence checks below prove "
+        "nothing until they are"
     )
 
 
-def test_no_workspace_api_key_route(document):
-    assert POSITIVE_CONTROL in document["paths"], "positive control failed"
-    found = key_paths(document)
+def test_no_workspace_api_key_route(live):
+    assert POSITIVE_CONTROL in live["paths"], "positive control failed"
+    found = key_paths(live)
     assert not found, f"workspace API-key routes are still served: {found}"
 
 
-def test_no_key_schema_and_no_plan_field(document):
-    schemas = document.get("components", {}).get("schemas", {})
+def test_no_key_schema_and_no_plan_field(live):
+    schemas = live.get("components", {}).get("schemas", {})
     assert set(WORKSPACE_SCHEMAS) <= set(schemas), "workspace schemas are missing"
     still = [name for name in REMOVED_SCHEMAS if name in schemas]
     assert not still, f"removed schemas are still published: {still}"
@@ -107,8 +87,8 @@ def test_no_key_schema_and_no_plan_field(document):
     assert not fields, f"removed fields are still published: {fields}"
 
 
-def test_requests_refuse_unknown_fields(document):
-    schemas = document["components"]["schemas"]
+def test_requests_refuse_unknown_fields(live):
+    schemas = live["components"]["schemas"]
     for name in ("CreateWorkspaceRequest", "UpdateWorkspaceRequest"):
         assert schemas[name].get("additionalProperties") is False, name
 

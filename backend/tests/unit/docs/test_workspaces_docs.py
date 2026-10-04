@@ -214,6 +214,81 @@ def test_the_workspaces_tag_says_there_are_no_keys_or_plans() -> None:
     assert "issue no api keys" in flat, flat
 
 
+#: Paths, schemas and fields removed with workspace API keys and plans
+#: (#263, #264), which the committed full snapshot must not publish. The live
+#: application is checked the same way by the module smoke test
+#: ``test_workspace_routes_contract.py``; this half reads the JSON alone, so
+#: it also runs in a core tree, and catches a snapshot not regenerated.
+_WS_POSITIVE_CONTROL = "/api/v1/workspaces/{workspace_id}/members"
+_REMOVED_SCHEMAS = (
+    "CreateAPIKeyRequest",
+    "CreateAPIKeyResponse",
+    "WorkspaceAPIKeyResponse",
+)
+_REMOVED_FIELDS = (
+    "plan",
+    "max_experiments",
+    "max_feature_flags",
+    "max_members",
+    "max_api_keys",
+    "api_key_count",
+    "experiment_count",
+    "flag_count",
+)
+_WORKSPACE_SCHEMAS = (
+    "CreateWorkspaceRequest",
+    "UpdateWorkspaceRequest",
+    "WorkspaceResponse",
+    "WorkspaceWithStatsResponse",
+)
+
+
+def _workspace_key_paths(document: dict) -> List[str]:
+    """Every workspace path that names API keys, in any letter case."""
+    return sorted(
+        path
+        for path in document.get("paths", {})
+        if path.lower().startswith("/api/v1/workspaces") and "api-key" in path.lower()
+    )
+
+
+def test_the_full_snapshot_publishes_no_workspace_keys_or_plans() -> None:
+    import json
+
+    doc = json.loads(FULL_SNAPSHOT.read_text(encoding="utf-8"))
+    assert _WS_POSITIVE_CONTROL in doc["paths"], (
+        "the full snapshot has no workspaces routes; the absence checks prove nothing"
+    )
+    found = _workspace_key_paths(doc)
+    assert not found, f"workspace API-key routes are still published: {found}"
+    schemas = doc["components"]["schemas"]
+    assert set(_WORKSPACE_SCHEMAS) <= set(schemas), "workspace schemas are missing"
+    still = [name for name in _REMOVED_SCHEMAS if name in schemas]
+    assert not still, f"removed schemas are still published: {still}"
+    fields = [
+        f"{name}.{field}"
+        for name in _WORKSPACE_SCHEMAS
+        for field in _REMOVED_FIELDS
+        if field in schemas[name].get("properties", {})
+    ]
+    assert not fields, f"removed fields are still published: {fields}"
+    for name in ("CreateWorkspaceRequest", "UpdateWorkspaceRequest"):
+        assert schemas[name].get("additionalProperties") is False, name
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/api/v1/workspaces/{workspace_id}/api-keys",
+        "/api/v1/workspaces/{workspace_id}/api-keys/{key_id}/rotate",
+        "/api/v1/Workspaces/{workspace_id}/API-Keys",
+    ],
+)
+def test_the_snapshot_selector_catches_a_planted_route(path: str) -> None:
+    doc = {"paths": {_WS_POSITIVE_CONTROL: {}, path: {}}}
+    assert _workspace_key_paths(doc) == [path]
+
+
 def test_overview_says_there_are_no_plans_or_limits() -> None:
     body = _section(OVERVIEW, "Plans and Limits")
     assert "workspaces have no plan and no limits" in body, body
