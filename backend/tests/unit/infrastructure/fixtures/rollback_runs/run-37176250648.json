@@ -1,0 +1,77 @@
+{
+  "run": "https://github.com/getexperimently/experimently/actions/runs/37176250648",
+  "tooling_sha": "58199f964924e36b0b697eeab2ac38e72313854f",
+  "step": "Stop any deployment already in flight",
+  "about": "One staging rollback's stop step: its env, the AWS answers it was given, in call order, and every line it printed. Each value says whether it is verbatim from the run's log or reconstructed from the step's own messages. The log masks the account inside each ARN; the mask is replaced by 123456789012 inside the ARN's account field only. No other text is changed.",
+  "env": {
+    "TARGET_ARN": {
+      "value": "arn:aws:ecs:us-west-2:123456789012:task-definition/experimentation-backend-staging:2",
+      "source": "verbatim from the step's env header, the masked account replaced"
+    }
+  },
+  "answers": [
+    {
+      "match": [
+        "deploy list-deployments"
+      ],
+      "answers": [
+        "d-1J9383JAL",
+        "d-P46UMOJAL",
+        "",
+        ""
+      ],
+      "source": "reconstructed: the first listing from 'in-flight deployment d-1J9383JAL'; then the group-idle wait's reads from 'deployment group still busy: d-P46UMOJAL' and the two 'no active deployment' lines"
+    },
+    {
+      "match": [
+        "deploy get-deployment",
+        "d-1J9383JAL",
+        "creator"
+      ],
+      "answers": [
+        "user\tNone"
+      ],
+      "source": "reconstructed: 'was created by user'; the second field, the deployment a CodeDeploy rollback is rolling back, is inferred as None for a user deployment"
+    },
+    {
+      "match": [
+        "deploy stop-deployment",
+        "d-1J9383JAL"
+      ],
+      "answers": [
+        "{\n    \"status\": \"Succeeded\",\n    \"statusMessage\": \"No more commands will be scheduled for execution in the deployment instances\"\n}"
+      ],
+      "source": "verbatim: the call's own answer, as the step printed it"
+    },
+    {
+      "match": [
+        "deploy get-deployment",
+        "d-1J9383JAL",
+        "deploymentInfo.status"
+      ],
+      "answers": [
+        "Stopped"
+      ],
+      "source": "reconstructed: 'd-1J9383JAL is Stopped' on the first poll"
+    }
+  ],
+  "printed": [
+    "in-flight deployment d-1J9383JAL was created by user",
+    "stopping in-flight deployment d-1J9383JAL",
+    "{",
+    "    \"status\": \"Succeeded\",",
+    "    \"statusMessage\": \"No more commands will be scheduled for execution in the deployment instances\"",
+    "}",
+    "d-1J9383JAL is Stopped",
+    "waiting up to about 5 minutes for the deployment group to have no active deployment: stopping with auto-rollback makes CodeDeploy create its own revert of what was stopped, usually finished in a few seconds",
+    "deployment group still busy: d-P46UMOJAL; reading again in 5 s",
+    "no active deployment on the deployment group (read 2); reading again in 5 s to confirm",
+    "no active deployment on the deployment group in two reads in a row; creating the rollback deployment"
+  ],
+  "printed_source": "verbatim, with the runner's timestamps stripped",
+  "outputs": {
+    "stopped": "d-1J9383JAL",
+    "stop_wait": "ok"
+  },
+  "outputs_source": "expected, not captured: the run predates these outputs (#759); they are what the step writes for the printed lines above"
+}
