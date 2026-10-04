@@ -200,8 +200,8 @@ definitions are downloaded. Requires Python 3.9+ and `openfeature-sdk >= 0.9.0`.
 
 ### Installation
 
-**Not yet published.** Neither `experimently` nor `experimently-openfeature` is on PyPI yet, so
-this fails today:
+**Not yet published.** `experimently-openfeature` is not on PyPI yet, so this fails today
+(`experimently` and `openfeature-sdk` are on PyPI):
 
 ```bash
 pip install openfeature-sdk experimently experimently-openfeature

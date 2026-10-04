@@ -144,6 +144,51 @@ describe('AdminService', () => {
     });
   });
 
+  describe('exportAuditLogs (#221)', () => {
+    it('asks for the format and the filters with the token, and returns the text and headers', async () => {
+      localStorage.setItem(TOKEN_STORAGE_KEY, 'tok');
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        text: () => Promise.resolve('[]'),
+        headers: new Headers({ 'X-Total-Count': '0' }),
+      });
+      const result = await AdminService.exportAuditLogs('csv', {
+        action_type: 'safety_rollback',
+        from_date: '2024-01-01T00:00:00.000Z',
+      });
+      const [url, init] = mockFetch.mock.calls[0] as [string, RequestInit];
+      const parsed = new URL(url);
+      expect(parsed.pathname).toBe('/api/v1/audit-logs/export');
+      expect(parsed.searchParams.get('format')).toBe('csv');
+      expect(parsed.searchParams.get('action_type')).toBe('safety_rollback');
+      expect(parsed.searchParams.has('entity_type')).toBe(false);
+      expect((init.headers as Record<string, string>).Authorization).toBe('Bearer tok');
+      expect(result.text).toBe('[]');
+      expect(result.headers.get('x-total-count')).toBe('0');
+    });
+
+    it('throws an ApiError carrying the 422 detail', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: false,
+        status: 422,
+        text: () => Promise.resolve(JSON.stringify({ detail: '60001 entries match these filters' })),
+        headers: new Headers({ 'content-type': 'application/json' }),
+      });
+      const err = await AdminService.exportAuditLogs('json').catch((e) => e);
+      expect(err).toBeInstanceOf(ApiError);
+      expect(err.status).toBe(422);
+      expect(err.detail).toBe('60001 entries match these filters');
+    });
+
+    it('throws a status-0 ApiError when the API cannot be reached', async () => {
+      mockFetch.mockRejectedValueOnce(new TypeError('Failed to fetch'));
+      const err = await AdminService.exportAuditLogs('json').catch((e) => e);
+      expect(err).toBeInstanceOf(ApiError);
+      expect(err.status).toBe(0);
+    });
+  });
+
   // `/api/v1/rbac/*` moved to the rbac module; covered by modules/frontend/src/rbac.test.ts.
 
   describe('safety', () => {

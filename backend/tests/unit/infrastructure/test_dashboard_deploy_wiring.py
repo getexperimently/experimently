@@ -172,12 +172,20 @@ def _code(script: str) -> str:
 #: dict, an empty list, another --output -- exits 98: the CLI's text output
 #: for those was not measured (it reorders nested lists), so the fake refuses
 #: rather than guess.
+#:
+#: Each `deploy stop-deployment` call first copies the step's GITHUB_OUTPUT as
+#: it stands to `snap.<n>` in the state directory (`Runner.snapshots()`), so a
+#: test can tell an output written before the call from one written after it
+#: (#759 gate 2a): the final file cannot.
 FAKE_AWS = r"""#!{python}
-import json, os, sys
+import json, os, shutil, sys
 args = sys.argv[1:]
 state = os.environ["FAKE_AWS_STATE"]
 with open(os.path.join(state, "calls.log"), "a") as log:
     log.write(json.dumps(args) + "\n")
+if args[:2] == ["deploy", "stop-deployment"] and os.environ.get("GITHUB_OUTPUT"):
+    taken = len([f for f in os.listdir(state) if f.startswith("snap.")])
+    shutil.copyfile(os.environ["GITHUB_OUTPUT"], os.path.join(state, "snap.%d" % taken))
 
 REVERT = os.path.join(state, "revert.json")
 revert = json.load(open(REVERT)) if os.path.exists(REVERT) else None
@@ -424,9 +432,17 @@ _EXPR = re.compile(r"\$\{\{\s*([^}]*?)\s*\}\}")
 
 
 class Runner:
-    """Runs a workflow step's `run:` script the way the runner does."""
+    """Runs a workflow step's `run:` script the way the runner does.
+
+    ``shell_flags`` are bash's flags. The default, ``-eo pipefail``, is
+    stricter than GitHub's ``bash -e {0}``; a test that must match the runner
+    sets ``("-e",)``. ``raw_outputs`` keeps each step's GITHUB_OUTPUT text as
+    written, keyed by step id (or name), because ``run()``'s dict keeps only
+    the last value of a repeated key."""
 
     def __init__(self, tmp_path: Path):
+        self.shell_flags: tuple[str, ...] = ("-eo", "pipefail")
+        self.raw_outputs: dict[str, str] = {}
         self.root = tmp_path
         self.bin = tmp_path / "bin"
         self.bin.mkdir()
@@ -445,7 +461,7 @@ class Runner:
 
     def scenario(self, rules: list) -> None:
         (self.state / "rules.json").write_text(json.dumps(rules))
-        for stale in self.state.glob("rule*.count"):
+        for stale in [*self.state.glob("rule*.count"), *self.state.glob("snap.*")]:
             stale.unlink()
         (self.state / "calls.log").unlink(missing_ok=True)
 
@@ -458,6 +474,13 @@ class Runner:
         if not log.exists():
             return []
         return [json.loads(x) for x in log.read_text().splitlines()]
+
+    def snapshots(self) -> list[str]:
+        """GITHUB_OUTPUT's text at each `deploy stop-deployment` call, in order."""
+        snaps = sorted(
+            self.state.glob("snap.*"), key=lambda p: int(p.name.split(".")[1])
+        )
+        return [p.read_text() for p in snaps]
 
     def updates(self) -> list[list[str]]:
         return [c for c in self.calls() if c[:2] == ["ecs", "update-service"]]
@@ -538,15 +561,17 @@ class Runner:
             GITHUB_ENV=str(self.root / "github_env"),
         )
         result = subprocess.run(
-            ["bash", "--noprofile", "--norc", "-eo", "pipefail", str(script)],
+            ["bash", "--noprofile", "--norc", *self.shell_flags, str(script)],
             cwd=self.work,
             env=base,
             capture_output=True,
             text=True,
             timeout=60,
         )
+        raw = output.read_text()
+        self.raw_outputs[step.get("id") or step["name"]] = raw
         written = {}
-        for line in output.read_text().splitlines():
+        for line in raw.splitlines():
             if "=" in line:
                 key, value = line.split("=", 1)
                 written[key] = value

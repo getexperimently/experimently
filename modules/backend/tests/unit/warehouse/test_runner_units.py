@@ -193,6 +193,23 @@ def test_a_preview_not_in_utc_is_refused():
     )
 
 
+@pytest.mark.regression
+def test_a_preview_from_a_real_snowflake_utc_session_is_accepted():
+    """Snowflake writes a UTC offset as ``Z``; ``Z `` or ``-00:00`` is still refused."""
+    row = {"total_rows": "1", "null_unit_rows": "0", "null_value_rows": "0"}
+    runner.parse_preview_rows(
+        "metric", [{**row, "session_offset": "Z"}], expect_session_offset=True
+    )
+    for offset in ("Z ", "z", "-00:00", None):
+        with pytest.raises(WarehouseResultRefused) as refused:
+            runner.parse_preview_rows(
+                "metric",
+                [{**row, "session_offset": offset}],
+                expect_session_offset=True,
+            )
+        assert refused.value.code == "timezone_not_utc"
+
+
 def test_failure_codes_come_from_the_fixed_set():
     assert (
         runner.failure_code(WarehouseError(WarehouseErrorCode.BYTES_LIMIT))

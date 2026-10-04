@@ -1,0 +1,66 @@
+{
+  "_provenance": {
+    "source": "real account",
+    "real_run_id": "wl-snowflake-20261004T194134Z-155c1c4b",
+    "check": "sf_wire_probe",
+    "request": {
+      "method": "GET",
+      "path": "/api/v2/statements/019c06a4-0000-df4f-0000-00100006589e"
+    },
+    "note": "Recorded on a real account by the warehouse_live check, then scrubbed: the account, user, database, schema, role and warehouse names, the statement handle, the request id and the creation time are replaced with this suite's placeholders. Everything else is as Snowflake answered."
+  },
+  "status": 200,
+  "body": {
+    "resultSetMetaData": {
+      "numRows": 1,
+      "format": "jsonv2",
+      "partitionInfo": [
+        {
+          "rowCount": 1,
+          "uncompressedSize": 61
+        }
+      ],
+      "rowType": [
+        {
+          "name": "V",
+          "database": "",
+          "schema": "",
+          "table": "",
+          "nullable": false,
+          "precision": null,
+          "scale": null,
+          "collation": null,
+          "byteLength": 134217728,
+          "length": 134217728,
+          "type": "text"
+        },
+        {
+          "name": "SESSION_OFFSET",
+          "database": "",
+          "schema": "",
+          "table": "",
+          "nullable": false,
+          "precision": null,
+          "scale": null,
+          "collation": null,
+          "byteLength": 134217728,
+          "length": 134217728,
+          "type": "text"
+        }
+      ]
+    },
+    "data": [
+      [
+        "3.0000000000000004440892098500626161695e-1",
+        "Z"
+      ]
+    ],
+    "code": "090001",
+    "statementStatusUrl": "/api/v2/statements/019c06a4-0000-df4f-0000-00100006589e?requestId=00000000-0000-4000-8000-000000000000",
+    "requestId": "00000000-0000-4000-8000-000000000000",
+    "sqlState": "00000",
+    "statementHandle": "019c06a4-0000-df4f-0000-00100006589e",
+    "message": "Statement executed successfully.",
+    "createdOn": 1759000000000
+  }
+}

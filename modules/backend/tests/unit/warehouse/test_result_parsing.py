@@ -142,7 +142,7 @@ def test_snowflake_session_must_be_utc():
     assert (
         parse_metric_rows(good, expect_session_offset=True).session_offset == "+00:00"
     )
-    for offset in ("-07:00", "+01:00", None, "+0000"):
+    for offset in ("-07:00", "+01:00", None, "+0000", "-00:00", "z", "Z ", "UTC", ""):
         assert (
             _code([_row(session_offset=offset)], expect_session_offset=True)
             == "timezone_not_utc"
@@ -182,6 +182,15 @@ def test_diagnostics_refusals(rows, code):
     with pytest.raises(WarehouseResultRefused) as refused:
         parse_diagnostics_rows(rows)
     assert refused.value.code == code
+
+
+@pytest.mark.regression
+def test_snowflake_writes_utc_as_z():
+    """A real Snowflake UTC session reports ``Z``; metric and diagnostics rows accept it."""
+    stats = parse_metric_rows([_row(session_offset="Z")], expect_session_offset=True)
+    assert stats.session_offset == "Z"
+    diag = parse_diagnostics_rows(_diag(session_offset="Z"), expect_session_offset=True)
+    assert diag.session_offset == "Z"
 
 
 def test_diagnostics_session_offset():

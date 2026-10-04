@@ -1388,11 +1388,11 @@ created.
 
 #### Installation
 
-**Not yet published.** The `experimently` package is not on PyPI yet, so this line fails today.
-Install from this repository instead, as described in the [Python SDK](../sdk/python.md#installation) page.
+The `experimently` package is on PyPI (0.1.0, beta). The [Python SDK](../sdk/python.md#installation)
+page also shows how to install it from this repository.
 
 ```bash
-pip install experimently
+pip install experimently==0.1.0
 ```
 
 #### Basic Usage

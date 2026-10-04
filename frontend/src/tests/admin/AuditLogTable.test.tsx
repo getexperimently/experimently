@@ -52,13 +52,13 @@ describe('AuditLogTable', () => {
     });
   });
 
-  it('shows user_email, action_type, entity_type, entity_name in each row', async () => {
+  it('shows the user, the action label, the entity label and the name in each row', async () => {
     mockListAuditLogs.mockResolvedValue(makePage());
     render(<AuditLogTable />);
     await waitFor(() => {
       expect(screen.getByText('alice@example.com')).toBeInTheDocument();
-      expect(screen.getByText('toggle_enable')).toBeInTheDocument();
-      expect(screen.getByText('feature_flag')).toBeInTheDocument();
+      expect(screen.getByText('Flag turned on')).toBeInTheDocument();
+      expect(screen.getByText('Feature flag')).toBeInTheDocument();
       expect(screen.getByText('my-feature-flag')).toBeInTheDocument();
     });
   });

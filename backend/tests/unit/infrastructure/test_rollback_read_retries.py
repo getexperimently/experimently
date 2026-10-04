@@ -319,7 +319,7 @@ def test_the_wait_proceeds_on_two_empty_reads_after_busy_ones(runner):
     assert lists == 1 + 4, lists
     assert log.count(f"deployment group still busy: {CD}") == 2
     assert "Deployment group still busy" not in log
-    assert written == {}
+    assert written == {"stopped": BAD_ID, "stop_wait": "ok"}  # #759
 
 
 @pytest.mark.regression

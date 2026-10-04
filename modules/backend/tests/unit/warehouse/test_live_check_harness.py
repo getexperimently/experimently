@@ -765,6 +765,38 @@ def test_the_private_calls_the_live_check_makes_still_exist():
             assert callable(getattr(owner, name, None)), f"{owner.__name__}.{name}"
 
 
+@pytest.mark.regression
+def test_a_warehouse_without_a_visible_monitor_names_the_monitor_grant():
+    """The refusal names the grant that makes the monitor visible to the role.
+
+    On the first real run MONITOR on the warehouse was granted and the role
+    still saw ``resource_monitor`` as null; MONITOR on the resource monitor
+    itself is what shows it.
+    """
+    from modules.backend.tests.live_warehouse.test_snowflake_live import (
+        _verify_spend_cap,
+    )
+
+    seen = []
+
+    class Adapter:
+        def _execute(self, sql, deadline):
+            seen.append(sql)
+            return "h", [{"name": "WH_A", "resource_monitor": None}], 0
+
+    class Recorder:
+        def record(self, *args, **kwargs):
+            pass
+
+    config = SimpleNamespace(warehouse="WH_A", role="ROLE_A", resource_monitor="MON_A")
+    with pytest.raises(AssertionError) as refused:
+        _verify_spend_cap(Adapter(), config, Recorder())
+    message = str(refused.value)
+    assert "GRANT MONITOR ON RESOURCE MONITOR MON_A TO ROLE ROLE_A;" in message
+    assert "Nothing else has run." in message
+    assert seen == ["SHOW WAREHOUSES LIKE 'WH_A'"]
+
+
 def test_new_run_ids_are_distinct_and_name_the_target():
     ids = {harness.new_run_id("snowflake") for _ in range(20)}
     assert len(ids) == 20

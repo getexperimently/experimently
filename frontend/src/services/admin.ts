@@ -18,7 +18,7 @@ import {
   UserListResponse,
 } from '@/types/admin';
 import type { SafetyCheckResponse, SafetyMetricStatus } from '@/types/safety';
-import { apiFetch } from '@/services/api';
+import { apiDownload, apiFetch, type ApiDownload } from '@/services/api';
 import { type FeatureFlag, isFlagOn } from '@/services/featureFlags';
 
 const ERROR_RATE_METRICS = ['error_rate'];
@@ -134,6 +134,28 @@ export const AdminService = {
         from_date: params?.from_date || undefined,
         to_date: params?.to_date || undefined,
       },
+    });
+  },
+
+  /**
+   * Download every entry the filters match as one file. `X-Total-Count` in
+   * the returned headers is the number of entries the file should hold.
+   */
+  async exportAuditLogs(
+    format: 'csv' | 'json',
+    params?: {
+      action_type?: string;
+      entity_type?: string;
+      from_date?: string;
+      to_date?: string;
+    },
+  ): Promise<ApiDownload> {
+    return apiDownload('/api/v1/audit-logs/export', {
+      format,
+      action_type: params?.action_type || undefined,
+      entity_type: params?.entity_type || undefined,
+      from_date: params?.from_date || undefined,
+      to_date: params?.to_date || undefined,
     });
   },
 
