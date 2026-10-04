@@ -13235,19 +13235,24 @@
           "description": "Premium subscribers in the United States",
           "name": "US Premium Users",
           "rules": {
-            "conditions": [
+            "groups": [
               {
-                "attribute": "country",
-                "operator": "eq",
-                "value": "US"
-              },
-              {
-                "attribute": "plan",
-                "operator": "eq",
-                "value": "premium"
+                "conditions": [
+                  {
+                    "attribute": "country",
+                    "operator": "equals",
+                    "value": "US"
+                  },
+                  {
+                    "attribute": "plan",
+                    "operator": "equals",
+                    "value": "premium"
+                  }
+                ],
+                "logical_operator": "AND"
               }
             ],
-            "operator": "and"
+            "logical_operator": "AND"
           }
         },
         "properties": {
@@ -13271,7 +13276,7 @@
           },
           "rules": {
             "additionalProperties": true,
-            "description": "Targeting rules JSON matching rules_engine format. Format: {\"conditions\": [...], \"logical_operator\": \"AND\"|\"OR\"}",
+            "description": "Targeting rules in the format flag and experiment targeting use: {\"logical_operator\": \"AND\"|\"OR\"|\"NOT\" (optional), \"groups\": [{\"logical_operator\"?, \"conditions\": [{\"attribute\", \"operator\", \"value\"}]}]}, with operators such as equals, in, regex and semver_gte. At least one group, each with at least one condition; at most 20 groups, 50 conditions, 10 regex conditions and 1,000 list values. Any other shape is refused with 422.",
             "title": "Rules",
             "type": "object"
           }
@@ -13360,8 +13365,8 @@
         "example": {
           "is_member": true,
           "matched_rules": [
-            "country eq US",
-            "plan eq premium"
+            "country equals US",
+            "plan equals premium"
           ],
           "segment_id": "abc123",
           "segment_name": "US Premium Users"
@@ -13373,6 +13378,7 @@
           },
           "matched_rules": {
             "default": [],
+            "description": "Each condition, in any group, that the context satisfies on its own, as \"<attribute> <operator> <value>\". Empty when the user is not a member.",
             "items": {
               "type": "string"
             },
@@ -13508,6 +13514,7 @@
                 "type": "null"
               }
             ],
+            "description": "Targeting rules in the format flag and experiment targeting use: {\"logical_operator\": \"AND\"|\"OR\"|\"NOT\" (optional), \"groups\": [{\"logical_operator\"?, \"conditions\": [{\"attribute\", \"operator\", \"value\"}]}]}, with operators such as equals, in, regex and semver_gte. At least one group, each with at least one condition; at most 20 groups, 50 conditions, 10 regex conditions and 1,000 list values. Any other shape is refused with 422. Leave it out to keep the stored rules.",
             "title": "Rules"
           },
           "status": {
@@ -30522,7 +30529,7 @@
     },
     "/api/v1/segments/bulk-evaluate": {
       "post": {
-        "description": "Evaluate one user context against multiple segments in a single request. Returns a membership dict {segment_id: is_member} for each requested segment.",
+        "description": "Evaluate one user context against multiple segments in a single request. Returns a membership dict {segment_id: is_member} for each requested segment. An unknown segment, and one whose stored rules are not valid, is false.",
         "operationId": "bulk_evaluate_segments_api_v1_segments_bulk_evaluate_post",
         "requestBody": {
           "content": {
@@ -30578,6 +30585,7 @@
             "name": "segment_id",
             "required": true,
             "schema": {
+              "format": "uuid",
               "title": "Segment Id",
               "type": "string"
             }
@@ -30618,6 +30626,7 @@
             "name": "segment_id",
             "required": true,
             "schema": {
+              "format": "uuid",
               "title": "Segment Id",
               "type": "string"
             }
@@ -30665,6 +30674,7 @@
             "name": "segment_id",
             "required": true,
             "schema": {
+              "format": "uuid",
               "title": "Segment Id",
               "type": "string"
             }
@@ -30716,7 +30726,7 @@
     },
     "/api/v1/segments/{segment_id}/evaluate": {
       "post": {
-        "description": "Check whether a user context (arbitrary attributes dict) satisfies this segment's targeting rules.",
+        "description": "Check whether a user context (arbitrary attributes dict) satisfies this segment's targeting rules, evaluated as a feature flag evaluates the same rules. A segment whose stored rules are not in the targeting rule format (saved before rules were checked) answers 409.",
         "operationId": "evaluate_segment_membership_api_v1_segments__segment_id__evaluate_post",
         "parameters": [
           {
@@ -30724,6 +30734,7 @@
             "name": "segment_id",
             "required": true,
             "schema": {
+              "format": "uuid",
               "title": "Segment Id",
               "type": "string"
             }
@@ -30749,6 +30760,9 @@
               }
             },
             "description": "Successful Response"
+          },
+          "409": {
+            "description": "The segment's stored rules are not valid; save them again."
           },
           "422": {
             "content": {
@@ -30783,6 +30797,7 @@
             "name": "segment_id",
             "required": true,
             "schema": {
+              "format": "uuid",
               "title": "Segment Id",
               "type": "string"
             }
@@ -30824,7 +30839,7 @@
     },
     "/api/v1/segments/{segment_id}/preview": {
       "post": {
-        "description": "Estimate the percentage of users who would match the provided targeting rules by evaluating them against a sample of recent assignment records.",
+        "description": "Estimate the percentage of users who would match the provided targeting rules by evaluating them against the stored contexts of up to sample_size assignments. Only assignments that carry a context are counted; the answer's sample_size is how many there were, and 0 when none do.",
         "operationId": "preview_audience_size_api_v1_segments__segment_id__preview_post",
         "parameters": [
           {
@@ -30832,6 +30847,7 @@
             "name": "segment_id",
             "required": true,
             "schema": {
+              "format": "uuid",
               "title": "Segment Id",
               "type": "string"
             }

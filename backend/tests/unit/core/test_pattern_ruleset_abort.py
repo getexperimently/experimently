@@ -245,18 +245,28 @@ def test_experiment_targeting_is_ineligible(rules):
 
 # -- segments -----------------------------------------------------------------
 
+# Segment rules are checked when saved (#440), so an unparseable pattern
+# cannot be stored; a context value longer than MAX_REGEX_INPUT is what makes
+# a pattern unevaluable at evaluation time. Without the abort, the NOT group
+# would turn the unevaluable condition into a match.
 SEGMENT_NESTED_NOT = {
-    "operator": "and",
-    "conditions": [{"attribute": "country", "operator": "eq", "value": "US"}],
+    "logical_operator": "AND",
     "groups": [
+        {"conditions": [{"attribute": "country", "operator": "equals", "value": "US"}]},
         {
-            "operator": "not",
+            "logical_operator": "NOT",
             "conditions": [
-                {"attribute": "email", "operator": "match_regex", "value": UNPARSEABLE}
+                {
+                    "attribute": "email",
+                    "operator": "regex",
+                    "value": r"@competitor\.com$",
+                }
             ],
-        }
+        },
     ],
 }
+
+LONG_COMPETITOR = {"email": "x" * MAX_REGEX_INPUT + "@competitor.com", "country": "US"}
 
 
 @pytest.mark.regression
@@ -267,7 +277,7 @@ def test_segment_membership_is_not_granted(monkeypatch):
     monkeypatch.setattr(
         AudienceService, "get_segment", staticmethod(lambda db, sid: segment)
     )
-    result = AudienceService.evaluate_membership(MagicMock(), "seg-1", COMPETITOR)
+    result = AudienceService.evaluate_membership(MagicMock(), "seg-1", LONG_COMPETITOR)
     assert result.is_member is False
     assert result.matched_rules == []
 
@@ -275,9 +285,8 @@ def test_segment_membership_is_not_granted(monkeypatch):
 @pytest.mark.regression
 def test_segment_preview_does_not_count_the_user():
     db = MagicMock()
-    db.query.return_value.limit.return_value.all.return_value = [
-        SimpleNamespace(context=COMPETITOR, user_id="u1")
-    ]
+    rows = db.query.return_value.filter.return_value.limit.return_value
+    rows.all.return_value = [(LONG_COMPETITOR,)]
     preview = AudienceService.preview_audience_size(db, SEGMENT_NESTED_NOT, 10)
     assert preview.sample_size == 1
     assert preview.matched == 0

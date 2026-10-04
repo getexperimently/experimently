@@ -2044,13 +2044,75 @@ POST /api/v1/safety/feature-flags/{flag_id}/rollback      — Manual rollback (?
 ### Audience Segments
 
 ```
-POST   /api/v1/segments              — Create segment (DEVELOPER+)
-GET    /api/v1/segments              — List segments
-GET    /api/v1/segments/{id}         — Get segment
-PUT    /api/v1/segments/{id}         — Update segment (DEVELOPER+)
-DELETE /api/v1/segments/{id}         — Delete segment (DEVELOPER+)
-POST   /api/v1/segments/{id}/evaluate — Evaluate segment membership
+POST   /api/v1/segments                  — Create segment (DEVELOPER+)
+GET    /api/v1/segments                  — List segments (?status=active|inactive|archived)
+GET    /api/v1/segments/{id}             — Get segment
+PUT    /api/v1/segments/{id}             — Update segment (DEVELOPER+)
+DELETE /api/v1/segments/{id}             — Archive segment: sets status archived (DEVELOPER+)
+POST   /api/v1/segments/{id}/evaluate    — Is this user context a member? (409: stored rules not valid)
+POST   /api/v1/segments/bulk-evaluate    — One user context against up to 50 segments
+GET    /api/v1/segments/{id}/experiments — Experiments and flags whose rules mention the segment's id
+POST   /api/v1/segments/{id}/preview     — Estimate the share of users the rules in the body match
 ```
+
+`{id}` is the segment's UUID; any other text answers 422.
+
+**Segment rules use the targeting rule format** that flag and experiment targeting use,
+and are checked when saved:
+
+```json
+{"logical_operator": "AND",
+ "groups": [{"logical_operator": "AND",
+             "conditions": [{"attribute": "country", "operator": "equals", "value": "US"},
+                            {"attribute": "plan", "operator": "in", "value": "pro, team"}]}]}
+```
+
+The operators are the flag operators listed under
+[Add targeting rules](../feature-flags/create.md#add-targeting-rules) (`equals`, `in`,
+`regex`, `semver_gte`, ...). A segment needs at least one group, and every group at least
+one condition. It holds at most 20 groups, 50 conditions, 10 `regex` conditions and 1,000
+list values in total. `POST` and `PUT /api/v1/segments` answer 422 for anything else, with
+`loc` `["body", "rules"]` and a fixed message naming the place and the reason, for example
+`groups[0].conditions[0].operator: unknown operator` or `rules: unknown key`. The message
+never repeats the submitted rules. Saved rules are returned exactly as sent.
+
+A user is a member when the rules match the `user_context` sent to evaluate, evaluated as
+a feature flag evaluates the same rules: `{"user": {"country": "US"}}` and
+`{"user.country": "US"}` both answer a rule on `country`. `matched_rules` lists each
+condition, in any group, that the context satisfies on its own, as
+`"<attribute> <operator> <value>"`; it is empty when the user is not a member. A `regex`
+condition that cannot be evaluated makes the user not a member.
+
+`POST /api/v1/segments/{id}/preview` evaluates the rules in its body against the stored
+contexts of up to `sample_size` assignments (10 to 10,000, default 1,000). Only assignments
+that carry a context are counted, and `sample_size` in the answer is how many there were.
+Assignment does not store a context today, so the answer is usually
+`{"estimated_percentage": 0.0, "sample_size": 0, "matched": 0}`: there was nothing to
+estimate from, which is not the same as 0%. The preview also refuses, before any query,
+`regex` conditions times `sample_size` above 500 and conditions plus groups times
+`sample_size` above 50,000, at `loc` `["query", "sample_size"]`.
+
+#### Upgrading: segment rules
+
+Releases before this check stored segment rules in a format of their own,
+`{"operator": "and", "conditions": [{"attribute", "operator": "eq", "value"}]}`, which
+nothing checked: a condition the engine did not understand was skipped, and a segment left
+with no condition matched every user. That format is now refused when saved.
+
+**Segments already stored are left as they are.** Their rules are kept and returned by
+`GET` unchanged, but they are not evaluated: `POST /api/v1/segments/{id}/evaluate` answers
+**409** with the detail `Segment rules not valid: ...`, and bulk-evaluate answers `false`
+for that segment. The same holds for a stored segment with no groups, an empty group or an
+unknown operator. A `PUT` that leaves `rules` out (to rename one, say) still succeeds.
+
+To list them, run `python -m backend.scripts.check_targeting_rules` from the repository
+root against the API's database settings. Beside its flag lines it prints one line per
+segment that is not archived and whose rules are not valid,
+`segment <id> <name> <place> rules not valid: <reason>`, writes nothing, and exits 0
+(2 when it cannot read the database). Rewrite each listed segment's rules in the format
+above with `PUT /api/v1/segments/{id}`.
+
+No flag or experiment changes behaviour: no targeting rule can refer to a segment.
 
 ---
 

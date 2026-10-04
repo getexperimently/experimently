@@ -23,9 +23,14 @@ from backend.app.schemas.segment import (
 )
 
 VALID_RULES = {
-    "operator": "and",
-    "conditions": [
-        {"attribute": "country", "operator": "eq", "value": "US"},
+    "logical_operator": "AND",
+    "groups": [
+        {
+            "logical_operator": "AND",
+            "conditions": [
+                {"attribute": "country", "operator": "equals", "value": "US"},
+            ],
+        }
     ],
 }
 
@@ -88,17 +93,53 @@ class TestSegmentCreate:
         with pytest.raises(ValidationError):
             SegmentCreate(name="My Segment")
 
-    def test_rules_accepts_complex_dict(self):
-        """Rules accepts any dict structure."""
+    def test_rules_are_kept_as_given(self):
+        """Valid rules are stored as sent, never rewritten."""
         complex_rules = {
-            "operator": "or",
-            "conditions": [
-                {"attribute": "plan", "operator": "eq", "value": "premium"},
-                {"attribute": "age", "operator": "gte", "value": 18},
+            "logical_operator": "OR",
+            "groups": [
+                {
+                    "conditions": [
+                        {"attribute": "plan", "operator": "equals", "value": "premium"},
+                        {
+                            "attribute": "age",
+                            "operator": "greater_than_or_equal",
+                            "value": "18",
+                        },
+                    ]
+                },
+                {
+                    "conditions": [
+                        {"attribute": "country", "operator": "in", "value": "US, CA"}
+                    ]
+                },
             ],
         }
         data = SegmentCreate(name="Complex Segment", rules=complex_rules)
-        assert data.rules["operator"] == "or"
+        assert data.rules == complex_rules
+
+    @pytest.mark.parametrize(
+        "rules, message",
+        [
+            (
+                {
+                    "operator": "and",
+                    "conditions": [{"attribute": "c", "operator": "eq", "value": "US"}],
+                },
+                "rules: unknown key",
+            ),
+            ({"rules": []}, "rules: unknown key"),
+            ([VALID_RULES], "rules: must be an object"),
+            ({}, "groups: at least one group is required"),
+        ],
+        ids=["legacy", "native", "list", "empty"],
+    )
+    def test_rules_not_in_the_targeting_format_are_refused(self, rules, message):
+        with pytest.raises(ValidationError) as exc_info:
+            SegmentCreate(name="Refused", rules=rules)
+        [error] = exc_info.value.errors()
+        assert error["loc"] == ("rules",)
+        assert error["msg"] == f"Value error, {message}"
 
 
 class TestSegmentUpdate:
@@ -131,6 +172,13 @@ class TestSegmentUpdate:
         """Name in update also enforces maximum 128 characters."""
         with pytest.raises(ValidationError):
             SegmentUpdate(name="A" * 129)
+
+    def test_update_refuses_rules_not_in_the_targeting_format(self):
+        with pytest.raises(ValidationError):
+            SegmentUpdate(rules={"operator": "and", "conditions": []})
+
+    def test_update_with_null_rules_keeps_the_stored_rules(self):
+        assert SegmentUpdate(rules=None).rules is None
 
     def test_update_all_fields(self):
         """SegmentUpdate accepts all fields together."""

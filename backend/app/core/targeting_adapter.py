@@ -384,6 +384,121 @@ def validate_flag_targeting(value: Any) -> Optional[TargetingRules]:
         raise TargetingRulesError("", err.code, subject=FLAG_RULES_SUBJECT) from None
 
 
+#: What :func:`validate_segment_rules` calls the rules when a problem has no path.
+SEGMENT_RULES_SUBJECT = "rules"
+
+#: Limits on one segment's rules. They are the audience preview's limits
+#: (``backend.app.core.segment_preview_limits`` (a), (a'), (b) and (c)), so
+#: every saved segment also passes the preview's static checks.
+MAX_SEGMENT_GROUPS = 20
+MAX_SEGMENT_CONDITIONS = 50
+MAX_SEGMENT_REGEX_CONDITIONS = 10
+MAX_SEGMENT_LIST_ELEMENTS = 1000
+
+_SEGMENT_TOP_KEYS = frozenset({"logical_operator", "groups"})
+
+
+def validate_segment_rules(value: Any) -> TargetingRules:
+    """
+    Refuse segment rules that membership would not evaluate as written.
+
+    Segment rules use the dashboard shape that flag and experiment targeting
+    use, ``{"logical_operator"?, "groups": [{"logical_operator"?,
+    "conditions": [{"attribute", "operator", "value"}]}]}``, with the
+    dashboard operators (``equals``, ``in``, ``semver_gte``, ...). Each
+    condition gets the flag validator's checks. On top of those:
+
+    * only ``logical_operator`` and ``groups`` may appear at the top level, so
+      the legacy segment shape (``{"operator", "conditions"}``), the native
+      shape (``{"rules": [...]}``), ``rollout_percentage`` and ``id`` all
+      answer ``rules: unknown key``;
+    * ``groups`` must be a non-empty list (``groups: at least one group is
+      required``), and every group needs a condition: a segment with no
+      condition would match every user;
+    * at most :data:`MAX_SEGMENT_GROUPS` groups, :data:`MAX_SEGMENT_CONDITIONS`
+      conditions, :data:`MAX_SEGMENT_REGEX_CONDITIONS` ``regex`` conditions
+      and :data:`MAX_SEGMENT_LIST_ELEMENTS` list values in total.
+
+    No database access. The value is never changed.
+
+    Returns:
+        The ``TargetingRules`` membership evaluates; never empty.
+
+    Raises:
+        TargetingRulesError: with a fixed message keyed by path, never
+        carrying a submitted value.
+    """
+    try:
+        return _validate_segment_rules(value)
+    except TargetingRulesError as err:
+        if err.path:
+            raise
+        raise TargetingRulesError("", err.code, subject=SEGMENT_RULES_SUBJECT) from None
+
+
+def _validate_segment_rules(value: Any) -> TargetingRules:
+    # Imported here: the counting module imports nothing from this one, and
+    # only the write path and membership need it.
+    from backend.app.core.segment_preview_limits import count_ruleset
+
+    if not isinstance(value, dict):
+        raise TargetingRulesError("", "must be an object")
+    if any(key not in _SEGMENT_TOP_KEYS for key in value):
+        raise TargetingRulesError("", "unknown key")
+    groups = value.get("groups")
+    if groups is None:
+        raise TargetingRulesError("groups", "at least one group is required")
+    if not isinstance(groups, list):
+        raise TargetingRulesError("groups", "must be a list")
+    if not groups:
+        raise TargetingRulesError("groups", "at least one group is required")
+
+    # Counted on the submitted value before anything is converted, so the
+    # work below is bounded.
+    counts = count_ruleset(value)
+    if counts["groups"] > MAX_SEGMENT_GROUPS:
+        raise TargetingRulesError(
+            "groups", f"at most {MAX_SEGMENT_GROUPS} groups are allowed"
+        )
+    if counts["conditions"] > MAX_SEGMENT_CONDITIONS:
+        raise TargetingRulesError(
+            "", f"at most {MAX_SEGMENT_CONDITIONS} conditions are allowed"
+        )
+    if counts["regex_conditions"] > MAX_SEGMENT_REGEX_CONDITIONS:
+        raise TargetingRulesError(
+            "",
+            f"at most {MAX_SEGMENT_REGEX_CONDITIONS} regex conditions are allowed",
+        )
+    if counts["list_elements"] > MAX_SEGMENT_LIST_ELEMENTS:
+        raise TargetingRulesError("", _SEGMENT_LIST_LIMIT)
+
+    rules = _validated_dashboard(value, _FLAG)
+    # ``"beta, staff"`` is a list for ``in`` once converted, so the total
+    # is counted again on what membership evaluates.
+    if _converted_list_elements(rules) > MAX_SEGMENT_LIST_ELEMENTS:
+        raise TargetingRulesError("", _SEGMENT_LIST_LIMIT)
+    _check_list_sizes(rules, "groups")
+    _check_rule_validator(rules, "groups")
+    return rules
+
+
+_SEGMENT_LIST_LIMIT = (
+    f"at most {MAX_SEGMENT_LIST_ELEMENTS} list values are allowed in total"
+)
+
+
+def _converted_list_elements(rules: TargetingRules) -> int:
+    total = 0
+    stack = [rule.rule for rule in rules.rules]
+    while stack:
+        group = stack.pop()
+        for condition in group.conditions:
+            if isinstance(condition.value, (list, tuple, set)):
+                total += len(condition.value)
+        stack.extend(group.groups or [])
+    return total
+
+
 def _validate_targeting(value: Any, *, kind: str) -> Optional[TargetingRules]:
     """The checks both validators share; ``kind`` is ``"experiment"`` or ``"flag"``."""
     if value is None:

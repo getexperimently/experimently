@@ -13,10 +13,15 @@ Routes:
     POST   /api/v1/segments/bulk-evaluate   — check one user against N segments
     GET    /api/v1/segments/{id}/experiments — list experiments using this segment
     POST   /api/v1/segments/{id}/preview    — estimate audience size
+
+Segment rules use the targeting rule format (the dashboard shape) and are
+checked when saved (``validate_segment_rules``). ``{id}`` is a UUID; any other
+text answers 422.
 """
 
 import logging
 from typing import List, Optional
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
@@ -39,12 +44,20 @@ from backend.app.schemas.segment import (
 )
 from backend.app.services.audience_service import (
     AudienceService,
+    SegmentRulesNotValid,
     _segment_to_response_dict,
 )
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+#: The 409 ``detail`` for a stored segment whose rules fail validation. Fixed
+#: text: it never carries the stored rules.
+SEGMENT_RULES_NOT_VALID = (
+    "Segment rules not valid: they are not in the targeting rule format. "
+    "Save them again with PUT /api/v1/segments/{id}."
+)
 
 
 # ---------------------------------------------------------------------------
@@ -130,7 +143,8 @@ def create_segment(
     summary="Bulk segment membership evaluation",
     description=(
         "Evaluate one user context against multiple segments in a single request. "
-        "Returns a membership dict {segment_id: is_member} for each requested segment."
+        "Returns a membership dict {segment_id: is_member} for each requested segment. "
+        "An unknown segment, and one whose stored rules are not valid, is false."
     ),
     tags=["Segments"],
 )
@@ -157,7 +171,7 @@ def bulk_evaluate_segments(
     tags=["Segments"],
 )
 def get_segment(
-    segment_id: str,
+    segment_id: UUID,
     db: Session = Depends(deps.get_db),
     current_user: User = Depends(deps.get_current_active_user),
 ) -> SegmentResponse:
@@ -183,7 +197,7 @@ def get_segment(
     tags=["Segments"],
 )
 def update_segment(
-    segment_id: str,
+    segment_id: UUID,
     data: SegmentUpdate,
     db: Session = Depends(deps.get_db),
     current_user: User = Depends(deps.get_current_active_user),
@@ -213,7 +227,7 @@ def update_segment(
     tags=["Segments"],
 )
 def delete_segment(
-    segment_id: str,
+    segment_id: UUID,
     db: Session = Depends(deps.get_db),
     current_user: User = Depends(deps.get_current_active_user),
 ) -> None:
@@ -236,12 +250,19 @@ def delete_segment(
     summary="Evaluate user membership in a segment",
     description=(
         "Check whether a user context (arbitrary attributes dict) satisfies "
-        "this segment's targeting rules."
+        "this segment's targeting rules, evaluated as a feature flag evaluates "
+        "the same rules. A segment whose stored rules are not in the targeting "
+        "rule format (saved before rules were checked) answers 409."
     ),
+    responses={
+        409: {
+            "description": "The segment's stored rules are not valid; save them again."
+        }
+    },
     tags=["Segments"],
 )
 def evaluate_segment_membership(
-    segment_id: str,
+    segment_id: UUID,
     request: SegmentMembershipRequest,
     db: Session = Depends(deps.get_db),
     current_user: User = Depends(deps.get_current_active_user),
@@ -250,6 +271,10 @@ def evaluate_segment_membership(
     _require_permission(current_user, Action.READ)
     try:
         return AudienceService.evaluate_membership(db, segment_id, request.user_context)
+    except SegmentRulesNotValid:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail=SEGMENT_RULES_NOT_VALID
+        ) from None
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc))
 
@@ -270,7 +295,7 @@ def evaluate_segment_membership(
     tags=["Segments"],
 )
 def get_segment_experiments(
-    segment_id: str,
+    segment_id: UUID,
     db: Session = Depends(deps.get_db),
     current_user: User = Depends(deps.get_current_active_user),
 ) -> SegmentExperimentResponse:
@@ -293,12 +318,14 @@ def get_segment_experiments(
     summary="Preview estimated audience size",
     description=(
         "Estimate the percentage of users who would match the provided targeting rules "
-        "by evaluating them against a sample of recent assignment records."
+        "by evaluating them against the stored contexts of up to sample_size "
+        "assignments. Only assignments that carry a context are counted; the "
+        "answer's sample_size is how many there were, and 0 when none do."
     ),
     tags=["Segments"],
 )
 def preview_audience_size(
-    segment_id: str,
+    segment_id: UUID,
     data: SegmentCreate,
     sample_size: int = Query(
         1000, ge=10, le=10000, description="Sample size for estimation"
