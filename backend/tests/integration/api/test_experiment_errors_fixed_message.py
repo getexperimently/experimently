@@ -203,11 +203,13 @@ def _plant_update_fallback(monkeypatch):
 
 
 def _plant_results_fallback(monkeypatch):
-    """The keyword call raises TypeError, the plain one the planted error."""
-    calls = iter([TypeError("unexpected keyword argument"), RuntimeError(CANARY)])
+    """A TypeError from the analysis. The route used to retry without its
+    keyword arguments on one (and label numbers computed with the service's
+    defaults with the request's settings); that fallback is gone (#580), so
+    the TypeError itself is what must answer the fixed message."""
 
     def fail(self, *args: Any, **kwargs: Any) -> Any:
-        raise next(calls)
+        raise TypeError(CANARY)
 
     monkeypatch.setattr(AnalysisService, "get_experiment_results", fail)
 
@@ -216,7 +218,11 @@ def _plant_results_serialise(monkeypatch):
     monkeypatch.setattr(
         AnalysisService,
         "get_experiment_results",
-        lambda self, *a, **k: {"status": "active"},
+        lambda self, *a, **k: {
+            "status": "active",
+            "confidence_level": 0.95,
+            "correction_method": "benjamini_hochberg",
+        },
     )
     monkeypatch.setattr(results_endpoints, "ExperimentResultsResponse", _boom)
 

@@ -340,7 +340,12 @@ def test_downgrade_removes_the_column_and_the_check_and_nothing_else(
 
     assert _rows(test_db, scratch_schema) == PREVIOUS_ROWS[profile]
     assert _column(test_db, scratch_schema) is None
+    # The downgrade to the previous core head also unapplies every revision
+    # above this one; ``806901fb7735`` (#580) drops its own two checks.
+    later = {"ck_experiments_correction_method", "ck_experiments_confidence_level"}
     assert _checks(test_db, scratch_schema) == {
-        name: definition for name, definition in checks.items() if name != CHECK
+        name: definition
+        for name, definition in checks.items()
+        if name != CHECK and name not in later
     }
     assert set(inspect(test_db).get_table_names(schema=scratch_schema)) == tables

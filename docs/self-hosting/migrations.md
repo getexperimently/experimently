@@ -325,9 +325,18 @@ upgrade finishes the rest. Killing it only makes you wait twice.
 release keeps serving, and keeps storing times as clients send them, until the
 new release takes all the traffic. Rows it writes after the migration's scan
 stay as they were. Once the new release serves all traffic, run the migration
-again: downgrade to the revision before it (that downgrade changes no data; it
-only moves the version row back) and upgrade. The second log line says how many
-values it rewrote.
+again: downgrade to the revision before it and upgrade. The second log line says
+how many values it rewrote.
+
+**This re-run applies only while `alembic current` shows `1ab99332f0ba` as the
+core head** (with `modules_0002_warehouse_analysis` on a full install). Then the
+downgrade changes no data; it only moves the version row back. Complete it
+before you upgrade to the release that adds `806901fb7735`, the experiments'
+stored correction settings. Past that release the recipe is not offered:
+`downgrade a89544fb1075` would also run `806901fb7735`'s downgrade, which drops
+every experiment's stored correction method and confidence level, and the
+`upgrade heads` after it puts back the defaults (Benjamini-Hochberg, 0.95), not
+the choices that were stored.
 
 ```bash
 python -m alembic -c backend/app/db/alembic.ini downgrade a89544fb1075

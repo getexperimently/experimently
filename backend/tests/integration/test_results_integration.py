@@ -456,6 +456,10 @@ class TestResultsEndpointCacheBehavior:
         clean up so subsequent tests start with a clean slate.
         """
         mock_db = MagicMock()
+        # The route reads the experiment's stored analysis settings (#580).
+        experiment = mock_db.query.return_value.filter.return_value.first.return_value
+        experiment.correction_method = "none"
+        experiment.confidence_level = 0.95
         mock_user = _make_mock_user(is_superuser=True)
 
         def override_get_db():

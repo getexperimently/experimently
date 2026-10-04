@@ -42,7 +42,7 @@ pytestmark = pytest.mark.skipif(
 #: The examples the help text and the runbook give, and the one revision each
 #: unapplies from both heads.
 NAMED_DOWNGRADES = {
-    "a89544fb1075": ["1ab99332f0ba"],
+    "1ab99332f0ba": ["806901fb7735"],
     "modules_0001_rbac": ["modules_0002_warehouse_analysis"],
 }
 BRANCH_POINT = "a7b8c9d0e1f2"
