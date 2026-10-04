@@ -103,9 +103,42 @@ def test_the_connector_list_follows_the_enabled_set(wh):
     shipped = viewer.get(f"{WA}/connectors").json()["connectors"]
     assert {c["warehouse_type"]: c["enabled"] for c in shipped} == {
         "bigquery": False,
-        "snowflake": False,
+        "snowflake": True,
         "athena": False,
     }
+
+
+def test_as_shipped_snowflake_is_created_and_the_others_are_422(
+    wh, service_account_pem
+):
+    """With no override, a Snowflake connection is created; BigQuery and Athena are not."""
+    admin = wh.as_("ADMIN")
+    app.dependency_overrides.pop(wa.get_enabled_connectors)
+    before = wh.db.query(WarehouseConnection).count()
+    created = admin.post(
+        f"{WA}/connections",
+        json={
+            "warehouse_type": "snowflake",
+            "name": "Snow",
+            "account": "MYORG-MYACCOUNT",
+            "user": "EXPERIMENTLY_READER",
+            "role": "ANALYSIS_READER",
+            "warehouse": "ANALYSIS_WH",
+        },
+    )
+    assert created.status_code == 201, created.text
+    assert created.json()["enabled"] is True
+    for body, name in (
+        (bigquery_body(service_account_pem), "BigQuery"),
+        (ATHENA_BODY, "Amazon Athena"),
+    ):
+        refused = admin.post(f"{WA}/connections", json=body)
+        assert refused.status_code == 422
+        assert refused.json()["detail"] == {
+            "code": "connector_disabled",
+            "message": f"{name} isn't available on this deployment yet.",
+        }
+    assert wh.db.query(WarehouseConnection).count() == before + 1
 
 
 def test_bigquery_connection_create_and_test(wh, google, service_account_pem):

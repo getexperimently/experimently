@@ -111,13 +111,28 @@ describe('who may create', () => {
 });
 
 describe('connectors that are not available', () => {
-  it('shows no form at all when none is enabled (as shipped)', async () => {
+  it('shows no form at all when none is enabled', async () => {
     svc.listConnectors.mockResolvedValue(connectors());
     renderPage();
     expect(await screen.findByTestId('warehouse-no-connector')).toBeInTheDocument();
     expect(screen.queryByTestId('warehouse-connection-form')).not.toBeInTheDocument();
     expect(screen.queryByRole('radio')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /save/i })).not.toBeInTheDocument();
+  });
+
+  it('as shipped: Snowflake is chosen, and BigQuery and Amazon Athena cannot be', async () => {
+    svc.listConnectors.mockResolvedValue(connectors({ snowflake: true }));
+    renderPage();
+    const snowflake = await screen.findByRole('radio', { name: 'Snowflake' });
+    expect(snowflake).toBeEnabled();
+    expect(snowflake).toBeChecked();
+    for (const name of ['BigQuery', 'Amazon Athena']) {
+      const radio = screen.getByRole('radio', { name });
+      expect(radio).toBeDisabled();
+      expect(radio).toHaveAccessibleDescription('Not yet available');
+    }
+    expect(screen.getByLabelText(/^Account/)).toBeInTheDocument();
+    expect(screen.queryByTestId('wh-conn-service-account-json')).not.toBeInTheDocument();
   });
 
   it('lists a disabled connector as not yet available and does not let it be chosen', async () => {

@@ -2089,7 +2089,7 @@ GET  /api/v1/holdout/{id}/results — Holdout vs everyone else for one metric (b
 
 The full profile serves the warehouse analysis routes under
 `/api/v1/warehouse/analysis`; every other path under `/api/v1/warehouse`
-answers 404. No warehouse is available yet. See
+answers 404. Snowflake is available; BigQuery and Amazon Athena are not yet. See
 [Warehouse analysis](warehouse-analytics.md).
 
 ---

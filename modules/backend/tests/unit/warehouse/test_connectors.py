@@ -28,14 +28,27 @@ VENDOR_DOC_ROOTS = {
 }
 
 
+#: The connectors whose real check has passed, each enabled by its own pull
+#: request carrying the run id (Snowflake: wl-snowflake-20261004T225624Z-3787b33c).
+SHIPPED_ENABLED = frozenset({"snowflake"})
+#: Every other connector ships disabled.
+SHIPPED_DISABLED = ("bigquery", "athena")
+
+
 def test_enabled_connectors_exact():
-    """No connector is enabled until its real check has passed (a flip PR changes this)."""
-    assert ENABLED_CONNECTORS == frozenset()
+    """Only a connector whose real check has passed is enabled (a flip PR changes this)."""
+    assert ENABLED_CONNECTORS == SHIPPED_ENABLED
     assert isinstance(ENABLED_CONNECTORS, frozenset)
     assert set(KNOWN_CONNECTORS) == set(WAREHOUSE_TYPES)
+    assert set(SHIPPED_DISABLED) == set(KNOWN_CONNECTORS) - SHIPPED_ENABLED
 
 
-@pytest.mark.parametrize("warehouse_type", KNOWN_CONNECTORS)
+def test_snowflake_is_enabled_as_shipped():
+    assert require_enabled("snowflake") == "snowflake"
+    assert is_enabled("snowflake")
+
+
+@pytest.mark.parametrize("warehouse_type", SHIPPED_DISABLED)
 def test_disabled_connector_refused_with_422(warehouse_type):
     with pytest.raises(ConnectorDisabled) as err:
         require_enabled(warehouse_type)
