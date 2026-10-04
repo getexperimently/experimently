@@ -1104,7 +1104,7 @@ def compare_results(
 
     ``results.diagnostics.session_offset`` is left out: only a dialect with a
     session time zone (Snowflake) reports it, and the connector has already
-    refused any value but ``+00:00``.
+    refused any value but a UTC spelling (``Z`` or ``+00:00``).
     """
     problems: List[str] = []
     skip = {"results.diagnostics.session_offset"}

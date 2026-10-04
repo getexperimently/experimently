@@ -1,9 +1,10 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { AdminService } from '@/services/admin';
 import { AuditLog, AuditLogListResponse } from '@/types/admin';
 import { AuditLogDetailPanel } from './AuditLogDetailPanel';
 import { AuditLogFilters } from './AuditLogFilter';
 import { localDayRange } from '@/utils/auditDates';
+import { actionLabel, actorLabel, entityLabel } from './actionLabels';
 
 interface AuditLogTableProps {
   filters?: AuditLogFilters;
@@ -58,11 +59,24 @@ export function AuditLogTable({ filters }: AuditLogTableProps) {
 
   const totalPages = data ? Math.max(1, Math.ceil(data.total / PAGE_LIMIT)) : 1;
 
+  // Each row's details button, so closing the panel can return focus to it.
+  const rowButtons = useRef(new Map<string, HTMLButtonElement>());
+  const [returnFocusTo, setReturnFocusTo] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (returnFocusTo === null) return;
+    rowButtons.current.get(returnFocusTo)?.focus();
+    setReturnFocusTo(null);
+  }, [returnFocusTo]);
+
   const handleRowClick = (log: AuditLog) => {
     setSelectedLog((prev) => (prev?.id === log.id ? null : log));
   };
 
-  const handleClose = () => setSelectedLog(null);
+  const handleClose = () => {
+    if (selectedLog) setReturnFocusTo(selectedLog.id);
+    setSelectedLog(null);
+  };
 
   const handlePrev = () => {
     if (page > 1) setPage((p) => p - 1);
@@ -113,47 +127,75 @@ export function AuditLogTable({ filters }: AuditLogTableProps) {
           <table className="w-full text-sm text-left">
             <thead className="bg-slate-50 border-b border-slate-200">
               <tr>
-                <th className="px-4 py-3 font-semibold text-slate-600">Timestamp</th>
-                <th className="px-4 py-3 font-semibold text-slate-600">User</th>
-                <th className="px-4 py-3 font-semibold text-slate-600">Action</th>
-                <th className="px-4 py-3 font-semibold text-slate-600">Entity Type</th>
-                <th className="px-4 py-3 font-semibold text-slate-600">Entity Name</th>
+                <th scope="col" className="px-4 py-3 font-semibold text-slate-600">Timestamp</th>
+                <th scope="col" className="px-4 py-3 font-semibold text-slate-600">User</th>
+                <th scope="col" className="px-4 py-3 font-semibold text-slate-600">Action</th>
+                <th scope="col" className="px-4 py-3 font-semibold text-slate-600">Entity</th>
+                <th scope="col" className="px-4 py-3 font-semibold text-slate-600">Name</th>
               </tr>
             </thead>
             <tbody>
-              {data.items.map((log) => (
-                <React.Fragment key={log.id}>
-                  <tr
-                    data-testid={`audit-log-row-${log.id}`}
-                    onClick={() => handleRowClick(log)}
-                    className={`border-b border-slate-100 cursor-pointer hover:bg-blue-50 transition-colors ${
-                      selectedLog?.id === log.id ? 'bg-blue-50' : 'bg-white'
-                    }`}
-                  >
-                    <td
-                      data-testid={`timestamp-${log.id}`}
-                      className="px-4 py-3 text-slate-600 whitespace-nowrap"
+              {data.items.map((log) => {
+                const expanded = selectedLog?.id === log.id;
+                const panelId = `audit-log-detail-${log.id}`;
+                return (
+                  <React.Fragment key={log.id}>
+                    <tr
+                      data-testid={`audit-log-row-${log.id}`}
+                      onClick={() => handleRowClick(log)}
+                      className={`border-b border-slate-100 cursor-pointer hover:bg-blue-50 transition-colors ${
+                        expanded ? 'bg-blue-50' : 'bg-white'
+                      }`}
                     >
-                      {formatTimestamp(log.timestamp)}
-                    </td>
-                    <td className="px-4 py-3 text-slate-800">{log.user_email}</td>
-                    <td className="px-4 py-3">
-                      <span className="inline-block bg-slate-100 text-slate-700 px-2 py-0.5 rounded text-xs font-mono">
-                        {log.action_type}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3 text-slate-700">{log.entity_type}</td>
-                    <td className="px-4 py-3 text-slate-800 font-medium">{log.entity_name}</td>
-                  </tr>
-                  {selectedLog?.id === log.id && (
-                    <tr>
-                      <td colSpan={5} className="p-4 bg-slate-50">
-                        <AuditLogDetailPanel log={log} onClose={handleClose} />
+                      <td
+                        data-testid={`timestamp-${log.id}`}
+                        className="px-4 py-3 text-slate-600 whitespace-nowrap"
+                      >
+                        {formatTimestamp(log.timestamp)}
+                      </td>
+                      <td data-testid={`actor-${log.id}`} className="px-4 py-3 text-slate-800">
+                        {actorLabel(log)}
+                      </td>
+                      <td className="px-4 py-3">
+                        <span
+                          data-testid={`action-${log.id}`}
+                          className="inline-block bg-slate-100 text-slate-700 px-2 py-0.5 rounded text-xs"
+                        >
+                          {actionLabel(log.action_type)}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-slate-700">{entityLabel(log.entity_type)}</td>
+                      <td className="px-4 py-3 text-slate-800 font-medium">
+                        <button
+                          type="button"
+                          data-testid={`audit-log-open-${log.id}`}
+                          ref={(el) => {
+                            if (el) rowButtons.current.set(log.id, el);
+                            else rowButtons.current.delete(log.id);
+                          }}
+                          aria-expanded={expanded}
+                          aria-controls={expanded ? panelId : undefined}
+                          aria-label={`View details for ${log.entity_name}`}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleRowClick(log);
+                          }}
+                          className="text-left font-medium text-blue-700 underline-offset-2 hover:underline focus:outline-none focus:ring-2 focus:ring-blue-500 rounded"
+                        >
+                          {log.entity_name}
+                        </button>
                       </td>
                     </tr>
-                  )}
-                </React.Fragment>
-              ))}
+                    {expanded && (
+                      <tr>
+                        <td colSpan={5} className="p-4 bg-slate-50" id={panelId}>
+                          <AuditLogDetailPanel log={log} onClose={handleClose} />
+                        </td>
+                      </tr>
+                    )}
+                  </React.Fragment>
+                );
+              })}
             </tbody>
           </table>
         </div>
@@ -163,6 +205,7 @@ export function AuditLogTable({ filters }: AuditLogTableProps) {
       {!loading && !error && data && (
         <div className="flex items-center gap-3 justify-end">
           <button
+            type="button"
             data-testid="pagination-prev"
             onClick={handlePrev}
             disabled={page <= 1}
@@ -174,6 +217,7 @@ export function AuditLogTable({ filters }: AuditLogTableProps) {
             Page {page} of {totalPages}
           </span>
           <button
+            type="button"
             data-testid="pagination-next"
             onClick={handleNext}
             disabled={page >= totalPages}

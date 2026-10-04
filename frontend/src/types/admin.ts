@@ -62,7 +62,8 @@ export interface CustomRole {
 
 export interface AuditLog {
   id: string;
-  user_id: string;
+  /** Null for an entry the platform made on its own, or by a deleted user. */
+  user_id: string | null;
   user_email: string;
   action_type: string;
   entity_type: string;

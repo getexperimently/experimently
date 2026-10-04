@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { AdminLayout } from '@/components/admin/AdminLayout';
+import { AuditLogDownload } from '@/components/admin/audit/AuditLogDownload';
 import { AuditLogFilter, AuditLogFilters } from '@/components/admin/audit/AuditLogFilter';
 import { AuditLogTable } from '@/components/admin/audit/AuditLogTable';
 import { withAdminGuard } from '@/components/admin/withAdminGuard';
@@ -12,6 +13,7 @@ export function AuditLogPage() {
       <div data-testid="audit-log-page" className="flex flex-col gap-5">
         <h2 className="text-xl font-semibold text-slate-900">Audit Log</h2>
         <AuditLogFilter filters={filters} onFilterChange={setFilters} />
+        <AuditLogDownload filters={filters} />
         <AuditLogTable filters={filters} />
       </div>
     </AdminLayout>

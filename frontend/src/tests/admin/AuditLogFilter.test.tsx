@@ -66,7 +66,7 @@ describe('AuditLogFilter', () => {
     );
   });
 
-  it('"Clear Filters" button resets all filters and calls onFilterChange with empty object', () => {
+  it('"Clear filters" button resets all filters and calls onFilterChange with empty object', () => {
     const filtersWithValues = {
       action_type: 'toggle_enable',
       entity_type: 'feature_flag',

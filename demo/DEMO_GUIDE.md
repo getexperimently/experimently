@@ -204,8 +204,9 @@ See `demo/streampulse/README.md`.
   groups, segments, creating and deleting users, changes to a user's role, superuser flag or active status,
   signing in with a password, and safety rollbacks. Changes the platform makes on its own (scheduled starts and
   ends, rollout stages, the safety monitor's rollbacks, a first Cognito sign-in and Cognito role sync) are
-  recorded too, by a named system actor such as `system:safety-monitor`
+  recorded too, by a named system actor; the page shows it as, for example, "Safety monitor (automatic)"
   - "You can filter these entries by action, resource type and date."
+- Press **Download CSV** (or **Download JSON**): the file holds every entry the current filters match
 - Show compliance report export: `/api/v1/compliance/report` → downloads CSV/JSON
 
 **RBAC:**

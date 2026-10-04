@@ -43,7 +43,10 @@ warehouse and role, and these session parameters on every request:
   than one statement;
 * ``timezone = UTC`` -- ``TIMESTAMP_NTZ`` columns and ``CURRENT_TIMESTAMP()``
   are read in UTC, and each analysis statement returns the session's offset,
-  which must be ``+00:00`` (else ``timezone_not_utc``);
+  which must be one of the UTC spellings in
+  :data:`~modules.backend.app.services.warehouse_query_builder.UTC_SESSION_OFFSETS`
+  -- ``Z``, which is how Snowflake writes it, or ``+00:00`` -- else
+  ``timezone_not_utc``;
 * ``query_tag`` -- so the customer can find our statements in their history.
 
 The body's ``timeout`` makes Snowflake cancel the statement itself at the
@@ -61,19 +64,26 @@ query fails with ``time_limit``.
 
 Result columns come back named as Snowflake stores them, which for our
 unquoted aliases is upper case; they are read in lower case, and two columns
-that differ only in case are refused.
+that differ only in case are refused.  A name is an identifier
+(``[A-Za-z_][A-Za-z0-9_$]*``), optionally ending in one ``?``: ``SHOW
+COLUMNS`` names one of its output columns ``null?``.
 
 Wire format
 -----------
 Our SQL serialises every floating-point result as
 ``CAST(CAST(x AS DECFLOAT) AS VARCHAR)`` (see
 :mod:`~modules.backend.app.services.warehouse_query_builder`); nothing here
-depends on how Snowflake renders a FLOAT.  Intent, to be settled by the real
-check: if the DECFLOAT wire probe (``0.1 + 0.2`` must read back as exactly
-``0.30000000000000004``) fails, the fallback is an explicit 17-significant-digit
-format, ``TO_VARCHAR(x, 'S9.9999999999999999EE')``; it must pass the same probe
-before the connector is enabled, and if neither does, the connector stays
-disabled.
+depends on how Snowflake renders a FLOAT.  A real account returned the wire
+probe ``0.1 + 0.2`` as ``3.0000000000000004440892098500626161695e-1``: the
+binary64 value's exact decimal expansion rounded to 38 significant digits, in
+exponent form, not the shortest form.  The reader
+(:func:`~modules.backend.app.services.warehouse_sufficient_stats.parse_float`)
+accepts the exponent form and converts through ``Decimal``, which gives back
+exactly ``0.30000000000000004``; that is what the probe checks.  Whether ``SUM``
+over these values matches the reference within tolerance is settled by the
+parity check on a real account, not here.  The live check also records the
+explicit 17-digit format ``TO_VARCHAR(x, 'S9.9999999999999999EE')`` for
+comparison; the connector does not use it.
 
 Errors
 ------
@@ -110,7 +120,10 @@ from modules.backend.app.core.warehouse_identifiers import (
     render_table,
     validate_table_parts,
 )
-from modules.backend.app.services.warehouse_query_builder import BuiltQuery
+from modules.backend.app.services.warehouse_query_builder import (
+    BuiltQuery,
+    is_utc_session_offset,
+)
 from modules.backend.app.warehouse.deadlines import Deadline, Sleeper
 from modules.backend.app.warehouse.egress import (
     SNOWFLAKE_ACCOUNT,
@@ -140,8 +153,6 @@ SESSION_PARAMETERS: Final = {
     "timezone": "UTC",
     "query_tag": "experimently-analysis",
 }
-#: The session offset every analysis statement must report.
-UTC_OFFSET: Final = "+00:00"
 #: Generated keys, and the smallest stored key accepted.
 RSA_KEY_BITS: Final = 2048
 #: Waits between status polls, in order; the last one repeats.
@@ -168,6 +179,9 @@ _HANDLE: Final = re.compile(
     r"[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}"
 )
 _COLUMN_NAME: Final = re.compile(r"[A-Za-z_][A-Za-z0-9_$]{0,254}")
+#: A result column's name: an identifier, optionally ending in one ``?``
+#: (``SHOW COLUMNS`` returns a column named ``null?``).
+_RESULT_COLUMN_NAME: Final = re.compile(r"[A-Za-z_][A-Za-z0-9_$]{0,254}\??")
 _TYPE_NAME: Final = re.compile(r"[A-Z][A-Z0-9_]{0,31}")
 
 _C = WarehouseErrorCode
@@ -466,7 +480,7 @@ def decode_result(
     names: List[str] = []
     for column in row_type:
         name = _mapping(column).get("name")
-        if not _fullmatch(_COLUMN_NAME, name) or name.lower() in names:
+        if not _fullmatch(_RESULT_COLUMN_NAME, name) or name.lower() in names:
             raise _invalid()
         names.append(name.lower())
     partitions = meta.get("partitionInfo", [{}])
@@ -770,7 +784,7 @@ class SnowflakeAdapter:
     @staticmethod
     def _check_utc(rows: List[Dict[str, Optional[str]]]) -> None:
         for row in rows:
-            if row.get("session_offset") != UTC_OFFSET:
+            if not is_utc_session_offset(row.get("session_offset")):
                 raise WarehouseError(_C.TIMEZONE_NOT_UTC, warehouse=WAREHOUSE)
 
     # -- operations ------------------------------------------------------
@@ -778,7 +792,7 @@ class SnowflakeAdapter:
     def run_query(self, query: BuiltQuery, deadline: Deadline) -> QueryResult:
         """Run and read one generated statement, within ``deadline``.
 
-        Every row must report the session offset ``+00:00``.
+        Every row must report a UTC session offset (``Z`` or ``+00:00``).
         """
         if not isinstance(query, BuiltQuery) or query.dialect != WAREHOUSE:
             raise WarehouseError(_C.INTERNAL, warehouse=WAREHOUSE)
@@ -808,7 +822,8 @@ class SnowflakeAdapter:
         return ConnectionCheck(
             role=row.get("role_name"),
             warehouse=row.get("warehouse_name"),
-            session_offset=UTC_OFFSET,
+            # The spelling Snowflake returned; _check_utc has accepted it.
+            session_offset=str(row.get("session_offset")),
         )
 
     def table_columns(

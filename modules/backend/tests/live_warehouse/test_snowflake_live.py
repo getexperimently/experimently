@@ -32,6 +32,7 @@ from modules.backend.app.services.warehouse_clients import (
 )
 from modules.backend.app.services.warehouse_query_builder import (
     SNOWFLAKE_SQL,
+    UTC_SESSION_OFFSETS,
     AnalysisWindow,
     AssignmentMapping,
     BuiltQuery,
@@ -54,7 +55,7 @@ from modules.backend.tests.live_warehouse import harness
 pytestmark = pytest.mark.warehouse_live
 
 OFFSET = SNOWFLAKE_SQL.session_offset
-#: The fallback serialisation the connector's docstring names, recorded only.
+#: The explicit 17-digit serialisation the connector's docstring names, recorded only.
 FALLBACK_SERIALISE = (
     "TO_VARCHAR(CAST(0.1 AS DOUBLE) + CAST(0.2 AS DOUBLE), 'S9.9999999999999999EE')"
 )
@@ -127,8 +128,9 @@ def _verify_spend_cap(adapter: SnowflakeAdapter, config, recorder) -> None:
             f"warehouse {name} reports resource_monitor={monitor or 'null'}, not "
             f"{config.resource_monitor}. Assign the monitor to the warehouse itself "
             "(ALTER WAREHOUSE ... SET RESOURCE_MONITOR = ...); if it is assigned and "
-            "still shows null, grant the role MONITOR on the warehouse. Nothing else "
-            "has run."
+            "still shows null, the role cannot see the monitor: run GRANT MONITOR ON "
+            f"RESOURCE MONITOR {config.resource_monitor} TO ROLE {config.role}; "
+            "(MONITOR on the warehouse alone does not show it). Nothing else has run."
         )
 
 
@@ -257,7 +259,8 @@ def test_sf_timezone(sf, recorder):
         account_timezone=account_default,
         **_statement(result),
     )
-    assert text == "2026-09-01 00:30:00 +00:00", text
+    # Snowflake writes a zero offset as Z; +00:00 is the same offset.
+    assert text in {f"2026-09-01 00:30:00 {o}" for o in UTC_SESSION_OFFSETS}, text
 
 
 def test_sf_wire_probe(sf, recorder):
