@@ -52,7 +52,7 @@ const sections = [
   {
     category: 'SDKs',
     icon: '📦',
-    description: 'MIT-licensed client libraries for web, mobile and server. Not yet on package registries; each guide shows a from-source install.',
+    description: 'MIT-licensed client libraries for web, mobile and server. The JavaScript SDK is on npm and the Python SDK is on PyPI (both beta); the others are not on package registries yet, and each guide shows a from-source install.',
     links: [
       { label: 'JavaScript SDK', href: docsUrl('sdk/javascript'), desc: 'Browser and Node.js' },
       { label: 'Python SDK', href: docsUrl('sdk-guide'), desc: 'Server-side Python integration' },
