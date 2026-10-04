@@ -12,8 +12,8 @@
 # scripts/doc_examples.py), and each page's residual counts can only fall.
 
 [meta]
-documents = 36
-exec = 177
+documents = 37
+exec = 184
 universe = [
     ".github/pull_request_template.md",
     "CHANGELOG.md",
@@ -97,6 +97,7 @@ universe = [
     "docs/getting-started/vscode-settings.md",
     "docs/guides/assign-customer-list.md",
     "docs/guides/experiment-wizard.md",
+    "docs/guides/segments.md",
     "docs/guides/user-guide.md",
     "docs/hipaa/overview.md",
     "docs/infrastructure/aurora-postgres-readme.md",
@@ -518,3 +519,10 @@ environment = "stack"
 exec = 9
 skip = 0
 expects = 11
+
+[[document]]
+path = "docs/guides/segments.md"
+environment = "stack"
+exec = 7
+skip = 0
+expects = 7

@@ -182,6 +182,10 @@ INVENTORY = {
     ("POST", f"{V1}/segments"): Audited(A.SEGMENT_CREATE),
     ("PUT", f"{V1}/segments/{{segment_id}}"): Audited(A.SEGMENT_UPDATE),
     ("DELETE", f"{V1}/segments/{{segment_id}}"): Audited(A.SEGMENT_ARCHIVE),
+    # #440: an update with reason "members added"/"members removed" and the
+    # counts only, never the ids (#221 EM C8).
+    ("POST", f"{V1}/segments/{{segment_id}}/members"): Audited(A.SEGMENT_UPDATE),
+    ("POST", f"{V1}/segments/{{segment_id}}/members/remove"): Audited(A.SEGMENT_UPDATE),
     ("POST", f"{V1}/segments/bulk-evaluate"): READ_ONLY,
     ("POST", f"{V1}/segments/{{segment_id}}/evaluate"): READ_ONLY,
     ("POST", f"{V1}/segments/{{segment_id}}/preview"): READ_ONLY,
@@ -280,7 +284,7 @@ def test_the_inventory_is_exact():
         f"unclassified: {sorted(found - set(INVENTORY))}; "
         f"gone: {sorted(set(INVENTORY) - found)}"
     )
-    assert len(INVENTORY) == 104
+    assert len(INVENTORY) == 106
 
 
 def test_every_mutating_route_is_under_backend_or_modules():
