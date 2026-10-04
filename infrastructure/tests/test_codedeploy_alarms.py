@@ -403,12 +403,18 @@ def test_flipping_the_live_group_changes_no_logical_id(stacks, environment):
     """A cdk deploy after an odd number of deployments must not replace anything
     this change added; the alarms are colour-agnostic by construction.
 
-    The templates as a whole do differ between the two (the listener's
-    security-group rule follows the live group, which predates #148), so the
-    comparison is over the resource types this change adds or touches."""
+    The templates as a whole do differ between the two: the two ``ApiPaths``
+    listener rules forward to the live group, and ``BackendService``'s
+    DependsOn follows them. Nothing else may (test_alb_egress_to_tasks.py pins
+    that exact difference). The load balancer's egress rule to the tasks used
+    to follow the live group too, and a green-pinned deploy would have
+    deleted it (#801), so the comparison includes the ingress and egress
+    rules alongside the resource types #148 added."""
     kinds = (
         "AWS::CloudWatch::Alarm",
         "AWS::CodeDeploy::DeploymentGroup",
+        "AWS::EC2::SecurityGroupEgress",
+        "AWS::EC2::SecurityGroupIngress",
         "AWS::IAM::Policy",
         "AWS::IAM::Role",
     )

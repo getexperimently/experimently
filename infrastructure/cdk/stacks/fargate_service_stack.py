@@ -635,6 +635,32 @@ class FargateServiceStack(Stack):
             **test_listener_kwargs,
         )
 
+        # Imported immutably, and this is the whole fix for the dependency
+        # cycle. Passing the ComputeStack's SecurityGroup *object* to the
+        # service made `attach_to_application_target_group` below reach back into
+        # it: CDK's ApplicationListener.registerConnectable calls
+        # `connections.allowFrom(loadBalancer, ...)`, and
+        # `determineRuleScope` puts BOTH halves of the rule pair under the
+        # initiating group -- the ECS one, in the compute stack --
+        # each referencing the ALB's group, which lives here. That
+        # is compute -> fargate, against the fargate -> compute dependency
+        # app.py already declares, and `cdk synth` has refused to complete
+        # since EP-019 first added this stack.
+        #
+        # `mutable=False` makes CDK decline to write rules onto the
+        # imported group; the rule it would have written is created
+        # explicitly below, in this stack, where it belongs.
+        #
+        # A local rather than inline in the service, so the egress rule below
+        # can name the same peer object. The construct id and path are
+        # unchanged, so every logical id derived from it is unchanged too.
+        imported_ecs_sg = ec2.SecurityGroup.from_security_group_id(
+            self,
+            "ImportedEcsSecurityGroup",
+            ecs_security_group.security_group_id,
+            mutable=False,
+        )
+
         # --- ECS Fargate Service (CodeDeploy deployment controller) ---
         # Using CODE_DEPLOY controller disables rolling updates managed by ECS
         # and hands deployment control entirely to CodeDeploy, enabling the
@@ -649,29 +675,7 @@ class FargateServiceStack(Stack):
             desired_count=api_desired_count,
             min_healthy_percent=100,
             max_healthy_percent=200,
-            # Imported immutably, and this is the whole fix for the dependency
-            # cycle. Passing the ComputeStack's SecurityGroup *object* here
-            # made `attach_to_application_target_group` below reach back into
-            # it: CDK's ApplicationListener.registerConnectable calls
-            # `connections.allowFrom(loadBalancer, ...)`, and
-            # `determineRuleScope` puts BOTH halves of the rule pair under the
-            # initiating security group -- the ECS one, in the compute stack --
-            # each referencing the ALB's security group, which lives here. That
-            # is compute -> fargate, against the fargate -> compute dependency
-            # app.py already declares, and `cdk synth` has refused to complete
-            # since EP-019 first added this stack.
-            #
-            # `mutable=False` makes CDK decline to write rules onto the
-            # imported group; the rule it would have written is created
-            # explicitly below, in this stack, where it belongs.
-            security_groups=[
-                ec2.SecurityGroup.from_security_group_id(
-                    self,
-                    "ImportedEcsSecurityGroup",
-                    ecs_security_group.security_group_id,
-                    mutable=False,
-                )
-            ],
+            security_groups=[imported_ecs_sg],
             vpc_subnets=ec2.SubnetSelection(
                 subnet_type=ec2.SubnetType.PRIVATE_WITH_EGRESS
             ),
@@ -689,13 +693,14 @@ class FargateServiceStack(Stack):
         self.fargate_service.attach_to_application_target_group(self.blue_target_group)
 
         # The ingress CDK would have added implicitly, written explicitly and on
-        # this side of the stack boundary. With the security group imported
+        # this side of the stack boundary. With the group imported
         # `mutable=False` above, CDK silently declines to create this rule --
-        # no warning, no annotation -- and the service would still be reachable
-        # only because `compute_stack.py` opens 0.0.0.0/0 on 8000. That is a
-        # rule nobody should rely on, and tightening it later would take the
-        # load balancer down with it. So the real rule is stated here: this ALB,
-        # to the task port, and nothing else.
+        # no warning, no annotation. `compute_stack.py` gives the ECS group no
+        # ingress of its own (its old 0.0.0.0/0 rule on 8000 was removed), so
+        # without this nothing lets the load balancer in: every `/api/v1` and
+        # `/health` request through it fails while the dashboard at `/` keeps
+        # working. So the real rule is stated here: this ALB, to the task
+        # port, and nothing else.
         ec2.CfnSecurityGroupIngress(
             self,
             "AlbToTasksIngress",
@@ -707,6 +712,39 @@ class FargateServiceStack(Stack):
                 0
             ].security_group_id,
             description="Load balancer to target",
+        )
+
+        # The other half of that pair: the load balancer's own egress to the
+        # task port. Its group has no allow-all outbound rule, so without this
+        # the ALB cannot open a connection to the tasks at all (#801).
+        #
+        # Explicit because the implicit one is not always there.
+        # `attach_to_application_target_group` above writes it only through
+        # the blue target group's listener, and the blue group sits behind a
+        # listener rule only while `api_live_target_group` is blue. A synth
+        # with green live dropped the rule, and a green-pinned `cdk diff`
+        # against staging planned to destroy it.
+        #
+        # Why this call and not a hand-written CfnSecurityGroupEgress: CDK
+        # derives the rule's construct id from the peer's uniqueId and the
+        # port only (`to <peer>:8000`, under the ALB's group), and skips a
+        # second rule with the same id regardless of its description. So
+        # naming the same `imported_ecs_sg` object yields the logical id the
+        # deployed stacks already carry. On blue, the implicit rule from
+        # `attach_to_application_target_group` runs first and this call is
+        # the one skipped; on green this call writes it. A resource under a
+        # new logical id would instead sit beside the deployed rule on blue,
+        # and be created before the old one is removed on a deployed stack
+        # (expected to fail as a duplicate; not run, nothing here deploys).
+        #
+        # Because the skip is by id and not by content, the description has
+        # to be the literal "Load balancer to target" -- the implicit rule's
+        # -- or the rule's properties would change with the live colour.
+        # infrastructure/tests/test_alb_egress_to_tasks.py pins the logical
+        # id, the properties and the description for every environment,
+        # profile and colour.
+        self.alb.connections.allow_to(
+            imported_ecs_sg, ec2.Port.tcp(8000), "Load balancer to target"
         )
 
         # The tasks to Aurora, on the same pattern as the rule above and

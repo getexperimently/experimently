@@ -392,12 +392,14 @@ class TestTheAppActuallySynthesises:
         explicit ``CfnSecurityGroupIngress`` in ``fargate_service_stack.py``
         puts it back.
 
-        Delete that construct and everything still synthesises, every other
-        test here still passes, and the service still answers -- because
-        ``compute_stack.py`` opens 0.0.0.0/0 on 8000 (see #175's neighbourhood).
-        The day that rule is tightened, the load balancer goes dark.  So the
-        rule is asserted here rather than left to be inferred from a green
-        synth.
+        Delete that construct and everything still synthesises and every
+        other test here still passes, but nothing lets the load balancer in:
+        ``compute_stack.py`` no longer opens 0.0.0.0/0 on 8000, so every
+        ``/api/v1`` and ``/health`` request through the load balancer fails
+        while the dashboard at ``/`` keeps working.  So the rule is asserted
+        here rather than left to be inferred from a green synth.  Its egress
+        half, on the load balancer's group, is pinned for every environment,
+        profile and live colour by ``test_alb_egress_to_tasks.py`` (#801).
         """
         with _app_environment(CDK_DIR):
             namespace = runpy.run_path(str(CDK_DIR / "app.py"), run_name="__main__")
