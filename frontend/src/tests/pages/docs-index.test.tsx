@@ -40,14 +40,22 @@ describe('/docs hub', () => {
 });
 
 /**
- * Two hub entries describe methods that are not usable today: CUPED reduces
- * almost no variance (#217) and the post-stratification route answers 501
- * (#577). Each entry has to say so, so each must contain the word "not".
- * Located by its link label; the description is in the same anchor.
+ * A hub entry for a method that is not usable today has to say so: the
+ * post-stratification route answers 501 (#577), so its entry must contain the
+ * word "not". CUPED left this list when it began reading each user's own
+ * history (#217); its entry now describes what it does. Located by the link
+ * label; the description is in the same anchor.
  */
 describe('/docs hub entries for methods that do not work yet', () => {
+  it('the CUPED entry describes the method, not a defect (#217)', () => {
+    const { getAllByRole } = render(<DocsIndex />);
+    const links = getAllByRole('link').filter((a) => /^CUPED/.test(a.textContent ?? ''));
+    expect(links).toHaveLength(1);
+    expect(links[0].textContent ?? '').toMatch(/pre-experiment events/i);
+    expect(links[0].textContent ?? '').not.toMatch(/\bnot\b|\bbeta\b/i);
+  });
+
   it.each([
-    ['CUPED', /^CUPED/],
     ['Post-Stratification', /^Post-Stratification/],
   ])('the %s entry says it is not available', (_name, label) => {
     const { getAllByRole } = render(<DocsIndex />);

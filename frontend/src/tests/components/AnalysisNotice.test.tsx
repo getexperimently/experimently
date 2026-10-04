@@ -3,38 +3,40 @@ import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { AnalysisNotice } from '@/components/results/shared/AnalysisNotice';
 
-const CUPED_NOTICE =
-  'Beta: the covariate is not yet a pre-experiment metric, so ' +
-  'variance_reduction_pct is close to 0 and the adjusted estimate is ' +
-  'close to the unadjusted one. ' +
-  'https://github.com/getexperimently/experimently/issues/217';
+// The interaction analysis's notice, as the API sends it (#219).
+const INTERACTIONS_NOTICE =
+  "Beta: only the overlap between the two experiments' users is measured. " +
+  'The interaction, novelty and SUTVA analyses are not computed yet, so ' +
+  'interaction_result, novelty_result and sutva_result are null and ' +
+  'overall_risk reflects the overlap alone. ' +
+  'https://github.com/getexperimently/experimently/issues/219';
 
 describe('AnalysisNotice', () => {
   it('renders a Beta label, the notice text and the issue link when beta', () => {
-    render(<AnalysisNotice status="beta" notice={CUPED_NOTICE} />);
+    render(<AnalysisNotice status="beta" notice={INTERACTIONS_NOTICE} />);
 
     const region = screen.getByRole('region', { name: /beta/i });
     // The label is text, not colour alone.
     expect(within(region).getByTestId('analysis-notice-label')).toHaveTextContent(/^Beta$/);
-    expect(region).toHaveTextContent(/the covariate is not yet a pre-experiment metric/i);
+    expect(region).toHaveTextContent(/only the overlap between the two experiments' users is measured/i);
     // The "Beta:" prefix is not repeated after the label.
     expect(screen.getByTestId('analysis-notice-text').textContent).not.toMatch(/^Beta:/);
 
-    const link = within(region).getByRole('link', { name: 'issue #217' });
+    const link = within(region).getByRole('link', { name: 'issue #219' });
     expect(link).toHaveAttribute(
       'href',
-      'https://github.com/getexperimently/experimently/issues/217'
+      'https://github.com/getexperimently/experimently/issues/219'
     );
     expect(link).toHaveAttribute('rel', expect.stringContaining('noopener'));
   });
 
   it('is not an alert, and its link is reachable by keyboard', async () => {
-    render(<AnalysisNotice status="beta" notice={CUPED_NOTICE} />);
+    render(<AnalysisNotice status="beta" notice={INTERACTIONS_NOTICE} />);
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
     expect(screen.getByTestId('analysis-notice')).not.toHaveAttribute('aria-live');
 
     await userEvent.tab();
-    expect(screen.getByRole('link', { name: 'issue #217' })).toHaveFocus();
+    expect(screen.getByRole('link', { name: 'issue #219' })).toHaveFocus();
   });
 
   it('keeps text that follows the issue link', () => {

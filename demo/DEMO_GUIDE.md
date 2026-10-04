@@ -59,7 +59,7 @@ and runs a traffic simulator against it so the dashboards fill up while you talk
 - On **/products** change nothing — explain the sort order is a **multi-armed bandit** (`shoplab_plp_sort`): Thompson Sampling
   moves traffic toward the algorithm with the best click rate. Click a product.
 - On the product page the **buy button** is one of four multivariate treatments (`shoplab_pdp_buy_button`). Add to cart.
-- **/checkout** is a 3-step vs one-page A/B test (configured for CUPED, which is beta, #217). Place the order → `purchase` with the order value.
+- **/checkout** is a 3-step vs one-page A/B test (configured for CUPED; its new visitors have no history, so it adjusts almost nothing). Place the order → `purchase` with the order value.
 - **/search** shows a gradual-rollout flag (`shoplab_new_search`, 10% → 50% → 100%) — press **New visitor** in the panel a
   few times to land in the 10% and see the "New search ✨" engine.
 - Switch to the dashboard (http://localhost:3100/experiments): open **shoplab_hero_banner** — results are moving because
@@ -163,8 +163,9 @@ See `demo/streampulse/README.md`.
 - The dashboard has no Bayesian or CUPED tab. The Bayesian analysis is in the API
   (`GET /api/v1/results/{id}/bayesian`, see `docs/api/bayesian.md`); show it from http://localhost:8000/api/v1/docs if
   the audience asks.
-  - Do not present CUPED as a variance reduction: it is beta, and its covariate is not yet a pre-experiment metric,
-    so it removes almost no variance (#217).
+  - CUPED is in the API too (`GET /api/v1/results/{id}/cuped`). On ShopLab's checkout it adjusts almost nothing,
+    because the simulator's visitors are new and have no history; the Quick Start's `checkout_button_color` has
+    history and shows the reduction (see `docs/api/cuped.md`).
 
 **Key talking points:**
 - Multiple statistical methods in one platform (frequentist + sequential in the dashboard, Bayesian in the API)

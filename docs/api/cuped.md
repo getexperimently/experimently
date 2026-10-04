@@ -1,17 +1,16 @@
 # CUPED Variance Reduction
 
-**Beta: not yet a pre-experiment covariate.** In this release the endpoint uses each
-user's position in the order of assignment as the covariate, not a pre-experiment metric,
-so it removes almost no variance: `variance_reduction_pct` is close to 0 and `cuped`
-gives the same numbers as `winsorization`. Responses say so in `analysis_status` and
-`analysis_notice`, and the route is marked `x-stability: beta` in the OpenAPI document
-([#217](https://github.com/getexperimently/experimently/issues/217)). The method `none`
-applies no adjustment at all: `theta` is `0` and the estimate is the unadjusted one.
+**Changed in 0.20.0.** CUPED now adjusts for each user's own events in the
+`covariate_lookback_days` before they were assigned. Until 0.19.0 it used each user's
+position in the order of assignment, which removed almost no variance, so CUPED numbers for
+experiments set to `cuped` or `cuped_plus` change. Every treatment is now reported, not only
+the first, at the experiment's `confidence_level` and with its `correction_method`.
 
-CUPED (Controlled-experiment Using Pre-Experiment Data) reduces the variance of metric
-estimates by adjusting for each user's pre-experiment behaviour. How much it removes
-depends on how well the covariate predicts the outcome. The method below describes what
-CUPED does; the response shape is the one the API returns today.
+CUPED (Controlled-experiment Using Pre-Experiment Data) narrows the interval around a
+treatment effect by adjusting for what each user did before the experiment. How much it
+narrows depends on how well that history predicts the outcome. The endpoint is
+`GET /api/v1/results/{experiment_id}/cuped`; the dashboard and `GET /results/{id}` show the
+unadjusted numbers.
 
 Reference: Deng, Xu, Kohavi & Walker — *Improving the sensitivity of online controlled experiments by utilizing pre-experiment data* (WSDM 2013).
 
@@ -19,39 +18,67 @@ Reference: Deng, Xu, Kohavi & Walker — *Improving the sensitivity of online co
 
 ## How It Works
 
-CUPED adjusts each user's observed metric by subtracting a term proportional to their pre-experiment value:
+For each conversion metric, the outcome `Y` of a user is 1 if they converted after
+assignment (counted exactly as `GET /results/{id}` counts them) and 0 otherwise. The
+covariate `X` is 1 if the same user sent the metric's event in the `covariate_lookback_days`
+before their assignment, and 0 if they did not. A user with no history stays in the
+analysis with `X = 0`.
+
+Each arm's adjusted conversion rate is:
 
 ```text
-Y_cuped = Y - θ × (X - E[X])
+Y_adjusted = mean(Y) - θ × (mean(X) - overall mean(X))
 ```
 
 Where:
-- `Y` = observed metric (e.g. revenue in the experiment window)
-- `X` = pre-experiment covariate (e.g. revenue in the 2 weeks before experiment)
-- `θ` = OLS coefficient (`Cov(Y, X) / Var(X)`) estimated from the control group
-- `E[X]` = population mean of the covariate
+- `θ` is the slope of `Y` on `X`, pooled within arms over every arm of the experiment: the
+  `x` coefficient of the regression `Y ~ arm + X`
+- `overall mean(X)` is the share of all assigned users with history, so the adjusted rates
+  stay on the conversion-rate scale
 
-The adjustment removes the variance explained by `X`, leaving a lower-noise estimate of the treatment effect.
+The adjusted effect is the treatment's adjusted rate minus the control's. Its variance is
+each arm's residual variance over its size, so the more of the outcome the history
+explains, the narrower the interval.
 
-### Winsorization
+What counts as history, per user:
 
-Extreme outliers can inflate variance and destabilize `θ`. With the `winsorization`
-method, values above `winsorization_percentile` are clipped to that percentile before the
-effect is computed.
+- the event is the metric's own `event_name` (or that of `covariate_metric_id`, below),
+  matched the way results match conversions: an experiment-view row never counts;
+- it happened in `[assigned_at − covariate_lookback_days, assigned_at)`: an event at the
+  moment of assignment is not history;
+- it can carry any experiment key, any flag key, or none. One event is enough; a user with
+  three copies of the same purchase still has `X = 1`;
+- **History counts only if the server received it before the user was assigned. Send
+  history before you start the experiment. History backfilled after the start is ignored.**
 
 ---
 
-## Choosing the method
+## Sending pre-experiment history
 
-The method is part of the experiment, in its `variance_reduction_config`, set when you
-create it (`POST /api/v1/experiments/`) or change it (`PUT /api/v1/experiments/{id}`):
+Send each user's past events to `POST /api/v1/tracking/track`, or 100 at a time to
+`POST /api/v1/tracking/batch`, **without** an `experiment_key` or a `feature_flag_key`. Such
+an event is stored as history: it counts in no experiment's results, only as CUPED history.
+For each event:
 
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `method` | string | `none` | `none`, `cuped`, `cuped_plus` or `winsorization` |
-| `covariate_metric_id` | string | `null` | The pre-experiment metric to use as the covariate (not read yet, #217) |
-| `covariate_lookback_days` | int | `7` | Days of pre-experiment data, 1–90 (not read yet, #217) |
-| `winsorization_percentile` | float | `99.0` | The percentile above which values are clipped, 50–100 |
+- `user_id` is exactly the id the user will be assigned with (it is case-sensitive);
+- `event_type` is the metric's `event_name`, for example `checkout_completed`;
+- `timestamp` is when the event happened, in ISO 8601 (no offset means UTC). Without it the
+  event is dated when it is received.
+
+Send events from at least `covariate_lookback_days` before the planned start; anything older
+is never read. The batch route shares the SDK rate limit
+(`SDK_RATE_LIMIT_PER_MINUTE`, 6,000 requests a minute per IP by default) and answers `429`
+with `Retry-After` above it.
+
+Events during the experiment still need the experiment's key, as they always have: an event
+without one counts in no experiment's results.
+
+The SDKs' `track()` without a key sends one event for each experiment and flag cached for the
+user, and those tagged events count as history for a later experiment. **An SDK user with
+nothing cached sends no history**, which is usual before a user's first assignment. Each
+result's `covariate_coverage_pct` shows how many users had history. To give every user
+history, send it from your server: the Python SDK's `track_batch` passes key-less entries
+through as they are, and any HTTP client can call the routes above.
 
 Run the commands on this page in one terminal, in order, against the stack from the
 [Quick Start](../getting-started/quick-start.md). Each uses the shell variables set by the
@@ -66,26 +93,67 @@ curl -s localhost:8000/api/v1/auth/me -H "Authorization: Bearer $TOKEN" | jq .ro
 ```
 <!-- expect: "ADMIN" -->
 
-It prints `"ADMIN"`. The examples use the demo data's `checkout_button_color` experiment.
-This saves its id in `$EXP_ID`, and sets its method to `winsorization` at the 99th
-percentile. The collection URL ends with a slash, `/api/v1/experiments/`; without it the
-API answers `307`, which `curl` doesn't follow:
+It prints `"ADMIN"`. The examples use the demo data's `checkout_button_color` experiment,
+whose primary metric counts `checkout_completed` events. The demo data already gives about
+one user in ten a `checkout_completed` before their assignment. Sending an event takes an
+API key, which this saves in `$KEY`, with the experiment's id in `$EXP_ID`; then it sends one
+history event with no key. The collection URL ends with a slash, `/api/v1/experiments/`;
+without it the API answers `307`, which `curl` doesn't follow:
 
 ```{.bash exec}
+KEY=$(curl -s -X POST localhost:8000/api/v1/api-keys \
+  -H "Authorization: Bearer $TOKEN" \
+  -H 'content-type: application/json' \
+  -d '{"name": "CUPED history"}' | jq -r .key)
 EXP_ID=$(curl -s localhost:8000/api/v1/experiments/ \
   -H "Authorization: Bearer $TOKEN" \
   | jq -r '.items[] | select(.key == "checkout_button_color") | .id')
 
+curl -s -X POST localhost:8000/api/v1/tracking/track \
+  -H "X-API-Key: $KEY" \
+  -H 'content-type: application/json' \
+  -d '{"event_type": "checkout_completed", "user_id": "returning-shopper-1", "timestamp": "2026-09-01T09:30:00Z"}' \
+  | jq '{event_name, experiment_id}'
+```
+<!-- expect: "experiment_id": null -->
+
+It prints `"experiment_id": null`: the event is stored as history, tagged with no
+experiment.
+
+---
+
+## Choosing the method
+
+The method is part of the experiment, in its `variance_reduction_config`, set when you
+create it (`POST /api/v1/experiments/`) or change it (`PUT /api/v1/experiments/{id}`):
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `method` | string | `none` | `none`, `cuped`, `cuped_plus` or `winsorization` |
+| `covariate_metric_id` | string | `null` | The id of one of the experiment's metrics whose `event_name` is the history to read. By default each metric's own `event_name` |
+| `covariate_lookback_days` | int | `7` | Days of history before each user's assignment, 1–90 |
+| `winsorization_percentile` | float | `99.0` | The percentile above which values are clipped, 50–100 |
+
+- `none` applies no adjustment: `theta` is `0` and the numbers are the unadjusted ones.
+- `cuped` adjusts as described above.
+- `cuped_plus` is currently computed as `cuped`: the response's top-level `method` says
+  `cuped_plus`, and each row's `method` says `cuped`.
+- `winsorization` clips values above a percentile, which only means something for a mean
+  metric (revenue, say). On a conversion metric it would turn every conversion into 0
+  whenever fewer than 1% of users convert, so a conversion metric is listed with
+  `unavailable_reason: "winsorization_needs_mean_metric"` instead.
+
+This sets the demo experiment's method to `cuped` with a 7-day lookback:
+
+```{.bash exec}
 curl -s -o /dev/null -w '%{http_code}\n' -X PUT localhost:8000/api/v1/experiments/$EXP_ID \
   -H "Authorization: Bearer $TOKEN" \
   -H 'content-type: application/json' \
-  -d '{"variance_reduction_config": {"method": "winsorization", "winsorization_percentile": 99}}'
+  -d '{"variance_reduction_config": {"method": "cuped", "covariate_lookback_days": 7}}'
 ```
 <!-- expect: 200 -->
 
-It prints `200`. The experiment's own response reports `variance_reduction_config` as
-`null` whatever is stored ([#197](https://github.com/getexperimently/experimently/issues/197)):
-the results below say which method was applied.
+It prints `200`.
 
 ---
 
@@ -93,51 +161,77 @@ the results below say which method was applied.
 
 ### GET /api/v1/results/{experiment_id}/cuped
 
-Returns the adjusted treatment effect for each of the experiment's metrics, comparing the
-control with the first treatment variant. It takes no query parameters: the method comes
-from the experiment. Its intervals are at 95% whatever the experiment's stored
-`confidence_level`, and it applies no multiple-comparison correction
-([How results are judged](endpoints.md#how-results-are-judged)). Any logged-in user can read it; an experiment that doesn't exist
-answers `404`.
+Returns one comparison per conversion metric and treatment, each against the control. It
+takes no query parameters: the method comes from the experiment, the interval uses the
+experiment's stored `confidence_level`, and `corrected_p_value` applies its stored
+`correction_method` across the metric's treatments
+([How results are judged](endpoints.md#how-results-are-judged)). Like the main results, the
+view is fixed-horizon: do not stop an experiment the first time it looks significant. Any
+logged-in user can read it; an experiment that doesn't exist answers `404`.
 
 ```{.bash exec}
 curl -s localhost:8000/api/v1/results/$EXP_ID/cuped \
   -H "Authorization: Bearer $TOKEN" \
-  | jq '{analysis_status, method, metrics: [.metrics[] | {metric_name, method, adjusted_effect, adjusted_p_value}]}'
+  | jq '{analysis_status, method, metrics: [.metrics[] | {metric_name, variant_name, covariate_coverage_pct, variance_reduction_pct, adjusted_effect, corrected_p_value}]}'
 ```
-<!-- expect: "analysis_status": "beta" -->
-<!-- expect: "method": "winsorization" -->
-<!-- expect: "metric_name": "Checkout Completion" -->
+<!-- expect: "analysis_status": "ga" -->
+<!-- expect: "method": "cuped" -->
+<!-- expect: "variant_name": "green_button" -->
 
-It prints `"analysis_status": "beta"`, `"method": "winsorization"` and the adjusted
-effect on the experiment's `Checkout Completion` metric. The full response:
+It prints `"analysis_status": "ga"`, `"method": "cuped"` and one comparison, for
+`green_button` against `blue_button`. This checks that the history narrowed the interval:
+
+```{.bash exec}
+curl -s localhost:8000/api/v1/results/$EXP_ID/cuped \
+  -H "Authorization: Bearer $TOKEN" \
+  | jq '.metrics[0] | .variance_reduction_pct > 0 and .covariate_coverage_pct > 0'
+```
+<!-- expect: true -->
+
+It prints `true`. On the demo data about 10% of users have history and the variance of the
+effect falls by about 13%. The full response:
 
 ```json
 {
-  "experiment_id": "f39b72eb-7173-49f7-bbd1-9fc01d381778",
-  "method": "winsorization",
+  "experiment_id": "cc748188-56cb-4068-ae84-bd69d1c4a64e",
+  "method": "cuped",
+  "confidence_level": 0.95,
+  "correction_method": "benjamini_hochberg",
+  "covariate_lookback_days": 7,
   "metrics": [
     {
-      "metric_id": "98f7219e-fd54-4acc-96ee-4b76892af3b1",
+      "metric_id": "ca34ed90-3fda-402d-9cb0-9511e69574a8",
       "metric_name": "Checkout Completion",
-      "adjusted_control_mean": 0.0797,
-      "adjusted_treatment_mean": 0.0891,
-      "adjusted_effect": 0.0094,
-      "adjusted_se": 0.0032,
-      "adjusted_p_value": 0.0035,
-      "adjusted_ci_lower": 0.0031,
-      "adjusted_ci_upper": 0.0156,
-      "variance_reduction_pct": 0.0002,
-      "theta": 8.7e-08,
-      "method": "winsorization"
+      "variant_id": "da92fe7a-e520-4911-a3da-2aa644bc01fc",
+      "variant_name": "green_button",
+      "control_variant_id": "31986f72-fe9c-4140-9b55-e9408717376d",
+      "control_sample_size": 15000,
+      "treatment_sample_size": 15000,
+      "adjusted_control_mean": 0.0799,
+      "adjusted_treatment_mean": 0.0885,
+      "adjusted_effect": 0.0086,
+      "adjusted_se": 0.0030,
+      "adjusted_p_value": 0.0042,
+      "adjusted_ci_lower": 0.0027,
+      "adjusted_ci_upper": 0.0145,
+      "unadjusted_effect": 0.0091,
+      "unadjusted_se": 0.0032,
+      "corrected_p_value": 0.0042,
+      "is_significant": true,
+      "variance_reduction_pct": 12.69,
+      "theta": 0.331,
+      "covariate_event_name": "checkout_completed",
+      "covariate_coverage_pct": 9.89,
+      "unavailable_reason": null,
+      "method": "cuped"
     }
   ],
-  "computed_at": "2026-09-26T22:54:12.480010+00:00",
+  "computed_at": "2026-10-04T14:54:13.935435+00:00",
   "seed": null,
   "n_samples": null,
-  "engine_version": "1.2.0",
-  "analysis_status": "beta",
-  "analysis_notice": "Beta: the covariate is not yet a pre-experiment metric, so variance_reduction_pct is close to 0 and the adjusted estimate is close to the unadjusted one. https://github.com/getexperimently/experimently/issues/217"
+  "engine_version": "1.3.0",
+  "analysis_status": "ga",
+  "analysis_notice": null
 }
 ```
 
@@ -145,31 +239,55 @@ effect on the experiment's `Checkout Completion` metric. The full response:
 
 | Field | Description |
 |-------|-------------|
-| `adjusted_effect` | Adjusted treatment effect (treatment mean − control mean) |
-| `adjusted_p_value` | Two-tailed p-value from a z-test on the adjusted effect |
-| `adjusted_ci_lower`, `adjusted_ci_upper` | 95% confidence interval for the adjusted effect |
-| `variance_reduction_pct` | % of control variance removed by the adjustment. Higher = more sensitive test |
-| `theta` | OLS coefficient. Values near 0 mean the covariate is a poor predictor; exactly `0` for the method `none` |
-| `analysis_status` | `beta` in this release: the covariate is not yet a pre-experiment metric. `ga` once it is |
-| `analysis_notice` | Present exactly when `analysis_status` is `beta`: what is not computed as described yet, with the issue |
+| `method` (top level) | The method the experiment is configured with |
+| `confidence_level`, `correction_method` | The experiment's stored settings the numbers use |
+| `covariate_lookback_days` | Days of history before each assignment that were read |
+| `variant_id`, `variant_name`, `control_variant_id` | The treatment, and the control it is compared with |
+| `control_sample_size`, `treatment_sample_size` | Users assigned to each, the same as `GET /results/{id}` |
+| `adjusted_control_mean`, `adjusted_treatment_mean` | The two conversion rates, adjusted for history |
+| `adjusted_effect`, `adjusted_se` | Treatment minus control, adjusted, and its standard error |
+| `adjusted_ci_lower`, `adjusted_ci_upper` | The adjusted effect's interval at `confidence_level` |
+| `adjusted_p_value` | Two-sided p-value of the adjusted effect, before any correction |
+| `corrected_p_value` | `adjusted_p_value` after `correction_method`, across the metric's treatments; `null` for `none` |
+| `is_significant` | `corrected_p_value` (or `adjusted_p_value` when there is none) is below `1 − confidence_level` |
+| `unadjusted_effect`, `unadjusted_se` | The same comparison without CUPED |
+| `variance_reduction_pct` | `100 × (1 − adjusted variance / unadjusted variance)` of the effect. At *r* % the interval is √(1 − *r*/100) as wide: 36% means 80% as wide, worth about 1.56 times the users |
+| `theta` | The slope of the outcome on history, pooled within arms. `0` when no user (or every user) has history, and for `none` |
+| `covariate_event_name` | The event read as history; `null` when none is read |
+| `covariate_coverage_pct` | Share of this comparison's users (control and treatment), 0–100, with history |
+| `unavailable_reason` | `null`, or why the comparison has no numbers (below) |
+| `method` (each row) | The method actually computed: `cuped` when `cuped_plus` is configured |
+| `analysis_status` | `ga`: the numbers are computed as described. `analysis_notice` is `null` |
 
----
+In `GET /results/{id}`, `adjusted_p_value` is the p-value after the multiple-comparison
+correction; here it is the p-value of the CUPED-adjusted effect before any correction, and
+the corrected one is `corrected_p_value`.
 
-## Choosing a Covariate
+Three things can surprise:
 
-The covariate `X` should be:
-- **Measured before the experiment starts** — prevents contamination
-- **Correlated with the outcome metric** — higher correlation → more variance reduction
-- **Available for all users** — users without covariate data are excluded from CUPED analysis
+- **`variance_reduction_pct` can be negative.** `θ` is one slope pooled over every arm. If
+  an arm's history relates to its outcome differently from the others' (a small arm, say),
+  its adjusted variance can come out larger than its unadjusted one. The estimate is still
+  valid; CUPED simply did not help that comparison.
+- **Adding an arm changes the other arms' adjusted effects.** Because `θ` is pooled over
+  every arm, a new treatment's users move `θ`, and with it every comparison's adjusted
+  numbers. The unadjusted numbers do not move.
+- **Coverage near 0 gives the unadjusted numbers.** With no history, `θ` is `0`,
+  `variance_reduction_pct` is `0` and the adjusted effect equals the unadjusted one. That is
+  not an error.
 
-Good covariate examples:
+**`unavailable_reason`**
 
-| Outcome Metric | Covariate |
-|---------------|-----------|
-| Revenue in experiment window | Revenue in prior 2–4 weeks |
-| Session duration | Average session duration (pre-experiment) |
-| Conversion rate | Prior conversion rate |
-| Click-through rate | Prior CTR on similar content |
+| Value | Meaning |
+|-------|---------|
+| `not_a_proportion_metric` | The metric is not a conversion metric; this view computes conversion metrics only |
+| `winsorization_needs_mean_metric` | The method is `winsorization`, which this view does not apply to a conversion metric |
+| `fewer_than_2_units` | The control or this treatment has fewer than 2 assigned users |
+| `no_variation` | Neither arm's outcome varies (in each arm nobody, or everybody, converted): there is no standard error to compute |
+| `no_control_variant` / `no_treatment_variant` | The experiment has no control, or no treatment; the row has no variant |
+| `covariate_metric_not_found` | `covariate_metric_id` is not one of the experiment's metrics (after a `PUT` replaced them, say) |
+| `metric_has_no_event_name` | The metric whose event is the history has no `event_name` |
+| `result_invalid` | The counts were ones no sample could produce |
 
 ---
 
@@ -177,10 +295,11 @@ Good covariate examples:
 
 | Value | Interpretation |
 |-------|---------------|
-| < 10% | Covariate is a weak predictor. Little benefit from CUPED. |
+| < 0 | CUPED did not help this comparison (see above); use the unadjusted numbers if you prefer |
+| < 10% | History is a weak predictor. Little benefit from CUPED. |
 | 10–30% | Moderate benefit. Worth using. |
 | 30–60% | Strong benefit. Experiment is significantly more sensitive. |
-| > 60% | Excellent covariate. Consider whether the experiment and covariate are too correlated (check for data leakage). |
+| > 60% | Unusual for user behaviour; check that the history events come from before assignment. |
 
 ---
 
