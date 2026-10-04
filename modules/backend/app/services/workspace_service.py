@@ -1,28 +1,26 @@
 """
 WorkspaceService for EP-057: Multi-Tenant Team Workspaces.
 
-Handles all business logic for workspace CRUD, membership management,
-invite lifecycle, and workspace-scoped API key management.
+Handles all business logic for workspace CRUD, membership management and
+the invite lifecycle. Workspaces have no plan and no limits, and issue no API
+keys.
 """
 
-import hashlib
 import re
 import secrets
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import List, Optional, Tuple
+from typing import List, Optional
 
 from sqlalchemy.orm import Session
 
 from modules.backend.app.models.workspace import (
     ROLE_HIERARCHY,
     Workspace,
-    WorkspaceAPIKey,
     WorkspaceInvite,
     WorkspaceMember,
     WorkspaceMemberRole,
-    WorkspacePlan,
 )
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -89,14 +87,6 @@ class InviteEmailMismatch(WorkspaceError):
 
     def __init__(self) -> None:
         super().__init__(INVITE_EMAIL_MISMATCH_MESSAGE)
-
-
-class PlanLimitExceeded(WorkspaceError):
-    """Raised when a plan resource limit would be exceeded."""
-
-
-class APIKeyNotFound(WorkspaceError):
-    """Raised when a workspace API key cannot be found."""
 
 
 def _comparable_email(value: Optional[str]) -> Optional[str]:
@@ -170,9 +160,6 @@ class WorkspaceStats:
     """Aggregated statistics for a workspace."""
 
     member_count: int
-    experiment_count: int
-    flag_count: int
-    api_key_count: int
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -192,49 +179,6 @@ def _validate_slug(slug: str) -> None:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# API key helpers
-# ─────────────────────────────────────────────────────────────────────────────
-
-_KEY_PREFIX_DISPLAY = "ep_live_"
-
-
-def _generate_api_key() -> str:
-    """Return a random workspace API key with a recognisable prefix."""
-    return f"{_KEY_PREFIX_DISPLAY}{secrets.token_hex(24)}"
-
-
-def _hash_key(plaintext: str) -> str:
-    """Return the SHA-256 hex digest of a plaintext API key."""
-    return hashlib.sha256(plaintext.encode()).hexdigest()
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Plan defaults
-# ─────────────────────────────────────────────────────────────────────────────
-
-_PLAN_LIMITS = {
-    WorkspacePlan.FREE: {
-        "max_experiments": 10,
-        "max_feature_flags": 50,
-        "max_members": 5,
-        "max_api_keys": 3,
-    },
-    WorkspacePlan.PRO: {
-        "max_experiments": 1000,
-        "max_feature_flags": 5000,
-        "max_members": 50,
-        "max_api_keys": 20,
-    },
-    WorkspacePlan.ENTERPRISE: {
-        "max_experiments": 999999,
-        "max_feature_flags": 999999,
-        "max_members": 999999,
-        "max_api_keys": 999999,
-    },
-}
-
-
-# ─────────────────────────────────────────────────────────────────────────────
 # Service
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -250,7 +194,6 @@ class WorkspaceService:
         name: str,
         slug: str,
         owner_id: uuid.UUID,
-        plan: str = "free",
         description: str = "",
     ) -> Workspace:
         """Create a new workspace and add the creator as OWNER."""
@@ -261,19 +204,11 @@ class WorkspaceService:
         if existing:
             raise WorkspaceSlugTaken(f"Slug '{slug}' is already in use.")
 
-        try:
-            plan_enum = WorkspacePlan(plan)
-        except ValueError:
-            plan_enum = WorkspacePlan.FREE
-
-        limits = _PLAN_LIMITS[plan_enum]
         workspace = Workspace(
             name=name,
             slug=slug,
             description=description,
-            plan=plan_enum,
             is_active=True,
-            **limits,
         )
         db.add(workspace)
         db.flush()  # get workspace.id before adding member
@@ -321,22 +256,13 @@ class WorkspaceService:
         workspace_id: uuid.UUID,
         data: dict,
     ) -> Workspace:
-        """Update workspace fields. Only name, description, plan are mutable."""
+        """Update workspace fields. Only name and description are mutable."""
         workspace = self.get_workspace(db, workspace_id)
 
-        allowed = {"name", "description", "plan"}
+        allowed = {"name", "description"}
         for key, value in data.items():
             if key not in allowed:
                 continue
-            if key == "plan":
-                try:
-                    value = WorkspacePlan(value)
-                    # Update limits when plan changes
-                    limits = _PLAN_LIMITS[value]
-                    for limit_key, limit_val in limits.items():
-                        setattr(workspace, limit_key, limit_val)
-                except ValueError:
-                    continue
             setattr(workspace, key, value)
 
         db.commit()
@@ -385,19 +311,11 @@ class WorkspaceService:
         role: str,
         invited_by: uuid.UUID,
     ) -> WorkspaceMember:
-        """Add an existing user as a member of the workspace."""
-        workspace = self.get_workspace(db, workspace_id)
+        """Add an existing user as a member of the workspace.
 
-        # Check plan limit
-        current_count = (
-            db.query(WorkspaceMember)
-            .filter(WorkspaceMember.workspace_id == workspace_id)
-            .count()
-        )
-        if current_count >= workspace.max_members:
-            raise PlanLimitExceeded(
-                f"Workspace has reached its member limit ({workspace.max_members})."
-            )
+        Workspaces have no member limit.
+        """
+        self.get_workspace(db, workspace_id)  # existence check
 
         # Check for existing membership
         existing = (
@@ -594,7 +512,7 @@ class WorkspaceService:
         invite.accepted_at = datetime.utcnow()
         db.flush()
 
-        # Add as member (may raise PlanLimitExceeded or AlreadyMember)
+        # Add as member (may raise AlreadyMember)
         member = self.add_member(
             db,
             workspace_id=invite.workspace_id,
@@ -604,148 +522,12 @@ class WorkspaceService:
         )
         return member
 
-    # ── API Keys ──────────────────────────────────────────────────────────────
-
-    def create_api_key(
-        self,
-        db: Session,
-        workspace_id: uuid.UUID,
-        name: str,
-        scopes: Optional[List[str]] = None,
-        expires_at: Optional[datetime] = None,
-    ) -> Tuple[WorkspaceAPIKey, str]:
-        """
-        Create a new workspace-scoped API key.
-
-        Returns (WorkspaceAPIKey, plaintext_key). The plaintext key is shown
-        exactly once — the caller must present it to the user immediately.
-        """
-        workspace = self.get_workspace(db, workspace_id)
-
-        # Check plan limit
-        active_key_count = (
-            db.query(WorkspaceAPIKey)
-            .filter(
-                WorkspaceAPIKey.workspace_id == workspace_id,
-                WorkspaceAPIKey.is_active == True,
-            )
-            .count()
-        )
-        if active_key_count >= workspace.max_api_keys:
-            raise PlanLimitExceeded(
-                f"Workspace has reached its API key limit ({workspace.max_api_keys})."
-            )
-
-        if scopes is None:
-            scopes = ["flags:read", "experiments:read", "track:write"]
-
-        plaintext = _generate_api_key()
-        key_hash = _hash_key(plaintext)
-        key_prefix = plaintext[:8]
-
-        api_key = WorkspaceAPIKey(
-            workspace_id=workspace_id,
-            name=name,
-            key_hash=key_hash,
-            key_prefix=key_prefix,
-            scopes=scopes,
-            is_active=True,
-            expires_at=expires_at,
-        )
-        db.add(api_key)
-        db.commit()
-        db.refresh(api_key)
-        return api_key, plaintext
-
-    def _get_workspace_api_key(
-        self, db: Session, workspace_id: uuid.UUID, api_key_id: uuid.UUID
-    ) -> Optional[WorkspaceAPIKey]:
-        """Return the key with this id in this workspace, or None."""
-        return (
-            db.query(WorkspaceAPIKey)
-            .filter(
-                WorkspaceAPIKey.id == api_key_id,
-                WorkspaceAPIKey.workspace_id == workspace_id,
-            )
-            .first()
-        )
-
-    def revoke_api_key(
-        self, db: Session, workspace_id: uuid.UUID, api_key_id: uuid.UUID
-    ) -> None:
-        """Deactivate a workspace API key belonging to ``workspace_id``."""
-        key = self._get_workspace_api_key(db, workspace_id, api_key_id)
-        if not key:
-            raise APIKeyNotFound(f"API key {api_key_id} not found.")
-        key.is_active = False
-        db.commit()
-
-    def rotate_api_key(
-        self, db: Session, workspace_id: uuid.UUID, api_key_id: uuid.UUID
-    ) -> Tuple[WorkspaceAPIKey, str]:
-        """
-        Rotate a workspace API key belonging to ``workspace_id``.
-
-        The old key is deactivated and a new one with the same name/scopes is
-        created. Returns (new_WorkspaceAPIKey, new_plaintext_key).
-        """
-        old_key = self._get_workspace_api_key(db, workspace_id, api_key_id)
-        if not old_key:
-            raise APIKeyNotFound(f"API key {api_key_id} not found.")
-
-        # Deactivate old key
-        old_key.is_active = False
-        db.flush()
-
-        # Create replacement key bypassing the limit check (rotation = replace not add)
-        plaintext = _generate_api_key()
-        key_hash = _hash_key(plaintext)
-        key_prefix = plaintext[:8]
-
-        new_key = WorkspaceAPIKey(
-            workspace_id=old_key.workspace_id,
-            name=old_key.name,
-            key_hash=key_hash,
-            key_prefix=key_prefix,
-            scopes=old_key.scopes,
-            is_active=True,
-            expires_at=old_key.expires_at,
-        )
-        db.add(new_key)
-        db.commit()
-        db.refresh(new_key)
-        return new_key, plaintext
-
-    def get_api_key_by_hash(
-        self, db: Session, plaintext: str
-    ) -> Optional[WorkspaceAPIKey]:
-        """Look up a workspace API key by its plaintext value (hashed internally)."""
-        key_hash = _hash_key(plaintext)
-        return (
-            db.query(WorkspaceAPIKey)
-            .filter(
-                WorkspaceAPIKey.key_hash == key_hash,
-                WorkspaceAPIKey.is_active == True,
-            )
-            .first()
-        )
-
-    def list_api_keys(
-        self, db: Session, workspace_id: uuid.UUID
-    ) -> List[WorkspaceAPIKey]:
-        """Return all API keys for a workspace (active and inactive)."""
-        return (
-            db.query(WorkspaceAPIKey)
-            .filter(WorkspaceAPIKey.workspace_id == workspace_id)
-            .all()
-        )
-
     # ── Stats ─────────────────────────────────────────────────────────────────
 
     def get_workspace_stats(
         self, db: Session, workspace_id: uuid.UUID
     ) -> WorkspaceStats:
-        """Return aggregated resource counts for the workspace."""
+        """Return the workspace's member count."""
         self.get_workspace(db, workspace_id)  # existence check
 
         member_count = (
@@ -753,44 +535,7 @@ class WorkspaceService:
             .filter(WorkspaceMember.workspace_id == workspace_id)
             .count()
         )
-        api_key_count = (
-            db.query(WorkspaceAPIKey)
-            .filter(
-                WorkspaceAPIKey.workspace_id == workspace_id,
-                WorkspaceAPIKey.is_active == True,
-            )
-            .count()
-        )
-
-        # Experiments and flags linked via workspace_id FK (may be NULL for legacy rows)
-        try:
-            from backend.app.models.experiment import Experiment
-
-            experiment_count = (
-                db.query(Experiment)
-                .filter(Experiment.workspace_id == workspace_id)
-                .count()
-            )
-        except Exception:
-            experiment_count = 0
-
-        try:
-            from backend.app.models.feature_flag import FeatureFlag
-
-            flag_count = (
-                db.query(FeatureFlag)
-                .filter(FeatureFlag.workspace_id == workspace_id)
-                .count()
-            )
-        except Exception:
-            flag_count = 0
-
-        return WorkspaceStats(
-            member_count=member_count,
-            experiment_count=experiment_count,
-            flag_count=flag_count,
-            api_key_count=api_key_count,
-        )
+        return WorkspaceStats(member_count=member_count)
 
     # ── Permissions ───────────────────────────────────────────────────────────
 

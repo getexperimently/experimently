@@ -21,7 +21,6 @@ from backend.app.models.user import User, UserRole
 from modules.backend.app.models.workspace import (
     ROLE_HIERARCHY,
     Workspace,
-    WorkspaceAPIKey,
     WorkspaceInvite,
     WorkspaceMember,
     WorkspaceMemberRole,
@@ -29,21 +28,17 @@ from modules.backend.app.models.workspace import (
 )
 from modules.backend.app.services.workspace_service import (
     AlreadyMember,
-    APIKeyNotFound,
     CannotDemoteLastOwner,
     CannotRemoveLastOwner,
     InviteAlreadyAccepted,
     InviteEmailMismatch,
     InviteExpired,
     InviteNotFound,
-    PlanLimitExceeded,
     WorkspaceMemberNotFound,
     WorkspaceNotFound,
     WorkspaceService,
     WorkspaceSlugInvalid,
     WorkspaceSlugTaken,
-    _generate_api_key,
-    _hash_key,
     invite_email_matches,
 )
 
@@ -97,7 +92,6 @@ def workspace(db_session: Session, svc: WorkspaceService, user_id: uuid.UUID):
         name=f"Test Corp {suffix}",
         slug=f"tc-{suffix}",
         owner_id=user_id,
-        plan="free",
     )
 
 
@@ -158,28 +152,6 @@ class TestCreateWorkspace:
     ):
         with pytest.raises(WorkspaceSlugInvalid):
             svc.create_workspace(db_session, "Bad", "ends-bad-", uuid.uuid4())
-
-    def test_create_workspace_pro_plan_limits(
-        self, db_session: Session, svc: WorkspaceService
-    ):
-        uid = _make_user(db_session).id
-        suffix = uuid.uuid4().hex[:8]
-        ws = svc.create_workspace(
-            db_session, "Pro Co", f"pro-{suffix}", uid, plan="pro"
-        )
-        assert ws.max_members == 50
-        assert ws.max_experiments == 1000
-
-    def test_create_workspace_free_plan_limits(
-        self, db_session: Session, svc: WorkspaceService
-    ):
-        uid = _make_user(db_session).id
-        suffix = uuid.uuid4().hex[:8]
-        ws = svc.create_workspace(
-            db_session, "Free Co", f"free-{suffix}", uid, plan="free"
-        )
-        assert ws.max_members == 5
-        assert ws.max_experiments == 10
 
     def test_create_workspace_description_optional(
         self, db_session: Session, svc: WorkspaceService
@@ -251,15 +223,6 @@ class TestUpdateWorkspace:
         assert updated.name == "New Name"
         assert updated.description == "New desc"
 
-    def test_update_workspace_plan_changes_limits(
-        self,
-        db_session: Session,
-        svc: WorkspaceService,
-        workspace: Workspace,
-    ):
-        updated = svc.update_workspace(db_session, workspace.id, {"plan": "pro"})
-        assert updated.max_members == 50
-
     def test_update_workspace_unknown_fields_ignored(
         self,
         db_session: Session,
@@ -275,6 +238,18 @@ class TestUpdateWorkspace:
         # slug is not in the allowed update list
         assert updated.slug == original_slug
         assert updated.name == "Safe Update"
+
+    def test_update_workspace_ignores_plan_and_limits(
+        self,
+        db_session: Session,
+        svc: WorkspaceService,
+        workspace: Workspace,
+    ):
+        before = (workspace.plan, workspace.max_members)
+        updated = svc.update_workspace(
+            db_session, workspace.id, {"plan": "pro", "max_members": 50}
+        )
+        assert (updated.plan, updated.max_members) == before
 
 
 class TestDeleteWorkspace:
@@ -399,21 +374,17 @@ class TestAddMember:
         with pytest.raises(AlreadyMember):
             svc.add_member(db_session, workspace.id, other_user_id, "VIEWER", user_id)
 
-    def test_cannot_exceed_max_members(
-        self, db_session: Session, svc: WorkspaceService
-    ):
+    @pytest.mark.regression
+    def test_no_member_limit(self, db_session: Session, svc: WorkspaceService):
+        """A workspace stored with the old free-plan cap (5) takes a sixth member."""
         uid = _make_user(db_session).id
         suffix = uuid.uuid4().hex[:8]
-        ws = svc.create_workspace(
-            db_session, "Limit Test", f"limit-{suffix}", uid, plan="free"
-        )
-        # free plan limit is 5 — owner already added → 4 more
-        for _ in range(4):
-            extra_uid = _make_user(db_session).id
-            svc.add_member(db_session, ws.id, extra_uid, "VIEWER", uid)
-        # 6th member should fail
-        with pytest.raises(PlanLimitExceeded):
+        ws = svc.create_workspace(db_session, "No Limit", f"nolimit-{suffix}", uid)
+        ws.max_members = 5
+        db_session.commit()
+        for _ in range(5):  # owner is member 1; this adds members 2 to 6
             svc.add_member(db_session, ws.id, _make_user(db_session).id, "VIEWER", uid)
+        assert len(svc.list_members(db_session, ws.id)) == 6
 
 
 class TestRemoveMember:
@@ -654,163 +625,6 @@ class TestInviteEmailMatches:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# API Keys
-# ─────────────────────────────────────────────────────────────────────────────
-
-
-class TestAPIKeyHelpers:
-    def test_generate_api_key_has_prefix(self):
-        key = _generate_api_key()
-        assert key.startswith("ep_live_")
-
-    def test_hash_key_is_sha256_hex(self):
-        h = _hash_key("test-key")
-        assert len(h) == 64
-        assert all(c in "0123456789abcdef" for c in h)
-
-    def test_hash_key_is_deterministic(self):
-        assert _hash_key("abc") == _hash_key("abc")
-
-    def test_hash_key_differs_for_different_inputs(self):
-        assert _hash_key("key1") != _hash_key("key2")
-
-
-class TestCreateAPIKey:
-    def test_create_api_key_returns_plaintext_once(
-        self,
-        db_session: Session,
-        svc: WorkspaceService,
-        workspace: Workspace,
-    ):
-        key_obj, plaintext = svc.create_api_key(db_session, workspace.id, "My Key")
-        assert plaintext.startswith("ep_live_")
-        assert len(plaintext) > 8
-
-    def test_create_api_key_stores_hash_not_plaintext(
-        self,
-        db_session: Session,
-        svc: WorkspaceService,
-        workspace: Workspace,
-    ):
-        key_obj, plaintext = svc.create_api_key(db_session, workspace.id, "Hash Check")
-        assert key_obj.key_hash != plaintext
-        assert key_obj.key_hash == _hash_key(plaintext)
-
-    def test_api_key_prefix_visible_but_not_full_key(
-        self,
-        db_session: Session,
-        svc: WorkspaceService,
-        workspace: Workspace,
-    ):
-        key_obj, plaintext = svc.create_api_key(
-            db_session, workspace.id, "Prefix Check"
-        )
-        assert key_obj.key_prefix == plaintext[:8]
-        assert key_obj.key_prefix != plaintext
-
-    def test_create_api_key_default_scopes(
-        self,
-        db_session: Session,
-        svc: WorkspaceService,
-        workspace: Workspace,
-    ):
-        key_obj, _ = svc.create_api_key(db_session, workspace.id, "Scoped Key")
-        assert "flags:read" in key_obj.scopes
-
-    def test_cannot_exceed_max_api_keys(
-        self, db_session: Session, svc: WorkspaceService
-    ):
-        uid = _make_user(db_session).id
-        suffix = uuid.uuid4().hex[:8]
-        ws = svc.create_workspace(
-            db_session, "Key Limit", f"keylim-{suffix}", uid, plan="free"
-        )
-        for i in range(3):  # free plan limit = 3
-            svc.create_api_key(db_session, ws.id, f"Key {i}")
-        with pytest.raises(PlanLimitExceeded):
-            svc.create_api_key(db_session, ws.id, "One too many")
-
-
-class TestRevokeAPIKey:
-    def test_revoke_api_key(
-        self,
-        db_session: Session,
-        svc: WorkspaceService,
-        workspace: Workspace,
-    ):
-        key_obj, _ = svc.create_api_key(db_session, workspace.id, "Revoke Me")
-        svc.revoke_api_key(db_session, workspace.id, key_obj.id)
-        db_session.refresh(key_obj)
-        assert key_obj.is_active is False
-
-    def test_revoke_nonexistent_key_raises(
-        self, db_session: Session, svc: WorkspaceService, workspace: Workspace
-    ):
-        with pytest.raises(APIKeyNotFound):
-            svc.revoke_api_key(db_session, workspace.id, uuid.uuid4())
-
-    @pytest.mark.regression
-    def test_revoke_key_of_another_workspace_raises(
-        self, db_session: Session, svc: WorkspaceService, workspace: Workspace
-    ):
-        key_obj, _ = svc.create_api_key(db_session, workspace.id, "Theirs")
-        uid = _make_user(db_session).id
-        other = svc.create_workspace(
-            db_session, "Other", f"other-{uuid.uuid4().hex[:8]}", uid
-        )
-        with pytest.raises(APIKeyNotFound):
-            svc.revoke_api_key(db_session, other.id, key_obj.id)
-        db_session.refresh(key_obj)
-        assert key_obj.is_active is True
-
-
-class TestRotateAPIKey:
-    def test_rotate_api_key_invalidates_old_key(
-        self,
-        db_session: Session,
-        svc: WorkspaceService,
-        workspace: Workspace,
-    ):
-        old_obj, old_plain = svc.create_api_key(db_session, workspace.id, "Rotate Me")
-        new_obj, new_plain = svc.rotate_api_key(db_session, workspace.id, old_obj.id)
-        db_session.refresh(old_obj)
-        assert old_obj.is_active is False
-        assert new_plain != old_plain
-
-    def test_rotate_api_key_new_key_is_valid(
-        self,
-        db_session: Session,
-        svc: WorkspaceService,
-        workspace: Workspace,
-    ):
-        old_obj, _ = svc.create_api_key(db_session, workspace.id, "Rotate Valid")
-        new_obj, new_plain = svc.rotate_api_key(db_session, workspace.id, old_obj.id)
-        assert new_obj.is_active is True
-        assert new_obj.key_hash == _hash_key(new_plain)
-
-    def test_rotate_nonexistent_key_raises(
-        self, db_session: Session, svc: WorkspaceService, workspace: Workspace
-    ):
-        with pytest.raises(APIKeyNotFound):
-            svc.rotate_api_key(db_session, workspace.id, uuid.uuid4())
-
-    @pytest.mark.regression
-    def test_rotate_key_of_another_workspace_raises(
-        self, db_session: Session, svc: WorkspaceService, workspace: Workspace
-    ):
-        key_obj, _ = svc.create_api_key(db_session, workspace.id, "Theirs")
-        uid = _make_user(db_session).id
-        other = svc.create_workspace(
-            db_session, "Other", f"other-{uuid.uuid4().hex[:8]}", uid
-        )
-        with pytest.raises(APIKeyNotFound):
-            svc.rotate_api_key(db_session, other.id, key_obj.id)
-        db_session.refresh(key_obj)
-        assert key_obj.is_active is True
-        assert svc.list_api_keys(db_session, workspace.id) == [key_obj]
-
-
-# ─────────────────────────────────────────────────────────────────────────────
 # Permissions
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -914,17 +728,6 @@ class TestWorkspaceStats:
         svc.add_member(db_session, workspace.id, other_user_id, "VIEWER", user_id)
         stats = svc.get_workspace_stats(db_session, workspace.id)
         assert stats.member_count == 2
-
-    def test_workspace_stats_api_key_count(
-        self,
-        db_session: Session,
-        svc: WorkspaceService,
-        workspace: Workspace,
-    ):
-        svc.create_api_key(db_session, workspace.id, "K1")
-        svc.create_api_key(db_session, workspace.id, "K2")
-        stats = svc.get_workspace_stats(db_session, workspace.id)
-        assert stats.api_key_count == 2
 
     def test_workspace_stats_not_found_raises(
         self, db_session: Session, svc: WorkspaceService

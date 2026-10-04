@@ -54,9 +54,6 @@
     "/api/v1/workspaces/invites/{token}",
     "/api/v1/workspaces/invites/{token}/accept",
     "/api/v1/workspaces/{workspace_id}",
-    "/api/v1/workspaces/{workspace_id}/api-keys",
-    "/api/v1/workspaces/{workspace_id}/api-keys/{key_id}",
-    "/api/v1/workspaces/{workspace_id}/api-keys/{key_id}/rotate",
     "/api/v1/workspaces/{workspace_id}/invites",
     "/api/v1/workspaces/{workspace_id}/members",
     "/api/v1/workspaces/{workspace_id}/members/{user_id}"

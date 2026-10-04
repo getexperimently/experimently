@@ -13,8 +13,7 @@ create endpoint; only its SHA-256 hash is persisted (``APIKey.key``).
   anyone else gets 403 and no key is written.
 * ``DELETE /{key_id}`` — owner or ADMIN; 204.
 
-Workspace-scoped keys (the workspaces module) live under
-``/workspaces/{id}/api-keys``.
+These are the only API keys: workspaces (the workspaces module) issue none.
 """
 
 from typing import Any, List, Optional

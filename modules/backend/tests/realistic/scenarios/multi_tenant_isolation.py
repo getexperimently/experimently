@@ -1,8 +1,8 @@
 """
 Realistic scenario: Multi-Tenant Workspace Isolation (EP-057).
 
-Validates workspace data isolation, RBAC within workspaces, plan limits,
-API key lifecycle, and invite workflow — all offline using the service layer
+Validates workspace data isolation, RBAC within workspaces, the retained
+(unused) plan and API-key columns, and invite workflow — all offline using the service layer
 directly with mocked database sessions.
 
 These tests do NOT require a running platform or database.
@@ -61,8 +61,8 @@ class TestWorkspaceModelIntegrity:
         assert "scopes" in col_names
 
 
-class TestWorkspacePlanLimits:
-    """Validate plan-based resource limits."""
+class TestWorkspacePlanEnum:
+    """The retained, unused plan column keeps its type."""
 
     def test_plan_enum_values(self):
         from modules.backend.app.models.workspace import WorkspacePlan
@@ -70,32 +70,6 @@ class TestWorkspacePlanLimits:
         assert hasattr(WorkspacePlan, "FREE")
         assert hasattr(WorkspacePlan, "PRO")
         assert hasattr(WorkspacePlan, "ENTERPRISE")
-
-    def test_free_plan_has_lowest_limits(self):
-        from modules.backend.app.services.workspace_service import _PLAN_LIMITS
-
-        free = _PLAN_LIMITS["free"]
-        pro = _PLAN_LIMITS["pro"]
-        assert free["max_experiments"] < pro["max_experiments"]
-        assert free["max_feature_flags"] < pro["max_feature_flags"]
-        assert free["max_members"] < pro["max_members"]
-
-    def test_enterprise_plan_has_highest_limits(self):
-        from modules.backend.app.services.workspace_service import _PLAN_LIMITS
-
-        enterprise = _PLAN_LIMITS["enterprise"]
-        pro = _PLAN_LIMITS["pro"]
-        assert enterprise["max_experiments"] >= pro["max_experiments"]
-        assert enterprise["max_members"] >= pro["max_members"]
-
-    def test_free_plan_specific_values(self):
-        from modules.backend.app.services.workspace_service import _PLAN_LIMITS
-
-        free = _PLAN_LIMITS["free"]
-        assert free["max_experiments"] == 10
-        assert free["max_feature_flags"] == 50
-        assert free["max_members"] == 5
-        assert free["max_api_keys"] == 3
 
 
 class TestRoleHierarchy:
@@ -173,17 +147,7 @@ class TestWorkspaceInviteLifecycle:
 
 
 class TestAPIKeyProperties:
-    """Validate workspace API key generation and validation properties."""
-
-    def test_api_key_prefix_format(self):
-        """API keys should start with 'ep_live_' prefix."""
-        prefix = "ep_live_"
-        # UUID hex is 32 chars; the actual key uses secrets.token_hex(24) = 48 hex chars
-        import secrets
-
-        key = prefix + secrets.token_hex(24)
-        assert key.startswith("ep_live_")
-        assert len(key) == 8 + 48  # prefix + 48 hex chars
+    """The retained, unused workspace API-key model keeps its columns."""
 
     def test_api_key_model_has_is_expired_property(self):
         from modules.backend.app.models.workspace import WorkspaceAPIKey
@@ -223,21 +187,19 @@ class TestWorkspaceServiceExceptions:
             "InviteNotFound",
             "InviteExpired",
             "InviteAlreadyAccepted",
-            "PlanLimitExceeded",
-            "APIKeyNotFound",
         ]
         for exc_name in expected_exceptions:
             assert hasattr(ws, exc_name), f"Missing exception class: {exc_name}"
 
     def test_workspace_error_is_base_class(self):
         from modules.backend.app.services.workspace_service import (
-            PlanLimitExceeded,
+            AlreadyMember,
             WorkspaceError,
             WorkspaceNotFound,
         )
 
         assert issubclass(WorkspaceNotFound, (WorkspaceError, Exception))
-        assert issubclass(PlanLimitExceeded, (WorkspaceError, Exception))
+        assert issubclass(AlreadyMember, (WorkspaceError, Exception))
 
 
 class TestWorkspaceDataIsolation:
@@ -259,15 +221,6 @@ class TestWorkspaceDataIsolation:
             for c in unique_constraints
         )
         assert has_unique, "Missing unique constraint on (workspace_id, user_id)"
-
-    def test_default_api_key_scopes(self):
-        """Default API key scopes should follow least-privilege principle."""
-        expected_defaults = ["flags:read", "experiments:read", "track:write"]
-        # This validates the expected scope structure
-        for scope in expected_defaults:
-            resource, action = scope.split(":")
-            assert resource in ("flags", "experiments", "track")
-            assert action in ("read", "write")
 
 
 # ---------------------------------------------------------------------------

@@ -3252,87 +3252,6 @@
         "title": "CounterType",
         "type": "string"
       },
-      "CreateAPIKeyRequest": {
-        "description": "Payload for creating a new workspace-scoped API key.",
-        "properties": {
-          "expires_at": {
-            "anyOf": [
-              {
-                "format": "date-time",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Expires At"
-          },
-          "name": {
-            "title": "Name",
-            "type": "string"
-          },
-          "scopes": {
-            "default": [
-              "flags:read",
-              "experiments:read",
-              "track:write"
-            ],
-            "items": {
-              "type": "string"
-            },
-            "title": "Scopes",
-            "type": "array"
-          }
-        },
-        "required": [
-          "name"
-        ],
-        "title": "CreateAPIKeyRequest",
-        "type": "object"
-      },
-      "CreateAPIKeyResponse": {
-        "description": "Response schema returned exactly once when a new API key is created.",
-        "properties": {
-          "created_at": {
-            "format": "date-time",
-            "title": "Created At",
-            "type": "string"
-          },
-          "id": {
-            "title": "Id",
-            "type": "string"
-          },
-          "key": {
-            "title": "Key",
-            "type": "string"
-          },
-          "key_prefix": {
-            "title": "Key Prefix",
-            "type": "string"
-          },
-          "name": {
-            "title": "Name",
-            "type": "string"
-          },
-          "scopes": {
-            "items": {
-              "type": "string"
-            },
-            "title": "Scopes",
-            "type": "array"
-          }
-        },
-        "required": [
-          "id",
-          "name",
-          "key_prefix",
-          "key",
-          "scopes",
-          "created_at"
-        ],
-        "title": "CreateAPIKeyResponse",
-        "type": "object"
-      },
       "CreateInviteRequest": {
         "description": "Payload for sending a workspace invite.\n\n``email`` is trimmed and must be ASCII, at most 255 characters (the column width) and shaped\n``local@domain`` (exactly one ``@``, no whitespace). Deliberately not\n``EmailStr``: that refuses special-use domains such as ``corp.local`` and\n``int.test``, which accounts can legitimately have. Who may accept the\ninvite is decided when it is accepted, not here.",
         "properties": {
@@ -3450,7 +3369,8 @@
         "type": "object"
       },
       "CreateWorkspaceRequest": {
-        "description": "Payload for creating a new workspace.",
+        "additionalProperties": false,
+        "description": "Payload for creating a new workspace.\n\nWorkspaces have no plan and no limits, so ``plan`` (or any other field not\nlisted here) is refused with 422 rather than silently ignored.",
         "properties": {
           "description": {
             "default": "",
@@ -3459,11 +3379,6 @@
           },
           "name": {
             "title": "Name",
-            "type": "string"
-          },
-          "plan": {
-            "default": "free",
-            "title": "Plan",
             "type": "string"
           },
           "slug": {
@@ -14710,7 +14625,8 @@
         "type": "object"
       },
       "UpdateWorkspaceRequest": {
-        "description": "Payload for updating an existing workspace (all fields optional).",
+        "additionalProperties": false,
+        "description": "Payload for updating an existing workspace (all fields optional).\n\nAny other field, ``plan`` included, is refused with 422.",
         "properties": {
           "description": {
             "anyOf": [
@@ -14733,17 +14649,6 @@
               }
             ],
             "title": "Name"
-          },
-          "plan": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Plan"
           }
         },
         "title": "UpdateWorkspaceRequest",
@@ -16132,75 +16037,6 @@
         "title": "WizardValidationResponse",
         "type": "object"
       },
-      "WorkspaceAPIKeyResponse": {
-        "description": "Safe response schema for listing API keys (no plaintext).",
-        "properties": {
-          "created_at": {
-            "format": "date-time",
-            "title": "Created At",
-            "type": "string"
-          },
-          "expires_at": {
-            "anyOf": [
-              {
-                "format": "date-time",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Expires At"
-          },
-          "id": {
-            "title": "Id",
-            "type": "string"
-          },
-          "is_active": {
-            "title": "Is Active",
-            "type": "boolean"
-          },
-          "key_prefix": {
-            "title": "Key Prefix",
-            "type": "string"
-          },
-          "last_used_at": {
-            "anyOf": [
-              {
-                "format": "date-time",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Last Used At"
-          },
-          "name": {
-            "title": "Name",
-            "type": "string"
-          },
-          "scopes": {
-            "items": {
-              "type": "string"
-            },
-            "title": "Scopes",
-            "type": "array"
-          }
-        },
-        "required": [
-          "id",
-          "name",
-          "key_prefix",
-          "scopes",
-          "is_active",
-          "last_used_at",
-          "expires_at",
-          "created_at"
-        ],
-        "title": "WorkspaceAPIKeyResponse",
-        "type": "object"
-      },
       "WorkspaceInviteResponse": {
         "description": "Response schema for a workspace invite.",
         "properties": {
@@ -16352,28 +16188,8 @@
             "title": "Is Active",
             "type": "boolean"
           },
-          "max_api_keys": {
-            "title": "Max Api Keys",
-            "type": "integer"
-          },
-          "max_experiments": {
-            "title": "Max Experiments",
-            "type": "integer"
-          },
-          "max_feature_flags": {
-            "title": "Max Feature Flags",
-            "type": "integer"
-          },
-          "max_members": {
-            "title": "Max Members",
-            "type": "integer"
-          },
           "name": {
             "title": "Name",
-            "type": "string"
-          },
-          "plan": {
-            "title": "Plan",
             "type": "string"
           },
           "slug": {
@@ -16391,12 +16207,7 @@
           "name",
           "slug",
           "description",
-          "plan",
           "is_active",
-          "max_experiments",
-          "max_feature_flags",
-          "max_members",
-          "max_api_keys",
           "created_at",
           "updated_at"
         ],
@@ -16404,13 +16215,8 @@
         "type": "object"
       },
       "WorkspaceWithStatsResponse": {
-        "description": "Workspace response enriched with live resource counts.",
+        "description": "Workspace response with its member count.",
         "properties": {
-          "api_key_count": {
-            "default": 0,
-            "title": "Api Key Count",
-            "type": "integer"
-          },
           "created_at": {
             "format": "date-time",
             "title": "Created At",
@@ -16427,16 +16233,6 @@
             ],
             "title": "Description"
           },
-          "experiment_count": {
-            "default": 0,
-            "title": "Experiment Count",
-            "type": "integer"
-          },
-          "flag_count": {
-            "default": 0,
-            "title": "Flag Count",
-            "type": "integer"
-          },
           "id": {
             "title": "Id",
             "type": "string"
@@ -16445,22 +16241,6 @@
             "title": "Is Active",
             "type": "boolean"
           },
-          "max_api_keys": {
-            "title": "Max Api Keys",
-            "type": "integer"
-          },
-          "max_experiments": {
-            "title": "Max Experiments",
-            "type": "integer"
-          },
-          "max_feature_flags": {
-            "title": "Max Feature Flags",
-            "type": "integer"
-          },
-          "max_members": {
-            "title": "Max Members",
-            "type": "integer"
-          },
           "member_count": {
             "default": 0,
             "title": "Member Count",
@@ -16468,10 +16248,6 @@
           },
           "name": {
             "title": "Name",
-            "type": "string"
-          },
-          "plan": {
-            "title": "Plan",
             "type": "string"
           },
           "slug": {
@@ -16489,12 +16265,7 @@
           "name",
           "slug",
           "description",
-          "plan",
           "is_active",
-          "max_experiments",
-          "max_feature_flags",
-          "max_members",
-          "max_api_keys",
           "created_at",
           "updated_at"
         ],
@@ -33571,227 +33342,6 @@
         ]
       }
     },
-    "/api/v1/workspaces/{workspace_id}/api-keys": {
-      "get": {
-        "description": "List workspace API keys. Requires ADMIN role.",
-        "operationId": "list_api_keys_api_v1_workspaces__workspace_id__api_keys_get",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "workspace_id",
-            "required": true,
-            "schema": {
-              "format": "uuid",
-              "title": "Workspace Id",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "items": {
-                    "$ref": "#/components/schemas/WorkspaceAPIKeyResponse"
-                  },
-                  "title": "Response List Api Keys Api V1 Workspaces  Workspace Id  Api Keys Get",
-                  "type": "array"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "OAuth2PasswordBearer": []
-          }
-        ],
-        "summary": "List Api Keys",
-        "tags": [
-          "Workspaces"
-        ]
-      },
-      "post": {
-        "description": "Create a workspace API key. Plaintext key is returned exactly once.",
-        "operationId": "create_api_key_api_v1_workspaces__workspace_id__api_keys_post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "workspace_id",
-            "required": true,
-            "schema": {
-              "format": "uuid",
-              "title": "Workspace Id",
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/CreateAPIKeyRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "201": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/CreateAPIKeyResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "OAuth2PasswordBearer": []
-          }
-        ],
-        "summary": "Create Api Key",
-        "tags": [
-          "Workspaces"
-        ]
-      }
-    },
-    "/api/v1/workspaces/{workspace_id}/api-keys/{key_id}": {
-      "delete": {
-        "description": "Revoke (deactivate) a workspace API key. Requires ADMIN role.",
-        "operationId": "revoke_api_key_api_v1_workspaces__workspace_id__api_keys__key_id__delete",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "workspace_id",
-            "required": true,
-            "schema": {
-              "format": "uuid",
-              "title": "Workspace Id",
-              "type": "string"
-            }
-          },
-          {
-            "in": "path",
-            "name": "key_id",
-            "required": true,
-            "schema": {
-              "format": "uuid",
-              "title": "Key Id",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "204": {
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "OAuth2PasswordBearer": []
-          }
-        ],
-        "summary": "Revoke Api Key",
-        "tags": [
-          "Workspaces"
-        ]
-      }
-    },
-    "/api/v1/workspaces/{workspace_id}/api-keys/{key_id}/rotate": {
-      "post": {
-        "description": "Rotate a workspace API key. Old key is revoked; new plaintext is returned once.",
-        "operationId": "rotate_api_key_api_v1_workspaces__workspace_id__api_keys__key_id__rotate_post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "workspace_id",
-            "required": true,
-            "schema": {
-              "format": "uuid",
-              "title": "Workspace Id",
-              "type": "string"
-            }
-          },
-          {
-            "in": "path",
-            "name": "key_id",
-            "required": true,
-            "schema": {
-              "format": "uuid",
-              "title": "Key Id",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "201": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/CreateAPIKeyResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "OAuth2PasswordBearer": []
-          }
-        ],
-        "summary": "Rotate Api Key",
-        "tags": [
-          "Workspaces"
-        ]
-      }
-    },
     "/api/v1/workspaces/{workspace_id}/invites": {
       "post": {
         "description": "Create a workspace invite for an email address and return its token.\n\nNo email is sent. Requires ADMIN role.",
@@ -34280,7 +33830,7 @@
       "name": "SSO"
     },
     {
-      "description": "EP-057: Team Workspaces — group users into teams with workspace roles (OWNER/ADMIN/DEVELOPER/ANALYST/VIEWER) and create and accept invitation links; no email is sent. Workspaces do not limit access to experiments or feature flags, which is by platform role. Workspace API keys are not yet accepted by the SDK or tracking endpoints; use a platform API key.",
+      "description": "EP-057: Team Workspaces — group users into teams with workspace roles (OWNER/ADMIN/DEVELOPER/ANALYST/VIEWER) and create and accept invitation links; no email is sent. Workspaces do not limit access to experiments or feature flags, which is by platform role. Workspaces have no plan and no limits, and issue no API keys: SDKs and integrations use a platform API key.",
       "name": "Workspaces"
     },
     {
