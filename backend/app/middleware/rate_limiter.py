@@ -3,8 +3,9 @@ Rate limiting middleware for Experimently.
 
 Provides a Redis-backed rate limiter (fixed-window via INCR + EXPIRE) with
 automatic fallback to an in-memory sliding-window limiter when Redis is
-unavailable; Redis is tried again every ``REDIS_RETRY_SECONDS``.  The middleware attaches standard rate-limit headers to every
-response and records Prometheus counters for hits and rejections.
+unavailable; Redis is tried again every ``REDIS_RETRY_SECONDS``.  The
+middleware attaches standard rate-limit headers to every response and records
+Prometheus counters for hits and rejections.
 """
 
 import logging
