@@ -225,8 +225,9 @@ the key explicitly when tracking from a different node or a worker that never as
 Synchronous. Sends up to 100 events per `POST /api/v1/tracking/batch` (longer lists are chunked)
 and returns `{:ok, %Experimently.BatchResult{success_count, failure_count, errors}}` or
 `{:error, reason}` when a request fails. Each event is a map (atom or string keys) with
-`event_name`, `user_id` and at least one of `experiment_key` / `feature_flag_key`; optional
-`properties` (sent as `metadata`), `value`, `event_type`, `timestamp`.
+`event_name` and `user_id`; optional `experiment_key`, `feature_flag_key`, `properties` (sent as
+`metadata`), `value`, `event_type`, `timestamp`. An event with no key is stored as history and
+counts in no experiment's results; tag outcome events.
 
 ```elixir
 {:ok, result} =

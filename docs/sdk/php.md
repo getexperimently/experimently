@@ -186,9 +186,9 @@ different request (for example a webhook or a queue worker).
 ### `trackBatch(array $events): BatchResult`
 
 Sends up to 100 events per `POST /api/v1/tracking/batch` (longer lists are chunked). Each event
-is an array with `event_name`, `user_id` and at least one of `experiment_key` /
-`feature_flag_key`; optional `properties`, `value`, `event_type`, `timestamp` (ISO-8601 string or
-`DateTimeInterface`).
+is an array with `event_name` and `user_id`; optional `experiment_key`, `feature_flag_key`,
+`properties`, `value`, `event_type`, `timestamp` (ISO-8601 string or `DateTimeInterface`). An
+event with no key is stored as history and counts in no experiment's results; tag outcome events.
 
 ```php
 $result = $client->trackBatch([

@@ -170,9 +170,10 @@ module Experimently
     # (chunked into requests of at most BATCH_LIMIT events). Never raises.
     #
     # Each event is a Hash (symbol or string keys) with +event_name+ and
-    # +user_id+ (required), and at least one of +experiment_key+ /
-    # +feature_flag_key+ (the server rejects key-less events). Optional:
+    # +user_id+ (required). Optional: +experiment_key+, +feature_flag_key+,
     # +properties+ (sent as +metadata+), +value+, +event_type+, +timestamp+.
+    # An event with no key is stored as history and counts in no experiment's
+    # results; tag outcome events.
     #
     # @param events [Array<Hash>]
     # @return [BatchResult]

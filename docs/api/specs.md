@@ -810,8 +810,10 @@ Returns `404` when no ACTIVE experiment has that key.
 POST /api/v1/tracking/track
 ```
 
-Records one event. At least one of `experiment_key` / `feature_flag_key` is required; the user's variant
-is looked up from their assignment. `event_type` is free text (SDKs send the event name);
+Records one event. `experiment_key` and `feature_flag_key` are both optional. An event with no key
+is stored as history and counts in no experiment's results; tag outcome events. With
+`experiment_key`, the user's variant is looked up from their assignment. `event_type` is free text
+(SDKs send the event name);
 `event_name` defaults to `event_type`.
 
 **Request Body**
@@ -847,7 +849,9 @@ is looked up from their assignment. `event_type` is free text (SDKs send the eve
 metric's `event_name` (exposure events are excluded), regardless of `event_type`. A metric with
 `event_name: "purchase"` therefore counts the event above.
 
-Returns `404` when neither key exists and `422` when both are missing.
+Returns `404` when a key is given and no experiment or flag has it. The detail names the key, for
+example `No experiment has the key 'nope'. Leave experiment_key out to record the event
+without an experiment.`
 
 #### Batch Track Events
 
@@ -856,7 +860,8 @@ POST /api/v1/tracking/batch
 ```
 
 Records up to 100 events in one request; each entry has the same shape as `/tracking/track`.
-Failures are reported per event.
+Failures are reported per event: an entry whose key is not found is reported in `errors` with the
+same sentence as the `404` above. An entry with no key is stored as history, not refused.
 
 **Request Body**
 

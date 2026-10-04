@@ -771,16 +771,19 @@ public `key`. They share the per-IP `SDK_RATE_LIMIT_PER_MINUTE` ceiling (default
 
 ### Track Event
 - **Endpoint**: `POST /api/v1/tracking/track`
-- **Description**: Record one event. At least one of `experiment_key` / `feature_flag_key` is required.
+- **Description**: Record one event. `experiment_key` and `feature_flag_key` are both optional.
+  An event with no key is stored as history and counts in no experiment's results; tag outcome
+  events. A key that is given but not found answers 404.
   `event_type` is free text (SDKs send the event name); `event_name` defaults to `event_type`. Metrics count
   events by `event_name`: a metric with `event_name: "purchase"` counts every `purchase` event.
 - **Headers**: X-API-Key: {api_key}
 - **Body**: `{"event_type": string, "event_name": string?, "user_id": string, "experiment_key": string?, "feature_flag_key": string?, "value": number?, "metadata": object?, "timestamp": datetime?}`
-- **Response**: 200 OK (the stored event); 404 unknown keys; 422 no key
+- **Response**: 200 OK (the stored event); 404 a key that was given was not found; 422 invalid body
 
 ### Batch Track Events
 - **Endpoint**: `POST /api/v1/tracking/batch`
-- **Description**: Record up to 100 events (same shape as `/track`) in one request
+- **Description**: Record up to 100 events (same shape as `/track`) in one request. An entry with no
+  key is stored as history, not refused; an entry whose key is not found is reported in `errors`.
 - **Response**: 200 OK `{"success_count": int, "failure_count": int, "errors": [...]|null}`; 413 above 100 events
 
 ### Track Event by Ids

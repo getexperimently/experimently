@@ -237,7 +237,7 @@ Every request carries `X-API-Key`, `Content-Type: application/json` and `Accept:
 | local mode: ruleset refresh | `GET /api/v1/sdk/ruleset` (beta) | `If-None-Match: "<version>"` | the ruleset, `ETag`; `304` when unchanged |
 | local mode: evaluation counts | `POST /api/v1/tracking/evaluations` (beta) | `{"evaluations":[{"flag_key","count","enabled_count","window_start","window_end"}]}` | `{"accepted","errors"}` |
 
-Errors: 401 bad key; 404 experiment/flag not ACTIVE or unknown; 422 track without any key; 429
+Errors: 401 bad key; 404 experiment/flag not ACTIVE or unknown; 422 invalid event; 429
 rate limited (`Retry-After` header, retried once).
 
 ---

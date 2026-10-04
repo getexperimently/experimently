@@ -530,8 +530,10 @@ class ExperimentationClient:
         """Send raw track bodies via ``POST /api/v1/tracking/batch`` in chunks of 100. Never raises.
 
         Each event is a dict with the ``/tracking/track`` fields
-        (``event_type``/``event_name``, ``user_id``, ``experiment_key`` or
-        ``feature_flag_key``, optional ``value``, ``metadata``, ``timestamp``).
+        (``event_type``/``event_name``, ``user_id``, optional ``experiment_key``,
+        ``feature_flag_key``, ``value``, ``metadata``, ``timestamp``). An event
+        with no key is stored as history and counts in no experiment's results;
+        tag outcome events.
         ``event_type`` defaults to ``event_name`` when missing. A chunk that
         fails outright counts every one of its events as a failure; error
         ``index`` values are absolute positions in ``events``.
