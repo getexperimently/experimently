@@ -10,6 +10,13 @@ longer applies and release-please can generate this file directly. Until it
 does, entries below 0.2.2 are hand-written and the links in them are the
 reason why.
 
+## [0.18.1](https://github.com/getexperimently/experimently/compare/v0.18.0...v0.18.1) (2026-10-04)
+
+
+### Bug Fixes
+
+* **site:** the marketing homepage shows a contact address, and a privacy page exists ([#824](https://github.com/getexperimently/experimently/issues/824)) ([7a371d9](https://github.com/getexperimently/experimently/commit/7a371d92fa0e89e0d0a384519b80ef6d5a3c0fd9))
+
 ## [0.18.0](https://github.com/getexperimently/experimently/compare/v0.17.0...v0.18.0) (2026-10-04)
 
 
