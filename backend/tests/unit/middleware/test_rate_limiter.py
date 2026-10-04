@@ -21,6 +21,7 @@ from backend.app.middleware.rate_limiter import (
     DEFAULT_SDK_RATE_LIMIT_PER_MINUTE,
     EXPORT_RATE_LIMIT,
     RATE_LIMIT_CONFIG,
+    REDIS_RETRY_SECONDS,
     RateLimitMiddleware,
     RedisRateLimiter,
     SlidingWindowRateLimiter,
@@ -138,29 +139,296 @@ class TestRedisRateLimiter:
         assert remaining == 9
         assert limiter._redis_available is False
 
-    def test_falls_back_when_redis_unavailable(self):
-        """When Redis was previously detected as unavailable, uses fallback."""
-        limiter = RedisRateLimiter()
+    @pytest.mark.regression
+    def test_falls_back_when_redis_unavailable(self, no_client_build):
+        """Inside the retry window the fallback serves, with zero Redis calls.
+
+        This replaced a test that set ``_redis_available = False`` with no
+        client and checked only ``remaining``. Under the old contract that
+        state was permanent; under this one it means "the window has passed",
+        so the old test would have tried whatever ``REDIS_HOST`` is. It now
+        pins the window: a recording client, a retry time in the future, and
+        no call reaches the client (#790).
+        """
+        clock = FakeClock()
+        client = RecordingClient()
+        limiter = RedisRateLimiter(clock=clock)
+        limiter._redis_client = client
         limiter._redis_available = False
-        limiter._redis_client = None
+        limiter._retry_at = REDIS_RETRY_SECONDS
 
         allowed, remaining = limiter.is_allowed("key1", limit=5, window_seconds=60)
 
-        assert allowed is True
-        assert remaining == 4
+        assert (allowed, remaining) == (True, 4)
+        assert client.calls == []
+        assert no_client_build == []
 
-    def test_lazy_connect_failure(self):
-        """If initial Redis connection fails, falls back gracefully."""
-        with patch(
-            "backend.app.middleware.rate_limiter.RedisRateLimiter._get_redis",
-            return_value=None,
-        ):
-            limiter = RedisRateLimiter()
-            limiter._redis_available = False
+    @pytest.mark.regression
+    def test_lazy_connect_failure(self, monkeypatch):
+        """A failed first connect starts the fallback and its retry window."""
+        clock = FakeClock()
+        built = _patch_create(monkeypatch, [RecordingClient(fail=True)])
+        limiter = RedisRateLimiter(clock=clock)
 
-            allowed, remaining = limiter.is_allowed("key1", limit=5, window_seconds=60)
-            assert allowed is True
-            assert remaining == 4
+        allowed, remaining = limiter.is_allowed("key1", limit=5, window_seconds=60)
+        assert (allowed, remaining) == (True, 4)
+        assert limiter._redis_available is False
+        assert limiter._retry_at == REDIS_RETRY_SECONDS
+        assert len(built) == 1
+
+        # Still inside the window: no second connect, no call on the client.
+        clock.now = REDIS_RETRY_SECONDS - 0.1
+        for _ in range(3):
+            limiter.is_allowed("key1", limit=5, window_seconds=60)
+        assert len(built) == 1
+        assert built[0].calls == ["ping"]
+
+
+# ---------------------------------------------------------------------------
+# Returning to Redis after an error (#790)
+# ---------------------------------------------------------------------------
+
+
+class FakeClock:
+    """A monotonic clock the test moves by hand."""
+
+    def __init__(self, now: float = 0.0) -> None:
+        self.now = now
+
+    def __call__(self) -> float:
+        return self.now
+
+
+class _RecordingPipeline:
+    def __init__(self, client: "RecordingClient") -> None:
+        self._client = client
+
+    def incr(self, key):
+        self._client.calls.append("incr")
+
+    def ttl(self, key):
+        self._client.calls.append("ttl")
+
+    def execute(self):
+        self._client.calls.append("execute")
+        if self._client.fail:
+            raise ConnectionError("Error 111 connecting to redis.example:6379.")
+        self._client.count += 1
+        return [self._client.count, 60]
+
+
+class RecordingClient:
+    """A stand-in Redis client that records every call made on it.
+
+    ``fail`` makes ping and the pipeline raise; flip it to model Redis
+    going away and coming back.
+    """
+
+    def __init__(self, fail: bool = False) -> None:
+        self.fail = fail
+        self.calls: list = []
+        self.count = 0
+
+    def ping(self):
+        self.calls.append("ping")
+        if self.fail:
+            raise ConnectionError("Error 111 connecting to redis.example:6379.")
+        return True
+
+    def pipeline(self, transaction=True):
+        self.calls.append("pipeline")
+        return _RecordingPipeline(self)
+
+    def expire(self, key, seconds):
+        self.calls.append("expire")
+
+    def pipelines(self) -> int:
+        return self.calls.count("pipeline")
+
+
+def _patch_create(monkeypatch, clients: list) -> list:
+    """Make ``create_redis_client`` hand out *clients* in order; return the built list."""
+    built: list = []
+
+    def create(**options):
+        client = clients[len(built)]
+        built.append(client)
+        return client
+
+    monkeypatch.setattr("backend.app.core.redis_client.create_redis_client", create)
+    return built
+
+
+@pytest.fixture
+def no_client_build(monkeypatch) -> list:
+    """Fail the test if anything builds a real Redis client."""
+    attempts: list = []
+
+    def create(**options):
+        attempts.append(options)
+        raise AssertionError("this test must not build a Redis client")
+
+    monkeypatch.setattr("backend.app.core.redis_client.create_redis_client", create)
+    return attempts
+
+
+def _limiter_on(client: RecordingClient, clock: FakeClock) -> RedisRateLimiter:
+    limiter = RedisRateLimiter(clock=clock)
+    limiter._redis_client = client
+    return limiter
+
+
+@pytest.mark.unit
+@pytest.mark.regression
+class TestRedisRetry:
+    """After a Redis error the limiter uses Redis again within the retry window.
+
+    Before #790 one error set ``_redis_available = False`` and nothing set it
+    back, so every process counted on its own until the next deploy. The
+    in-memory counts are not asserted across clock jumps: the fallback limiter
+    keeps real time; only the retry window uses the test clock.
+    """
+
+    def test_a_runtime_error_then_redis_again_after_the_window(self, no_client_build):
+        clock = FakeClock()
+        client = RecordingClient(fail=True)
+        limiter = _limiter_on(client, clock)
+
+        limiter.is_allowed("k", limit=1000, window_seconds=60)
+        assert limiter._redis_available is False
+        assert client.pipelines() == 1
+
+        client.fail = False
+        clock.now = REDIS_RETRY_SECONDS - 0.1
+        for _ in range(20):
+            limiter.is_allowed("k", limit=1000, window_seconds=60)
+        assert client.pipelines() == 1, "Redis was called inside the retry window"
+
+        clock.now = REDIS_RETRY_SECONDS
+        assert limiter.is_allowed("k", limit=1000, window_seconds=60) == (True, 999)
+        assert client.pipelines() == 2
+        assert limiter._redis_available is True
+
+        for _ in range(5):
+            limiter.is_allowed("k", limit=1000, window_seconds=60)
+        assert client.pipelines() == 7
+        assert no_client_build == []
+
+    def test_a_failed_connect_at_startup_recovers(self, monkeypatch):
+        clock = FakeClock()
+        first, second = RecordingClient(fail=True), RecordingClient()
+        built = _patch_create(monkeypatch, [first, second])
+        limiter = RedisRateLimiter(clock=clock)
+
+        limiter.is_allowed("k", limit=1000, window_seconds=60)
+        assert limiter._redis_available is False
+        assert limiter._redis_client is None
+
+        clock.now = REDIS_RETRY_SECONDS - 0.1
+        limiter.is_allowed("k", limit=1000, window_seconds=60)
+        assert len(built) == 1
+
+        clock.now = REDIS_RETRY_SECONDS
+        assert limiter.is_allowed("k", limit=1000, window_seconds=60) == (True, 999)
+        assert len(built) == 2
+        assert second.calls[:2] == ["ping", "pipeline"]
+        assert limiter._redis_client is second
+        assert limiter._redis_available is True
+
+    def test_a_failed_retry_starts_a_new_window(self, no_client_build):
+        clock = FakeClock()
+        client = RecordingClient(fail=True)
+        limiter = _limiter_on(client, clock)
+
+        limiter.is_allowed("k", limit=1000, window_seconds=60)  # t=0: error
+        clock.now = REDIS_RETRY_SECONDS
+        limiter.is_allowed("k", limit=1000, window_seconds=60)  # t=30: retry fails
+        assert client.pipelines() == 2
+        assert limiter._redis_available is False
+
+        clock.now = 2 * REDIS_RETRY_SECONDS - 0.1
+        for _ in range(10):
+            limiter.is_allowed("k", limit=1000, window_seconds=60)
+        assert client.pipelines() == 2, "a failed retry did not start a new window"
+
+        client.fail = False
+        clock.now = 2 * REDIS_RETRY_SECONDS
+        limiter.is_allowed("k", limit=1000, window_seconds=60)
+        assert client.pipelines() == 3
+        assert limiter._redis_available is True
+
+    def test_the_client_is_built_with_client_retries_off(self, monkeypatch):
+        """The kwargs: a ``Retry`` with no backoff and zero retries."""
+        from redis.backoff import NoBackoff
+        from redis.retry import Retry
+
+        seen: list = []
+
+        def create(**options):
+            seen.append(options)
+            return RecordingClient()
+
+        monkeypatch.setattr("backend.app.core.redis_client.create_redis_client", create)
+        assert RedisRateLimiter()._get_redis() is not None
+
+        assert len(seen) == 1
+        retry = seen[0]["retry"]
+        assert isinstance(retry, Retry)
+        assert retry.get_retries() == 0
+        assert isinstance(retry._backoff, NoBackoff)
+        assert seen[0]["socket_connect_timeout"] == 2
+        assert seen[0]["socket_timeout"] == 1
+
+
+@pytest.mark.unit
+@pytest.mark.regression
+class TestNoClientRetries:
+    """A real ``redis.Redis``, built by the limiter, tries to connect once.
+
+    redis-py retries ten times by default, so one failed retry would hold the
+    event loop for seconds every window. These drive the real client against
+    a refused address (127.0.0.1:1) and count connect attempts; no timing.
+    """
+
+    @pytest.fixture
+    def connects(self, monkeypatch) -> list:
+        from redis.connection import Connection
+
+        from backend.app.core.config import settings
+
+        monkeypatch.setattr(settings, "REDIS_HOST", "127.0.0.1")
+        monkeypatch.setattr(settings, "REDIS_PORT", 1)
+        monkeypatch.setattr(settings, "REDIS_PASSWORD", None)
+        monkeypatch.setattr(settings, "REDIS_SSL", False)
+        attempts: list = []
+        real_connect = Connection._connect
+
+        def counting_connect(conn):
+            attempts.append(conn.port)
+            return real_connect(conn)
+
+        monkeypatch.setattr(Connection, "_connect", counting_connect)
+        return attempts
+
+    def test_the_connect_ping_makes_one_attempt(self, connects):
+        limiter = RedisRateLimiter(clock=FakeClock())
+        assert limiter._get_redis() is None
+        assert limiter._redis_available is False
+        assert connects == [1], f"{len(connects)} connect attempts, not 1"
+
+    def test_the_pipeline_makes_one_attempt(self, connects, monkeypatch):
+        import redis
+
+        # Let the client be built without connecting, so the pipeline is
+        # the first thing that reaches the socket.
+        monkeypatch.setattr(redis.Redis, "ping", lambda self, **kw: True)
+        limiter = RedisRateLimiter(clock=FakeClock())
+        assert limiter._get_redis() is not None
+        assert connects == []
+
+        assert limiter.is_allowed("k", limit=5, window_seconds=60) == (True, 4)
+        assert limiter._redis_available is False
+        assert connects == [1], f"{len(connects)} connect attempts, not 1"
 
 
 # ---------------------------------------------------------------------------

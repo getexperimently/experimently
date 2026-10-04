@@ -95,6 +95,81 @@ def test_the_rate_limiter_uses_redis(configured):
     assert limiter._redis_available is True
 
 
+class _Clock:
+    def __init__(self) -> None:
+        self.now = 0.0
+
+    def __call__(self) -> float:
+        return self.now
+
+
+def test_the_rate_limiter_goes_back_to_redis_after_the_retry_window(configured):
+    """The retry path against a real server, with the limiter's own client (#790).
+
+    The limiter is put into the fallback on a working client, so the only
+    way the key reaches Redis is the retry after the window.
+    """
+    from backend.app.middleware.rate_limiter import (
+        REDIS_RETRY_SECONDS,
+        RedisRateLimiter,
+    )
+
+    direct = redis.Redis(
+        host=configured["host"],
+        port=configured["port"],
+        password=configured["password"],
+        decode_responses=True,
+    )
+    clock = _Clock()
+    limiter = RedisRateLimiter(clock=clock)
+    assert limiter._get_redis() is not None
+    key = f"s790-{uuid.uuid4().hex}"
+    redis_key = f"ratelimit:{key}"
+
+    limiter._enter_fallback(ConnectionError("planted"))
+    clock.now = REDIS_RETRY_SECONDS - 0.1
+    limiter.is_allowed(key, limit=5, window_seconds=60)
+    assert direct.get(redis_key) is None, "Redis was used inside the retry window"
+
+    clock.now = REDIS_RETRY_SECONDS
+    assert limiter.is_allowed(key, limit=5, window_seconds=60) == (True, 4)
+    assert limiter._redis_available is True
+    assert direct.get(redis_key) == "1"
+    assert 0 < direct.ttl(redis_key) <= 60
+    direct.delete(redis_key)
+
+
+def test_the_rate_limiter_connects_after_a_failed_first_connect(
+    configured, monkeypatch
+):
+    """A connect refused at startup (wrong password) is retried after the window."""
+    from backend.app.middleware.rate_limiter import (
+        REDIS_RETRY_SECONDS,
+        RedisRateLimiter,
+    )
+
+    clock = _Clock()
+    limiter = RedisRateLimiter(clock=clock)
+    key = f"s790-{uuid.uuid4().hex}"
+    monkeypatch.setattr(settings, "REDIS_PASSWORD", "not-the-password")
+    limiter.is_allowed(key, limit=5, window_seconds=60)
+    assert limiter._redis_available is False
+    assert limiter._redis_client is None
+
+    monkeypatch.setattr(settings, "REDIS_PASSWORD", configured["password"])
+    clock.now = REDIS_RETRY_SECONDS
+    assert limiter.is_allowed(key, limit=5, window_seconds=60) == (True, 4)
+    assert limiter._redis_available is True
+    direct = redis.Redis(
+        host=configured["host"],
+        port=configured["port"],
+        password=configured["password"],
+        decode_responses=True,
+    )
+    assert direct.get(f"ratelimit:{key}") == "1"
+    direct.delete(f"ratelimit:{key}")
+
+
 def test_the_dependency_cache_pool_authenticates(configured, monkeypatch):
     from backend.app.api import deps
 
