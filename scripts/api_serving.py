@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Is the API serving this task-definition revision? (#143)
 
-    python3 scripts/api_serving.py <cluster> <service> <task-definition ARN>
+    python3 scripts/api_serving.py [--explain] <cluster> <service> <task-definition ARN>
 
 Exits 0 only when both of these hold:
 
@@ -39,6 +39,21 @@ Exit status:
                 forwards somewhere else, with no split: the API route is not
                 where the tasks are
 
+`--explain`, accepted as the first argument only, adds one last line to
+stdout that names why the exit is what it is, and changes nothing else:
+
+    explain: serving         exit 0
+    explain: primary-other   exit 1, the PRIMARY task set is another revision
+                             (the listener is not read)
+    explain: listener-split  exit 1, the /api/* rule splits traffic
+    explain: listener-other  exit 3
+    explain: unknown         exit 2, including a usage error and a crash
+
+Without the flag the output is byte-identical to what it was before the flag
+existed (backend/tests/unit/infrastructure/test_api_serving_explain.py). Only
+the rollback's summary passes it, and it reads the two streams separately: in
+a merged capture the stdout line need not come last.
+
 READ-ONLY: it runs only `check_live_target_group.READ_ONLY_OPERATIONS`, which
 are four describe calls.
 """
@@ -57,6 +72,11 @@ import check_live_target_group as live
 from public_text import redact, short_arn
 
 SERVING, NOT_YET, UNKNOWN, WRONG = 0, 1, 2, 3
+
+#: The words `--explain` prints, one per reason (see the docstring).
+EXPLAIN_WORDS = frozenset(
+    {"serving", "primary-other", "listener-split", "listener-other", "unknown"}
+)
 
 #: `infrastructure/cdk/stacks/names.py`: the cluster is `experimentation-<env>`
 #: and the API service `experimentation-backend-<env>`. The environment names
@@ -80,9 +100,21 @@ def verdict(
     aws: live.Runner, cluster: str, service: str, arn: str
 ) -> tuple[int, str, str | None]:
     """Return (status, sentence, live colour or None)."""
+    return _verdict(aws, cluster, service, arn)[:3]
+
+
+def _verdict(
+    aws: live.Runner, cluster: str, service: str, arn: str
+) -> tuple[int, str, str | None, str]:
+    """Return (status, sentence, live colour or None, the `--explain` word)."""
     match = _CLUSTER.fullmatch(cluster)
     if not match:
-        return UNKNOWN, f"{cluster!r} is not an experimentation-<env> cluster", None
+        return (
+            UNKNOWN,
+            f"{cluster!r} is not an experimentation-<env> cluster",
+            None,
+            "unknown",
+        )
     env = match.group(1)
     if service != f"experimentation-backend-{env}":
         return (
@@ -90,12 +122,14 @@ def verdict(
             f"{service!r} is not the API service of {cluster} "
             f"(experimentation-backend-{env})",
             None,
+            "unknown",
         )
     if not (_ARN.fullmatch(arn) or _REVISION.fullmatch(arn)):
         return (
             UNKNOWN,
             f"{short_arn(arn)!r} is not a task-definition revision ARN or family:n",
             None,
+            "unknown",
         )
     shown = short_arn(arn)
 
@@ -104,18 +138,29 @@ def verdict(
             ["ecs", "describe-services", "--cluster", cluster, "--services", service]
         ).get("services", [])
         if len(services) != 1:
-            return UNKNOWN, f"describe-services returned {len(services)} services", None
+            return (
+                UNKNOWN,
+                f"describe-services returned {len(services)} services",
+                None,
+                "unknown",
+            )
         primary = [
             t for t in services[0].get("taskSets", []) if t.get("status") == "PRIMARY"
         ]
         if len(primary) != 1:
-            return UNKNOWN, f"{service} has {len(primary)} PRIMARY task sets", None
+            return (
+                UNKNOWN,
+                f"{service} has {len(primary)} PRIMARY task sets",
+                None,
+                "unknown",
+            )
         serving = primary[0].get("taskDefinition")
         if not _same(serving, arn):
             return (
                 NOT_YET,
                 f"the PRIMARY task set runs {short_arn(serving)}, not {shown}",
                 None,
+                "primary-other",
             )
 
         stack = f"experimentation-fargate-{env}"
@@ -134,38 +179,58 @@ def verdict(
                 UNKNOWN,
                 f"the PRIMARY task set is in {len(target_groups)} target groups",
                 None,
+                "unknown",
             )
         colour = live._name(target_groups.pop(), groups, "the PRIMARY task set")
         # Derived, not defaulted: --expect is the PRIMARY task set's colour.
         live.check(aws, env, colour)
     except live.Shifting as exc:
-        return NOT_YET, f"the PRIMARY task set runs {shown}; {exc}", None
+        return (
+            NOT_YET,
+            f"the PRIMARY task set runs {shown}; {exc}",
+            None,
+            "listener-split",
+        )
     except live.Refused as exc:
-        return WRONG, f"the PRIMARY task set runs {shown}, but {exc}", None
+        return (
+            WRONG,
+            f"the PRIMARY task set runs {shown}, but {exc}",
+            None,
+            "listener-other",
+        )
     except (live.Unknown, live.AwsError, KeyError, ValueError) as exc:
-        return UNKNOWN, f"could not tell: {exc}", None
+        return UNKNOWN, f"could not tell: {exc}", None, "unknown"
     return (
         SERVING,
         f"{shown} is the PRIMARY task set and the /api/* rule forwards to {colour} alone",
         colour,
+        "serving",
     )
 
 
 def main(argv: Sequence[str] | None = None, aws: live.Runner = live.run_aws) -> int:
     args = list(sys.argv[1:] if argv is None else argv)
+    # The first argument only: anywhere else it is a positional, and four
+    # arguments are the usage error they always were.
+    explain = bool(args) and args[0] == "--explain"
+    if explain:
+        args = args[1:]
     if len(args) != 3:
         print(
             "usage: api_serving.py <cluster> <service> <task-definition ARN>",
             file=sys.stderr,
         )
+        if explain:
+            print("explain: unknown")
         return UNKNOWN
     try:
-        status, sentence, colour = verdict(aws, *args)
+        status, sentence, colour, word = _verdict(aws, *args)
     except Exception as exc:  # any crash is "could not tell", never "not yet"
-        status, sentence, colour = (
+        status, sentence, colour, word = (
             UNKNOWN,
             f"could not tell: {type(exc).__name__}: {exc}",
             None,
+            "unknown",
         )
     if status == SERVING:
         print(f"serving: {redact(sentence)}")
@@ -176,6 +241,8 @@ def main(argv: Sequence[str] | None = None, aws: live.Runner = live.run_aws) -> 
     else:
         label = {NOT_YET: "NOT YET", UNKNOWN: "UNKNOWN", WRONG: "WRONG"}[status]
         print(f"{label}: {redact(sentence)}", file=sys.stderr)
+    if explain:
+        print(f"explain: {word}")
     return status
 
 
