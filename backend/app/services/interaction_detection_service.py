@@ -374,42 +374,40 @@ class InteractionDetectionService:
         return recs
 
     # ------------------------------------------------------------------
-    # Database helpers (stubbed — override or patch in tests)
+    # Database helpers
     # ------------------------------------------------------------------
 
     def _get_experiment_users(self, experiment_id: str, db) -> Set[str]:
         """Return the set of user IDs assigned to an experiment.
 
-        Queries the assignments table for the given experiment_id.
-        Falls back to an empty set if the query fails or returns nothing.
+        Queries the assignments table for the given experiment_id.  A failed
+        query raises (#853): an empty set would read as "nobody assigned".
         """
-        try:
-            from backend.app.models.assignment import (
-                Assignment,  # noqa: WPS433 — local import
-            )
+        from backend.app.models.assignment import (
+            Assignment,  # noqa: WPS433 — local import
+        )
 
-            rows = (
-                db.query(Assignment.user_id)
-                .filter(Assignment.experiment_id == experiment_id)
-                .all()
-            )
-            return {str(row.user_id) for row in rows}
-        except Exception:
-            return set()
+        rows = (
+            db.query(Assignment.user_id)
+            .filter(Assignment.experiment_id == experiment_id)
+            .all()
+        )
+        return {str(row.user_id) for row in rows}
 
     def _get_active_experiment_ids(self, db) -> List[str]:
-        """Return a list of IDs for all currently active experiments."""
-        try:
-            from backend.app.models.experiment import (  # noqa: WPS433
-                Experiment,
-                ExperimentStatus,
-            )
+        """Return a list of IDs for all currently active experiments.
 
-            rows = (
-                db.query(Experiment.id)
-                .filter(Experiment.status == ExperimentStatus.ACTIVE)
-                .all()
-            )
-            return [str(row.id) for row in rows]
-        except Exception:
-            return []
+        A failed query raises (#853): an empty list would read as "no active
+        experiments".
+        """
+        from backend.app.models.experiment import (  # noqa: WPS433
+            Experiment,
+            ExperimentStatus,
+        )
+
+        rows = (
+            db.query(Experiment.id)
+            .filter(Experiment.status == ExperimentStatus.ACTIVE)
+            .all()
+        )
+        return [str(row.id) for row in rows]
