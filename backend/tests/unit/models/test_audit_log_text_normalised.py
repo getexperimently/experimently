@@ -20,8 +20,8 @@ from backend.app.models.audit_log import (
 
 pytestmark = [pytest.mark.unit, pytest.mark.regression]
 
-RAW = "x\x00y\ud800z\udfffw"
-STORED = "x�y�z�w"
+RAW = "x" + chr(0x0) + "y" + chr(0xD800) + "z" + chr(0xDFFF) + "w"
+STORED = "x\ufffdy\ufffdz\ufffdw"
 
 
 def _text_columns():

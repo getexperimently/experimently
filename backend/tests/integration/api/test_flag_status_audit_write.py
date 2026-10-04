@@ -44,8 +44,8 @@ SCHEMA = "test_experimentation"
 
 #: Reason text as sent (JSON-escaped) -> as stored.
 REASONS = {
-    "nul": ('"a\\u0000b"', "a�b"),
-    "surrogate": ('"a\\ud800b"', "a�b"),
+    "case-a": (json.dumps("a" + chr(0x0) + "b"), "a\ufffdb"),
+    "case-b": (json.dumps("a" + chr(0xD800) + "b"), "a\ufffdb"),
 }
 
 #: route -> (status the flag starts in, status it must end in)
@@ -191,7 +191,7 @@ def _flag(db_session, status, name=None) -> FeatureFlag:
 
 
 def _post_raw(client, path, user, raw_body):
-    """POST a JSON body written by hand, so escapes reach the server intact."""
+    """POST a JSON body exactly as written."""
     headers = {**_auth(user), "Content-Type": "application/json"}
     return client.post(path, content=raw_body.encode("ascii"), headers=headers)
 
@@ -256,7 +256,7 @@ def _bulk_enable(client, developer, flag, sent):
 
 
 def test_bulk_toggle_stores_normalised_reason(client, db_session, fresh, developer):
-    sent, stored = REASONS["nul"]
+    sent, stored = REASONS["case-a"]
     flag = _flag(db_session, FeatureFlagStatus.INACTIVE)
 
     response = _bulk_enable(client, developer, flag, sent)
@@ -273,7 +273,7 @@ def test_bulk_toggle_refuses_reason_its_schema_cannot_read(
     client, db_session, fresh, developer
 ):
     """The bulk request schema answers 422 for this reason; no flag changes."""
-    sent, _ = REASONS["surrogate"]
+    sent, _ = REASONS["case-b"]
     flag = _flag(db_session, FeatureFlagStatus.INACTIVE)
 
     response = _bulk_enable(client, developer, flag, sent)
