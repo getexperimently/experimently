@@ -629,13 +629,20 @@ def test_a_linked_account_takes_its_role_from_the_groups_when_sync_is_on(
 # --------------------------------------------------------------------------
 
 
-def _insert_before_commit(db: Session, rows: Rows, values: dict) -> None:
+def _insert_before_first_write(db: Session, rows: Rows, values: dict) -> None:
     """Commit ``values`` as a row from another connection just before the
-    request's session commits -- what a concurrent request does."""
+    request's session first writes -- what a concurrent request that gets
+    there first does.
+
+    It runs before the session's first flush, not at its commit: the new
+    account is flushed before the commit (its audit entry refers to it), and
+    a row inserted from another connection after that would wait on this
+    session's uncommitted row, which waits on the hook.
+    """
 
     fired: List[bool] = []
 
-    def insert(session):
+    def insert(session, *_):
         if fired:
             return
         fired.append(True)
@@ -650,14 +657,14 @@ def _insert_before_commit(db: Session, rows: Rows, values: dict) -> None:
                 values,
             )
 
-    event.listen(db, "before_commit", insert)
+    event.listen(db, "before_flush", insert)
 
 
 def test_two_first_sign_ins_of_one_identity_reach_the_same_account(signin, caplog):
     sfx = _suffix()
     sub = str(uuid.uuid4())
     winner = uuid.uuid4()
-    _insert_before_commit(
+    _insert_before_first_write(
         signin.db,
         signin.rows,
         {
@@ -684,7 +691,7 @@ def test_a_create_that_cannot_be_saved_is_refused(signin, caplog):
     re-look-up finds nothing, so the sign-in is refused."""
     sfx = _suffix()
     other = uuid.uuid4()
-    _insert_before_commit(
+    _insert_before_first_write(
         signin.db,
         signin.rows,
         {

@@ -5,13 +5,16 @@ records the changes people make through the API: creating, changing and deleting
 flags and experiments, turning flags on and off, starting, pausing and completing
 experiments, rollout schedule changes, API keys, holdouts, mutual exclusion groups,
 segments, creating and deleting users, changes to a user's role, superuser flag or active
-status, and signing in with a password. [Action Types](#action-types) lists every action
-and when it is written.
+status, signing in with a password, and safety rollbacks. [Action Types](#action-types)
+lists every action and when it is written.
 
-Changes the platform makes on its own (the experiment scheduler, the rollout scheduler and
-the safety monitor) and signing in through Cognito or single sign-on are not written to it
-yet ([#221](https://github.com/getexperimently/experimently/issues/221)). The Quick
-Start's demo data includes entries written by the seed script, not by the platform.
+It also records the changes the platform makes on its own: scheduled experiment starts and
+ends, rollout stages the rollout scheduler starts, rollbacks the safety monitor makes, a
+user's first Cognito sign-in, and role changes Cognito group sync makes. Those entries are
+written by a [system actor](#changes-the-platform-makes-on-its-own). Signing in through
+Cognito or single sign-on is not written as `user_login` yet
+([#221](https://github.com/getexperimently/experimently/issues/221)). The Quick Start's
+demo data includes entries written by the seed script, not by the platform.
 
 Creating, changing and deleting a feature flag or an experiment is also recorded in a
 separate table, the compliance audit trail, which `GET /api/v1/compliance/audit-events`
@@ -198,8 +201,10 @@ It prints `2`. The whole response has the shape
 
 ## Action Types
 
-Every action below is written by the route named, after the change is saved, with the
-signed-in user as the actor. An update records only the fields that changed, as
+Every action below is written by the route or the part of the platform named. A route
+writes it after the change is saved, with the signed-in user as the actor; the
+[failure policy](#when-an-entry-can-be-missing) says what happens when an entry cannot be
+written. An update records only the fields that changed, as
 `old_value` and `new_value` JSON; a create records the new entity's identifying fields in
 `new_value`, and a delete the old ones in `old_value`. Descriptions, hypotheses, targeting
 rules, segment rules, variants and metrics are never stored: when they change, their names
@@ -226,6 +231,11 @@ an API key, or a request body.
 | `role_assign` | `user` | A superuser changes a user's role or superuser flag (`PATCH /admin/users/{id}`, `PUT /admin/users/{id}`, `PUT /users/{id}`); `old_value` and `new_value` are `{"role", "is_superuser"}` |
 | `user_activate`, `user_deactivate` | `user` | The same routes change a user's active status |
 | `user_login` | `user` | Signing in with a password (`POST /auth/login`, or `POST /auth/token` with `AUTH_PROVIDER=local`); `new_value` is `{"provider": "local"}` |
+| `safety_rollback` | `feature_flag` | A safety rollback, manual (`POST /safety/feature-flags/{id}/rollback`, by the calling user) or by the safety monitor. `new_value` is `{"trigger_type", "previous_percentage", "new_percentage", "deactivated", "paused_schedules"}`; `reason` is the rollback's reason. It appears in the flag's history |
+| `experiment_start`, `experiment_complete` | `experiment` | The experiment scheduler starts an experiment at its start date or scheduled resume, or completes it at its end date (also when `POST /experiments/schedules/process` runs it). `reason` is `scheduled start`, `scheduled resume` or `scheduled end` |
+| `feature_flag_update` | `feature_flag` | The rollout scheduler starts a rollout stage and sets the flag's rollout percentage. `reason` is `rollout schedule stage started` |
+| `user_create` | `user` | A user's first Cognito sign-in creates their account. The actor is the new user; `reason` is `first sign-in` |
+| `role_assign` | `user` | Cognito group sync (`SYNC_ROLES_ON_LOGIN`) changes a user's role or superuser flag when they sign in; `old_value` and `new_value` are `{"role", "is_superuser"}` |
 
 User changes record the superuser flag. A change to a user's role, superuser flag or
 active status is saved together with its entry: if the entry cannot be written, the
@@ -233,11 +243,73 @@ change is refused with a `500` and nothing is saved, and sending the same reques
 once the problem is fixed writes it once.
 
 `ActionType` also defines `user_update`, `user_logout`, `permission_grant`,
-`permission_revoke`, `role_unassign`, `safety_rollback` and `safety_config_update`. You
-can filter on them, but nothing in this release writes them
+`permission_revoke`, `role_unassign` and `safety_config_update`. You can filter on them,
+but nothing in this release writes them
 ([#221](https://github.com/getexperimently/experimently/issues/221)). Entries written by
 an earlier release for `PATCH /admin/users/{id}` are `user_update`, with the role and
 active status before and after.
+
+### Changes the platform makes on its own
+
+An entry the platform makes on its own has no `user_id`, and its `user_email` is one of
+these reserved values:
+
+| `user_email` | Written by |
+|--------------|------------|
+| `system:experiment-scheduler` | The experiment scheduler: scheduled starts, resumes and ends |
+| `system:rollout-scheduler` | The rollout scheduler: each rollout stage it starts |
+| `system:safety-monitor` | The safety monitor: each automatic rollback |
+| `system:cognito-sync` | Cognito group sync: each role or superuser flag change |
+
+An entry is automatic only when `user_id` is empty **and** `user_email` is one of these
+values. Deleting a user also empties `user_id` on their entries, but keeps their own
+`user_email`, so those entries are never automatic. A manual rollback is recorded with the
+user who asked for it.
+
+### What is never recorded
+
+[Action Types](#action-types) is the complete list: a change not listed there writes no
+entry. No entry ever holds:
+
+- reading anything: lists, reports, the audit log itself;
+- failed sign-ins (there is no account to attach them to) or sign-outs;
+- passwords or their hashes, tokens, or any part of an API key or its hash;
+- request bodies, IP addresses or user agents;
+- the contents of descriptions, hypotheses, targeting rules, segment rules, variants and
+  metrics (only their names, under `changed_fields`);
+- error text;
+- changes made directly in the database rather than through the platform.
+
+### When an entry can be missing
+
+Whether a change is kept when its entry cannot be written depends on where it is made:
+
+| Where | If the entry cannot be written |
+|-------|--------------------------------|
+| A route (all the route actions above) | The change is kept and the response is `2xx`; there is no entry |
+| A superuser's change to a user's role, superuser flag or active status | Nothing is saved and the response is `500`; resend it once the problem is fixed |
+| A safety rollback, manual or by the safety monitor | The rollback is kept; there is no entry |
+| The experiment scheduler | The start or end is kept; there is no entry, and **it is not written later** |
+| The rollout scheduler | The stage does not start and the rollout percentage does not change; the next run tries both again |
+| A first Cognito sign-in | The account is created; there is no entry |
+| Cognito group sync | The role change is kept and the request succeeds; there is no entry, and **it is not written later**: the next request finds the role already changed and writes nothing |
+
+Each entry that cannot be written logs one ERROR line from the API:
+
+```text
+Failed to create audit log for <action> on <entity type> <entity id> (<exception type>)
+```
+
+In a deployed stack that line is the only signal that an entry is missing. The API also
+counts these failures in a Prometheus counter, `audit_write_failures_total`, but do not
+rely on it there: the AWS deployment does not collect it.
+
+### Keeping entries, and deleted users
+
+Nothing deletes audit entries: they are kept until someone removes them from the
+database. Deleting a user empties `user_id` on their entries and keeps `user_email`, so a
+deleted user's email address stays in the log, readable by everyone who reads every entry
+(see [Permissions](#permissions)).
 
 ---
 
