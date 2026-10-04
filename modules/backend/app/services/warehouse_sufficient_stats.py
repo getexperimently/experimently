@@ -13,11 +13,13 @@ cannot be right, rather than analysing it:
 * metric rows in the window but none matched to an exposed unit ->
   ``join_key_mismatch``;
 * zero units -> ``no_units``;
-* a Snowflake session whose UTC offset is not ``+00:00`` ->
-  ``timezone_not_utc``.
+* a Snowflake session whose offset is not one of the UTC spellings in
+  :data:`~modules.backend.app.services.warehouse_query_builder.UTC_SESSION_OFFSETS`
+  (``Z`` or ``+00:00``) -> ``timezone_not_utc``.
 
 Floats arrive as the strings our SQL produced (at least 17 significant
-digits) and are parsed with ``float(Decimal(text))``; the text is kept as
+digits; Snowflake's DECFLOAT text is in exponent form with up to 38, e.g.
+``3.0000000000000004440892098500626161695e-1`` for ``0.1 + 0.2``) and are parsed with ``float(Decimal(text))``; the text is kept as
 returned so a stored result can be checked against it later.  Counts may
 arrive as integers or as digit strings, depending on the connector's wire.
 """
@@ -33,6 +35,7 @@ from typing import Any, Final, Mapping, Optional, Sequence
 from modules.backend.app.services.warehouse_query_builder import (
     LABEL_MAX_CHARS,
     MAX_VARIANT_VALUES,
+    is_utc_session_offset,
 )
 
 SCHEMA_ID: Final = "experimently.warehouse.sufficient_statistics/v2"
@@ -41,7 +44,6 @@ _COUNT_TEXT: Final = re.compile(r"[0-9]{1,19}")
 _FLOAT_TEXT: Final = re.compile(
     r"[+-]?(?:[0-9]{1,400}(?:\.[0-9]{0,400})?|\.[0-9]{1,400})(?:[eE][+-]?[0-9]{1,4})?"
 )
-UTC_OFFSET: Final = "+00:00"
 
 
 class WarehouseResultRefused(ValueError):
@@ -133,7 +135,7 @@ def _check_offset(row: Mapping[str, Any], expect_session_offset: bool) -> Option
     if not expect_session_offset:
         return None
     offset = row.get("session_offset")
-    if offset != UTC_OFFSET:
+    if not is_utc_session_offset(offset):
         raise WarehouseResultRefused(
             "timezone_not_utc",
             "the warehouse session did not run in UTC; times would be compared in another zone",
