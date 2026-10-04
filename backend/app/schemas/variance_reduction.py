@@ -88,53 +88,128 @@ class VarianceReductionConfig(BaseModel):
 
 
 class CupedMetricResult(BaseModel):
-    """CUPED-adjusted statistics for a single metric.
+    """CUPED-adjusted comparison of one treatment with the control, on one metric.
 
-    Produced by the CUPED results endpoint for each metric in an experiment,
-    containing both the variance-reduction statistics and the adjusted
-    treatment effect estimate.
+    The CUPED results endpoint returns one of these per (metric, treatment).
+    A comparison that cannot be computed carries ``unavailable_reason`` and
+    null numbers; it is listed, never left out.
     """
 
     model_config = ConfigDict(from_attributes=True)
 
     metric_id: str = Field(..., description="Unique identifier of the metric.")
     metric_name: str = Field(..., description="Human-readable name of the metric.")
-    adjusted_control_mean: float = Field(
-        ..., description="Mean of the CUPED-adjusted control observations."
-    )
-    adjusted_treatment_mean: float = Field(
-        ..., description="Mean of the CUPED-adjusted treatment observations."
-    )
-    adjusted_effect: float = Field(
-        ...,
-        description="adjusted_treatment_mean - adjusted_control_mean.",
-    )
-    adjusted_se: float = Field(
-        ..., description="Pooled standard error of the adjusted effect estimate."
-    )
-    adjusted_p_value: float = Field(
-        ...,
-        description="Two-tailed p-value from a z-test on the adjusted effect.",
-    )
-    adjusted_ci_lower: float = Field(
-        ..., description="Lower bound of the 95% confidence interval."
-    )
-    adjusted_ci_upper: float = Field(
-        ..., description="Upper bound of the 95% confidence interval."
-    )
-    variance_reduction_pct: float = Field(
-        ...,
+    variant_id: Optional[str] = Field(
+        None,
         description=(
-            "Percentage of variance removed by CUPED relative to the raw "
-            "control variance. Positive values indicate reduction."
+            "The treatment compared with the control. Null only when the "
+            "experiment has no control or no treatment."
         ),
     )
-    theta: float = Field(
-        ...,
-        description="OLS coefficient θ = Cov(Y,X) / Var(X) used for adjustment.",
+    variant_name: Optional[str] = Field(None, description="The treatment's name.")
+    control_variant_id: Optional[str] = Field(
+        None, description="The control variant the treatment is compared with."
+    )
+    control_sample_size: Optional[int] = Field(
+        None, description="Users assigned to the control."
+    )
+    treatment_sample_size: Optional[int] = Field(
+        None, description="Users assigned to this treatment."
+    )
+    adjusted_control_mean: Optional[float] = Field(
+        None, description="The control's conversion rate, adjusted for the covariate."
+    )
+    adjusted_treatment_mean: Optional[float] = Field(
+        None,
+        description="The treatment's conversion rate, adjusted for the covariate.",
+    )
+    adjusted_effect: Optional[float] = Field(
+        None,
+        description="adjusted_treatment_mean - adjusted_control_mean.",
+    )
+    adjusted_se: Optional[float] = Field(
+        None, description="Standard error of the adjusted effect."
+    )
+    adjusted_p_value: Optional[float] = Field(
+        None,
+        description=(
+            "Two-sided p-value of a z-test on the adjusted effect, before any "
+            "multiple-comparison correction (in /results, adjusted_p_value is "
+            "the corrected one; here that is corrected_p_value)."
+        ),
+    )
+    adjusted_ci_lower: Optional[float] = Field(
+        None,
+        description="Lower bound of the adjusted effect's interval, at confidence_level.",
+    )
+    adjusted_ci_upper: Optional[float] = Field(
+        None,
+        description="Upper bound of the adjusted effect's interval, at confidence_level.",
+    )
+    unadjusted_effect: Optional[float] = Field(
+        None,
+        description="The treatment's conversion rate minus the control's, unadjusted.",
+    )
+    unadjusted_se: Optional[float] = Field(
+        None, description="Standard error of the unadjusted effect."
+    )
+    corrected_p_value: Optional[float] = Field(
+        None,
+        description=(
+            "adjusted_p_value after the experiment's correction_method, applied "
+            "across this metric's treatments. Null for the method 'none'."
+        ),
+    )
+    is_significant: bool = Field(
+        False,
+        description=(
+            "corrected_p_value (adjusted_p_value when there is none) is below "
+            "1 - confidence_level."
+        ),
+    )
+    variance_reduction_pct: Optional[float] = Field(
+        None,
+        description=(
+            "100 * (1 - variance of the adjusted effect / variance of the "
+            "unadjusted effect). Can be below 0: the slope theta is pooled over "
+            "every arm, and an arm whose own relation differs can end up noisier."
+        ),
+    )
+    theta: Optional[float] = Field(
+        None,
+        description=(
+            "The slope of the outcome on the covariate, pooled within arms; 0 when "
+            "no user has covariate events (or every user has), and for 'none'."
+        ),
+    )
+    covariate_event_name: Optional[str] = Field(
+        None,
+        description=(
+            "The event the covariate counts: the metric's own event_name, or that "
+            "of covariate_metric_id. Null when no covariate is read."
+        ),
+    )
+    covariate_coverage_pct: Optional[float] = Field(
+        None,
+        description=(
+            "Share of this comparison's users (control and this treatment), 0-100, "
+            "with at least one covariate event in their window before assignment."
+        ),
+    )
+    unavailable_reason: Optional[str] = Field(
+        None,
+        description=(
+            "Null, or why this comparison was not computed: not_a_proportion_metric, "
+            "winsorization_needs_mean_metric, fewer_than_2_units, no_variation, "
+            "no_control_variant, no_treatment_variant, covariate_metric_not_found, "
+            "metric_has_no_event_name or result_invalid."
+        ),
     )
     method: VarianceReductionMethod = Field(
-        ..., description="The variance-reduction method that was applied."
+        ...,
+        description=(
+            "The method actually computed: 'cuped' when 'cuped_plus' is configured."
+        ),
     )
 
 
@@ -154,10 +229,26 @@ class CupedResultsResponse(BaseModel):
 
     experiment_id: str = Field(..., description="Unique identifier of the experiment.")
     method: VarianceReductionMethod = Field(
-        ..., description="Variance-reduction method that was applied."
+        ..., description="The experiment's configured variance-reduction method."
+    )
+    confidence_level: Optional[float] = Field(
+        None,
+        description="The experiment's stored confidence level, used for every interval.",
+    )
+    correction_method: Optional[str] = Field(
+        None,
+        description=(
+            "The experiment's stored multiple-comparison correction, behind "
+            "corrected_p_value."
+        ),
+    )
+    covariate_lookback_days: Optional[int] = Field(
+        None,
+        description="Days before each user's assignment the covariate reads.",
     )
     metrics: List[CupedMetricResult] = Field(
-        ..., description="Per-metric CUPED-adjusted results."
+        ...,
+        description="One comparison per metric and treatment, against the control.",
     )
     computed_at: str = Field(
         ..., description="ISO 8601 UTC timestamp of when the results were computed."

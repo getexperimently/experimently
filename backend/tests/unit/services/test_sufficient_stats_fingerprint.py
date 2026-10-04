@@ -31,6 +31,7 @@ from backend.app.core.stats_engine import ENGINE_VERSION
 from backend.app.services.sufficient_stats_analysis import (
     BinomialVariant,
     binomial_metric_result,
+    cuped_metric_result,
     mean_metric_result,
 )
 from backend.tests.unit.services.test_binomial_metric_result_characterisation import (
@@ -54,7 +55,19 @@ SUFFICIENT_STATS_FINGERPRINTS: Dict[str, Dict[str, str]] = {
         "binomial_metric_result": "c65e109491f6e0968e0f5f8e248fcad9f571826960095622cf76e813516eba8a",
         "mean_metric_result": "ad119bc6bfff1ec62f70b7499e7c7eb29341f3a12df69587935128964e03125c",
     },
+    # #217: CUPED from per-arm sums, new in 1.3.0.  The other two are 1.2.0's.
+    "1.3.0": {
+        "binomial_metric_result": "c65e109491f6e0968e0f5f8e248fcad9f571826960095622cf76e813516eba8a",
+        "cuped_metric_result": "29e33befe849a6cc36fd462b5d4e1f2a361efcff2f695a38c612653c11363f67",
+        "mean_metric_result": "ad119bc6bfff1ec62f70b7499e7c7eb29341f3a12df69587935128964e03125c",
+    },
 }
+
+#: Engine versions that have shipped in a release.  A function new in this
+#: release is pinned under a later version only, never added to one of these
+#: (a new key under a released version passes every hash, which is how a
+#: changed engine could keep a released version number).
+RELEASED_ENGINE_VERSIONS = ("1.1.0", "1.2.0")
 
 _CONTROL = "ffffffff-0000-4000-8000-000000000002"
 _TREATMENT_1 = "00000000-0000-4000-8000-000000000001"
@@ -135,9 +148,46 @@ def _mean_outputs() -> Dict[str, Any]:
     return outputs
 
 
+def _cuped_outputs() -> Dict[str, Any]:
+    """Fixed per-arm sums through ``cuped_metric_result``."""
+    control = BinomialVariant(_CONTROL, "control", True)
+    t1 = BinomialVariant(_TREATMENT_1, "t1", False)
+    t2 = BinomialVariant(_TREATMENT_2, "t2", False)
+    sum_sets = {
+        # (variant, n, sum_y, sum_x, sum_y2, sum_x2, sum_xy); treatment first.
+        "three": [
+            (t1, 1000, 150.0, 300.0, 150.0, 300.0, 80.0),
+            (control, 1000, 120.0, 310.0, 120.0, 310.0, 70.0),
+            (t2, 1000, 131.0, 290.0, 131.0, 290.0, 66.0),
+        ],
+        "unbalanced": [
+            (control, 2000, 40.0, 500.0, 40.0, 500.0, 25.0),
+            (t1, 150, 9.0, 30.0, 9.0, 30.0, 5.0),
+            (t2, 30000, 690.0, 7000.0, 690.0, 7000.0, 400.0),
+        ],
+        "edges": [
+            (t1, 0, 0.0, 0.0, 0.0, 0.0, 0.0),
+            (control, 500, 10.0, 0.0, 10.0, 0.0, 0.0),
+            (t2, 400, 12.0, 0.0, 12.0, 0.0, 0.0),
+        ],
+    }
+    outputs: Dict[str, Any] = {}
+    for name, sums in sum_sets.items():
+        for level in (0.95, 0.90):
+            for correction in ("none", "bonferroni", "benjamini_hochberg"):
+                for adjust in (True, False):
+                    outputs[f"{name}/{level}/{correction}/{adjust}"] = (
+                        cuped_metric_result(
+                            sums, level, correction, metric=_METRIC, adjust=adjust
+                        )
+                    )
+    return outputs
+
+
 #: Every function this file pins, by the key it is pinned under.
 _ESTIMATORS: Dict[str, Callable[[], Dict[str, Any]]] = {
     "binomial_metric_result": _binomial_outputs,
+    "cuped_metric_result": _cuped_outputs,
     "mean_metric_result": _mean_outputs,
 }
 
@@ -159,6 +209,22 @@ def test_sufficient_stats_fingerprint(function):
         f"{function}'s output changed under ENGINE_VERSION {ENGINE_VERSION} "
         f"(fingerprint {actual}). See this module's docstring."
     )
+
+
+def test_cuped_metric_result_is_pinned_under_no_released_version():
+    """#217 changed CUPED's numbers after 1.2.0 shipped, so it bumped the
+    engine: ``cuped_metric_result`` is in no released version's dict, and it
+    is pinned under the running version."""
+    for version in RELEASED_ENGINE_VERSIONS:
+        assert "cuped_metric_result" not in SUFFICIENT_STATS_FINGERPRINTS[version], (
+            f"cuped_metric_result is pinned under {version}, which has shipped"
+        )
+    assert "cuped_metric_result" in SUFFICIENT_STATS_FINGERPRINTS[ENGINE_VERSION]
+
+    def _key(version):
+        return tuple(int(part) for part in version.split("."))
+
+    assert _key(ENGINE_VERSION) >= max(map(_key, RELEASED_ENGINE_VERSIONS))
 
 
 def test_every_pinned_function_is_exercised():

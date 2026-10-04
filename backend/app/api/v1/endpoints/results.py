@@ -7,11 +7,11 @@ sample size / power analysis, cache invalidation, and sequential testing analysi
 
 import logging
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 from uuid import UUID
 
+import numpy as np
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import ValidationError
 from sqlalchemy.orm import Session, joinedload
 
 from backend.app.api.deps import get_current_active_user, get_current_superuser, get_db
@@ -19,7 +19,7 @@ from backend.app.core.analysis_status import analysis_notice, analysis_status
 from backend.app.core.logger import unexpected_failure
 from backend.app.core.stats_engine import ENGINE_VERSION
 from backend.app.models.analysis_snapshot import AnalysisKind
-from backend.app.models.experiment import Experiment
+from backend.app.models.experiment import Experiment, MetricType
 from backend.app.models.user import User
 from backend.app.schemas.bayesian import BayesianResultsResponse
 from backend.app.schemas.dimensional import (
@@ -41,6 +41,7 @@ from backend.app.schemas.sequential import SequentialTestingResponse
 from backend.app.schemas.variance_reduction import (
     CupedMetricResult,
     CupedResultsResponse,
+    VarianceReductionConfig,
     VarianceReductionMethod,
 )
 from backend.app.services.analysis_service import AnalysisService
@@ -49,6 +50,11 @@ from backend.app.services.analysis_snapshot_service import record_snapshot
 from backend.app.services.cache import CacheService
 from backend.app.services.cuped_service import CupedService
 from backend.app.services.dimensional_analysis_service import DimensionalAnalysisService
+from backend.app.services.event_matching import (
+    assignment_times,
+    converting_user_ids,
+    covariate_user_ids,
+)
 from backend.app.services.power_calculator_service import (
     SAMPLE_SIZE_NOT_FINITE_MESSAGE,
     TREATMENT_RATE_CEILING_MESSAGE,
@@ -58,6 +64,11 @@ from backend.app.services.power_calculator_service import (
 )
 from backend.app.services.sequential_testing_service import SequentialTestingService
 from backend.app.services.srm_service import compute_srm_for_experiment
+from backend.app.services.sufficient_stats_analysis import (
+    SufficientStatsNotComputed,
+    SufficientStatsRefused,
+    cuped_metric_result,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -1301,8 +1312,65 @@ def get_sequential_results(
 
 
 # ---------------------------------------------------------------------------
-# Issue #21 — CUPED helper + endpoint
+# Issue #21 — CUPED helper + endpoint (#217: each user's own history)
 # ---------------------------------------------------------------------------
+
+
+class ExperimentNotFound(Exception):
+    """The experiment does not exist: the only CUPED failure that answers 404.
+
+    Deliberately not a ``ValueError``.  Statistics code raises ``ValueError``
+    for conditions that are not a missing experiment (``fromisoformat``, the
+    sufficient-statistics refusals), and mapping those to 404 would echo
+    their text.
+    """
+
+
+#: Reasons a CUPED comparison is listed without numbers (``unavailable_reason``).
+NOT_A_PROPORTION_METRIC = "not_a_proportion_metric"
+WINSORIZATION_NEEDS_MEAN_METRIC = "winsorization_needs_mean_metric"
+NO_CONTROL_VARIANT = "no_control_variant"
+NO_TREATMENT_VARIANT = "no_treatment_variant"
+COVARIATE_METRIC_NOT_FOUND = "covariate_metric_not_found"
+METRIC_HAS_NO_EVENT_NAME = "metric_has_no_event_name"
+
+_ADJUSTED_METHODS = (VarianceReductionMethod.CUPED, VarianceReductionMethod.CUPED_PLUS)
+
+
+def _metric_is_proportion(metric_def: Any) -> bool:
+    metric_type = getattr(metric_def.metric_type, "value", metric_def.metric_type)
+    return metric_type == MetricType.CONVERSION.value
+
+
+def _cuped_reason_rows(
+    metric_def: Any,
+    control: Any,
+    treatments: List[Any],
+    reason: str,
+    method: VarianceReductionMethod,
+    sizes: Optional[Dict[str, int]] = None,
+) -> List[CupedMetricResult]:
+    """One row per treatment (or one row, with no variant) carrying ``reason``."""
+    base = {
+        "metric_id": str(metric_def.id),
+        "metric_name": metric_def.name,
+        "unavailable_reason": reason,
+        "method": method,
+    }
+    if control is None or not treatments:
+        return [CupedMetricResult(**base)]
+    sizes = sizes or {}
+    return [
+        CupedMetricResult(
+            **base,
+            variant_id=str(treatment.id),
+            variant_name=treatment.name,
+            control_variant_id=str(control.id),
+            control_sample_size=sizes.get(str(control.id)),
+            treatment_sample_size=sizes.get(str(treatment.id)),
+        )
+        for treatment in treatments
+    ]
 
 
 def get_cuped_results_data(
@@ -1310,21 +1378,25 @@ def get_cuped_results_data(
     db: Session,
 ) -> CupedResultsResponse:
     """
-    Compute CUPED variance-reduced results for an experiment.
+    Compute CUPED variance-reduced results for an experiment (#217).
 
-    This helper is a separate function so that it can be easily mocked in
-    unit tests.  It:
-      1. Loads the experiment and its metric/assignment data.
-      2. Reads variance_reduction_config to determine the method.
-      3. Calls CupedService to compute adjusted statistics per metric.
-      4. Returns a CupedResultsResponse.
+    For each proportion metric and each treatment, the treatment's conversion
+    rate minus the control's, adjusted for a covariate ``X``: whether the user
+    sent the covariate event in their own window before assignment
+    (``event_matching.covariate_user_ids``).  The outcome ``Y`` is the
+    converters ``/results`` counts (``event_matching.converting_user_ids``).
+    The estimate itself is ``cuped_metric_result``, from per-arm sums.
+
+    The method comes from the experiment's ``variance_reduction_config``, and
+    the confidence level and correction from its stored settings
+    (``resolve_analysis_settings``).  A metric that cannot be computed is
+    listed with ``unavailable_reason``; any other failure propagates.
 
     Raises:
-        ValueError: If the experiment is not found.
+        ExperimentNotFound: the experiment does not exist.
+        pydantic.ValidationError: the stored ``variance_reduction_config`` is
+            one no request could have stored.
     """
-    import numpy as np
-
-    # Fetch experiment
     experiment = (
         db.query(Experiment)
         .options(
@@ -1335,141 +1407,149 @@ def get_cuped_results_data(
         .first()
     )
     if not experiment:
-        raise ValueError("Experiment not found")
+        raise ExperimentNotFound()
 
-    # Determine method from variance_reduction_config
-    vr_config = experiment.variance_reduction_config or {}
-    method_str = vr_config.get("method", VarianceReductionMethod.NONE.value)
-    try:
-        method = VarianceReductionMethod(method_str)
-    except ValueError:
-        method = VarianceReductionMethod.NONE
-
-    winsorization_pct = float(vr_config.get("winsorization_percentile", 99.0))
-
+    config = VarianceReductionConfig.model_validate(
+        experiment.variance_reduction_config or {}
+    )
+    method = config.method
+    settings = resolve_analysis_settings(experiment)
     computed_at = datetime.now(timezone.utc).isoformat()
 
-    # Identify control and treatment variants
-    control_variant = next((v for v in experiment.variants if v.is_control), None)
-    treatment_variants = [v for v in experiment.variants if not v.is_control]
+    control = next((v for v in experiment.variants if v.is_control), None)
+    treatments = [v for v in experiment.variants if not v.is_control]
+    users_by_variant = assignment_times(db, experiment.id)
+    sizes = {
+        str(v.id): len(users_by_variant.get(str(v.id), {})) for v in experiment.variants
+    }
+    assigned_at: Dict[str, datetime] = {}
+    for users in users_by_variant.values():
+        assigned_at.update(users)
+    metrics_by_id = {str(m.id): m for m in experiment.metric_definitions}
+    adjust = method in _ADJUSTED_METHODS
+    # cuped_plus is computed as cuped; each row says what was computed.
+    row_method = VarianceReductionMethod.CUPED if adjust else method
 
+    covariates: Dict[str, Set[str]] = {}
+    skipped: Dict[str, int] = {}
     metric_results: List[CupedMetricResult] = []
 
     for metric_def in experiment.metric_definitions:
-        # Pull per-user metric values from the assignments/events tables.
-        # For a robust implementation we would join events; here we build
-        # synthetic per-user arrays from aggregate counts so the service can
-        # always return a sensible (if simplified) result when the DB is live.
-        #
-        # The full CUPED pipeline with real pre-experiment covariates would
-        # require a separate covariate data source (out of scope for this
-        # endpoint's inline computation — use a dedicated analytics job).
-        # Instead we demonstrate the pipeline with the available assignment
-        # data, treating assignment order as a proxy covariate.
+
+        def reason(code: str) -> List[CupedMetricResult]:
+            return _cuped_reason_rows(
+                metric_def, control, treatments, code, row_method, sizes
+            )
+
+        if control is None:
+            metric_results.extend(reason(NO_CONTROL_VARIANT))
+            continue
+        if not treatments:
+            metric_results.extend(reason(NO_TREATMENT_VARIANT))
+            continue
+        if not _metric_is_proportion(metric_def):
+            metric_results.extend(reason(NOT_A_PROPORTION_METRIC))
+            continue
+
+        covariate_event: Optional[str] = None
+        x_users: Set[str] = set()
+        if adjust:
+            covariate_metric = (
+                metrics_by_id.get(str(config.covariate_metric_id))
+                if config.covariate_metric_id
+                else metric_def
+            )
+            if covariate_metric is None:
+                metric_results.extend(reason(COVARIATE_METRIC_NOT_FOUND))
+                continue
+            covariate_event = covariate_metric.event_name
+            if not covariate_event:
+                metric_results.extend(reason(METRIC_HAS_NO_EVENT_NAME))
+                continue
+            if covariate_event not in covariates:
+                found, unreadable = covariate_user_ids(
+                    db, assigned_at, covariate_event, config.covariate_lookback_days
+                )
+                covariates[covariate_event] = found
+                if unreadable:
+                    skipped[str(metric_def.id)] = unreadable
+            x_users = covariates[covariate_event]
+
+        arms = []
+        x_counts: Dict[str, int] = {}
+        for variant in experiment.variants:
+            users = users_by_variant.get(str(variant.id), {})
+            converted = converting_user_ids(
+                db, experiment.id, variant.id, metric_def.event_name
+            )
+            if method == VarianceReductionMethod.WINSORIZATION:
+                y = np.array([1.0 if u in converted else 0.0 for u in users])
+                if len(y):
+                    y = CupedService.apply_winsorization(
+                        y, percentile=config.winsorization_percentile
+                    )
+                sum_y = float(y.sum()) if len(y) else 0.0
+                sum_y2 = float((y * y).sum()) if len(y) else 0.0
+                arms.append((variant, len(users), sum_y, 0.0, sum_y2, 0.0, 0.0))
+                continue
+            n_converted = len(converted)
+            with_history = x_users.intersection(users)
+            both = len(with_history & converted)
+            x_counts[str(variant.id)] = len(with_history)
+            arms.append(
+                (
+                    variant,
+                    len(users),
+                    float(n_converted),
+                    float(len(with_history)),
+                    float(n_converted),
+                    float(len(with_history)),
+                    float(both),
+                )
+            )
 
         try:
-            from backend.app.models.assignment import Assignment
-            from backend.app.models.event import Event
-            from backend.app.services.event_matching import conversion_event_filter
-
-            def _get_outcomes(variant_id):
-                """Return (Y, X) arrays for CUPED — Y=converted, X=assignment index."""
-                assignments = (
-                    db.query(Assignment)
-                    .filter(
-                        Assignment.experiment_id == experiment.id,
-                        Assignment.variant_id == variant_id,
-                    )
-                    .all()
-                )
-                if not assignments:
-                    return np.zeros(1), np.zeros(1)
-
-                n = len(assignments)
-                # X = assignment order (proxy pre-experiment covariate)
-                X = np.arange(n, dtype=float)
-
-                # Y = 1 if user converted, 0 otherwise.  Conversions are
-                # matched like every other analysis path (event_matching.py):
-                # on the metric's event name, never counting an exposure row.
-                converted_ids = {
-                    str(e.user_id)
-                    for e in db.query(Event)
-                    .filter(
-                        Event.experiment_id == experiment.id,
-                        Event.variant_id == variant_id,
-                        conversion_event_filter(metric_def.event_name),
-                    )
-                    .all()
-                }
-                Y = np.array(
-                    [
-                        1.0 if str(a.user_id) in converted_ids else 0.0
-                        for a in assignments
-                    ]
-                )
-                return Y, X
-
-            if control_variant is None or not treatment_variants:
-                # Not enough variants to compute an effect
-                continue
-
-            Y_c, X_c = _get_outcomes(control_variant.id)
-            treatment_variant = treatment_variants[0]
-            Y_t, X_t = _get_outcomes(treatment_variant.id)
-
-            # Apply Winsorization if requested (before CUPED)
-            if method in (
-                VarianceReductionMethod.WINSORIZATION,
-                VarianceReductionMethod.CUPED,
-                VarianceReductionMethod.CUPED_PLUS,
-            ):
-                if method == VarianceReductionMethod.WINSORIZATION:
-                    Y_c = CupedService.apply_winsorization(
-                        Y_c, percentile=winsorization_pct
-                    )
-                    Y_t = CupedService.apply_winsorization(
-                        Y_t, percentile=winsorization_pct
-                    )
-
-            # Compute the effect.  ``none`` applies no adjustment at all:
-            # θ is 0 and the estimate is the unadjusted one (#217).
-            cuped_effect = CupedService.compute_cuped_effect(
-                Y_c,
-                X_c,
-                Y_t,
-                X_t,
-                adjust=method != VarianceReductionMethod.NONE,
+            rows = cuped_metric_result(
+                arms,
+                settings.confidence_level,
+                settings.correction_method,
+                metric=metric_def,
+                adjust=adjust,
             )
-            applied_method = (
-                method
-                if method != VarianceReductionMethod.NONE
-                else VarianceReductionMethod.NONE
-            )
+        except (SufficientStatsNotComputed, SufficientStatsRefused) as exc:
+            metric_results.extend(reason(exc.code))
+            continue
 
+        control_id = str(control.id)
+        for row in rows:
+            coverage = None
+            if adjust:
+                n = sizes[control_id] + sizes[row["variant_id"]]
+                if n:
+                    covered = x_counts[control_id] + x_counts[row["variant_id"]]
+                    coverage = 100.0 * covered / n
             metric_results.append(
                 CupedMetricResult(
-                    metric_id=str(metric_def.id),
-                    metric_name=metric_def.name,
-                    adjusted_control_mean=cuped_effect.adjusted_control_mean,
-                    adjusted_treatment_mean=cuped_effect.adjusted_treatment_mean,
-                    adjusted_effect=cuped_effect.adjusted_effect,
-                    adjusted_se=cuped_effect.adjusted_se,
-                    adjusted_p_value=cuped_effect.adjusted_p_value,
-                    adjusted_ci_lower=cuped_effect.adjusted_ci[0],
-                    adjusted_ci_upper=cuped_effect.adjusted_ci[1],
-                    variance_reduction_pct=cuped_effect.variance_reduction_pct,
-                    theta=cuped_effect.theta,
-                    method=applied_method,
+                    **row,
+                    method=row_method,
+                    covariate_event_name=covariate_event,
+                    covariate_coverage_pct=coverage,
                 )
             )
-        except Exception:
-            # If computation fails for a metric, skip it gracefully
-            continue
+
+    if skipped:
+        # Ids and counts only: the stored values are client text.
+        logger.warning(
+            "CUPED skipped stored event timestamps it could not read, by metric: %s",
+            ", ".join(f"{metric_id}={count}" for metric_id, count in skipped.items()),
+        )
 
     return CupedResultsResponse(
         experiment_id=str(experiment_id),
         method=method,
+        confidence_level=settings.confidence_level,
+        correction_method=settings.correction_method,
+        covariate_lookback_days=config.covariate_lookback_days,
         metrics=metric_results,
         computed_at=computed_at,
     )
@@ -1484,8 +1564,9 @@ def get_cuped_results_data(
     "/{experiment_id}/cuped",
     response_model=CupedResultsResponse,
     summary="Beta: CUPED variance-reduced results",
-    # Beta (#217): the covariate is not yet a pre-experiment metric.  The
-    # response says so in analysis_status/analysis_notice.
+    # The numbers are GA (#217; analysis_status says so).  The route stays
+    # x-stability: beta while its response is still being shaped (mean
+    # metrics, #439).
     openapi_extra={"x-stability": "beta"},
 )
 def get_cuped_results(
@@ -1494,37 +1575,29 @@ def get_cuped_results(
     current_user: User = Depends(get_current_active_user),
 ) -> CupedResultsResponse:
     """
-    Get CUPED variance-reduced results for an experiment (Issue #21).
+    Get CUPED variance-reduced results for an experiment (#21, #217).
 
-    Beta (#217): the covariate is each user's position in the order of
-    assignment, not a pre-experiment metric, so it removes almost no variance.
-    The response carries ``analysis_status: "beta"`` and an
-    ``analysis_notice`` saying so.
+    For each conversion metric and each treatment, the effect against the
+    control adjusted for each user's own events in the
+    ``covariate_lookback_days`` before their assignment.  History counts only
+    if the server received it before the user was assigned.  Intervals use
+    the experiment's stored ``confidence_level`` and ``corrected_p_value`` its
+    ``correction_method``.  A comparison that cannot be computed is listed
+    with ``unavailable_reason``.
 
-    The variance-reduction method is read from the experiment's
-    ``variance_reduction_config`` JSONB field:
+    The method is read from the experiment's ``variance_reduction_config``:
 
-    - ``none``         — No adjustment: the unadjusted effect, θ exactly 0.
-    - ``cuped``        — CUPED adjustment (covariate: assignment order, #217).
-    - ``cuped_plus``   — CUPED++ with delta-method ratio adjustment.
-    - ``winsorization`` — Winsorization only (no CUPED).
+    - ``none``          — No adjustment: the unadjusted effect, θ exactly 0.
+    - ``cuped``         — CUPED adjustment.
+    - ``cuped_plus``    — Computed as ``cuped`` (each row's ``method`` says so).
+    - ``winsorization`` — Clipping, for mean metrics.
 
     Returns 404 if the experiment does not exist.
     """
     try:
         response = get_cuped_results_data(experiment_id, db)
-    except ValidationError as exc:
-        # A ValueError too, but a response that failed to build is not a
-        # missing experiment, and its text would repeat the values.
-        raise unexpected_failure(
-            exc,
-            "CUPED results",
-            "Could not compute the CUPED results",
-            db=db,
-            logger=logger,
-        )
-    except ValueError as exc:
-        raise HTTPException(status_code=404, detail=str(exc))
+    except ExperimentNotFound:
+        raise HTTPException(status_code=404, detail="Experiment not found")
     except Exception as exc:
         raise unexpected_failure(
             exc,
@@ -1534,7 +1607,8 @@ def get_cuped_results(
             logger=logger,
         )
 
-    # Audit snapshot (best-effort; CUPED is closed-form, so no seed).
+    # Audit snapshot (best-effort; CUPED is closed-form, so no seed).  The
+    # numbers are always computed under the stored settings.
     try:
         record_snapshot(
             db,

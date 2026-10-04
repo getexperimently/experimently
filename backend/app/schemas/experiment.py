@@ -370,7 +370,7 @@ CONFIDENCE_LEVEL_DESCRIPTION = (
     "Confidence level the results use for significance and intervals, from "
     "0.80 to 0.99 (default 0.95). A request to the results may name another "
     "for that request only. Locked once the experiment leaves draft. CUPED "
-    "and sequential analysis do not follow it."
+    "follows it; sequential analysis does not."
 )
 
 

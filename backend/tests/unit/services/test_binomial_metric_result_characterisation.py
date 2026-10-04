@@ -110,6 +110,14 @@ CHARACTERISATIONS: Dict[str, Dict[str, str]] = {
         "three_variants-0.9-benjamini_hochberg": "9dc29fe6a32a100937e291cdb811fb7ab614c73cca809f13e89395655361331f",
         "edges-0.95-none": "8a393ac383215c05be91713bf0994289b03126f806ee3ff7b4ba27e4c1496e88",
         "edges-0.95-bonferroni": "d823df91499efad14663e562d09f0ef215926ca87b2746d9148846f1dcb66979",
+    },  # 1.3.0 (#217) changes CUPED only; /results is as in 1.2.0.
+    "1.3.0": {
+        "three_variants-0.95-none": "d897bf322f4fe5cca38d5e9acc0a43e42477e2a6282ba57ea31c3b7c3902c76d",
+        "three_variants-0.95-bonferroni": "1485e9cf00349a258ec93da464d6b80b791cf06d7c9e20483eb3b50237c74303",
+        "three_variants-0.95-benjamini_hochberg": "bcb71934fe55430b61665e883f0079f84e2133565c25f4f0003ce37f4be62b25",
+        "three_variants-0.9-benjamini_hochberg": "9dc29fe6a32a100937e291cdb811fb7ab614c73cca809f13e89395655361331f",
+        "edges-0.95-none": "8a393ac383215c05be91713bf0994289b03126f806ee3ff7b4ba27e4c1496e88",
+        "edges-0.95-bonferroni": "d823df91499efad14663e562d09f0ef215926ca87b2746d9148846f1dcb66979",
     },
 }
 
