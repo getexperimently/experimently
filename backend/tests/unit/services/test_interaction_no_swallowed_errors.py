@@ -154,5 +154,6 @@ def test_the_pair_route_has_exactly_the_one_failure_shape():
 def test_the_route_check_names_a_planted_defect(plant):
     old, new = plant
     source = ROUTES.read_text()
-    assert old in source
-    assert _route_problems(source.replace(old, new, 1))
+    head, marker, route = source.partition("def analyze_pair(")
+    assert marker and old in route
+    assert _route_problems(head + marker + route.replace(old, new, 1))
