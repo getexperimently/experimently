@@ -235,6 +235,13 @@ INVENTORY = {
     ("POST", f"{V1}/tracking/evaluations"): SDK,
 }
 
+#: GET routes a reader could expect to be recorded, and why they are not.
+#: Only the export is listed: the audit log records changes, not reads.
+#: ``test_audit_export.py`` checks that an export writes no entry.
+READ_ROUTES = {
+    ("GET", f"{V1}/audit-logs/export"): NotAudited("reading, not changing"),
+}
+
 
 def _contexts(application):
     """(method, path, route context) for every HTTP route, flattened.
@@ -311,3 +318,16 @@ def test_written_action_types_are_what_the_inventory_writes():
         f"in the inventory but not written: "
         f"{sorted(a.value for a in audited - set(WRITTEN_ACTION_TYPES))}"
     )
+
+
+@pytest.mark.parametrize("key", sorted(READ_ROUTES), ids=lambda k: f"{k[0]} {k[1]}")
+def test_each_read_route_exists_and_is_not_audited(key):
+    found = {
+        (method, path)
+        for method, path, ctx in _contexts(app)
+        if ctx.endpoint.__module__.startswith("backend.")
+    }
+    assert key in found, f"{key} is not a core route"
+    assert key[0] == "GET"
+    assert isinstance(READ_ROUTES[key], NotAudited)
+    assert READ_ROUTES[key].reason.strip()

@@ -105,6 +105,12 @@
         "summary": "Get audit history for a specific entity"
       }
     },
+    "/api/v1/audit-logs/export": {
+      "get": {
+        "operationId": "export_audit_logs_api_v1_audit_logs_export_get",
+        "summary": "Export audit logs as CSV or JSON"
+      }
+    },
     "/api/v1/audit-logs/stats": {
       "get": {
         "operationId": "get_audit_stats_api_v1_audit_logs_stats_get",

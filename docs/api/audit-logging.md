@@ -14,7 +14,8 @@ user's first Cognito sign-in, and role changes Cognito group sync makes. Those e
 written by a [system actor](#changes-the-platform-makes-on-its-own). Signing in through
 Cognito or single sign-on is not written as `user_login` yet
 ([#221](https://github.com/getexperimently/experimently/issues/221)). The Quick Start's
-demo data includes entries written by the seed script, not by the platform.
+demo data includes a history written by the seed script, in the form the platform writes
+it.
 
 Creating, changing and deleting a feature flag or an experiment is also recorded in a
 separate table, the compliance audit trail, which `GET /api/v1/compliance/audit-events`
@@ -199,6 +200,72 @@ It prints `2`. The whole response has the shape
 
 ---
 
+### GET /api/v1/audit-logs/export
+
+Downloads every entry the filters match as one file, newest first. This route is beta: its
+shape may still change (see [API stability](stability.md)). The URL has no trailing slash;
+with one the API answers `307`.
+
+It takes the list's filters (`user_id`, `entity_type`, `entity_id`, `action_type`,
+`from_date`, `to_date`), with the same `400` refusals, plus `format`:
+
+| `format` | File |
+|----------|------|
+| `json` (default) | `application/json`: an array of the list's entry objects, as shown above |
+| `csv` | `text/csv; charset=utf-8`: a header row, then one row per entry |
+
+The CSV columns are `id`, `timestamp`, `user_id`, `user_email`, `action_type`,
+`action_description`, `entity_type`, `entity_id`, `entity_name`, `old_value`, `new_value`
+and `reason`, in that order. Each cell is the same field's value in the JSON (empty for
+`null`), quoted as RFC 4180 describes. Export cells are made safe for spreadsheets: a cell
+that starts with `=`, `+`, `-`, `@`, a tab or a carriage return starts with an apostrophe
+in the CSV. The JSON holds the stored text unchanged.
+
+The file is named `audit-log-<UTC time>.<format>` in `Content-Disposition`, for example
+`audit-log-20261004T090507Z.csv`. Entries written after the request arrived are not in it.
+
+Who sees what is the list's rule: ADMIN and ANALYST export every entry; DEVELOPER and
+VIEWER export only their own, whatever `user_id` they send. Exporting is not recorded in
+the audit log.
+
+**Check the count.** `X-Total-Count` is the number of entries the file holds. A download
+that stops part-way can still look complete, a CSV especially, so compare the entries you
+received with it before you use the file. This exports the two bulk-toggle entries as
+JSON and compares:
+
+```{.bash exec}
+curl -s -D export-headers.txt -o audit-log.json \
+  "localhost:8000/api/v1/audit-logs/export?entity_type=feature_flag&action_type=toggle_disable" \
+  -H "Authorization: Bearer $TOKEN"
+EXPECTED=$(grep -i '^x-total-count:' export-headers.txt | tr -d '\r' | awk '{print $2}')
+RECEIVED=$(jq length audit-log.json)
+printf 'expected %s, received %s\n' "$EXPECTED" "$RECEIVED"
+```
+<!-- expect: expected 2, received 2 -->
+
+It prints `expected 2, received 2`. The same entries as CSV start with the header row:
+
+```{.bash exec}
+curl -s "localhost:8000/api/v1/audit-logs/export?format=csv&entity_type=feature_flag&action_type=toggle_disable" \
+  -H "Authorization: Bearer $TOKEN" | sed -n 1p
+```
+<!-- expect: id,timestamp,user_id,user_email,action_type,action_description,entity_type,entity_id,entity_name,old_value,new_value,reason -->
+
+To count the entries in a CSV, use a CSV parser: a quoted cell can hold a line break, so
+counting lines can be wrong.
+
+At most 50,000 entries fit in one export. When more match, the API answers `422`, says how
+many match, and sends no file; narrow `from_date` and `to_date`, or filter by
+`action_type` or `entity_type`. It never sends part of the entries. The export has its own
+rate limit, 10 requests a minute per client address, apart from the
+[data export](data-export.md) routes' limit.
+
+The dashboard's Audit Log page (`/admin/audit`) has **Download CSV** and **Download JSON**
+buttons that export the page's current filters. The page makes the same comparison, and
+when the counts differ it says so and saves nothing.
+
+---
+
 ## Action Types
 
 Every action below is written by the route or the part of the platform named. A route
@@ -271,7 +338,7 @@ user who asked for it.
 [Action Types](#action-types) is the complete list: a change not listed there writes no
 entry. No entry ever holds:
 
-- reading anything: lists, reports, the audit log itself;
+- reading anything: lists, reports, the audit log itself, or exporting it;
 - failed sign-ins (there is no account to attach them to) or sign-outs;
 - passwords or their hashes, tokens, or any part of an API key or its hash;
 - request bodies, IP addresses or user agents;
@@ -370,6 +437,7 @@ VIEWER read only the entries they made themselves.
 | Route | ADMIN, ANALYST | DEVELOPER, VIEWER |
 |-------|----------------|-------------------|
 | `GET /audit-logs/` | Every entry; `user_id` filters by any user | Own entries only; a `user_id` naming anyone else is replaced by their own |
+| `GET /audit-logs/export` | Every entry; `user_id` filters by any user | Own entries only; a `user_id` naming anyone else is replaced by their own |
 | `GET /audit-logs/user/{user_id}` | Any user | Their own id only; any other id is 403 |
 | `GET /audit-logs/entity/{entity_type}/{entity_id}` | Every entry | 403 |
 | `GET /audit-logs/stats` | Every entry | 403 |

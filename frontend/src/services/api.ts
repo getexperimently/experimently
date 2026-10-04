@@ -431,6 +431,15 @@ export async function apiFetch<T = unknown>(
     return readSuccessBody<T>(response, path);
   }
 
+  throw await failureFrom(response, auth, redirectOn401);
+}
+
+/** The `ApiError` for a non-2xx response; a 401 also clears the token. */
+async function failureFrom(
+  response: LooseResponse,
+  auth: boolean,
+  redirectOn401: boolean,
+): Promise<ApiError> {
   const status = response.status ?? 0;
   const { detail, json: bodyIsJson } = await readErrorDetail(response);
   const requestId = readRequestId(response);
@@ -457,7 +466,39 @@ export async function apiFetch<T = unknown>(
     }
   }
 
-  throw new ApiError({ status, detail, message, requestId });
+  return new ApiError({ status, detail, message, requestId });
+}
+
+/** A downloaded file: its text and the response headers. */
+export interface ApiDownload {
+  text: string;
+  headers: Headers;
+}
+
+/**
+ * Download a file from the API with the signed-in user's token. Unlike
+ * `apiFetch` it does not parse the body, and it returns the headers.
+ *
+ * @throws {ApiError} for non-2xx responses and network failures
+ */
+export async function apiDownload(
+  path: string,
+  query?: Record<string, QueryValue>,
+): Promise<ApiDownload> {
+  const headers: Record<string, string> = {};
+  const token = getToken();
+  if (token) headers.Authorization = `Bearer ${token}`;
+  let response: Response;
+  let text: string;
+  try {
+    response = await fetch(apiUrl(path, query), { headers });
+    if (!response.ok) throw await failureFrom(response as LooseResponse, true, true);
+    text = await response.text();
+  } catch (err) {
+    if (err instanceof ApiError) throw err;
+    throw new ApiError({ status: 0, detail: unreachableMessage(), cause: err });
+  }
+  return { text, headers: response.headers };
 }
 
 function hasHeader(headers: Record<string, string>, name: string): boolean {

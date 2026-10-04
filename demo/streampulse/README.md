@@ -140,7 +140,9 @@ Keep `traffic.py` running in a terminal throughout so the numbers move.
    incident (`traffic.py --incident android12` reports errors through `POST /tracking/errors`) →
    safety check unhealthy → rollback to 5 % → `app_version ≥ 3.2.1` rule → 50 % → 100 %. Watch
    the drawer's readout for *Galaxy S10 · app 3.1.0* vs *iPhone 15 · app 3.2.1*, and the Safety and
-   Audit pages in the dashboard.
+   Audit pages in the dashboard. The Audit page shows the rollback as a *Safety rollback* by
+   *Safety monitor (automatic)*, or by you when the story rolls back by hand; the seed writes no
+   rollback.
 4. **Notifications — sequential test + guardrail** (`streampulse_push_frequency`). Show the
    variant, press *Open notification* a few times and *Uninstall app* once. In the dashboard open
    Results → sequential testing (mSPRT boundary) and the `app_uninstall` guardrail.
@@ -152,8 +154,8 @@ Keep `traffic.py` running in a terminal throughout so the numbers move.
    press *Play your first track*. The dashboard has no Bayesian tab: the probability `three_step`
    beats `five_step` and the expected loss are in the API, `GET /api/v1/results/{id}/bayesian`.
 7. **Payments — audit trail** (`streampulse_upsell_modal`). *Go Premium* → classic vs value modal →
-   *Subscribe*. Dashboard → Admin → Audit log: the seed wrote create/start entries for this
-   experiment; every later change is logged too.
+   *Subscribe*. Dashboard → Admin → Audit log: the seed wrote create, change and start entries
+   for this experiment, in the form the platform writes them; every later change is logged too.
 8. **Global holdout**. Type a custom device id such as `sp-holdout-15` (bucket 1 under the demo
    holdout's salt) and *Apply device*: every experiment reads `in global holdout streampulse-holdout (control
    shown)` and no exposure is recorded. The preset ids are chosen to be outside the holdout.

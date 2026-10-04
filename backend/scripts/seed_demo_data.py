@@ -41,7 +41,7 @@ from backend.app.core.database_config import get_schema_name
 from backend.app.core.security import get_password_hash
 from backend.app.db.session import SessionLocal, engine
 from backend.app.models.assignment import Assignment
-from backend.app.models.audit_log import AuditLog
+from backend.app.models.audit_log import ActionType, AuditLog, EntityType
 from backend.app.models.event import Event
 from backend.app.models.experiment import (
     Experiment,
@@ -61,6 +61,9 @@ from backend.app.models.rollout_schedule import (
 )
 from backend.app.models.safety import FeatureFlagSafetyConfig, SafetySettings
 from backend.app.models.user import User, UserRole
+from backend.app.services.audit_service import role_value
+from backend.scripts import seed_audit
+from backend.scripts.seed_audit import seeded_entry
 from backend.scripts.seed_guard import require_development_environment
 
 # ---------------------------------------------------------------------------
@@ -886,7 +889,12 @@ def seed_feature_flags(db, admin_user) -> dict:
 
 
 def seed_audit_logs(db, users: dict, flags: dict, experiments: list):
-    """Seed a realistic audit trail."""
+    """Seed an audit trail in the form the platform writes it (#221).
+
+    Each entry goes through ``seed_audit.seeded_entry`` (the platform's own
+    writer and value helpers), dated in the past. Only actions the platform
+    writes are seeded, and never a safety rollback.
+    """
     print("  Seeding audit log entries...")
 
     admin = users.get("admin@demo.com")
@@ -895,92 +903,116 @@ def seed_audit_logs(db, users: dict, flags: dict, experiments: list):
         return
 
     # Check if we already have demo audit logs
-    existing_count = (
-        db.query(AuditLog).filter(AuditLog.user_email == "admin@demo.com").count()
-    )
+    existing_count = db.query(AuditLog).filter(AuditLog.user_id == admin.id).count()
     if existing_count > 5:
         print("    Audit logs already exist, skipping.")
         return
 
     log_entries = []
 
-    # User login events
-    for i, (email, user) in enumerate(users.items()):
+    def add(at, **entry):
+        log_entries.append(seeded_entry(db, at=at, **entry))
+
+    # Sign-ins with a password
+    for i, user in enumerate(users.values()):
         for day in [44, 30, 14, 7, 3, 1]:
-            log_entries.append(
-                AuditLog(
-                    user_id=user.id,
-                    user_email=email,
-                    action_type="user_login",
-                    entity_type="user",
-                    entity_id=user.id,
-                    entity_name=email,
-                    timestamp=days_ago(day) + timedelta(hours=i),
-                )
+            add(
+                days_ago(day) + timedelta(hours=i),
+                actor=user,
+                action=ActionType.USER_LOGIN,
+                entity_type=EntityType.USER,
+                entity_id=user.id,
+                entity_name=user.username or str(user.id),
+                after={"provider": "local"},
             )
 
-    # Experiment lifecycle events
+    # One experiment's lifecycle: created, its description changed, started,
+    # paused, completed.
     if experiments:
-        exp1 = experiments[0]
-        for action, entity_name, day_offset in [
-            ("experiment_create", "Homepage Hero Copy Test", 45),
-            ("experiment_update", "Homepage Hero Copy Test", 44),
-            ("experiment_start", "Homepage Hero Copy Test", 44),
-            ("experiment_pause", "Homepage Hero Copy Test", 25),
-            ("experiment_complete", "Homepage Hero Copy Test", 10),
+        exp = experiments[0]
+        E = EntityType.EXPERIMENT
+        status = ExperimentStatus
+
+        def lifecycle(action, day, before=None, after=None):
+            add(
+                days_ago(day),
+                actor=admin,
+                action=action,
+                entity_type=E,
+                entity_id=exp.id,
+                entity_name=exp.name,
+                before=before,
+                after=after,
+            )
+
+        lifecycle(
+            ActionType.EXPERIMENT_CREATE,
+            45,
+            after=seed_audit.identity(E, exp, status=status.DRAFT),
+        )
+        for action, day, old, new in [
+            (ActionType.EXPERIMENT_UPDATE, 44, {"description": "(draft)"}, {}),
+            (
+                ActionType.EXPERIMENT_START,
+                44,
+                {"status": status.DRAFT},
+                {"status": status.ACTIVE},
+            ),
+            (
+                ActionType.EXPERIMENT_PAUSE,
+                25,
+                {"status": status.ACTIVE},
+                {"status": status.PAUSED},
+            ),
+            (
+                ActionType.EXPERIMENT_COMPLETE,
+                10,
+                {"status": status.PAUSED},
+                {"status": status.COMPLETED},
+            ),
         ]:
-            log_entries.append(
-                AuditLog(
-                    user_id=admin.id,
-                    user_email=admin.email,
-                    action_type=action,
-                    entity_type="experiment",
-                    entity_id=exp1.id,
-                    entity_name=entity_name,
-                    timestamp=days_ago(day_offset),
-                )
+            before, after = seed_audit.changes(E, exp, old, new)
+            lifecycle(action, day, before, after)
+
+    # Feature flags: created by the developer; the ones that are on now were
+    # turned on by the admin.
+    for flag in flags.values():
+        add(
+            days_ago(30),
+            actor=dev,
+            action=ActionType.FEATURE_FLAG_CREATE,
+            entity_type=EntityType.FEATURE_FLAG,
+            entity_id=flag.id,
+            entity_name=flag.name,
+            after=seed_audit.identity(
+                EntityType.FEATURE_FLAG, flag, status=FeatureFlagStatus.INACTIVE
+            ),
+        )
+        if getattr(flag.status, "value", flag.status) == FeatureFlagStatus.ACTIVE.value:
+            add(
+                days_ago(29),
+                actor=admin,
+                action=ActionType.TOGGLE_ENABLE,
+                entity_type=EntityType.FEATURE_FLAG,
+                entity_id=flag.id,
+                entity_name=flag.name,
+                before=FeatureFlagStatus.INACTIVE.value,
+                after=FeatureFlagStatus.ACTIVE.value,
             )
 
-    # Feature flag events
-    for flag_key, flag in flags.items():
-        log_entries.append(
-            AuditLog(
-                user_id=dev.id,
-                user_email=dev.email,
-                action_type="feature_flag_create",
-                entity_type="feature_flag",
-                entity_id=flag.id,
-                entity_name=flag_key,
-                timestamp=days_ago(30),
-            )
-        )
-        log_entries.append(
-            AuditLog(
-                user_id=admin.id,
-                user_email=admin.email,
-                action_type="feature_flag_activate",
-                entity_type="feature_flag",
-                entity_id=flag.id,
-                entity_name=flag_key,
-                timestamp=days_ago(29),
-            )
-        )
-
-    # RBAC events
-    log_entries.append(
-        AuditLog(
-            user_id=admin.id,
-            user_email=admin.email,
-            action_type="role_assign",
-            entity_type="user",
-            entity_id=dev.id,
-            entity_name="dev@demo.com",
-            reason="Assigned developer role for experimentation platform access",
-            timestamp=days_ago(60),
-        )
+    # The developer's role, given by the admin.
+    add(
+        days_ago(60),
+        actor=admin,
+        action=ActionType.ROLE_ASSIGN,
+        entity_type=EntityType.USER,
+        entity_id=dev.id,
+        entity_name=dev.username or str(dev.id),
+        before={"role": UserRole.VIEWER.name, "is_superuser": False},
+        after=role_value(dev),
     )
 
-    _bulk_insert(db, log_entries, batch_size=200)
+    db.flush()
     db.commit()
     print(f"    Created {len(log_entries)} audit log entries.")
 
