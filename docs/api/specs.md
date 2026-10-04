@@ -772,7 +772,10 @@ POST /api/v1/tracking/assign
 
 Returns the user's variant for an ACTIVE experiment. Assignment is sticky: the first call buckets the
 user (deterministic hash over traffic allocation, or the current bandit weights for multi-armed bandit
-experiments) and every later call returns the same variant. Each call records an exposure event.
+experiments) and every later call returns the same variant. Each call for an enrolled user records
+that the user saw the experiment. A new user who is not eligible (global holdout, mutual exclusion
+group or targeting rules) gets the control variant with `assigned: false` and a `reason` of
+`holdout`, `mutual_exclusion` or `targeting`, and nothing is recorded for them.
 
 **Request Body**
 
@@ -793,7 +796,9 @@ experiments) and every later call returns the same variant. Each call records an
     "variant_id": "0d3e7f6a-4b0e-4a1a-9b6f-8b1c2d3e4f50",
     "variant_name": "video_hero",
     "is_control": false,
-    "configuration": {"media": "video", "headline": "See it in motion"}
+    "configuration": {"media": "video", "headline": "See it in motion"},
+    "assigned": true,
+    "reason": "assigned"
 }
 ```
 
