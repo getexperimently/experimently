@@ -2179,9 +2179,16 @@ POST   /api/v1/segments/{id}/evaluate    — Is this user context a member? (409
 POST   /api/v1/segments/bulk-evaluate    — One user context against up to 50 segments
 GET    /api/v1/segments/{id}/experiments — Experiments and flags whose rules mention the segment's id
 POST   /api/v1/segments/{id}/preview     — Estimate the share of users the rules in the body match
+POST   /api/v1/segments/{id}/members        — Add user IDs to an id_list segment (beta; DEVELOPER+)
+POST   /api/v1/segments/{id}/members/remove — Remove user IDs from an id_list segment (beta; DEVELOPER+)
 ```
 
 `{id}` is the segment's UUID; any other text answers 422.
+
+A segment's `kind` is `rules` (the default: users whose attributes match its rules) or
+`id_list` (users whose `user_id` is in its list; see
+[below](#segments-made-from-a-list-of-user-ids-beta)). It is set on create and never
+changed.
 
 **Segment rules use the targeting rule format** that flag and experiment targeting use,
 and are checked when saved:
@@ -2239,6 +2246,53 @@ segment that is not archived and whose rules are not valid,
 above with `PUT /api/v1/segments/{id}`.
 
 No flag or experiment changes behaviour: no targeting rule can refer to a segment.
+
+#### Segments made from a list of user IDs (beta)
+
+Create the segment with `kind` `id_list` and no `rules`:
+
+```json
+{"name": "Enterprise pilot", "kind": "id_list"}
+```
+
+Sending `rules` with `id_list`, or leaving them out with `rules`, answers 422. The answer
+carries `"kind": "id_list"` and `"rules": null`, and `GET /api/v1/segments/{id}` adds
+`member_count`, how many IDs the list holds (it is `null` for a rules segment and in the
+list route). A `PUT` that sends `kind`, or `rules` for an id list, answers 422; renaming one
+works as for any segment.
+
+Add and remove IDs with the member routes, which are beta (`x-stability: beta`):
+
+```json
+POST /api/v1/segments/{id}/members          {"add": ["user-123", "user-456"]}
+→ 200 {"added": 2, "already_members": 0, "member_count": 2}
+
+POST /api/v1/segments/{id}/members/remove   {"remove": ["user-123", "user-999"]}
+→ 200 {"removed": 1, "not_members": 1, "member_count": 1}
+```
+
+- **Limits.** 1 to 10,000 IDs per request, each a string of 1 to 255 characters, matched
+  exactly (not trimmed, not case-folded). A segment holds at most 1,000,000 IDs. Send a
+  longer list in chunks of 10,000.
+- **Sending the same IDs again is safe.** An ID already in the segment is counted in
+  `already_members` and left alone; removing one that is not there is counted in
+  `not_members`. An ID repeated within one request counts once, so `added +
+  already_members` (or `removed + not_members`) is the number of distinct IDs sent.
+- **Refusals.** 422 with `loc` `["body", "add"]` (or `"remove"`) and a fixed message that
+  never repeats an ID: `add: at least 1 ID is required`, `add: at most 10,000 IDs per
+  request`, `add[17]: an ID is 1 to 255 characters`. Any other field in the body answers
+  422 (`{"ids": [...]}` is refused, not ignored). A request that would take the segment
+  past 1,000,000 answers 422 `this segment would have 1,000,250 members; a segment holds at
+  most 1,000,000` and adds nothing. A rules segment answers 409 `members can be added only
+  to an id_list segment` (`removed only from` on remove), an archived one 409 `this
+  segment is archived; its members cannot be changed`, an unknown one 404.
+- **Who.** DEVELOPER and ADMIN; ANALYST and VIEWER get 403. Each change writes one
+  `segment_update` audit entry with the counts, never the IDs.
+
+`POST /api/v1/segments/{id}/evaluate` answers an id list on `user_context.user_id`: the user
+is a member when it is a string in the list, and `matched_rules` is empty. A context with no
+`user_id`, or a `user_id` that is not a string, is not a member. Bulk-evaluate answers the
+same way. Preview takes rules, so it answers 422 for a body with none.
 
 ---
 

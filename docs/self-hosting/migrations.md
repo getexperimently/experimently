@@ -202,7 +202,7 @@ python -m alembic -c backend/app/db/alembic.ini downgrade <core revision id>
 
 **Not `modules@base`.** `modules_0001_rbac` is a child of the core revision
 `a7b8c9d0e1f2`, not an alembic base, and with a single tree root alembic cannot
-filter a downgrade by branch label: `downgrade modules@base` resolves to **34
+filter a downgrade by branch label: `downgrade modules@base` resolves to **35
 revisions** — the whole core chain to base — and drops every table in the
 schema.
 
@@ -356,6 +356,14 @@ Past `d29a479daafe` that downgrade would also drop the table
 `holdout_population`, with every row in it, and three `global_holdouts` columns
 (see the next section).
 
+Past `37dcb2969766` it also runs that revision's downgrade, which drops the
+table `segment_members` (the members of every id-list segment) and the column
+`segments.kind`. **So it now stops while any id list has members**: that
+downgrade refuses, prints how many rows `segment_members` holds, and changes
+nothing, because nothing could put the members back and every id-list segment
+would return as a rules segment with no rules (see
+[`37dcb2969766`](#37dcb2969766-adds-segments-made-from-a-list-of-user-ids)).
+
 ### `d29a479daafe` records who each global holdout covers
 
 This revision adds `activated_at`, `deactivated_at` and `hash_salt` to
@@ -393,6 +401,34 @@ nothing can rebuild the table. The deactivations are not reverted. Rolling back
 across this revision while a holdout is active also invalidates that holdout:
 the older release buckets users with the old salt and records nobody, so after
 upgrading again deactivate it and create a new one.
+
+### `37dcb2969766` adds segments made from a list of user ids
+
+This revision adds `segments.kind` (`rules` or `id_list`, default `rules`, with
+the check `ck_segments_kind`) and the table `segment_members`, one row per user
+id in an id-list segment. Every segment already stored becomes a `rules`
+segment, which is what it was; no row is changed.
+
+**The downgrade deletes every id list's members.** `37dcb2969766`'s downgrade
+drops `segment_members` with all its rows, the check and `segments.kind`;
+nothing can rebuild the table, and an id-list segment comes back from a later
+upgrade as a rules segment with no rules. So while `segment_members` has any
+row the downgrade refuses, names the row count, and changes nothing:
+
+```text
+37dcb2969766: refusing to downgrade: segment_members holds 3 row(s), ...
+```
+
+To go on, either remove the members first (`POST
+/api/v1/segments/{id}/members/remove`), or, once someone has agreed to lose
+them, run the same downgrade with the override:
+
+```bash
+python -m alembic -c backend/app/db/alembic.ini -x allow_member_loss=true downgrade d29a479daafe
+```
+
+The Database Migration workflow does not pass `-x`, so on AWS it stops at this
+revision while any id list has members.
 
 Roll back to a specific revision:
 
@@ -665,6 +701,9 @@ What this means for you:
   ran. [`d29a479daafe`](#d29a479daafe-records-who-each-global-holdout-covers)
   is backward-compatible for a rollback, but undoing it drops
   `holdout_population` and its rows.
+  [`37dcb2969766`](#37dcb2969766-adds-segments-made-from-a-list-of-user-ids)
+  is backward-compatible for a rollback too, and undoing it drops
+  `segment_members` and its rows; it refuses while that table has any.
 - **Docker Compose and the Helm chart are deliberately unchanged.** Compose runs
   one API container, which is the only writer and keeps `RUN_MIGRATIONS=true`.
   The chart already keeps the bootstrap out of the serving container: it runs

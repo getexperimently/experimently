@@ -44,12 +44,13 @@ pytestmark = [pytest.mark.integration]
 REVISION = "806901fb7735"
 PREVIOUS_CORE_HEAD = "1ab99332f0ba"
 #: The core head of this tree, which ``upgrade heads`` runs on to past this
-#: revision: ``d29a479daafe`` (#445).
-CORE_HEAD = "d29a479daafe"
+#: revision, through ``d29a479daafe`` (#445): ``37dcb2969766`` (#440).
+CORE_HEAD = "37dcb2969766"
 #: Tables that a later core revision's downgrade drops: a downgrade from the
 #: head to this test's target unapplies those revisions too.  ``d29a479daafe``
-#: (#445) drops ``holdout_population``.
-LATER_DOWNGRADE_TABLES = {"holdout_population"}
+#: (#445) drops ``holdout_population``; ``37dcb2969766`` (#440) drops
+#: ``segment_members``.
+LATER_DOWNGRADE_TABLES = {"holdout_population", "segment_members"}
 #: The modules branch's head, in the previous release and in this one alike.
 MODULES_HEAD = "modules_0002_warehouse_analysis"
 
