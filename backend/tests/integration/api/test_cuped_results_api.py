@@ -731,3 +731,31 @@ def test_volume_the_statement_count_does_not_grow_with_users(admin_client, built
     )
 
     assert _statements(admin_client, small) == _statements(admin_client, large)
+
+
+# ---------------------------------------------------------------------------
+# Winsorization on a conversion metric
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.regression
+def test_winsorization_on_a_conversion_metric_is_a_reason_not_zeroed(
+    admin_client, built
+):
+    """Clipping 0/1 outcomes at the 99th percentile turns every conversion
+    into 0 when fewer than 1% convert: 10 of 2,000 here.  The comparison is
+    listed as needing a mean metric instead of reported as no conversions."""
+    arms = {
+        "control": Arm(n=2000, converted=10, history=0, both=0),
+        "treatment": Arm(n=2000, converted=14, history=0, both=0),
+    }
+    exp = built(arms, method="winsorization")
+
+    body = _get(admin_client, exp)
+
+    [row] = body["metrics"]
+    assert row["unavailable_reason"] == "winsorization_needs_mean_metric"
+    assert row["adjusted_control_mean"] is None
+    assert row["method"] == "winsorization"
+    assert row["control_sample_size"] == 2000
+    assert body["method"] == "winsorization"

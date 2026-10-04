@@ -10,7 +10,6 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Set, Tuple
 from uuid import UUID
 
-import numpy as np
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session, joinedload
 
@@ -48,7 +47,6 @@ from backend.app.services.analysis_service import AnalysisService
 from backend.app.services.analysis_settings import resolve_analysis_settings
 from backend.app.services.analysis_snapshot_service import record_snapshot
 from backend.app.services.cache import CacheService
-from backend.app.services.cuped_service import CupedService
 from backend.app.services.dimensional_analysis_service import DimensionalAnalysisService
 from backend.app.services.event_matching import (
     assignment_times,
@@ -1450,6 +1448,11 @@ def get_cuped_results_data(
         if not _metric_is_proportion(metric_def):
             metric_results.extend(reason(NOT_A_PROPORTION_METRIC))
             continue
+        if method == VarianceReductionMethod.WINSORIZATION:
+            # Clipping 0/1 outcomes at a percentile zeroes every conversion
+            # when fewer than (100 - percentile)% convert; it is for means.
+            metric_results.extend(reason(WINSORIZATION_NEEDS_MEAN_METRIC))
+            continue
 
         covariate_event: Optional[str] = None
         x_users: Set[str] = set()
@@ -1482,16 +1485,6 @@ def get_cuped_results_data(
             converted = converting_user_ids(
                 db, experiment.id, variant.id, metric_def.event_name
             )
-            if method == VarianceReductionMethod.WINSORIZATION:
-                y = np.array([1.0 if u in converted else 0.0 for u in users])
-                if len(y):
-                    y = CupedService.apply_winsorization(
-                        y, percentile=config.winsorization_percentile
-                    )
-                sum_y = float(y.sum()) if len(y) else 0.0
-                sum_y2 = float((y * y).sum()) if len(y) else 0.0
-                arms.append((variant, len(users), sum_y, 0.0, sum_y2, 0.0, 0.0))
-                continue
             n_converted = len(converted)
             with_history = x_users.intersection(users)
             both = len(with_history & converted)
