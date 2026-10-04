@@ -9,9 +9,13 @@ the step that deleted a published release tag mid-incident.
 
 from __future__ import annotations
 
+import json
 import re
+import subprocess
+import sys
 from pathlib import Path
 
+import jmespath
 import pytest
 import yaml
 
@@ -779,3 +783,150 @@ def test_the_jwt_rotation_does_not_claim_to_take_effect_at_once():
     assert "invalidates all active sessions immediately" not in section
     assert "#restart-the-api-on-its-current-release" in section
     assert "#how-long-the-old-value-keeps-working" in section
+
+
+# ---------------------------------------------------------------------------
+# The API's running counts: the PRIMARY task set's own, never the service's
+# (#816).
+#
+# For the hour after a blue/green shift the replaced task set keeps running
+# beside the new one, so the service's runningCount counts both (staging read
+# 4 of 2 after a rollback that had worked). The commands that tell an operator
+# "Running == Desired" read the PRIMARY task set's runningCount,
+# computedDesiredCount and pendingCount instead. Scoped to the three documents
+# that carry those commands and to the API's service: disaster-recovery.md and
+# the dashboard's rolling-controller blocks are deliberately not read.
+
+COUNT_DOCS = [RUNBOOK, GUIDE, DOCS / "deployment" / "README.md"]
+POST_SHIFT = (
+    Path(__file__).resolve().parent
+    / "fixtures"
+    / "rollback_verify"
+    / "services-post-shift.json"
+)
+
+
+def _api_count_commands() -> list[tuple[str, str]]:
+    """(document, command) for every describe-services of the API's service
+    that reads a count (runningCount, desiredCount, pendingCount,
+    computedDesiredCount): the old service-level form is caught here too, and
+    then fails the evaluation below.
+
+    A command is the fence's `\\`-continued lines joined back into one, as the
+    shell reads them.
+    """
+    found = []
+    for path in COUNT_DOCS:
+        if not path.is_file():  # read at collection; the module skips later
+            continue
+        text = path.read_text()
+        for body in re.findall(r"^```bash\n(.*?)^```", text, re.S | re.M):
+            logical, current = [], ""
+            for line in body.split("\n"):
+                current += line + "\n"
+                if not line.endswith("\\"):
+                    logical.append(current)
+                    current = ""
+            for command in logical:
+                if (
+                    "describe-services" in command
+                    and "backend-" in command
+                    and "Count" in command
+                ):
+                    found.append((path.name, command))
+    return found
+
+
+def _run_through_the_shell(command: str, tmp_path: Path) -> list[str]:
+    """The arguments `aws` receives when the operator pastes `command`.
+
+    The real shell does the quoting -- including `watch`'s second round
+    through `sh -c` -- so a quote that ends a quoted string early changes
+    what the fake receives exactly as it changes what the real CLI does.
+    """
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir(exist_ok=True)
+    args_file = tmp_path / "aws-args"
+    args_file.write_bytes(b"")
+    (bin_dir / "aws").write_text(
+        f"#!{sys.executable}\n"
+        "import json, os, sys\n"
+        "with open(os.environ['AWS_ARGS'], 'w') as f:\n"
+        "    json.dump(sys.argv[1:], f)\n"
+    )
+    # watch(1) joins its arguments with spaces and runs them with `sh -c`.
+    (bin_dir / "watch").write_text('#!/bin/sh\nshift 2\nexec sh -c "$*"\n')
+    for name in ("aws", "watch"):
+        (bin_dir / name).chmod(0o755)
+    script = tmp_path / "block.sh"
+    script.write_text("export ENV=staging\n" + command)
+    env = {
+        "PATH": f"{bin_dir}:/usr/bin:/bin",
+        "AWS_ARGS": str(args_file),
+        "HOME": str(tmp_path),
+    }
+    done = subprocess.run(
+        ["bash", str(script)], env=env, capture_output=True, text=True, timeout=30
+    )
+    assert done.returncode == 0, done.stderr
+    raw = args_file.read_text()
+    assert raw, f"the block never ran aws: {command}"
+    return json.loads(raw)
+
+
+def test_the_api_count_commands_are_found():
+    found = _api_count_commands()
+    by_doc = {}
+    for name, _ in found:
+        by_doc[name] = by_doc.get(name, 0) + 1
+    # Two in the runbook (the watch and the post-rollback check), one in the
+    # guide, two in the README (the check and the watch).
+    assert by_doc == {
+        "rollback-runbook.md": 2,
+        "deployment-guide.md": 1,
+        "README.md": 2,
+    }, by_doc
+
+
+@pytest.mark.regression
+@pytest.mark.parametrize(
+    "doc,command",
+    [
+        pytest.param(
+            doc, command, id=f"{doc}-{'watch' if 'watch' in command else 'check'}"
+        )
+        for doc, command in _api_count_commands()
+    ],
+)
+def test_the_api_counts_are_the_primary_task_sets(doc, command, tmp_path):
+    args = _run_through_the_shell(command, tmp_path)
+    assert args[:2] == ["ecs", "describe-services"], args
+    assert args[args.index("--services") + 1] == "experimentation-backend-staging"
+    # --output text sorts the keys and an operator's config may set text or
+    # table: the block says json itself.
+    assert args[args.index("--output") + 1] == "json", args
+    query = args[args.index("--query") + 1]
+    response = json.loads(POST_SHIFT.read_text())
+    (primary,) = [
+        s for s in response["services"][0]["taskSets"] if s["status"] == "PRIMARY"
+    ]
+    got = jmespath.search(query, response)
+    # The service runs 4 of 2 here; the PRIMARY task set runs 2 of 2.
+    assert got == {
+        "Serving": primary["taskDefinition"],
+        "Running": 2,
+        "Desired": 2,
+        "Pending": 0,
+    }, f"{doc}: {query!r} gives {got!r} on the post-shift response"
+
+
+@pytest.mark.regression
+def test_a_watch_block_writes_primary_in_backticks():
+    """Inside `watch`'s single-quoted string, `'PRIMARY'` ends the quote: the
+    filter compares against a field named PRIMARY, and the command prints
+    null and exits 0."""
+    watches = [c for _, c in _api_count_commands() if c.lstrip().startswith("watch")]
+    assert len(watches) == 2, watches
+    for command in watches:
+        assert "status==\\`PRIMARY\\`" in command, command
+        assert "'PRIMARY'" not in command, command

@@ -551,7 +551,8 @@ curl -s "$BASE/api/v1/experiments/"
 
 aws ecs describe-services --cluster "experimentation-$ENV" \
   --services "experimentation-backend-$ENV" \
-  --query "services[0].{Running:runningCount,Desired:desiredCount,Serving:taskSets[?status=='PRIMARY'].taskDefinition|[0]}"
+  --output json \
+  --query "services[0].taskSets[?status=='PRIMARY'] | [0].{Serving:taskDefinition,Running:runningCount,Desired:computedDesiredCount,Pending:pendingCount}"
 
 curl -sS -o /dev/null -w '%{http_code} %{content_type}\n' "$BASE/"
 aws ecs describe-services --cluster "experimentation-$ENV" \
@@ -559,9 +560,12 @@ aws ecs describe-services --cluster "experimentation-$ENV" \
   --query "services[0].deployments[?status=='PRIMARY'].{td:taskDefinition,state:rolloutState,running:runningCount,desired:desiredCount}"
 ```
 
-Expected: `Running == Desired`, and `Serving` the revision the run summary
-named; the dashboard's one PRIMARY deployment on the new dashboard revision,
-`COMPLETED`, running equal to desired.
+Expected: `Running == Desired` and `Pending` 0, and `Serving` the revision the
+run summary named. These are the API's PRIMARY task set's own counts; the
+service's `runningCount` also counts the replaced task set for the hour after
+a shift, so it reads higher than `Desired` then. The dashboard's one PRIMARY
+deployment on the new dashboard revision, `COMPLETED`, running equal to
+desired.
 
 ---
 
