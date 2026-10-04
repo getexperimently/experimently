@@ -1319,7 +1319,7 @@ class ExperimentNotFound(Exception):
 
     Deliberately not a ``ValueError``.  Statistics code raises ``ValueError``
     for conditions that are not a missing experiment (``fromisoformat``, the
-    sufficient-statistics refusals), and mapping those to 404 would echo
+    sufficient-statistics refusals), and mapping those to 404 would repeat
     their text.
     """
 

@@ -282,9 +282,29 @@ def test_cuped_reports_every_treatment(admin_client, built):
 
 
 @pytest.mark.regression
-def test_s6_sizes_and_conversions_are_the_results_routes(admin_client, built):
-    """With method none, n and the unadjusted effect are exactly /results'."""
+def test_s6_sizes_and_conversions_are_the_results_routes(
+    admin_client, built, db_session
+):
+    """With method none, n and the unadjusted effect are exactly /results'.
+
+    Three control converters buy twice: users are counted, not events."""
     exp = built(TWO, method="none")
+    db_session.add_all(
+        Event(
+            event_type="purchase",
+            event_name="purchase",
+            user_id=assignment.user_id,
+            experiment_id=exp.id,
+            variant_id=assignment.variant_id,
+            created_at=(assignment.created_at + timedelta(hours=2)).isoformat(),
+            updated_at=assignment.created_at + timedelta(hours=2),
+        )
+        for assignment in db_session.query(Assignment)
+        .filter(Assignment.experiment_id == exp.id)
+        .order_by(Assignment.user_id)
+        .limit(3)
+    )
+    db_session.commit()
 
     cuped = _get(admin_client, exp)
     results = admin_client.get(f"/api/v1/results/{exp.id}", params={"use_cache": False})

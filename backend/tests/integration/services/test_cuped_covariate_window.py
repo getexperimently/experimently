@@ -29,7 +29,7 @@ from datetime import datetime, timedelta
 
 import pytest
 
-from backend.app.models.event import Event
+from backend.app.models.event import Event, EventType
 from backend.app.services import event_matching
 from backend.app.services.event_matching import covariate_user_ids
 
@@ -163,14 +163,14 @@ def test_w5_a_fanned_out_copy_counts_once(db_session, rows, make_experiment):
 
 
 def test_only_conversion_events_of_the_name_count(db_session, rows):
-    """An exposure row named after the metric, or another event, is not history."""
+    """A variant-view row named after the metric, or another event, is not history."""
     assigned = datetime(2026, 9, 20, 15, 0, 0)
     prefix = uuid.uuid4().hex[:8]
-    exposure, other = f"cv-{prefix}-exp", f"cv-{prefix}-other"
+    viewed, other = f"cv-{prefix}-viewed", f"cv-{prefix}-other"
     happened = assigned - timedelta(days=1)
     rows.extend(
         [
-            _event(exposure, happened, happened, event_type="exposure"),
+            _event(viewed, happened, happened, event_type=EventType.EXPOSURE.value),
             _event(other, happened, happened, event_name="page_view"),
         ]
     )
@@ -178,7 +178,7 @@ def test_only_conversion_events_of_the_name_count(db_session, rows):
     db_session.commit()
 
     found, _ = covariate_user_ids(
-        db_session, dict.fromkeys((exposure, other), assigned), EVENT, 7
+        db_session, dict.fromkeys((viewed, other), assigned), EVENT, 7
     )
 
     assert found == set()
