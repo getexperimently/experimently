@@ -443,6 +443,10 @@ HIPAA_DECRYPT = "ValueError: the HIPAA service's decryption-refused sentence"
 RERAISE = "re-raises an HTTPException the route itself raised, unchanged"
 VALUES_OMITTED = "keeps only type, loc and msg of each error, never the input"
 DOMAIN = "a domain exception whose message the module wrote"
+SEGMENT_CHANGE_REFUSED = (
+    "SegmentChangeRefused: the audience service's fixed sentence and status "
+    "(kind, archived, the member cap with counts); never an id or request value"
+)
 
 ALLOWED: Dict[Tuple[str, str, str], Tuple[int, str]] = {
     (f"{E}/audit_logs.py", "list_audit_logs", "ValueError"): (1, AUDIT_PAGE),
@@ -567,6 +571,29 @@ ALLOWED: Dict[Tuple[str, str, str], Tuple[int, str]] = {
     # The segment's audit snapshot before an update or archive: the same
     # ``AudienceService.get_segment`` "not found" text the routes answered.
     (f"{E}/segments.py", "_segment_before", "ValueError"): (1, SERVICE_VALUEERROR),
+    # #440: the member routes and update. ``SegmentChangeRefused.message`` is
+    # fixed text the audience service writes (counts at most, never an id or
+    # any other request value); ValueError is the service's "not found".
+    (f"{E}/segments.py", "add_segment_members", "SegmentChangeRefused"): (
+        1,
+        SEGMENT_CHANGE_REFUSED,
+    ),
+    (f"{E}/segments.py", "add_segment_members", "ValueError"): (
+        1,
+        SERVICE_VALUEERROR,
+    ),
+    (f"{E}/segments.py", "remove_segment_members", "SegmentChangeRefused"): (
+        1,
+        SEGMENT_CHANGE_REFUSED,
+    ),
+    (f"{E}/segments.py", "remove_segment_members", "ValueError"): (
+        1,
+        SERVICE_VALUEERROR,
+    ),
+    (f"{E}/segments.py", "update_segment", "SegmentChangeRefused"): (
+        1,
+        SEGMENT_CHANGE_REFUSED,
+    ),
     (f"{E}/segments.py", "delete_segment", "ValueError"): (1, SERVICE_VALUEERROR),
     (f"{E}/segments.py", "evaluate_segment_membership", "ValueError"): (
         1,

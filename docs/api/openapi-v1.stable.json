@@ -10092,6 +10092,11 @@
             ],
             "title": "Description"
           },
+          "kind": {
+            "$ref": "#/components/schemas/SegmentKind",
+            "default": "rules",
+            "description": "rules: users whose attributes match `rules`. id_list: users whose user_id is in the segment's list, added with POST /segments/{segment_id}/members; an id_list segment has no rules. Set when the segment is created and never changed."
+          },
           "name": {
             "maxLength": 128,
             "minLength": 2,
@@ -10099,15 +10104,21 @@
             "type": "string"
           },
           "rules": {
-            "additionalProperties": true,
-            "description": "Targeting rules in the format flag and experiment targeting use: {\"logical_operator\": \"AND\"|\"OR\"|\"NOT\" (optional), \"groups\": [{\"logical_operator\"?, \"conditions\": [{\"attribute\", \"operator\", \"value\"}]}]}, with operators such as equals, in, regex and semver_gte. At least one group, each with at least one condition; at most 20 groups, 50 conditions, 10 regex conditions and 1,000 list values. Any other shape is refused with 422.",
-            "title": "Rules",
-            "type": "object"
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Targeting rules in the format flag and experiment targeting use: {\"logical_operator\": \"AND\"|\"OR\"|\"NOT\" (optional), \"groups\": [{\"logical_operator\"?, \"conditions\": [{\"attribute\", \"operator\", \"value\"}]}]}, with operators such as equals, in, regex and semver_gte. At least one group, each with at least one condition; at most 20 groups, 50 conditions, 10 regex conditions and 1,000 list values. Any other shape is refused with 422. Required for a rules segment; refused for an id_list segment.",
+            "title": "Rules"
           }
         },
         "required": [
-          "name",
-          "rules"
+          "name"
         ],
         "title": "SegmentCreate",
         "type": "object"
@@ -10158,6 +10169,136 @@
           "feature_flags"
         ],
         "title": "SegmentExperimentResponse",
+        "type": "object"
+      },
+      "SegmentKind": {
+        "description": "What decides a segment's members. Fixed when the segment is created.",
+        "enum": [
+          "rules",
+          "id_list"
+        ],
+        "title": "SegmentKind",
+        "type": "string"
+      },
+      "SegmentMembersAdd": {
+        "additionalProperties": false,
+        "description": "User ids to add to an id-list segment.",
+        "example": {
+          "add": [
+            "user-123",
+            "user-456"
+          ]
+        },
+        "properties": {
+          "add": {
+            "description": "User ids, 1 to 10,000 per request, each 1 to 255 characters and matched exactly (not trimmed, not case-folded). Repeats count once. An id already in the segment is left as it is.",
+            "items": {
+              "maxLength": 255,
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 10000,
+            "minItems": 1,
+            "title": "Add",
+            "type": "array"
+          }
+        },
+        "required": [
+          "add"
+        ],
+        "title": "SegmentMembersAdd",
+        "type": "object"
+      },
+      "SegmentMembersAddResponse": {
+        "description": "What an add changed. ``added + already_members`` is the number of\ndistinct ids sent.",
+        "example": {
+          "added": 4190,
+          "already_members": 11,
+          "member_count": 4190
+        },
+        "properties": {
+          "added": {
+            "description": "Ids that were not members and now are.",
+            "title": "Added",
+            "type": "integer"
+          },
+          "already_members": {
+            "description": "Ids that were members already; nothing changed for them.",
+            "title": "Already Members",
+            "type": "integer"
+          },
+          "member_count": {
+            "description": "Members of the segment now.",
+            "title": "Member Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "added",
+          "already_members",
+          "member_count"
+        ],
+        "title": "SegmentMembersAddResponse",
+        "type": "object"
+      },
+      "SegmentMembersRemove": {
+        "additionalProperties": false,
+        "description": "User ids to remove from an id-list segment.",
+        "example": {
+          "remove": [
+            "user-123"
+          ]
+        },
+        "properties": {
+          "remove": {
+            "description": "User ids, 1 to 10,000 per request, each 1 to 255 characters and matched exactly (not trimmed, not case-folded). Repeats count once. An id that is not in the segment is ignored.",
+            "items": {
+              "maxLength": 255,
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 10000,
+            "minItems": 1,
+            "title": "Remove",
+            "type": "array"
+          }
+        },
+        "required": [
+          "remove"
+        ],
+        "title": "SegmentMembersRemove",
+        "type": "object"
+      },
+      "SegmentMembersRemoveResponse": {
+        "description": "What a remove changed. ``removed + not_members`` is the number of\ndistinct ids sent.",
+        "example": {
+          "member_count": 4070,
+          "not_members": 0,
+          "removed": 120
+        },
+        "properties": {
+          "member_count": {
+            "description": "Members of the segment now.",
+            "title": "Member Count",
+            "type": "integer"
+          },
+          "not_members": {
+            "description": "Ids that were not members.",
+            "title": "Not Members",
+            "type": "integer"
+          },
+          "removed": {
+            "description": "Ids that were members and no longer are.",
+            "title": "Removed",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "removed",
+          "not_members",
+          "member_count"
+        ],
+        "title": "SegmentMembersRemoveResponse",
         "type": "object"
       },
       "SegmentMembershipRequest": {
@@ -10248,6 +10389,11 @@
             "title": "Id",
             "type": "string"
           },
+          "kind": {
+            "$ref": "#/components/schemas/SegmentKind",
+            "default": "rules",
+            "description": "rules: users whose attributes match `rules`. id_list: users whose user_id is in the segment's list, added with POST /segments/{segment_id}/members; an id_list segment has no rules. Set when the segment is created and never changed."
+          },
           "member_count": {
             "anyOf": [
               {
@@ -10257,6 +10403,7 @@
                 "type": "null"
               }
             ],
+            "description": "How many user ids an id_list segment holds, on GET /segments/{segment_id}. Null for a rules segment and in the list.",
             "title": "Member Count"
           },
           "name": {
@@ -10264,9 +10411,17 @@
             "type": "string"
           },
           "rules": {
-            "additionalProperties": true,
-            "title": "Rules",
-            "type": "object"
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The segment's rules; null for an id_list segment.",
+            "title": "Rules"
           },
           "status": {
             "$ref": "#/components/schemas/SegmentStatus"
@@ -10279,7 +10434,6 @@
         "required": [
           "id",
           "name",
-          "rules",
           "status",
           "created_at",
           "updated_at"
@@ -24058,7 +24212,7 @@
         ]
       },
       "post": {
-        "description": "Create a new audience segment with targeting rules. Requires DEVELOPER or ADMIN role.",
+        "description": "Create a new audience segment: kind rules (the default) with targeting rules, or kind id_list with no rules, whose members are added with POST /segments/{segment_id}/members. Requires DEVELOPER or ADMIN role.",
         "operationId": "create_segment_api_v1_segments_post",
         "requestBody": {
           "content": {
@@ -24195,7 +24349,7 @@
         ]
       },
       "get": {
-        "description": "Retrieve a single audience segment by its UUID.",
+        "description": "Retrieve a single audience segment by its UUID. For an id_list segment, member_count is how many user ids it holds.",
         "operationId": "get_segment_api_v1_segments__segment_id__get",
         "parameters": [
           {
@@ -24243,7 +24397,7 @@
         ]
       },
       "put": {
-        "description": "Update segment name, description, rules, or status. Requires DEVELOPER or ADMIN role.",
+        "description": "Update segment name, description, rules, or status. A segment's kind cannot be changed, and an id_list segment takes no rules (422). Requires DEVELOPER or ADMIN role.",
         "operationId": "update_segment_api_v1_segments__segment_id__put",
         "parameters": [
           {
@@ -24303,7 +24457,7 @@
     },
     "/api/v1/segments/{segment_id}/evaluate": {
       "post": {
-        "description": "Check whether a user context (arbitrary attributes dict) satisfies this segment's targeting rules, evaluated as a feature flag evaluates the same rules. A segment whose stored rules are not in the targeting rule format (saved before rules were checked) answers 409.",
+        "description": "Check whether a user context (arbitrary attributes dict) satisfies this segment's targeting rules, evaluated as a feature flag evaluates the same rules. For an id_list segment, the user is a member when user_context.user_id is in its list. A segment whose stored rules are not in the targeting rule format (saved before rules were checked) answers 409.",
         "operationId": "evaluate_segment_membership_api_v1_segments__segment_id__evaluate_post",
         "parameters": [
           {
@@ -24412,6 +24566,126 @@
           "Segments",
           "Segments"
         ]
+      }
+    },
+    "/api/v1/segments/{segment_id}/members": {
+      "post": {
+        "description": "Add 1 to 10,000 user ids (each 1 to 255 characters, matched exactly) to an id_list segment. Ids already in it are left alone, so sending the same ids again is safe. A segment holds at most 1,000,000 ids; a request that would pass that answers 422 and adds nothing. Answers the counts: added + already_members is the number of distinct ids sent. Requires DEVELOPER or ADMIN role.",
+        "operationId": "add_segment_members_api_v1_segments__segment_id__members_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "segment_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Segment Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SegmentMembersAdd"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SegmentMembersAddResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "description": "No segment has this id."
+          },
+          "409": {
+            "description": "The segment is a rules segment, or it is archived: its members cannot be changed."
+          },
+          "422": {
+            "description": "The request is outside the limits, or the change would pass 1,000,000 members (nothing is written). The message never repeats a submitted id."
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Add user ids to an id-list segment",
+        "tags": [
+          "Segments",
+          "Segments"
+        ],
+        "x-stability": "beta"
+      }
+    },
+    "/api/v1/segments/{segment_id}/members/remove": {
+      "post": {
+        "description": "Remove 1 to 10,000 user ids from an id_list segment. Ids that are not in it are ignored. Answers the counts: removed + not_members is the number of distinct ids sent. Requires DEVELOPER or ADMIN role.",
+        "operationId": "remove_segment_members_api_v1_segments__segment_id__members_remove_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "segment_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Segment Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SegmentMembersRemove"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SegmentMembersRemoveResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "description": "No segment has this id."
+          },
+          "409": {
+            "description": "The segment is a rules segment, or it is archived: its members cannot be changed."
+          },
+          "422": {
+            "description": "The request is outside the limits, or the change would pass 1,000,000 members (nothing is written). The message never repeats a submitted id."
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Remove user ids from an id-list segment",
+        "tags": [
+          "Segments",
+          "Segments"
+        ],
+        "x-stability": "beta"
       }
     },
     "/api/v1/segments/{segment_id}/preview": {

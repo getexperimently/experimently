@@ -13,10 +13,13 @@ Routes:
     POST   /api/v1/segments/bulk-evaluate   — check one user against N segments
     GET    /api/v1/segments/{id}/experiments — list experiments using this segment
     POST   /api/v1/segments/{id}/preview    — estimate audience size
+    POST   /api/v1/segments/{id}/members        — add user ids (id list; beta)
+    POST   /api/v1/segments/{id}/members/remove — remove user ids (id list; beta)
 
 Segment rules use the targeting rule format (the dashboard shape) and are
 checked when saved (``validate_segment_rules``). ``{id}`` is a UUID; any other
-text answers 422.
+text answers 422. A segment's ``kind`` is ``rules`` or ``id_list`` (#440); an
+id list has no rules, and its members are changed with the two member routes.
 """
 
 import logging
@@ -37,14 +40,19 @@ from backend.app.schemas.segment import (
     BulkSegmentMembershipResponse,
     SegmentCreate,
     SegmentExperimentResponse,
+    SegmentMembersAdd,
+    SegmentMembersAddResponse,
     SegmentMembershipRequest,
     SegmentMembershipResponse,
+    SegmentMembersRemove,
+    SegmentMembersRemoveResponse,
     SegmentResponse,
     SegmentStatus,
     SegmentUpdate,
 )
 from backend.app.services.audience_service import (
     AudienceService,
+    SegmentChangeRefused,
     SegmentRulesNotValid,
     _segment_to_response_dict,
 )
@@ -125,7 +133,11 @@ def list_segments(
     response_model=SegmentResponse,
     status_code=status.HTTP_201_CREATED,
     summary="Create an audience segment",
-    description="Create a new audience segment with targeting rules. Requires DEVELOPER or ADMIN role.",
+    description=(
+        "Create a new audience segment: kind rules (the default) with targeting "
+        "rules, or kind id_list with no rules, whose members are added with POST "
+        "/segments/{segment_id}/members. Requires DEVELOPER or ADMIN role."
+    ),
     tags=["Segments"],
 )
 def create_segment(
@@ -209,7 +221,10 @@ def bulk_evaluate_segments(
     "/{segment_id}",
     response_model=SegmentResponse,
     summary="Get an audience segment",
-    description="Retrieve a single audience segment by its UUID.",
+    description=(
+        "Retrieve a single audience segment by its UUID. For an id_list segment, "
+        "member_count is how many user ids it holds."
+    ),
     tags=["Segments"],
 )
 def get_segment(
@@ -223,7 +238,11 @@ def get_segment(
         segment = AudienceService.get_segment(db, segment_id)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc))
-    return SegmentResponse(**_segment_to_response_dict(segment))
+    return SegmentResponse(
+        **_segment_to_response_dict(
+            segment, member_count=AudienceService.member_count(db, segment)
+        )
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -235,7 +254,11 @@ def get_segment(
     "/{segment_id}",
     response_model=SegmentResponse,
     summary="Update an audience segment",
-    description="Update segment name, description, rules, or status. Requires DEVELOPER or ADMIN role.",
+    description=(
+        "Update segment name, description, rules, or status. A segment's kind "
+        "cannot be changed, and an id_list segment takes no rules (422). "
+        "Requires DEVELOPER or ADMIN role."
+    ),
     tags=["Segments"],
 )
 def update_segment(
@@ -249,6 +272,8 @@ def update_segment(
     before = _segment_before(db, segment_id)
     try:
         segment = AudienceService.update_segment(db, segment_id, data)
+    except SegmentChangeRefused as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.message) from None
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc))
     response = SegmentResponse(**_segment_to_response_dict(segment))
@@ -317,8 +342,10 @@ def delete_segment(
     description=(
         "Check whether a user context (arbitrary attributes dict) satisfies "
         "this segment's targeting rules, evaluated as a feature flag evaluates "
-        "the same rules. A segment whose stored rules are not in the targeting "
-        "rule format (saved before rules were checked) answers 409."
+        "the same rules. For an id_list segment, the user is a member when "
+        "user_context.user_id is in its list. A segment whose stored rules are "
+        "not in the targeting rule format (saved before rules were checked) "
+        "answers 409."
     ),
     responses={
         409: {
@@ -406,6 +433,10 @@ def preview_audience_size(
     request over any of them is answered 422.
     """
     _require_permission(current_user, Action.READ)
+    if data.rules is None:
+        raise HTTPException(
+            status_code=422, detail="rules: preview takes rules; an id_list has none"
+        )
     violations = preview_ruleset_violations(data.rules, sample_size)
     if violations:
         raise HTTPException(status_code=422, detail=violations)
@@ -417,3 +448,106 @@ def preview_audience_size(
     return AudienceService.preview_audience_size(
         db, data.rules, sample_size=sample_size
     )
+
+
+# ---------------------------------------------------------------------------
+# Id-list members (beta)
+# ---------------------------------------------------------------------------
+
+_MEMBER_RESPONSES = {
+    404: {"description": "No segment has this id."},
+    409: {
+        "description": "The segment is a rules segment, or it is archived: its "
+        "members cannot be changed."
+    },
+    422: {
+        "description": "The request is outside the limits, or the change would "
+        "pass 1,000,000 members (nothing is written). The message never "
+        "repeats a submitted id."
+    },
+}
+
+
+@router.post(
+    "/{segment_id}/members",
+    response_model=SegmentMembersAddResponse,
+    summary="Add user ids to an id-list segment",
+    description=(
+        "Add 1 to 10,000 user ids (each 1 to 255 characters, matched exactly) "
+        "to an id_list segment. Ids already in it are left alone, so sending the "
+        "same ids again is safe. A segment holds at most 1,000,000 ids; a request "
+        "that would pass that answers 422 and adds nothing. Answers the counts: "
+        "added + already_members is the number of distinct ids sent. Requires "
+        "DEVELOPER or ADMIN role."
+    ),
+    responses=_MEMBER_RESPONSES,
+    openapi_extra={"x-stability": "beta"},
+    tags=["Segments"],
+)
+def add_segment_members(
+    segment_id: UUID,
+    data: SegmentMembersAdd,
+    db: Session = Depends(deps.get_db),
+    current_user: User = Depends(deps.get_current_active_user),
+) -> SegmentMembersAddResponse:
+    """Add user ids to an id-list segment (idempotent)."""
+    _require_permission(current_user, Action.UPDATE)
+    try:
+        name, result = AudienceService.add_members(db, segment_id, data.add)
+    except SegmentChangeRefused as exc:
+        # Fixed text chosen by the service: counts at most, never an id.
+        raise HTTPException(status_code=exc.status_code, detail=exc.message) from None
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc))
+    # Counts only: the ids themselves are never recorded.
+    _record(
+        db,
+        current_user,
+        ActionType.SEGMENT_UPDATE,
+        segment_id,
+        name,
+        after=result.model_dump(),
+        reason="members added",
+    )
+    return result
+
+
+@router.post(
+    "/{segment_id}/members/remove",
+    response_model=SegmentMembersRemoveResponse,
+    summary="Remove user ids from an id-list segment",
+    description=(
+        "Remove 1 to 10,000 user ids from an id_list segment. Ids that are not "
+        "in it are ignored. Answers the counts: removed + not_members is the "
+        "number of distinct ids sent. Requires DEVELOPER or ADMIN role."
+    ),
+    responses=_MEMBER_RESPONSES,
+    openapi_extra={"x-stability": "beta"},
+    tags=["Segments"],
+)
+def remove_segment_members(
+    segment_id: UUID,
+    data: SegmentMembersRemove,
+    db: Session = Depends(deps.get_db),
+    current_user: User = Depends(deps.get_current_active_user),
+) -> SegmentMembersRemoveResponse:
+    """Remove user ids from an id-list segment (idempotent)."""
+    _require_permission(current_user, Action.UPDATE)
+    try:
+        name, result = AudienceService.remove_members(db, segment_id, data.remove)
+    except SegmentChangeRefused as exc:
+        # Fixed text chosen by the service: counts at most, never an id.
+        raise HTTPException(status_code=exc.status_code, detail=exc.message) from None
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc))
+    # Counts only: the ids themselves are never recorded.
+    _record(
+        db,
+        current_user,
+        ActionType.SEGMENT_UPDATE,
+        segment_id,
+        name,
+        after=result.model_dump(),
+        reason="members removed",
+    )
+    return result

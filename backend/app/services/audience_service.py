@@ -13,13 +13,20 @@ checked by ``validate_segment_rules`` when saved. Membership is decided by the
 flag engine (``match_targeting_rule``) on the expanded context
 (``expand_context``), so a segment's rules mean what the same rules mean on a
 feature flag.
+
+An ``id_list`` segment (#440) has no rules: its members are the user ids stored
+in ``segment_members``, changed with :meth:`AudienceService.add_members` and
+:meth:`AudienceService.remove_members`, and a user is a member when the
+context's ``user_id`` is one of them.
 """
 
 import logging
 import time
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 from uuid import UUID
 
+import sqlalchemy as sa
+from sqlalchemy.dialects import postgresql
 from sqlalchemy.orm import Session
 
 from backend.app.core.pattern_match import PatternUnevaluable, report_unevaluable
@@ -33,21 +40,42 @@ from backend.app.core.targeting_adapter import (
 )
 from backend.app.models.experiment import Experiment
 from backend.app.models.feature_flag import FeatureFlag
-from backend.app.models.segment import Segment
+from backend.app.models.segment import Segment, SegmentKind, SegmentMember
 from backend.app.models.segment import SegmentStatus as ModelSegmentStatus
 from backend.app.schemas.segment import (
+    MAX_MEMBER_ID_LENGTH,
     AudiencePreviewResponse,
     BulkSegmentMembershipRequest,
     BulkSegmentMembershipResponse,
     SegmentCreate,
     SegmentExperimentResponse,
+    SegmentMembersAddResponse,
     SegmentMembershipResponse,
+    SegmentMembersRemoveResponse,
     SegmentStatus,
     SegmentUpdate,
 )
+from backend.app.schemas.storable_text import contains_unstorable_text
 from backend.app.schemas.targeting_rule import TargetingRules
 
 logger = logging.getLogger(__name__)
+
+#: An id-list segment holds at most this many user ids (#440). Read at call
+#: time, so a test can lower it.
+MAX_SEGMENT_MEMBERS = 1_000_000
+
+
+class SegmentChangeRefused(Exception):
+    """A change to a segment that its kind or status does not allow.
+
+    ``message`` is fixed text chosen here (counts at most, never a user id or
+    a value from the request); the route answers it with ``status_code``.
+    """
+
+    def __init__(self, status_code: int, message: str) -> None:
+        self.status_code = status_code
+        self.message = message
+        super().__init__(message)
 
 
 class SegmentRulesNotValid(Exception):
@@ -128,17 +156,73 @@ def _model_status_to_schema(status: ModelSegmentStatus) -> SegmentStatus:
     return mapping[status]
 
 
-def _segment_to_response_dict(segment: Segment) -> Dict[str, Any]:
-    """Convert a Segment ORM object to a dict suitable for SegmentResponse."""
+def _is_id_list(segment: Segment) -> bool:
+    return segment.kind == SegmentKind.ID_LIST.value
+
+
+def _segment_to_response_dict(
+    segment: Segment, member_count: Optional[int] = None
+) -> Dict[str, Any]:
+    """Convert a Segment ORM object to a dict suitable for SegmentResponse.
+
+    An id-list segment has no rules (``null``); ``member_count`` is filled
+    only by a caller that counted.
+    """
+    id_list = _is_id_list(segment)
     return {
         "id": str(segment.id),
         "name": segment.name,
         "description": segment.description,
-        "rules": segment.rules or {},
+        "kind": SegmentKind.ID_LIST.value if id_list else SegmentKind.RULES.value,
+        "rules": None if id_list else (segment.rules or {}),
         "status": _model_status_to_schema(segment.status).value,
         "created_at": segment.created_at.isoformat() if segment.created_at else "",
         "updated_at": segment.updated_at.isoformat() if segment.updated_at else "",
+        "member_count": member_count,
     }
+
+
+def _ids_param(ids: List[str]) -> Any:
+    """The ids as one ``varchar[]`` bind parameter, not one parameter each."""
+    return sa.bindparam(
+        "member_ids", value=ids, type_=postgresql.ARRAY(sa.String(MAX_MEMBER_ID_LENGTH))
+    )
+
+
+def _count_members(db: Session, segment_id: Any) -> int:
+    return int(
+        db.query(sa.func.count())
+        .select_from(SegmentMember)
+        .filter(SegmentMember.segment_id == segment_id)
+        .scalar()
+    )
+
+
+def _locked_id_list(db: Session, segment_id: Union[UUID, str], verb: str) -> Segment:
+    """The segment row, locked ``FOR UPDATE`` until the transaction ends.
+
+    The lock serialises every member change to one segment, so the count the
+    cap is checked against cannot move underneath it.
+
+    Raises:
+        ValueError: no such segment (404).
+        SegmentChangeRefused: a rules segment, or an archived one (409).
+    """
+    segment = (
+        db.query(Segment).filter(Segment.id == segment_id).with_for_update().first()
+    )
+    if segment is None:
+        db.rollback()
+        raise ValueError(f"Segment '{segment_id}' not found")
+    if segment.status == ModelSegmentStatus.ARCHIVED:
+        db.rollback()
+        raise SegmentChangeRefused(
+            409, "this segment is archived; its members cannot be changed"
+        )
+    if not _is_id_list(segment):
+        db.rollback()
+        raise SegmentChangeRefused(409, f"members can be {verb} an id_list segment")
+    return segment
 
 
 class AudienceService:
@@ -168,6 +252,7 @@ class AudienceService:
         segment = Segment(
             name=data.name,
             description=data.description,
+            kind=data.kind.value,
             rules=data.rules,
             status=ModelSegmentStatus.ACTIVE,
             owner_id=created_by_id,
@@ -247,8 +332,11 @@ class AudienceService:
 
         Raises:
             ValueError: If the segment does not exist.
+            SegmentChangeRefused: ``rules`` sent for an id-list segment (422).
         """
         segment = AudienceService.get_segment(db, segment_id)
+        if data.rules is not None and _is_id_list(segment):
+            raise SegmentChangeRefused(422, "rules: an id_list segment has no rules")
 
         if data.name is not None:
             segment.name = data.name
@@ -303,11 +391,24 @@ class AudienceService:
         Returns:
             SegmentMembershipResponse with is_member and matched_rules.
 
+        An id-list segment is answered on ``user_context["user_id"]``: a member
+        when it is a string stored in the segment's list. A missing or
+        non-string ``user_id`` is not a member.
+
         Raises:
             ValueError: If the segment does not exist.
             SegmentRulesNotValid: If the stored rules fail validation.
         """
         segment = AudienceService.get_segment(db, segment_id)
+        if _is_id_list(segment):
+            return SegmentMembershipResponse(
+                segment_id=str(segment.id),
+                segment_name=segment.name,
+                is_member=AudienceService._in_id_list(
+                    db, segment.id, user_context.get("user_id")
+                ),
+                matched_rules=[],
+            )
         rules = stored_segment_rules(segment)
         context = expand_context(user_context)
 
@@ -327,6 +428,122 @@ class AudienceService:
             segment_name=segment.name,
             is_member=is_member,
             matched_rules=matched_rules,
+        )
+
+    @staticmethod
+    def _in_id_list(db: Session, segment_id: Any, user_id: Any) -> bool:
+        """Whether ``user_id`` is stored in the id list ``segment_id``."""
+        if (
+            not isinstance(user_id, str)
+            or not 1 <= len(user_id) <= MAX_MEMBER_ID_LENGTH
+            or contains_unstorable_text(user_id)
+        ):
+            return False
+        return db.query(
+            sa.exists().where(
+                SegmentMember.segment_id == segment_id,
+                SegmentMember.member_id == user_id,
+            )
+        ).scalar()
+
+    @staticmethod
+    def member_count(db: Session, segment: Segment) -> Optional[int]:
+        """How many ids an id-list segment holds; ``None`` for a rules segment."""
+        if not _is_id_list(segment):
+            return None
+        return _count_members(db, segment.id)
+
+    @staticmethod
+    def add_members(
+        db: Session, segment_id: Union[UUID, str], ids: List[str]
+    ) -> Tuple[str, SegmentMembersAddResponse]:
+        """Add ``ids`` to an id-list segment, in one transaction.
+
+        The segment row is locked ``FOR UPDATE``; the cap is checked before
+        anything is written (``MAX_SEGMENT_MEMBERS``), and a request that
+        would pass it changes nothing. Ids already stored, and repeats in
+        ``ids``, are left alone (``ON CONFLICT DO NOTHING``).
+
+        Raises:
+            ValueError: no such segment.
+            SegmentChangeRefused: a rules or archived segment (409), or the
+                cap (422).
+        """
+        segment = _locked_id_list(db, segment_id, "added only to")
+        name = segment.name
+        distinct = list(dict.fromkeys(ids))
+        current = _count_members(db, segment.id)
+        already = int(
+            db.query(sa.func.count())
+            .select_from(SegmentMember)
+            .filter(
+                SegmentMember.segment_id == segment.id,
+                SegmentMember.member_id == sa.any_(_ids_param(distinct)),
+            )
+            .scalar()
+        )
+        would_have = current + len(distinct) - already
+        cap = MAX_SEGMENT_MEMBERS
+        if would_have > cap:
+            db.rollback()
+            raise SegmentChangeRefused(
+                422,
+                f"this segment would have {would_have:,} members; a segment holds "
+                f"at most {cap:,}",
+            )
+        source = sa.select(
+            sa.literal(segment.id, type_=postgresql.UUID(as_uuid=True)),
+            sa.func.unnest(_ids_param(distinct)),
+        )
+        inserted = db.execute(
+            postgresql.insert(SegmentMember)
+            .from_select(["segment_id", "member_id"], source)
+            .on_conflict_do_nothing()
+            .returning(SegmentMember.member_id)
+        ).all()
+        added = len(inserted)
+        segment_key = segment.id
+        db.commit()
+        logger.info("Added %d member(s) to segment %s", added, segment_key)
+        return name, SegmentMembersAddResponse(
+            added=added,
+            already_members=len(distinct) - added,
+            member_count=current + added,
+        )
+
+    @staticmethod
+    def remove_members(
+        db: Session, segment_id: Union[UUID, str], ids: List[str]
+    ) -> Tuple[str, SegmentMembersRemoveResponse]:
+        """Remove ``ids`` from an id-list segment, in one transaction.
+
+        The segment row is locked ``FOR UPDATE``. Ids that are not members,
+        and repeats in ``ids``, are ignored.
+
+        Raises:
+            ValueError: no such segment.
+            SegmentChangeRefused: a rules or archived segment (409).
+        """
+        segment = _locked_id_list(db, segment_id, "removed only from")
+        name = segment.name
+        distinct = list(dict.fromkeys(ids))
+        deleted = db.execute(
+            sa.delete(SegmentMember)
+            .where(
+                SegmentMember.segment_id == segment.id,
+                SegmentMember.member_id == sa.any_(_ids_param(distinct)),
+            )
+            .returning(SegmentMember.member_id)
+        ).all()
+        removed = len(deleted)
+        member_count = _count_members(db, segment.id)
+        segment_key = segment.id
+        db.commit()
+        logger.info("Removed %d member(s) from segment %s", removed, segment_key)
+        return name, SegmentMembersRemoveResponse(
+            removed=removed,
+            not_members=len(distinct) - removed,
+            member_count=member_count,
         )
 
     @staticmethod

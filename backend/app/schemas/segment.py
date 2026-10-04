@@ -6,14 +6,27 @@ used in the P3-C: Audience Segmentation API.
 """
 
 from enum import Enum
-from typing import Any, Optional
+from typing import Annotated, Any, List, Optional
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    StringConstraints,
+    field_validator,
+    model_validator,
+)
 
 from backend.app.core.targeting_adapter import (
     TargetingRulesError,
     validate_segment_rules,
 )
+from backend.app.schemas.storable_text import StorableTextModel
+
+#: At most this many user ids in one add or remove request (#440).
+MAX_MEMBER_IDS_PER_REQUEST = 10_000
+#: A user id in an id-list segment is 1 to this many characters.
+MAX_MEMBER_ID_LENGTH = 255
 
 #: The description of a segment's ``rules`` in the OpenAPI document.
 SEGMENT_RULES_DESCRIPTION = (
@@ -48,12 +61,33 @@ class SegmentStatus(str, Enum):
     ARCHIVED = "archived"
 
 
+class SegmentKind(str, Enum):
+    """What decides a segment's members. Fixed when the segment is created."""
+
+    RULES = "rules"
+    ID_LIST = "id_list"
+
+
+#: The description of ``kind`` in the OpenAPI document.
+SEGMENT_KIND_DESCRIPTION = (
+    "rules: users whose attributes match `rules`. id_list: users whose user_id "
+    "is in the segment's list, added with POST /segments/{segment_id}/members; "
+    "an id_list segment has no rules. Set when the segment is created and never "
+    "changed."
+)
+
+
 class SegmentCreate(BaseModel):
     """Schema for creating a new audience segment."""
 
     name: str = Field(..., min_length=2, max_length=128)
     description: Optional[str] = Field(None, max_length=512)
-    rules: dict = Field(..., description=SEGMENT_RULES_DESCRIPTION)
+    kind: SegmentKind = Field(SegmentKind.RULES, description=SEGMENT_KIND_DESCRIPTION)
+    rules: Optional[dict] = Field(
+        None,
+        description=SEGMENT_RULES_DESCRIPTION
+        + " Required for a rules segment; refused for an id_list segment.",
+    )
 
     model_config = ConfigDict(
         json_schema_extra={
@@ -87,7 +121,17 @@ class SegmentCreate(BaseModel):
     @field_validator("rules", mode="before")
     @classmethod
     def checked_rules(cls, value: Any) -> Any:
+        if value is None:
+            return None
         return _checked_segment_rules(value)
+
+    @model_validator(mode="after")
+    def rules_match_the_kind(self) -> "SegmentCreate":
+        if self.kind == SegmentKind.RULES and self.rules is None:
+            raise ValueError("rules: required for a rules segment")
+        if self.kind == SegmentKind.ID_LIST and self.rules is not None:
+            raise ValueError("rules: an id_list segment has no rules")
+        return self
 
 
 class SegmentUpdate(BaseModel):
@@ -111,6 +155,13 @@ class SegmentUpdate(BaseModel):
         }
     )
 
+    @model_validator(mode="before")
+    @classmethod
+    def kind_is_not_changed(cls, data: Any) -> Any:
+        if isinstance(data, dict) and "kind" in data:
+            raise ValueError("kind: a segment's kind cannot be changed")
+        return data
+
     @field_validator("rules", mode="before")
     @classmethod
     def checked_rules(cls, value: Any) -> Any:
@@ -127,11 +178,128 @@ class SegmentResponse(BaseModel):
     id: str
     name: str
     description: Optional[str] = None
-    rules: dict
+    kind: SegmentKind = Field(SegmentKind.RULES, description=SEGMENT_KIND_DESCRIPTION)
+    rules: Optional[dict] = Field(
+        None, description="The segment's rules; null for an id_list segment."
+    )
     status: SegmentStatus
     created_at: str
     updated_at: str
-    member_count: Optional[int] = None  # populated on demand
+    member_count: Optional[int] = Field(
+        None,
+        description="How many user ids an id_list segment holds, on GET "
+        "/segments/{segment_id}. Null for a rules segment and in the list.",
+    )
+
+
+#: One user id in a member request: 1 to 255 characters, matched exactly.
+MemberId = Annotated[
+    str, StringConstraints(min_length=1, max_length=MAX_MEMBER_ID_LENGTH)
+]
+
+
+def _checked_member_ids(field: str, value: Any) -> Any:
+    """Refuse a member list outside the limits, with fixed text (#440).
+
+    The message names the field and, for one id, its position; never an id.
+    """
+    if not isinstance(value, list):
+        raise ValueError(f"{field}: a list of IDs is required")
+    if not value:
+        raise ValueError(f"{field}: at least 1 ID is required")
+    if len(value) > MAX_MEMBER_IDS_PER_REQUEST:
+        raise ValueError(
+            f"{field}: at most {MAX_MEMBER_IDS_PER_REQUEST:,} IDs per request"
+        )
+    for index in range(len(value)):
+        item = value[index]
+        if not isinstance(item, str) or not 1 <= len(item) <= MAX_MEMBER_ID_LENGTH:
+            raise ValueError(
+                f"{field}[{index}]: an ID is 1 to {MAX_MEMBER_ID_LENGTH} characters"
+            )
+    return value
+
+
+_MEMBER_IDS_DESCRIPTION = (
+    "User ids, 1 to 10,000 per request, each 1 to 255 characters and matched "
+    "exactly (not trimmed, not case-folded). Repeats count once."
+)
+
+
+class SegmentMembersAdd(StorableTextModel):
+    """User ids to add to an id-list segment."""
+
+    model_config = ConfigDict(
+        extra="forbid",
+        json_schema_extra={"example": {"add": ["user-123", "user-456"]}},
+    )
+
+    add: List[MemberId] = Field(
+        ...,
+        min_length=1,
+        max_length=MAX_MEMBER_IDS_PER_REQUEST,
+        description=_MEMBER_IDS_DESCRIPTION
+        + " An id already in the segment is left as it is.",
+    )
+
+    @field_validator("add", mode="before")
+    @classmethod
+    def checked_ids(cls, value: Any) -> Any:
+        return _checked_member_ids("add", value)
+
+
+class SegmentMembersRemove(StorableTextModel):
+    """User ids to remove from an id-list segment."""
+
+    model_config = ConfigDict(
+        extra="forbid",
+        json_schema_extra={"example": {"remove": ["user-123"]}},
+    )
+
+    remove: List[MemberId] = Field(
+        ...,
+        min_length=1,
+        max_length=MAX_MEMBER_IDS_PER_REQUEST,
+        description=_MEMBER_IDS_DESCRIPTION
+        + " An id that is not in the segment is ignored.",
+    )
+
+    @field_validator("remove", mode="before")
+    @classmethod
+    def checked_ids(cls, value: Any) -> Any:
+        return _checked_member_ids("remove", value)
+
+
+class SegmentMembersAddResponse(BaseModel):
+    """What an add changed. ``added + already_members`` is the number of
+    distinct ids sent."""
+
+    added: int = Field(..., description="Ids that were not members and now are.")
+    already_members: int = Field(
+        ..., description="Ids that were members already; nothing changed for them."
+    )
+    member_count: int = Field(..., description="Members of the segment now.")
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {"added": 4190, "already_members": 11, "member_count": 4190}
+        }
+    )
+
+
+class SegmentMembersRemoveResponse(BaseModel):
+    """What a remove changed. ``removed + not_members`` is the number of
+    distinct ids sent."""
+
+    removed: int = Field(..., description="Ids that were members and no longer are.")
+    not_members: int = Field(..., description="Ids that were not members.")
+    member_count: int = Field(..., description="Members of the segment now.")
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {"removed": 120, "not_members": 0, "member_count": 4070}
+        }
+    )
 
 
 class SegmentMembershipRequest(BaseModel):

@@ -37,15 +37,17 @@ pytestmark = [pytest.mark.integration]
 REVISION = "8fd44fb483a2"
 PREVIOUS_CORE_HEAD = "b8c9d0e1f2a3"
 #: The core head of this tree: ``upgrade heads`` runs on past this revision to
-#: ``d29a479daafe`` (holdout population), through ``271f03a31742``,
-#: ``d12cbd384bbe``, ``a89544fb1075``, ``1ab99332f0ba`` and ``806901fb7735``
-#: (the experiments' correction settings); a database built by ``create_all``
-#: already carries what they build, so they add nothing here.
-CORE_HEAD = "d29a479daafe"
+#: ``37dcb2969766`` (segment kind and members), through ``271f03a31742``,
+#: ``d12cbd384bbe``, ``a89544fb1075``, ``1ab99332f0ba``, ``806901fb7735`` (the
+#: experiments' correction settings) and ``d29a479daafe`` (holdout population);
+#: a database built by ``create_all`` already carries what they build, so they
+#: add nothing here.
+CORE_HEAD = "37dcb2969766"
 #: Tables that a later core revision's downgrade drops: a downgrade from the
 #: head to this test's target unapplies those revisions too.  ``d29a479daafe``
-#: (#445) drops ``holdout_population``.
-LATER_DOWNGRADE_TABLES = {"holdout_population"}
+#: (#445) drops ``holdout_population``; ``37dcb2969766`` (#440) drops
+#: ``segment_members``.
+LATER_DOWNGRADE_TABLES = {"holdout_population", "segment_members"}
 #: The modules revision the previous full release (0.10.0) recorded, and the
 #: branch's head in this one.  This release also carries
 #: ``modules_0002_warehouse_analysis`` (#312), so a full database at the

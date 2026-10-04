@@ -1175,6 +1175,18 @@
         "summary": "List experiments using this segment"
       }
     },
+    "/api/v1/segments/{segment_id}/members": {
+      "post": {
+        "operationId": "add_segment_members_api_v1_segments__segment_id__members_post",
+        "summary": "Add user ids to an id-list segment"
+      }
+    },
+    "/api/v1/segments/{segment_id}/members/remove": {
+      "post": {
+        "operationId": "remove_segment_members_api_v1_segments__segment_id__members_remove_post",
+        "summary": "Remove user ids from an id-list segment"
+      }
+    },
     "/api/v1/segments/{segment_id}/preview": {
       "post": {
         "operationId": "preview_audience_size_api_v1_segments__segment_id__preview_post",
