@@ -272,7 +272,7 @@ LONG_COMPETITOR = {"email": "x" * MAX_REGEX_INPUT + "@competitor.com", "country"
 @pytest.mark.regression
 def test_segment_membership_is_not_granted(monkeypatch):
     segment = SimpleNamespace(
-        id="seg-1", name="Not competitors", rules=SEGMENT_NESTED_NOT
+        id="seg-1", name="Not competitors", kind="rules", rules=SEGMENT_NESTED_NOT
     )
     monkeypatch.setattr(
         AudienceService, "get_segment", staticmethod(lambda db, sid: segment)
