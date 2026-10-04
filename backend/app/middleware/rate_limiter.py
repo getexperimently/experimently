@@ -290,6 +290,10 @@ RATE_LIMIT_CONFIG: Dict[str, Tuple[int, int]] = {
     # 60,000 users a minute per address). The path is exact: a trailing slash
     # is answered by FastAPI's 307 redirect to this path, not by the handler.
     "/api/v1/tracking/assign/batch": (60, 60),
+    # Audit log export: one request streams up to 50,000 entries and holds a
+    # database connection while it does. Its own counter, apart from the
+    # ``/api/v1/export/`` budget below (#221).
+    "/api/v1/audit-logs/export": (10, 60),
 }
 
 # Default rate limit for all other endpoints

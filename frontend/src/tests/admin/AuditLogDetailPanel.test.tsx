@@ -31,15 +31,31 @@ describe('AuditLogDetailPanel', () => {
     expect(screen.getByText('bob@example.com')).toBeInTheDocument();
   });
 
-  it('renders action description', () => {
+  it('renders the action label and the raw action type', () => {
     render(<AuditLogDetailPanel log={mockLog} onClose={mockOnClose} />);
-    expect(screen.getByText('Updated feature flag dark-mode-flag')).toBeInTheDocument();
+    expect(screen.getByText('Flag changed')).toBeInTheDocument();
+    expect(screen.getByText('feature_flag_update')).toBeInTheDocument();
   });
 
   it('renders entity name and type', () => {
     render(<AuditLogDetailPanel log={mockLog} onClose={mockOnClose} />);
     expect(screen.getByText('dark-mode-flag')).toBeInTheDocument();
-    expect(screen.getByText('feature_flag')).toBeInTheDocument();
+    expect(screen.getByText('Feature flag')).toBeInTheDocument();
+  });
+
+  it('moves focus to its heading when it opens', () => {
+    render(<AuditLogDetailPanel log={mockLog} onClose={mockOnClose} />);
+    expect(screen.getByTestId('detail-panel-heading')).toHaveFocus();
+  });
+
+  it('shows a system actor as automatic', () => {
+    render(
+      <AuditLogDetailPanel
+        log={{ ...mockLog, user_id: null, user_email: 'system:rollout-scheduler' }}
+        onClose={mockOnClose}
+      />,
+    );
+    expect(screen.getByText('Rollout scheduler (automatic)')).toBeInTheDocument();
   });
 
   it('renders reason when present', () => {

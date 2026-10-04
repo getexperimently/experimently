@@ -35,7 +35,6 @@ Usage:
 """
 
 import argparse
-import json
 import os
 import random
 import sys
@@ -94,6 +93,8 @@ from backend.app.models.safety import (
 from backend.app.schemas.bayesian import BayesianConfig
 from backend.app.schemas.experiment import SequentialTestingConfigInput
 from backend.app.services.global_holdout_service import GlobalHoldoutService
+from backend.scripts import seed_audit
+from backend.scripts.seed_audit import seeded_entry
 from backend.scripts.seed_demo_data import (
     _bulk_insert,
     days_ago,
@@ -898,7 +899,12 @@ def seed_safety_settings(db) -> SafetySettings:
 
 
 def seed_audit_logs(db, admin_user, experiment: Experiment) -> int:
-    """Create/start audit rows for the upsell experiment (the compliance story)."""
+    """Create, change and start entries for the upsell experiment (the compliance story).
+
+    Written in the form the platform writes them (``seed_audit.seeded_entry``),
+    dated before the seed ran. Safety rollbacks are never seeded: the rollout
+    story produces a real one.
+    """
     print("  Seeding audit trail for the upsell experiment...")
     existing = (
         db.query(func.count(AuditLog.id))
@@ -915,56 +921,49 @@ def seed_audit_logs(db, admin_user, experiment: Experiment) -> int:
         )
         return 0
 
+    E = EntityType.EXPERIMENT
     created_at = days_ago(HISTORY_DAYS + 1)
+    entry = {
+        "actor": admin_user,
+        "entity_type": E,
+        "entity_id": experiment.id,
+        "entity_name": experiment.name,
+    }
+    changed_before, changed_after = seed_audit.changes(
+        E, experiment, {"description": "(draft)"}
+    )
+    started_before, started_after = seed_audit.changes(
+        E,
+        experiment,
+        {"status": ExperimentStatus.DRAFT},
+        {"status": ExperimentStatus.ACTIVE},
+    )
     rows = [
-        AuditLog(
-            user_id=admin_user.id,
-            user_email=admin_user.email,
-            action_type=ActionType.EXPERIMENT_CREATE.value,
-            entity_type=EntityType.EXPERIMENT.value,
-            entity_id=experiment.id,
-            entity_name=experiment.name,
-            new_value=json.dumps(
-                {
-                    "key": experiment.key,
-                    "status": "draft",
-                    "variants": ["control", "value_modal"],
-                    "primary_metric": "subscribe",
-                }
-            ),
-            reason="Payments screen: value-led premium upsell modal",
-            timestamp=created_at,
+        seeded_entry(
+            db,
+            at=created_at,
+            action=ActionType.EXPERIMENT_CREATE,
+            after=seed_audit.identity(E, experiment, status=ExperimentStatus.DRAFT),
+            **entry,
         ),
-        AuditLog(
-            user_id=admin_user.id,
-            user_email=admin_user.email,
-            action_type=ActionType.EXPERIMENT_UPDATE.value,
-            entity_type=EntityType.EXPERIMENT.value,
-            entity_id=experiment.id,
-            entity_name=experiment.name,
-            old_value=json.dumps(
-                {"traffic_allocation": {"control": 90, "value_modal": 10}}
-            ),
-            new_value=json.dumps(
-                {"traffic_allocation": {"control": 50, "value_modal": 50}}
-            ),
-            reason="Legal review complete (PII-adjacent screen); moving to a 50/50 split",
-            timestamp=created_at + timedelta(hours=6),
+        seeded_entry(
+            db,
+            at=created_at + timedelta(hours=6),
+            action=ActionType.EXPERIMENT_UPDATE,
+            before=changed_before,
+            after=changed_after,
+            **entry,
         ),
-        AuditLog(
-            user_id=admin_user.id,
-            user_email=admin_user.email,
-            action_type=ActionType.EXPERIMENT_START.value,
-            entity_type=EntityType.EXPERIMENT.value,
-            entity_id=experiment.id,
-            entity_name=experiment.name,
-            old_value=json.dumps({"status": "draft"}),
-            new_value=json.dumps({"status": "active"}),
-            reason="Launch approved by growth + compliance",
-            timestamp=days_ago(HISTORY_DAYS),
+        seeded_entry(
+            db,
+            at=days_ago(HISTORY_DAYS),
+            action=ActionType.EXPERIMENT_START,
+            before=started_before,
+            after=started_after,
+            **entry,
         ),
     ]
-    _bulk_insert(db, rows, batch_size=50)
+    db.flush()
     db.commit()
     print(f"    Created {len(rows)} audit rows (create / update / start).")
     return len(rows)
