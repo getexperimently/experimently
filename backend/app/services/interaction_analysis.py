@@ -99,12 +99,105 @@ def floor_reason(n: Sequence, x: Sequence) -> Optional[str]:
     return None
 
 
+#: A bracket stops when its width is at most this many ulps of its upper end...
+_RELATIVE_WIDTH = 4 * np.finfo(float).eps
+#: ...or at most this, for values near 0.
+_ABSOLUTE_WIDTH = 1e-18
+#: Halvings allowed per bisection.  The width after k halvings is at most
+#: 2 ** (1 - k), so the stopping rule is met within 61; reaching this raises.
+_MAX_HALVINGS = 200
+#: A cell within this of 0 or 1, whose count is there too, adds 0 to X^2.
+_EXACT_EDGE = 1e-12
+
+
+def _ratio(count: np.ndarray, denominator: np.ndarray) -> np.ndarray:
+    """count / denominator, with 0 where the count is 0 (0 log 0 = 0)."""
+    out = np.zeros(np.broadcast(count, denominator).shape)
+    np.divide(count, denominator, out=out, where=(count != 0))
+    return out
+
+
+def _scores(x0, m0, x1, m1, b, d):
+    """The control and treatment cells' scores at baseline b and difference d."""
+    t = b + d
+    return (
+        _ratio(x0, b) - _ratio(m0, 1.0 - b),
+        _ratio(x1, t) - _ratio(m1, 1.0 - t),
+    )
+
+
+def _narrow(lo: np.ndarray, hi: np.ndarray) -> bool:
+    return bool(
+        np.all(hi - lo <= np.maximum(_ABSOLUTE_WIDTH, _RELATIVE_WIDTH * np.abs(hi)))
+    )
+
+
+def _baselines(x0, m0, x1, m1, d):
+    """For each column, the baseline that maximises the likelihood at d.
+
+    The column's log-likelihood is strictly concave in b on
+    [max(0, -d), min(1, 1 - d)], so its derivative (the two cells' scores
+    added) falls as b rises: bisection on its sign.
+    """
+    lo = np.maximum(0.0, -d) + np.zeros_like(x0)
+    hi = np.minimum(1.0, 1.0 - d) + np.zeros_like(x0)
+    for _ in range(_MAX_HALVINGS):
+        mid = 0.5 * (lo + hi)
+        s0, s1 = _scores(x0, m0, x1, m1, mid, d)
+        rising = (s0 + s1) > 0
+        lo = np.where(rising, mid, lo)
+        hi = np.where(rising, hi, mid)
+        if _narrow(lo, hi):
+            return 0.5 * (lo + hi)
+    raise InteractionFitError("the baseline bisection did not narrow")
+
+
+def _profile_slope(x0, m0, x1, m1, d):
+    """The derivative in d of the profile log-likelihood.
+
+    In the interior the control cell's score is minus the treatment cell's.
+    When the baseline sits on a bound, the derivative is the score of the
+    cell that is not on its boundary: the one farther from 0 and 1.
+    """
+    b = _baselines(x0, m0, x1, m1, d)
+    s0, s1 = _scores(x0, m0, x1, m1, b, d)
+    t = b + d
+    control_inside = np.minimum(b, 1.0 - b) >= np.minimum(t, 1.0 - t)
+    return np.where(control_inside, -s0, s1).sum(axis=-1)
+
+
 def fit_additive_batch(n: np.ndarray, x: np.ndarray) -> np.ndarray:
     """Maximum-likelihood rates of the additive model for each table.
 
     ``n`` and ``x`` have shape ``(B, 2, J)``; the result has the same shape.
+    The log-likelihood is concave, so its profile in the common difference
+    ``d`` is too: ``d`` is found by bisection on the sign of the profile's
+    derivative over (-1, 1), and each baseline by an inner bisection.  Every
+    bisection keeps a bracket around the maximiser and halves it, so nothing
+    depends on a start value or a step size.
+
+    Raises:
+        InteractionFitError: a bracket did not narrow within the cap (it
+            cannot, by construction; kept as an assertion).
     """
-    raise NotImplementedError("the fit is written after its tests (#219)")
+    n = np.asarray(n, dtype=float)
+    x = np.asarray(x, dtype=float)
+    x0, x1 = x[:, 0, :], x[:, 1, :]
+    m0, m1 = n[:, 0, :] - x0, n[:, 1, :] - x1
+    lo = np.full((n.shape[0], 1), -1.0)
+    hi = np.full((n.shape[0], 1), 1.0)
+    for _ in range(_MAX_HALVINGS):
+        mid = 0.5 * (lo + hi)
+        rising = (_profile_slope(x0, m0, x1, m1, mid) > 0)[:, None]
+        lo = np.where(rising, mid, lo)
+        hi = np.where(rising, hi, mid)
+        if _narrow(lo, hi):
+            break
+    else:
+        raise InteractionFitError("the difference bisection did not narrow")
+    d = 0.5 * (lo + hi)
+    b = _baselines(x0, m0, x1, m1, d)
+    return np.clip(np.stack([b, b + d], axis=1), 0.0, 1.0)
 
 
 def pearson_statistic_batch(
@@ -116,7 +209,14 @@ def pearson_statistic_batch(
     too (no converter at a fitted 0, every user converting at a fitted 1)
     contributes 0: the model fits it exactly.
     """
-    raise NotImplementedError("the fit is written after its tests (#219)")
+    n = np.asarray(n, dtype=float)
+    x = np.asarray(x, dtype=float)
+    exact = ((x == 0) & (fitted <= _EXACT_EDGE)) | (
+        (x == n) & (fitted >= 1.0 - _EXACT_EDGE)
+    )
+    with np.errstate(divide="ignore", invalid="ignore"):
+        term = (x - n * fitted) ** 2 / (n * fitted * (1.0 - fitted))
+    return np.where(exact, 0.0, term).sum(axis=(1, 2))
 
 
 def interaction_test(n: Sequence, x: Sequence) -> InteractionTest:

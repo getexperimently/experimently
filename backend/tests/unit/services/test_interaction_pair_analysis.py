@@ -464,7 +464,7 @@ def test_the_stored_level_decides():
     """A p-value between 0.01 and 0.05: significant at 0.95, not at 0.99."""
     users = []
     for va, lift in (("control", 0), ("treatment", 1)):
-        users += cell(va, "control", 3000, 300 + 45 * lift, 300, tag="c")
+        users += cell(va, "control", 3000, 300 + 75 * lift, 300, tag="c")
         users += cell(va, "treatment", 3000, 300 + 0 * lift, 300, tag="t")
     rows = {}
     for level in (0.95, 0.99):

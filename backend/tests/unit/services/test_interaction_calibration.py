@@ -2,7 +2,9 @@
 Seeded simulations of the interaction test (#219): false positives and power.
 
 * **S8.** A skewed null: 2 x 3, both experiments split 95/5, base rate 3%,
-  1,000,000 users, main effects but no interaction.  100,000 tables.  At
+  1,000,000 users, main effects but no interaction.  200,000 tables (at
+  100,000 plan v1's excess at alpha .20 is only about 4 standard errors, too
+  close to the band to be a dependable plant; it measured +2.8 on this seed).  At
   alpha .20, .10, .05 and .01 the share flagged is within 3.5 standard errors
   of alpha.  The plant is plan v1's rule (a Wald test on observed rates, with
   at least 10 observed converters per cell) on the same tables: it must be
@@ -67,7 +69,7 @@ def _within_band(p_values, alpha):
 
 def _s8_tables():
     rng = np.random.default_rng(8080219)
-    reps = 100_000
+    reps = 200_000
     split_a = np.array([0.95, 0.05])
     split_b = np.array([0.95, 0.025, 0.025])
     rates = 0.03 * (
@@ -77,6 +79,11 @@ def _s8_tables():
     n = n.reshape(reps, 2, 3).astype(float)
     x = rng.binomial(n.astype(np.int64), rates[None]).astype(float)
     return n, x
+
+
+#: S8 takes about 45 s on a laptop, so it is marked slow; the unit job runs
+#: slow tests too.
+S8 = pytest.mark.slow
 
 
 @pytest.fixture(scope="module")
@@ -92,11 +99,13 @@ def s8():
     return n, x, tested, p_values
 
 
+@S8
 def test_s8_every_table_passes_the_floor(s8):
     _, _, tested, _ = s8
     assert tested.all()
 
 
+@S8
 @pytest.mark.parametrize("alpha", ALPHAS)
 def test_s8_the_skewed_null_is_calibrated(s8, alpha):
     *_, p_values = s8
@@ -104,6 +113,7 @@ def test_s8_the_skewed_null_is_calibrated(s8, alpha):
     assert abs(z) <= BAND_SE, f"alpha {alpha}: {share:.4f} (z {z:+.1f})"
 
 
+@S8
 @pytest.mark.parametrize("alpha", ALPHAS)
 def test_s8_plan_v1s_rule_fails_the_band(s8, alpha):
     """The plant: the same tables under plan v1's test are above the band."""
