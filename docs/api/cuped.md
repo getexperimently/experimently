@@ -1,7 +1,7 @@
 # CUPED Variance Reduction
 
-**Changed in 0.20.0.** CUPED now adjusts for each user's own events in the
-`covariate_lookback_days` before they were assigned. Until 0.19.0 it used each user's
+**Changed in 0.21.0.** CUPED now adjusts for each user's own events in the
+`covariate_lookback_days` before they were assigned. Until 0.20.0 it used each user's
 position in the order of assignment, which removed almost no variance, so CUPED numbers for
 experiments set to `cuped` or `cuped_plus` change. Every treatment is now reported, not only
 the first, at the experiment's `confidence_level` and with its `correction_method`.
