@@ -73,5 +73,58 @@
     "stopped": "d-LPIWVZUAL",
     "stop_wait": "ok"
   },
-  "outputs_source": "expected, not captured: the run predates these outputs (#759); they are what the step writes for the printed lines above"
+  "outputs_source": "expected, not captured: the run predates these outputs (#759); they are what the step writes for the printed lines above",
+  "summary": {
+    "about": "The Run summary step's inputs in the same run, from its env header. The two outputs it does not show (the run predates them) are the stop step's, above; the step made no read, because its verify step succeeded.",
+    "env": {
+      "TARGET_ARN": {
+        "value": "arn:aws:ecs:us-west-2:123456789012:task-definition/experimentation-backend-staging:2",
+        "source": "verbatim from the Run summary step's env header, the masked account replaced inside the ARN's account field"
+      },
+      "DEPLOYMENT_ID": {
+        "value": "d-PS4WPZVAL",
+        "source": "verbatim from the Run summary step's env header"
+      },
+      "DASHBOARD_INPUT": {
+        "value": "experimentation-dashboard-staging:6",
+        "source": "verbatim from the Run summary step's env header"
+      },
+      "DASHBOARD_TARGET_ARN": {
+        "value": "arn:aws:ecs:us-west-2:123456789012:task-definition/experimentation-dashboard-staging:6",
+        "source": "verbatim from the Run summary step's env header, the masked account replaced inside the ARN's account field"
+      },
+      "DASHBOARD_RESULT": {
+        "value": "rolled back to experimentation-dashboard-staging:6",
+        "source": "verbatim from the Run summary step's env header"
+      },
+      "DASHBOARD_OUTCOME": {
+        "value": "success",
+        "source": "verbatim from the Run summary step's env header"
+      },
+      "API_VERIFY": {
+        "value": "success",
+        "source": "verbatim from the Run summary step's env header"
+      },
+      "ALREADY_SERVING": {
+        "value": "",
+        "source": "verbatim from the Run summary step's env header"
+      },
+      "REFUSED": {
+        "value": "",
+        "source": "verbatim from the Run summary step's env header"
+      },
+      "REFUSED_ID": {
+        "value": "",
+        "source": "verbatim from the Run summary step's env header"
+      },
+      "REFUSED_PRIMARY": {
+        "value": "",
+        "source": "verbatim from the Run summary step's env header"
+      },
+      "JOB_STATUS": {
+        "value": "success",
+        "source": "verbatim from the Run summary step's env header"
+      }
+    }
+  }
 }

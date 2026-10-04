@@ -900,6 +900,24 @@ def run_step(tmp_path: Path, path: Path, name: str, **overrides: str):
 
 DEPLOY, ROLLBACK, MIGRATE = AWS_WORKFLOWS
 
+#: The rollback summary's closed-set inputs, in their sets (#759): a fake
+#: value ("fake-stopped") is outside its set and would only ever reach the
+#: verdict that decides nothing. Free text that can carry the account does.
+#: The verdict rows that need a read of what is serving are run, with the
+#: account in every ARN, in test_rollback_verdict.py.
+ROLLBACK_SUMMARY = {
+    "REFUSED": "",
+    "REFUSED_ID": "",
+    "REFUSED_PRIMARY": "",
+    "ALREADY_SERVING": "",
+    "STOPPED": "d-STOPPED1",
+    "STOP_WAIT": "ok",
+    "DEPLOYMENT_ID": "d-ROLLBACK1",
+    "API_VERIFY": "success",
+    "DASHBOARD_OUTCOME": "success",
+    "DASHBOARD_RESULT": f"rolled back to arn:aws:ecs:us-west-2:{ACCOUNT}:task-definition/x:6",
+}
+
 #: The steps that print a summary or an annotation without calling AWS, with
 #: the input combinations that reach their branches.
 PRINTING_STEPS = [
@@ -918,9 +936,75 @@ PRINTING_STEPS = [
         "If the API was deployed and the dashboard was not",
         {"GUARD": "0", "RECHECK": "", "ROLLOUT": ""},
     ),
-    (ROLLBACK, "Run summary", {"DASHBOARD_OUTCOME": "success"}),
-    (ROLLBACK, "Run summary", {"DASHBOARD_INPUT": "", "DASHBOARD_OUTCOME": "skipped"}),
-    (ROLLBACK, "Run summary", {"REFUSED": "codeDeployRollback"}),
+    # ROLLED BACK, with and without a dashboard half.
+    (ROLLBACK, "Run summary", ROLLBACK_SUMMARY),
+    (
+        ROLLBACK,
+        "Run summary",
+        {**ROLLBACK_SUMMARY, "DASHBOARD_INPUT": "", "DASHBOARD_OUTCOME": "skipped"},
+    ),
+    # API BACK, DASHBOARD NOT: the dashboard step's result names the account.
+    (
+        ROLLBACK,
+        "Run summary",
+        {
+            **ROLLBACK_SUMMARY,
+            "DASHBOARD_OUTCOME": "failure",
+            "DASHBOARD_RESULT": f"failed: User: arn:aws:sts::{ACCOUNT}:assumed-role/x",
+        },
+    ),
+    # REFUSED, all three ways; the refused revision is free text here.
+    (
+        ROLLBACK,
+        "Run summary",
+        {
+            **ROLLBACK_SUMMARY,
+            "STOPPED": "",
+            "STOP_WAIT": "",
+            "DEPLOYMENT_ID": "",
+            "API_VERIFY": "skipped",
+            "REFUSED": "codeDeployRollback",
+            "REFUSED_ID": "d-CDROLLBACK",
+            "REFUSED_PRIMARY": f"arn:aws:ecs:us-west-2:{ACCOUNT}:task-definition/x:5",
+        },
+    ),
+    (
+        ROLLBACK,
+        "Run summary",
+        {
+            **ROLLBACK_SUMMARY,
+            "STOPPED": "",
+            "STOP_WAIT": "",
+            "DEPLOYMENT_ID": "",
+            "API_VERIFY": "skipped",
+            "REFUSED": "unreadable",
+            "REFUSED_ID": "d-UNREADABLE",
+        },
+    ),
+    (
+        ROLLBACK,
+        "Run summary",
+        {
+            **ROLLBACK_SUMMARY,
+            "STOPPED": "",
+            "STOP_WAIT": "",
+            "DEPLOYMENT_ID": "",
+            "ALREADY_SERVING": "true",
+        },
+    ),
+    # NOTHING CHANGED, and the verdict that decides nothing.
+    (
+        ROLLBACK,
+        "Run summary",
+        {
+            **ROLLBACK_SUMMARY,
+            "STOPPED": "",
+            "STOP_WAIT": "",
+            "DEPLOYMENT_ID": "",
+            "API_VERIFY": "skipped",
+        },
+    ),
+    (ROLLBACK, "Run summary", {**ROLLBACK_SUMMARY, "STOP_WAIT": "done"}),
     (ROLLBACK, "Refuse a rollback to the revision already serving", {}),
     (MIGRATE, "Run summary", {}),
     (MIGRATE, "Run summary", {"ACCOUNT_CHECK": "failure"}),
@@ -941,6 +1025,11 @@ def test_the_printing_steps_print_no_account_id(tmp_path, path, name, overrides)
     assert ACCOUNT not in summary, summary
     assert ACCOUNT not in log, log
     assert "dkr.ecr" not in summary + log
+    # A step output another step prints: the rollback summary's `slack=` is
+    # the Slack message (#759 C7).
+    output = tmp_path / "output"
+    written = output.read_text() if output.exists() else ""
+    assert ACCOUNT not in written, written
 
 
 @pytest.mark.regression

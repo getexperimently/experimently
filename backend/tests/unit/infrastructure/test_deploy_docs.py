@@ -466,6 +466,36 @@ def test_no_copy_advises_running_rollback_again():
     assert "Do not dispatch Rollback again while" in " ".join(texts["runbook"].split())
 
 
+#: The verdicts a Rollback run ends with (scripts/rollback_verdict.py's rows,
+#: #759); test_rollback_verdict.py pins that the two lists are equal.
+VERDICT_WORDS = (
+    "ROLLED BACK",
+    "API BACK, DASHBOARD NOT",
+    "API BACK, RUN FAILED",
+    "NOT FINISHED",
+    "STILL MOVING",
+    "NOT ROLLED BACK",
+    "OUTCOME UNKNOWN",
+    "REFUSED",
+    "NOTHING CHANGED",
+)
+
+
+@pytest.mark.regression
+def test_the_runbook_reads_every_rollback_verdict():
+    """#759: "Reading the result" has one row per verdict, and the STILL MOVING
+    row, which the split-listener headline points at by this section's
+    anchor, says a listener that stays split needs a person."""
+    text = RUNBOOK.read_text()
+    start = text.index("### Reading the result\n")
+    section = text[start : text.index("\n### ", start + 1)]
+    rows = re.findall(r"^\| `([A-Z ,]+)` \| .* \| (.*) \|$", section, re.M)
+    assert [word for word, _ in rows] == list(VERDICT_WORDS)
+    (moving,) = [action for word, action in rows if word == "STILL MOVING"]
+    assert "the listener is stuck and needs a person" in moving
+    assert "the table at the end of this page" in moving
+
+
 # --- the Database Migration target (#726) -------------------------------------
 
 DB_MIGRATE = WORKFLOWS / "db-migrate.yml"
