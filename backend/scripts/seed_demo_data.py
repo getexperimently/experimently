@@ -376,6 +376,49 @@ def seed_homepage_hero_experiment(db, admin_user) -> Experiment:
 # Experiment 2: Checkout Button Color (ACTIVE — live simulator target)
 # ---------------------------------------------------------------------------
 
+#: Each arm's conversion rate after assignment.
+CHECKOUT_CVR = {"blue_button": 0.08, "green_button": 0.09}
+
+#: Pre-experiment history for CUPED (#217): the probability that a user sent a
+#: ``checkout_completed`` with no key before their assignment, given whether
+#: they convert in the experiment, per arm, as ``(if converts, if not)``.
+#: History is drawn from a latent habit that exists before assignment, so its
+#: share must be the same in both arms: ``p1 * cvr + p0 * (1 - cvr)`` is
+#: 0.09802 for blue and 0.09803 for green.  Equal probabilities in both arms
+#: would make history depend on the arm (green converts more), and CUPED would
+#: then remove part of the real effect.
+#: ``test_seed_demo_history.py`` holds the two shares within 1e-3.
+CHECKOUT_HISTORY_P = {"blue_button": (0.449, 0.0675), "green_button": (0.436, 0.0646)}
+
+
+def checkout_history_share(arm: str) -> float:
+    """The share of an arm's users the seed gives pre-experiment history."""
+    p1, p0 = CHECKOUT_HISTORY_P[arm]
+    cvr = CHECKOUT_CVR[arm]
+    return p1 * cvr + p0 * (1 - cvr)
+
+
+def _checkout_history_event(history_rng, arm, user_id, assigned_at, converts):
+    """One key-less ``checkout_completed`` 1-6.5 days before ``assigned_at``, or None.
+
+    Its ``updated_at``, the time the server stored it, is set to the same
+    moment as naive UTC: CUPED reads history only if it was stored before the
+    assignment, and a day's margin keeps that true even on a database whose
+    session is not in UTC (``assigned_at`` is written as an aware value).
+    """
+    p1, p0 = CHECKOUT_HISTORY_P[arm]
+    if history_rng.random() >= (p1 if converts else p0):
+        return None
+    happened = assigned_at - timedelta(days=history_rng.uniform(1.0, 6.5))
+    return Event(
+        event_type="checkout_completed",
+        event_name="checkout_completed",
+        user_id=user_id,
+        value=1.0,
+        created_at=happened.isoformat(),
+        updated_at=happened.astimezone(timezone.utc).replace(tzinfo=None),
+    )
+
 
 def seed_checkout_button_experiment(db, admin_user) -> Experiment:
     """30K pre-seeded events, no clear winner yet. Status: ACTIVE."""
@@ -437,8 +480,8 @@ def seed_checkout_button_experiment(db, admin_user) -> Experiment:
     # Historical events: 30K total, no clear winner yet
     # Blue: 8%, Green: 9% — trending but not significant
     TOTAL_PER_VARIANT = 15_000
-    BLUE_CVR = 0.08
-    GREEN_CVR = 0.09
+    BLUE_CVR = CHECKOUT_CVR["blue_button"]
+    GREEN_CVR = CHECKOUT_CVR["green_button"]
 
     print(
         f"    Generating {TOTAL_PER_VARIANT * 2:,} events for checkout_button_color..."
@@ -446,6 +489,10 @@ def seed_checkout_button_experiment(db, admin_user) -> Experiment:
     events_to_add = []
     assignments_to_add = []
     rng = random.Random(123)
+    # History has its own generator, so rng(123)'s draws, and every other
+    # number the demo shows, are what they were before it existed.
+    history_rng = random.Random(217)
+    history = 0
 
     for i in range(TOTAL_PER_VARIANT):
         user_id = f"user_checkout_b_{i:06d}"
@@ -471,7 +518,14 @@ def seed_checkout_button_experiment(db, admin_user) -> Experiment:
                 created_at=event_time.isoformat(),
             )
         )
-        if rng.random() < BLUE_CVR:
+        converts = rng.random() < BLUE_CVR
+        prior = _checkout_history_event(
+            history_rng, "blue_button", user_id, event_time, converts
+        )
+        if prior is not None:
+            events_to_add.append(prior)
+            history += 1
+        if converts:
             conv_time = event_time + timedelta(minutes=rng.randint(1, 30))
             events_to_add.append(
                 Event(
@@ -509,7 +563,14 @@ def seed_checkout_button_experiment(db, admin_user) -> Experiment:
                 created_at=event_time.isoformat(),
             )
         )
-        if rng.random() < GREEN_CVR:
+        converts = rng.random() < GREEN_CVR
+        prior = _checkout_history_event(
+            history_rng, "green_button", user_id, event_time, converts
+        )
+        if prior is not None:
+            events_to_add.append(prior)
+            history += 1
+        if converts:
             conv_time = event_time + timedelta(minutes=rng.randint(1, 30))
             events_to_add.append(
                 Event(
@@ -527,7 +588,8 @@ def seed_checkout_button_experiment(db, admin_user) -> Experiment:
     _bulk_insert(db, events_to_add, batch_size=1000)
     db.commit()
     print(
-        f"    Created {len(assignments_to_add):,} assignments and {len(events_to_add):,} events."
+        f"    Created {len(assignments_to_add):,} assignments and {len(events_to_add):,} events"
+        f" ({history:,} of them pre-experiment history)."
     )
     return exp
 
