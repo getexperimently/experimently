@@ -7721,8 +7721,99 @@
         "title": "InteractionAnalysisResponse",
         "type": "object"
       },
+      "InteractionArm": {
+        "description": "One arm of the other experiment, among the users in both experiments.",
+        "properties": {
+          "control_rate": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "converted_control / n_control; null when n_control is 0.",
+            "title": "Control Rate"
+          },
+          "converted_control": {
+            "description": "Of those, users who converted.",
+            "title": "Converted Control",
+            "type": "integer"
+          },
+          "converted_treatment": {
+            "description": "Of those, users who converted.",
+            "title": "Converted Treatment",
+            "type": "integer"
+          },
+          "effect": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "treatment_rate - control_rate, as a rate (0.05 is 5 percentage points). This is the lift the test compares across arms.",
+            "title": "Effect"
+          },
+          "n_control": {
+            "description": "Users in this experiment's control and in this arm.",
+            "title": "N Control",
+            "type": "integer"
+          },
+          "n_treatment": {
+            "description": "Users in the row's treatment and in this arm.",
+            "title": "N Treatment",
+            "type": "integer"
+          },
+          "other_variant_id": {
+            "title": "Other Variant Id",
+            "type": "string"
+          },
+          "other_variant_name": {
+            "title": "Other Variant Name",
+            "type": "string"
+          },
+          "relative_lift": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "effect / control_rate, for reading only: the test does not use it. Null when control_rate is 0 or null.",
+            "title": "Relative Lift"
+          },
+          "treatment_rate": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "converted_treatment / n_treatment; null when n_treatment is 0.",
+            "title": "Treatment Rate"
+          }
+        },
+        "required": [
+          "other_variant_id",
+          "other_variant_name",
+          "n_control",
+          "converted_control",
+          "n_treatment",
+          "converted_treatment"
+        ],
+        "title": "InteractionArm",
+        "type": "object"
+      },
       "InteractionPairResponse": {
-        "description": "``GET /interactions/{a}/{b}``: the pair analysis, labelled beta (#219).\n\nOnly ``overlap_coefficient`` and ``has_significant_overlap`` are measured.\n``interaction_result``, ``novelty_result`` and ``sutva_result`` are null\n(not computed), and ``overall_risk`` comes from the overlap alone.",
+        "description": "``GET /interactions/{a}/{b}``: overlap, and the interaction test (beta, #219).",
         "properties": {
           "analysis_notice": {
             "anyOf": [
@@ -7733,7 +7824,7 @@
                 "type": "null"
               }
             ],
-            "description": "Present exactly when analysis_status is 'beta': what is not computed yet, with the issue that tracks it.",
+            "description": "Present exactly when analysis_status is 'beta': what the numbers are and are not, with the issue that tracks it.",
             "title": "Analysis Notice"
           },
           "analysis_status": {
@@ -7753,34 +7844,54 @@
             "title": "Experiment B Id",
             "type": "string"
           },
+          "has_interaction": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "True when any row is significant; false only when every row was tested and none is; null otherwise.",
+            "title": "Has Interaction"
+          },
           "has_significant_overlap": {
+            "description": "overlap_coefficient is above 0.3.",
             "title": "Has Significant Overlap",
             "type": "boolean"
           },
-          "interaction_result": {
+          "interaction_results": {
+            "items": {
+              "$ref": "#/components/schemas/InteractionRow"
+            },
+            "title": "Interaction Results",
+            "type": "array"
+          },
+          "min_expected_per_cell": {
+            "description": "Fewest expected converters and non-converters per combination of arms for a row to be tested.",
+            "title": "Min Expected Per Cell",
+            "type": "integer"
+          },
+          "min_users_per_cell": {
+            "description": "Fewest users per combination of arms for a row to be tested.",
+            "title": "Min Users Per Cell",
+            "type": "integer"
+          },
+          "mutual_exclusion_group_id": {
             "anyOf": [
               {
-                "$ref": "#/components/schemas/InteractionResultSchema"
+                "type": "string"
               },
               {
                 "type": "null"
               }
-            ]
-          },
-          "novelty_result": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/NoveltyResultSchema"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "overall_risk": {
-            "$ref": "#/components/schemas/RiskLevel"
+            ],
+            "description": "The mutual exclusion group both experiments are in; null unless they are in the same one.",
+            "title": "Mutual Exclusion Group Id"
           },
           "overlap_coefficient": {
+            "description": "Jaccard overlap: shared users / users in either experiment.",
             "maximum": 1,
             "minimum": 0,
             "title": "Overlap Coefficient",
@@ -7793,23 +7904,36 @@
             "title": "Recommendations",
             "type": "array"
           },
-          "sutva_result": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/SUTVAResultSchema"
-              },
-              {
-                "type": "null"
-              }
-            ]
+          "share_of_a": {
+            "description": "Fraction of experiment A's users who are also in experiment B.",
+            "maximum": 1,
+            "minimum": 0,
+            "title": "Share Of A",
+            "type": "number"
+          },
+          "share_of_b": {
+            "description": "Fraction of experiment B's users who are also in experiment A.",
+            "maximum": 1,
+            "minimum": 0,
+            "title": "Share Of B",
+            "type": "number"
+          },
+          "shared_users": {
+            "description": "Users assigned to both experiments.",
+            "title": "Shared Users",
+            "type": "integer"
           }
         },
         "required": [
           "experiment_a_id",
           "experiment_b_id",
+          "shared_users",
+          "share_of_a",
+          "share_of_b",
           "overlap_coefficient",
           "has_significant_overlap",
-          "overall_risk"
+          "min_users_per_cell",
+          "min_expected_per_cell"
         ],
         "title": "InteractionPairResponse",
         "type": "object"
@@ -7847,6 +7971,175 @@
           "interaction_effect_size"
         ],
         "title": "InteractionResultSchema",
+        "type": "object"
+      },
+      "InteractionRow": {
+        "description": "One treatment of one experiment, tested against the other's arms (beta).\n\nComputed exactly when ``unavailable_reason`` is null: then ``statistic``,\n``degrees_of_freedom``, ``p_value`` and ``is_significant`` are set, and\nwith a reason they are all null.  A null ``is_significant`` means not\ntested, never \"no interaction\".",
+        "properties": {
+          "arms": {
+            "description": "One entry per arm of the other experiment that shares users with this one, control first, then by name.",
+            "items": {
+              "$ref": "#/components/schemas/InteractionArm"
+            },
+            "title": "Arms",
+            "type": "array"
+          },
+          "confidence_level": {
+            "description": "The tested experiment's stored confidence level.",
+            "title": "Confidence Level",
+            "type": "number"
+          },
+          "control_variant_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Control Variant Id"
+          },
+          "corrected_p_value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "p_value corrected with correction_method across this experiment's tested rows; null when the method is none or the row is not tested.",
+            "title": "Corrected P Value"
+          },
+          "correction_method": {
+            "description": "The tested experiment's stored correction method.",
+            "title": "Correction Method",
+            "type": "string"
+          },
+          "degrees_of_freedom": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Number of arms minus one.",
+            "title": "Degrees Of Freedom"
+          },
+          "experiment_id": {
+            "description": "The experiment whose lift is tested.",
+            "title": "Experiment Id",
+            "type": "string"
+          },
+          "is_significant": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "True when the corrected p-value (the p-value under correction method none) is below 1 - confidence_level. Null when not tested: null never means no interaction.",
+            "title": "Is Significant"
+          },
+          "metric_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The tested experiment's primary metric.",
+            "title": "Metric Id"
+          },
+          "metric_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Metric Name"
+          },
+          "other_experiment_id": {
+            "title": "Other Experiment Id",
+            "type": "string"
+          },
+          "p_value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Uncorrected p-value of the test; null when not tested.",
+            "title": "P Value"
+          },
+          "statistic": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Pearson X^2 of the counts against the model in which the lift in percentage points is the same in every arm.",
+            "title": "Statistic"
+          },
+          "unavailable_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Null when tested; otherwise the first of these that applies: mutual_exclusion_group, no_shared_users, no_metric, not_a_proportion_metric, no_control_variant, too_few_shared_users, too_few_conversions.",
+            "title": "Unavailable Reason"
+          },
+          "variant_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The treatment compared with control. Null when the reason applies to the whole experiment.",
+            "title": "Variant Id"
+          },
+          "variant_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Variant Name"
+          }
+        },
+        "required": [
+          "experiment_id",
+          "other_experiment_id",
+          "correction_method",
+          "confidence_level"
+        ],
+        "title": "InteractionRow",
         "type": "object"
       },
       "InterpretRequest": {
@@ -9815,71 +10108,6 @@
         ],
         "title": "NotificationStatus",
         "type": "string"
-      },
-      "NoveltyAnalysisResponse": {
-        "description": "``GET /interactions/{a}/{b}/novelty``: labelled beta, not computed (#219).\n\n``has_novelty`` and ``decline_rate`` are null while ``computed`` is false:\na null ``has_novelty`` means *not computed*, never *no novelty found*.",
-        "properties": {
-          "analysis_notice": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Present exactly when analysis_status is 'beta': what is not computed yet, with the issue that tracks it.",
-            "title": "Analysis Notice"
-          },
-          "analysis_status": {
-            "description": "'ga' when these numbers are what their names say; 'beta' when part of the analysis is not computed yet (see analysis_notice).",
-            "enum": [
-              "ga",
-              "beta"
-            ],
-            "title": "Analysis Status",
-            "type": "string"
-          },
-          "computed": {
-            "default": false,
-            "description": "Whether novelty was computed.  False in this release.",
-            "title": "Computed",
-            "type": "boolean"
-          },
-          "decline_rate": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Slope of the daily treatment effect; null when not computed.",
-            "title": "Decline Rate"
-          },
-          "has_novelty": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Null when computed is false: not computed, not 'no novelty'.",
-            "title": "Has Novelty"
-          },
-          "recommendation": {
-            "title": "Recommendation",
-            "type": "string"
-          }
-        },
-        "required": [
-          "recommendation"
-        ],
-        "title": "NoveltyAnalysisResponse",
-        "type": "object"
       },
       "NoveltyResultSchema": {
         "description": "Schema for novelty effect detection results.",
@@ -25957,7 +26185,7 @@
     },
     "/api/v1/interactions/{exp_a_id}/{exp_b_id}": {
       "get": {
-        "description": "Analyze interaction between two specific experiments.\n\nBeta (#219): only the overlap is measured.  ``interaction_result``,\n``novelty_result`` and ``sutva_result`` are null (not computed) and\n``overall_risk`` comes from the overlap alone.\n\nReturns a minimal response (overlap_coefficient=0, has_significant_overlap=False)\nwhen experiments do not share a significant portion of users.",
+        "description": "The overlap of two experiments, and whether their effects interact.\n\nBeta (#219).  For each treatment of each experiment: does its lift, in\npercentage points, on the experiment's primary conversion metric differ\nacross the other experiment's arms, among the users in both?  Any two\nexperiments, in any status.  A row that cannot be tested says why in\n``unavailable_reason``.",
         "operationId": "analyze_pair_api_v1_interactions__exp_a_id___exp_b_id__get",
         "parameters": [
           {
@@ -26008,67 +26236,7 @@
             "OAuth2PasswordBearer": []
           }
         ],
-        "summary": "Beta: interaction analysis of two experiments (overlap only)",
-        "tags": [
-          "Interactions"
-        ],
-        "x-stability": "beta"
-      }
-    },
-    "/api/v1/interactions/{exp_a_id}/{exp_b_id}/novelty": {
-      "get": {
-        "description": "Return the novelty sub-analysis for a pair of experiments.\n\nBeta (#219): novelty is not computed yet, so the answer is\n``computed: false`` with ``has_novelty`` and ``decline_rate`` null -- never\n``has_novelty: false``, which would read as \"no novelty found\".\n\nThis route MUST be defined before /{exp_a_id}/{exp_b_id} to avoid\nthe path segment \"novelty\" being captured as exp_b_id.",
-        "operationId": "analyze_novelty_api_v1_interactions__exp_a_id___exp_b_id__novelty_get",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "exp_a_id",
-            "required": true,
-            "schema": {
-              "format": "uuid",
-              "title": "Exp A Id",
-              "type": "string"
-            }
-          },
-          {
-            "in": "path",
-            "name": "exp_b_id",
-            "required": true,
-            "schema": {
-              "format": "uuid",
-              "title": "Exp B Id",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/NoveltyAnalysisResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "OAuth2PasswordBearer": []
-          }
-        ],
-        "summary": "Beta: novelty sub-analysis (not computed yet)",
+        "summary": "Beta: do two experiments' effects interact?",
         "tags": [
           "Interactions"
         ],
@@ -34160,7 +34328,7 @@
       "name": "Global Holdout"
     },
     {
-      "description": "Cross-experiment interaction detection: overlap analysis, statistical interaction tests, novelty effect detection, and SUTVA violation checks",
+      "description": "Experiments that share users: the overlap between them, and (beta) whether one experiment's effect differs across the other's arms",
       "name": "Interactions"
     },
     {

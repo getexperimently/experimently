@@ -233,8 +233,9 @@ the checklist's lift is about the same whatever the pricing. The p-values themse
 a little from one stack to another, because which visitor lands in which variant depends
 on the order the variants are read in; the two decisions do not.
 
-The pricing row of the response looks like this (one stack's numbers; `arms` shortened to
-its first entry):
+The pricing row of the response looks like this when the variants are read in the order
+they were created (numbers rounded; `arms` shortened to its first entry, onboarding's
+`control`: +22.2 percentage points there, -0.7 in `checklist`):
 
 ```json
 {
@@ -245,14 +246,14 @@ its first entry):
   "arms": [
     {
       "other_variant_name": "control",
-      "n_control": 266,
-      "converted_control": 23,
-      "n_treatment": 275,
-      "converted_treatment": 85,
-      "control_rate": 0.0865,
-      "treatment_rate": 0.3091,
-      "effect": 0.2226,
-      "relative_lift": 2.574
+      "n_control": 256,
+      "converted_control": 22,
+      "n_treatment": 263,
+      "converted_treatment": 81,
+      "control_rate": 0.0859,
+      "treatment_rate": 0.308,
+      "effect": 0.2221,
+      "relative_lift": 2.584
     }
   ],
   "statistic": 28.08,
@@ -341,7 +342,26 @@ uneven splits (95/5, 99/1), so the row is not tested.
 
 ### How much the test can see
 
-The test needs many users. TODO(power table, re-run with the shipped fit)
+The test needs many users. The share of simulated pairs in which it finds an interaction
+(power) at a 95% confidence level, with no correction, for two experiments of two variants
+each. A's treatment lifts conversion by 20% of the base rate (1 percentage point at 5%)
+either only in B's control ("only in B's control") or in B's control while lowering it by
+as much in B's treatment ("opposite"). The users column is the number in the smallest of
+the four combinations; 20,000 simulated pairs per line (seed 2192027):
+
+| Split of each experiment | Pattern | Base rate | 1,000 users | 5,000 users | 25,000 users |
+|---|---|---|---|---|---|
+| 50/50 | only in B's control | 5% | 0.11 | 0.35 | 0.94 |
+| 50/50 | opposite | 5% | 0.31 | 0.91 | 1.00 |
+| 50/50 | only in B's control | 20% | 0.34 | 0.93 | 1.00 |
+| 50/50 | opposite | 20% | 0.89 | 1.00 | 1.00 |
+| 95/5 | only in B's control | 5% | 0.24 | 0.83 | 1.00 |
+| 95/5 | opposite | 5% | 0.76 | 1.00 | 1.00 |
+| 95/5 | only in B's control | 20% | 0.82 | 1.00 | 1.00 |
+
+So at a 5% base rate an interaction the size of A's own lift needs about 25,000 users in
+every combination to be found reliably, and a "no interaction found" with fewer is weak
+evidence. The 95/5 lines have more users in total for the same smallest combination.
 
 ### When an interaction is found
 
