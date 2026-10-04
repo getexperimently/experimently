@@ -62,17 +62,24 @@ env:
   # The dashboard's rolling deployment, as in deploy.yml.
   DASHBOARD_ROLLOUT_DEADLINE_SECONDS: '1200'
   DASHBOARD_ROLLOUT_POLL_SECONDS: '15'
+  # How long "Verify what is serving traffic" waits for the API's PRIMARY task
+  # set to reach its own desired count (#816): it reads at most
+  # DEADLINE / POLL + 1 times (31), POLL seconds apart.
+  VERIFY_TASKS_DEADLINE_SECONDS: '300'
+  VERIFY_TASKS_POLL_SECONDS: '10'
 
 jobs:
   rollback:
     name: Roll back ${{ inputs.environment }}
     runs-on: ubuntu-latest
     # The job's waits are ROLLBACK_TIMEOUT_SECONDS (1800),
-    # DASHBOARD_ROLLOUT_DEADLINE_SECONDS (1200) and the stop step's two (#783):
+    # DASHBOARD_ROLLOUT_DEADLINE_SECONDS (1200), the stop step's two (#783):
     # about 5 minutes for a stopped deployment to finish (STOP_WAIT_POLLS) and
     # about 5 more for the group to go idle (GROUP_IDLE_POLLS), both 60 reads
-    # 5 s apart. About 65 minutes with the rest; the default of 360 would
-    # outlive the AWS session.
+    # 5 s apart, and the API verify step's VERIFY_TASKS_DEADLINE_SECONDS (300,
+    # 31 reads 10 s apart; #816): about 67 minutes. The default of 360 would
+    # outlive the AWS session. test_the_rollback_job_timeout_covers_every_named_wait
+    # adds them up, with an allowance per read and a margin.
     timeout-minutes: 90
     environment: ${{ inputs.environment }}
     permissions:
@@ -794,35 +801,135 @@ jobs:
             sleep 10
           done
 
+      # The PRIMARY task set's OWN counts, never the service's (#816). For the
+      # deployment group's hour-long termination wait after a shift, the
+      # service runs both task sets: its runningCount is twice its
+      # desiredCount ("4 of 2" in run 37176250648, which failed a rollback
+      # that had worked), and the replaced set's tasks could make a PRIMARY
+      # with none running look complete. The count terms of ECS's steady
+      # state for a task set (botocore's TaskSet model) are running ==
+      # computedDesiredCount and nothing pending; those are what it checks.
+      #
+      # It waits, a bounded number of reads, rather than failing at once: a
+      # false red here skips the dashboard leg and leaves the API and the
+      # dashboard on different releases. Only two answers fail on the first
+      # read: no such service, and a single PRIMARY task set on another
+      # revision (something has taken over since the shift). Anything else
+      # not yet done -- not exactly one PRIMARY task set (a swap in flight),
+      # counts that are not numbers, a PRIMARY that wants fewer tasks than
+      # the service, a failed read -- is read again until the reads run out,
+      # then fails with what the last read said.
       - name: Verify what is serving traffic
         id: api-verify
         env:
           TARGET_ARN: ${{ steps.target.outputs.arn }}
+          DEPLOYMENT_ID: ${{ steps.codedeploy.outputs.deployment-id }}
+          DASHBOARD_INPUT: ${{ inputs.dashboard_task_definition_arn }}
         run: |
           set -euo pipefail
-          # One call, both answers. The PRIMARY task set, not
-          # services[0].taskDefinition: on a CODE_DEPLOY service that field is
-          # "specified when the service is created with CreateService and can
-          # be modified with UpdateService", and UpdateService is the call ECS
-          # refuses here -- so it still names the revision CloudFormation
-          # created and never moves.
-          read -r SERVING RUNNING DESIRED <<<"$(aws ecs describe-services \
-            --cluster "$ECS_CLUSTER" --services "$ECS_BACKEND_SERVICE" \
-            --query "services[0].[taskSets[?status=='PRIMARY'].taskDefinition | [0], runningCount, desiredCount]" \
-            --output text)"
-          echo "serving: ${SERVING##*/}  ($RUNNING/$DESIRED tasks running)"
+          for value in "$VERIFY_TASKS_DEADLINE_SECONDS" "$VERIFY_TASKS_POLL_SECONDS"; do
+            if ! [[ $value =~ ^[0-9]{1,5}$ ]]; then
+              printf '%s\n' "::error title=API verify not configured::VERIFY_TASKS_DEADLINE_SECONDS and VERIFY_TASKS_POLL_SECONDS must be whole numbers of seconds (they are '${VERIFY_TASKS_DEADLINE_SECONDS:0:20}' and '${VERIFY_TASKS_POLL_SECONDS:0:20}'), so this run did not check what the API is serving."
+              exit 1
+            fi
+          done
+          if [ "$VERIFY_TASKS_POLL_SECONDS" -lt 1 ]; then
+            printf '%s\n' "::error title=API verify not configured::VERIFY_TASKS_POLL_SECONDS must be at least 1, so this run did not check what the API is serving."
+            exit 1
+          fi
+          # Bounded by the number of reads, not by a clock.
+          # (10#: a leading zero is not octal.)
+          reads=$(( 10#$VERIFY_TASKS_DEADLINE_SECONDS / 10#$VERIFY_TASKS_POLL_SECONDS + 1 ))
+          target="${TARGET_ARN##*/}"
+          aws_errors="$(mktemp)"
+          trap 'rm -f "$aws_errors"' EXIT
+          # Free text from AWS (an AccessDenied names the role's ARN) loses
+          # every run of twelve digits before it is printed: the log is public.
+          scrub() {
+            sed -E 's/(^|[^0-9A-Za-z])[0-9]{12}([^0-9A-Za-z]|$)/\1<account>\2/g'
+          }
+          n=0
+          while :; do
+            n=$(( n + 1 ))
+            on_target=0
+            rc=0
+            # Nine flat fields: how many PRIMARY task sets; the first one's
+            # revision, running, computedDesiredCount, pending and scale; the
+            # service's desiredCount and runningCount; how many task sets.
+            # The service's taskDefinition is not read: on a CODE_DEPLOY
+            # service it names the revision CloudFormation created and never
+            # moves.
+            out="$(aws ecs describe-services \
+              --cluster "$ECS_CLUSTER" --services "$ECS_BACKEND_SERVICE" \
+              --query "services[0].[length(taskSets[?status=='PRIMARY']), taskSets[?status=='PRIMARY'] | [0].taskDefinition, taskSets[?status=='PRIMARY'] | [0].runningCount, taskSets[?status=='PRIMARY'] | [0].computedDesiredCount, taskSets[?status=='PRIMARY'] | [0].pendingCount, taskSets[?status=='PRIMARY'] | [0].scale.value, desiredCount, runningCount, length(taskSets)]" \
+              --output text 2>"$aws_errors")" || rc=$?
+            if [ "$rc" -ne 0 ]; then
+              error="$(<"$aws_errors")"
+              error="${error//$'\n'/ }"
+              error="${error#"${error%%[! ]*}"}"
+              error="${error:0:300}"
+              error="$(scrub <<<"$error")"
+              error="${error:0:200}"
+              why="the PRIMARY task set's counts could not be read (aws exit ${rc}: ${error:-no error text})"
+              counts="not read"
+            else
+              read -r count serving running desired pending scale service_desired service_running sets <<<"$out"
+              if [ "$out" = None ]; then
+                printf '%s\n' "::error title=API service not found::${ECS_BACKEND_SERVICE} was not found in ${ECS_CLUSTER}, so this run cannot tell what is serving. The dashboard was not rolled back."
+                exit 1
+              fi
+              counts="PRIMARY task set: ${running:-?} of ${desired:-?} running, ${pending:-?} starting, scale ${scale:-?}; the service wants ${service_desired:-?} and runs ${service_running:-?} tasks across ${sets:-?} task sets"
+              # The revision is compared only once there is exactly one
+              # PRIMARY task set naming one: mid-swap, `| [0]` can name the
+              # outgoing set, or nothing.
+              if ! [[ $count =~ ^[0-9]+$ ]]; then
+                why="the service's answer did not start with a count of PRIMARY task sets (${count:0:40})"
+              elif [ "$count" -ne 1 ]; then
+                why="the service has ${count} PRIMARY task sets, so this run cannot tell what is serving"
+              elif [ -z "$serving" ] || [ "$serving" = None ]; then
+                why="the PRIMARY task set names no task definition"
+              elif [ "$serving" != "$TARGET_ARN" ]; then
+                printf '%s\n' "::error title=API not on the target::expected ${target} to be serving, got ${serving##*/}: the PRIMARY task set moved after the traffic shift. The dashboard was not rolled back."
+                exit 1
+              elif ! [[ $running =~ ^[0-9]+$ && $desired =~ ^[0-9]+$ && $pending =~ ^[0-9]+$ && $service_desired =~ ^[0-9]+$ ]]; then
+                on_target=1
+                why="the PRIMARY task set's counts are not all numbers (running ${running:0:20}, desired ${desired:0:20}, starting ${pending:0:20}; the service wants ${service_desired:0:20})"
+              elif [ "$desired" -lt 1 ]; then
+                on_target=1
+                why="the PRIMARY task set wants 0 tasks: a rollback onto no tasks would look complete with nothing running"
+              elif [ "$desired" -lt "$service_desired" ]; then
+                on_target=1
+                why="its task set wants ${desired} tasks, fewer than the service's ${service_desired} (scale ${scale})"
+              elif [ "$running" -eq "$desired" ] && [ "$pending" -eq 0 ]; then
+                printf 'serving: %s  (%s; read %s of %s)\n' "$target" "$counts" "$n" "$reads"
+                exit 0
+              else
+                on_target=1
+                why="its task set has ${running} of ${desired} tasks running (${pending} starting)"
+              fi
+            fi
 
-          if [ "$SERVING" != "$TARGET_ARN" ]; then
-            echo "::error::expected ${TARGET_ARN##*/} to be serving, got ${SERVING##*/}"
-            exit 1
-          fi
-          # A rollback that lands the right revision with one of three tasks
-          # healthy is not a finished rollback, and was previously reported as
-          # a clean success because this count was printed and never compared.
-          if [ "$RUNNING" != "$DESIRED" ]; then
-            echo "::error::$RUNNING of $DESIRED tasks are running on ${TARGET_ARN##*/}"
-            exit 1
-          fi
+            if [ "$n" -ge "$reads" ]; then
+              if [ "$on_target" -eq 1 ]; then
+                lead="Traffic is on ${target}, but after ${VERIFY_TASKS_DEADLINE_SECONDS} s (${reads} reads, ${VERIFY_TASKS_POLL_SECONDS} s apart) ${why}."
+              else
+                lead="After ${VERIFY_TASKS_DEADLINE_SECONDS} s (${reads} reads, ${VERIFY_TASKS_POLL_SECONDS} s apart) this run could not confirm ${target} is serving: ${why}."
+              fi
+              watch="Watch the task set: aws ecs describe-services --cluster ${ECS_CLUSTER} --services ${ECS_BACKEND_SERVICE} --query \"services[0].taskSets[?status=='PRIMARY'] | [0].{Running:runningCount,Desired:computedDesiredCount,Pending:pendingCount}\" --output json"
+              dashboard=""
+              if [ -n "$DASHBOARD_INPUT" ]; then
+                dashboard=" The dashboard was not rolled back. Once the API is at its desired count, put the dashboard back with docs/deployment/rollback-runbook.md Method 2, the dashboard block."
+              fi
+              again=""
+              if [ -n "$DEPLOYMENT_ID" ]; then
+                again=" Do not dispatch Rollback again while CodeDeploy deployment ${DEPLOYMENT_ID} is active: its stop step would stop that deployment with auto-rollback and put the API back on the release you rolled back from."
+              fi
+              printf '%s\n' "::error title=API rollback not finished::${lead}${dashboard} ${watch}.${again}"
+              exit 1
+            fi
+            printf 'read %s of %s: %s (%s); reading again in %s s\n' "$n" "$reads" "$why" "$counts" "$VERIFY_TASKS_POLL_SECONDS"
+            sleep "$VERIFY_TASKS_POLL_SECONDS"
+          done
 
       # The dashboard, after the API is back and verified: the API rollback is
       # never delayed by the dashboard's rolling deployment, and CodeDeploy's

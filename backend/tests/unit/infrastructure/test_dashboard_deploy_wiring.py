@@ -160,6 +160,18 @@ def _code(script: str) -> str:
 #: rules, and `create-deployment` is refused, with the staging text, while the
 #: revert is active. The refusal is keyed on the revert, not on what the
 #: workflow last listed, so a workflow that never lists again still meets it.
+#:
+#: A rule made with `query=True` (#816) answers a describe-services document,
+#: and the fake evaluates the call's `--query` on it with jmespath, as the CLI
+#: does, so the workflow's own query is what is tested. Every other rule's
+#: answer is printed as given. It prints the result the way aws-cli 2.28.24
+#: was measured to print it (test_the_fakes_query_mode_prints_what_the_cli_prints):
+#: `--output text` tab-joins a flat list, a None is `None`, a float keeps its
+#: `.0`; `--output json` is indented by four. A jmespath error exits 255 with
+#: its message on stderr, as the CLI does. Anything else -- a nested list, a
+#: dict, an empty list, another --output -- exits 98: the CLI's text output
+#: for those was not measured (it reorders nested lists), so the fake refuses
+#: rather than guess.
 FAKE_AWS = r"""#!{python}
 import json, os, sys
 args = sys.argv[1:]
@@ -245,6 +257,44 @@ if args[:2] == ["deploy", "create-deployment"] and revert_active:
     )
     sys.exit(254)
 
+def query_mode(document):
+    def refuse(why):
+        print("fake aws: query mode " + why, file=sys.stderr)
+        sys.exit(98)
+
+    if "--query" not in args:
+        refuse("needs --query")
+    expression = args[args.index("--query") + 1]
+    output = args[args.index("--output") + 1] if "--output" in args else "json"
+    import jmespath
+    from jmespath.exceptions import JMESPathError
+
+    try:
+        result = jmespath.search(expression, document)
+    except JMESPathError as error:
+        print("\n" + str(error), file=sys.stderr)
+        sys.exit(255)
+
+    def scalar(value):
+        if isinstance(value, bool):
+            return False  # not measured
+        return value is None or isinstance(value, (str, int, float))
+
+    flat = scalar(result) or (
+        isinstance(result, list) and result and all(scalar(v) for v in result)
+    )
+    if not flat:
+        refuse("does not print this result (not measured): %r" % (result,))
+    if output == "json":
+        print(json.dumps(result, indent=4))
+    elif output == "text":
+        values = result if isinstance(result, list) else [result]
+        print("\t".join("None" if v is None else str(v) for v in values))
+    else:
+        refuse("does not print --output %s" % output)
+    sys.exit(0)
+
+
 rules = json.load(open(os.path.join(state, "rules.json")))
 line = " ".join(args)
 for i, rule in enumerate(rules):
@@ -257,6 +307,8 @@ for i, rule in enumerate(rules):
         if isinstance(answer, dict) and set(answer) == {"error"}:
             print(answer["error"], file=sys.stderr)
             sys.exit(254)
+        if rule.get("query"):
+            query_mode(answer)
         print(answer if isinstance(answer, str) else json.dumps(answer))
         sys.exit(0)
 print("fake aws: unexpected call " + line, file=sys.stderr)
@@ -278,8 +330,13 @@ sys.stdout.write(open(os.path.join(state, "curl.w")).read())
 """
 
 
-def rule(*match: str, answers: list) -> dict:
-    return {"match": list(match), "answers": answers}
+def rule(*match: str, answers: list, query: bool = False) -> dict:
+    """``query=True``: each answer is a document the call's --query is
+    evaluated on (FAKE_AWS's query mode), not the printed answer."""
+    made: dict[str, Any] = {"match": list(match), "answers": answers}
+    if query:
+        made["query"] = True
+    return made
 
 
 def _task_definition(arn: str, image: str, family: str | None = None) -> dict:
@@ -1042,6 +1099,89 @@ def test_the_budget_is_not_vacuous():
     assert _budget(env) > 120 * 60
     env["DASHBOARD_ROLLOUT_DEADLINE_SECONDS"] = "3000"
     assert _budget(env) > _job(DEPLOY)["timeout-minutes"] * 60
+
+
+# --- the rollback job's timeout budget (#816, PE condition 5) ---------------------------
+
+#: Per AWS read in a loop bounded by a COUNT of reads (the stop step's two
+#: waits, the API verify step): the sleeps are named, the reads' own time is
+#: not. An ASSUMPTION, not a measurement.
+ROLLBACK_READ_ALLOWANCE_SECONDS = 2
+#: Checkout, OIDC, the target checks, the stop step's first reads, the
+#: create and the summary's own calls.
+ROLLBACK_STEPS_ALLOWANCE_SECONDS = 5 * 60
+
+
+def _stop_step_value(name: str) -> int:
+    code = _step(ROLLBACK, "Stop any deployment already in flight")["run"]
+    (value,) = re.findall(rf"^\s*{name}=(\d+)\s*$", code, re.M)
+    return int(value)
+
+
+def _rollback_budget(env: dict[str, str]) -> int:
+    n = {k: int(v) for k, v in env.items() if str(v).isdigit()}
+    read = ROLLBACK_READ_ALLOWANCE_SECONDS
+    stop_polls = _stop_step_value("STOP_WAIT_POLLS")
+    idle_polls = _stop_step_value("GROUP_IDLE_POLLS")
+    verify_reads = (
+        n["VERIFY_TASKS_DEADLINE_SECONDS"] // n["VERIFY_TASKS_POLL_SECONDS"] + 1
+    )
+    summary = _step(ROLLBACK, "Run summary")["run"]
+    (summary_deadline,) = re.findall(
+        r"\$\{SUMMARY_SERVING_DEADLINE_SECONDS:-(\d+)\}", summary
+    )
+    return (
+        # the stop step: a stopped deployment's final status, 5 s apart ...
+        stop_polls * (5 + read)
+        # ... then the group idle, GROUP_IDLE_POLL_SECONDS apart
+        + idle_polls * (_stop_step_value("GROUP_IDLE_POLL_SECONDS") + read)
+        # the shift (a clock deadline) and its last sleep and poll
+        + n["ROLLBACK_TIMEOUT_SECONDS"]
+        + 10
+        + 3 * read
+        # the API verify step: count-bounded
+        + (verify_reads - 1) * n["VERIFY_TASKS_POLL_SECONDS"]
+        + verify_reads * read
+        # the dashboard's rollout: its deadline, two pre-mutation retries and
+        # its last sleep
+        + n["DASHBOARD_ROLLOUT_DEADLINE_SECONDS"]
+        + 3 * n["DASHBOARD_ROLLOUT_POLL_SECONDS"]
+        # the summary's read of what is serving, and one read past it
+        + int(summary_deadline)
+        + 4 * read
+        + ROLLBACK_STEPS_ALLOWANCE_SECONDS
+        + MARGIN_SECONDS
+    )
+
+
+@pytest.mark.regression
+def test_the_rollback_job_timeout_covers_every_named_wait():
+    """deploy.yml's check, for rollback.yml: every wait is a named value, each
+    step uses the name, and their sum fits inside timeout-minutes."""
+    env = _load(ROLLBACK)["env"]
+    timeout = _job(ROLLBACK)["timeout-minutes"]
+    assert timeout * 60 >= _rollback_budget(env), (timeout * 60, _rollback_budget(env))
+    code = "\n".join(_code(s["run"]) for s in _steps(ROLLBACK) if "run" in s)
+    assert "deadline=$(( $(date +%s) + ROLLBACK_TIMEOUT_SECONDS ))" in code
+    assert '--deadline "$DASHBOARD_ROLLOUT_DEADLINE_SECONDS"' in code
+    assert '--interval "$DASHBOARD_ROLLOUT_POLL_SECONDS"' in code
+    assert (
+        "reads=$(( 10#$VERIFY_TASKS_DEADLINE_SECONDS / "
+        "10#$VERIFY_TASKS_POLL_SECONDS + 1 ))" in code
+    )
+    assert 'sleep "$VERIFY_TASKS_POLL_SECONDS"' in code
+    assert 'for _ in $(seq 1 "$STOP_WAIT_POLLS"); do' in code
+    assert 'for n in $(seq 1 "$GROUP_IDLE_POLLS"); do' in code
+    assert 'sleep "$GROUP_IDLE_POLL_SECONDS"' in code
+
+
+def test_the_rollback_budget_is_not_vacuous():
+    """The sum is sensitive to each wait it guards: 60 minutes is short, and
+    a verify wait of 15 minutes no longer fits."""
+    env = dict(_load(ROLLBACK)["env"])
+    assert _rollback_budget(env) > 60 * 60
+    env["VERIFY_TASKS_DEADLINE_SECONDS"] = "900"
+    assert _rollback_budget(env) > _job(ROLLBACK)["timeout-minutes"] * 60
 
 
 # --- the dashboard image (QA 1a-1e, UX-3) ----------------------------------------------
