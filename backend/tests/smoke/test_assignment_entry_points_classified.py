@@ -65,7 +65,6 @@ UNRECORDED = (
 INVENTORY: Dict[str, str] = {
     "backend/app/services/assignment_service.py::AssignmentService.assign_user": WRITES_POPULATION,
     "backend/app/services/assignment_service.py::AssignmentService.assign_user_with_targeting": UNRECORDED,
-    "backend/app/services/assignment_service.py::AssignmentService.bulk_assign_users": UNRECORDED,
     "backend/app/services/assignment_service.py::AssignmentService.reassign_user": UNRECORDED,
     "backend/app/services/assignment_service.py::AssignmentService.delete_assignments_by_experiment": DELETES,
     "backend/app/api/v1/endpoints/results.py::_get_sequential_data._count_assignments": READS,
