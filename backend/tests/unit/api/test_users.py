@@ -151,7 +151,8 @@ def test_delete_self_normal(client, mock_db, mock_db_query, normal_user):
 
     # Verify mock calls
     mock_db.delete.assert_called_once_with(normal_user)
-    mock_db.commit.assert_called_once()
+    # The delete, then its audit entry (written after the delete commits).
+    assert mock_db.commit.call_count == 2
 
     # Reset overrides
     app.dependency_overrides = {}
@@ -497,7 +498,8 @@ def test_delete_user_superuser(client, mock_db, mock_db_query, superuser, normal
 
     # Verify mock calls
     mock_db.delete.assert_called_once_with(normal_user)
-    mock_db.commit.assert_called_once()
+    # The delete, then its audit entry (written after the delete commits).
+    assert mock_db.commit.call_count == 2
 
 
 def test_create_user_existing_username(client, mock_db):

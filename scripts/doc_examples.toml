@@ -323,7 +323,7 @@ path = "docs/api/audit-logging.md"
 environment = "stack"
 exec = 8
 skip = 0
-expects = 18
+expects = 19
 
 [[document]]
 path = "docs/api/bayesian.md"

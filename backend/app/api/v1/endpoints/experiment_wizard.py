@@ -21,6 +21,7 @@ from backend.app.core.permissions import (
     check_permission,
     get_permission_error_message,
 )
+from backend.app.models.audit_log import ActionType
 from backend.app.models.user import User
 from backend.app.schemas.experiment_wizard import (
     WizardDraftCreate,
@@ -31,6 +32,7 @@ from backend.app.schemas.experiment_wizard import (
     WizardValidationRequest,
     WizardValidationResponse,
 )
+from backend.app.services.audit_service import record_experiment_change
 from backend.app.services.experiment_wizard_service import (
     ExperimentWizardService,
     WizardDraft,
@@ -253,6 +255,14 @@ def submit_draft(
     result = ExperimentWizardService.validate_and_submit(
         draft_id, user_id=current_user.id, db=db
     )
+    if result.get("success") and result.get("experiment_id"):
+        record_experiment_change(
+            db,
+            current_user,
+            ActionType.EXPERIMENT_CREATE,
+            result["experiment_id"],
+            reason="submitted from the wizard",
+        )
 
     return WizardSubmitResponse(
         success=result["success"],

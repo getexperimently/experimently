@@ -455,7 +455,9 @@ class TestPatchUnderCognitoRoleSync:
 
 
 class TestPatchAudit:
-    def test_a_change_writes_one_audit_row_with_before_and_after(self, db_session):
+    def test_each_change_writes_its_audit_row_with_before_and_after(self, db_session):
+        """A role change is ``role_assign`` (role and superuser flag), an
+        active-status change ``user_deactivate``: one row for each (#221)."""
         target = _account(db_session, role=UserRole.VIEWER)
         actor = _account(db_session, role=UserRole.ADMIN, is_superuser=True)
         client = make_client_for_user(db_session, actor)
@@ -465,16 +467,19 @@ class TestPatchAudit:
         )
 
         assert response.status_code == 200, response.text
-        rows = _audit_rows(db_session, target.id)
-        assert len(rows) == 1
-        row = rows[0]
-        assert row.action_type == "user_update"
-        assert row.entity_type == "user"
-        assert row.user_id == actor.id
-        assert row.user_email == actor.email
-        assert row.entity_name == target.username
-        assert json.loads(row.old_value) == {"role": "VIEWER", "is_active": True}
-        assert json.loads(row.new_value) == {"role": "ANALYST", "is_active": False}
+        rows = {row.action_type: row for row in _audit_rows(db_session, target.id)}
+        assert sorted(rows) == ["role_assign", "user_deactivate"]
+        for row in rows.values():
+            assert row.entity_type == "user"
+            assert row.user_id == actor.id
+            assert row.user_email == actor.email
+            assert row.entity_name == target.username
+        role = rows["role_assign"]
+        assert json.loads(role.old_value) == {"role": "VIEWER", "is_superuser": False}
+        assert json.loads(role.new_value) == {"role": "ANALYST", "is_superuser": False}
+        active = rows["user_deactivate"]
+        assert json.loads(active.old_value) == {"is_active": True}
+        assert json.loads(active.new_value) == {"is_active": False}
 
     def test_when_the_audit_insert_fails_the_user_is_unchanged(self, db_session):
         """One transaction: no audit row means no change either."""

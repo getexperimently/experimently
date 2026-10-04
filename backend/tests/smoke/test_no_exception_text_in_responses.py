@@ -565,6 +565,9 @@ ALLOWED: Dict[Tuple[str, str, str], Tuple[int, str]] = {
         1,
         SERVICE_VALUEERROR,
     ),
+    # The segment's audit snapshot before an update or archive: the same
+    # ``AudienceService.get_segment`` "not found" text the routes answered.
+    (f"{E}/segments.py", "_segment_before", "ValueError"): (1, SERVICE_VALUEERROR),
     (f"{E}/segments.py", "delete_segment", "ValueError"): (1, SERVICE_VALUEERROR),
     (f"{E}/segments.py", "evaluate_segment_membership", "ValueError"): (
         1,

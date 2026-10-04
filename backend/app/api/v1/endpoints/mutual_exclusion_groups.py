@@ -22,6 +22,8 @@ from sqlalchemy.orm import Session
 
 from backend.app.api import deps
 from backend.app.core.permissions import Action, ResourceType, check_permission
+from backend.app.models.audit_log import ActionType, EntityType
+from backend.app.models.experiment import Experiment
 from backend.app.models.user import User
 from backend.app.schemas.mutual_exclusion_group import (
     AddExperimentToGroupRequest,
@@ -29,6 +31,12 @@ from backend.app.schemas.mutual_exclusion_group import (
     MutualExclusionGroupListResponse,
     MutualExclusionGroupResponse,
     MutualExclusionGroupUpdate,
+)
+from backend.app.services.audit_service import (
+    AuditService,
+    audit_changes,
+    audit_identity,
+    audit_snapshot,
 )
 from backend.app.services.mutual_exclusion_service import MutualExclusionService
 
@@ -58,6 +66,24 @@ def _require_admin(user: User) -> None:
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Admin permissions required for this action",
         )
+
+
+def _record(db: Session, user: User, action: ActionType, group_id, name, **values):
+    """The audit entry for a committed change to one group (fails open)."""
+    AuditService.record_after_commit(
+        db,
+        actor=user,
+        action=action,
+        entity_type=EntityType.MUTUAL_EXCLUSION_GROUP,
+        entity_id=group_id,
+        entity_name=name or str(group_id),
+        **values,
+    )
+
+
+def _group_name(db: Session, group_id: UUID):
+    group = MutualExclusionService(db).get_group(group_id)
+    return group.name if group is not None else None
 
 
 # ---------------------------------------------------------------------------
@@ -114,7 +140,16 @@ def create_group(
         traffic_allocation=data.traffic_allocation,
         owner_id=current_user.id,
     )
-    return MutualExclusionGroupResponse.model_validate(group)
+    response = MutualExclusionGroupResponse.model_validate(group)
+    _record(
+        db,
+        current_user,
+        ActionType.MUTUAL_EXCLUSION_GROUP_CREATE,
+        response.id,
+        response.name,
+        after=audit_identity(audit_snapshot(EntityType.MUTUAL_EXCLUSION_GROUP, group)),
+    )
+    return response
 
 
 # ---------------------------------------------------------------------------
@@ -167,6 +202,12 @@ def update_group(
     """Update an existing mutual exclusion group."""
     _require_developer(current_user)
     service = MutualExclusionService(db)
+    existing = service.get_group(group_id)
+    before = (
+        audit_snapshot(EntityType.MUTUAL_EXCLUSION_GROUP, existing)
+        if existing is not None
+        else {}
+    )
     group = service.update_group(
         group_id=group_id,
         name=data.name,
@@ -179,7 +220,20 @@ def update_group(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Mutual exclusion group {group_id} not found",
         )
-    return MutualExclusionGroupResponse.model_validate(group)
+    response = MutualExclusionGroupResponse.model_validate(group)
+    old, new = audit_changes(
+        before, audit_snapshot(EntityType.MUTUAL_EXCLUSION_GROUP, group)
+    )
+    _record(
+        db,
+        current_user,
+        ActionType.MUTUAL_EXCLUSION_GROUP_UPDATE,
+        group_id,
+        response.name,
+        before=old,
+        after=new,
+    )
+    return response
 
 
 # ---------------------------------------------------------------------------
@@ -202,13 +256,32 @@ def archive_group(
     """Archive (soft-delete) a mutual exclusion group."""
     _require_admin(current_user)
     service = MutualExclusionService(db)
+    existing = service.get_group(group_id)
+    before = (
+        audit_snapshot(EntityType.MUTUAL_EXCLUSION_GROUP, existing)
+        if existing is not None
+        else {}
+    )
     group = service.archive_group(group_id)
     if not group:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Mutual exclusion group {group_id} not found",
         )
-    return MutualExclusionGroupResponse.model_validate(group)
+    response = MutualExclusionGroupResponse.model_validate(group)
+    old, new = audit_changes(
+        before, audit_snapshot(EntityType.MUTUAL_EXCLUSION_GROUP, group)
+    )
+    _record(
+        db,
+        current_user,
+        ActionType.MUTUAL_EXCLUSION_GROUP_ARCHIVE,
+        group_id,
+        response.name,
+        before=old,
+        after=new,
+    )
+    return response
 
 
 # ---------------------------------------------------------------------------
@@ -232,8 +305,24 @@ def add_experiment_to_group(
     """Add an experiment to a mutual exclusion group."""
     _require_developer(current_user)
     service = MutualExclusionService(db)
+    already_member = (
+        db.query(Experiment.mutual_exclusion_group_id)
+        .filter(Experiment.id == data.experiment_id)
+        .scalar()
+        == group_id
+    )
     try:
         service.add_experiment_to_group(group_id, data.experiment_id)
+        if not already_member:
+            _record(
+                db,
+                current_user,
+                ActionType.MUTUAL_EXCLUSION_GROUP_UPDATE,
+                group_id,
+                _group_name(db, group_id),
+                after={"experiment_id": str(data.experiment_id)},
+                reason="experiment added",
+            )
         return {
             "status": "ok",
             "experiment_id": str(data.experiment_id),
@@ -269,6 +358,15 @@ def remove_experiment_from_group(
     service = MutualExclusionService(db)
     try:
         service.remove_experiment_from_group(group_id, experiment_id)
+        _record(
+            db,
+            current_user,
+            ActionType.MUTUAL_EXCLUSION_GROUP_UPDATE,
+            group_id,
+            _group_name(db, group_id),
+            before={"experiment_id": str(experiment_id)},
+            reason="experiment removed",
+        )
         return {
             "status": "ok",
             "experiment_id": str(experiment_id),

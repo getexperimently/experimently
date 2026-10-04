@@ -352,12 +352,12 @@ The `experimentation.audit_logs` table records (`backend/app/models/audit_log.py
 
 - `user_id` (UUID) — platform account who performed the action
 - `user_email` — denormalized for attribution after account deletion
-- `action_type` — one of: `feature_flag_create`, `feature_flag_update`, `feature_flag_delete`, `experiment_create`, `experiment_update`, `experiment_delete`, `user_create`, `user_update`, `user_delete`, `user_login`, `user_logout`, `permission_grant`, `permission_revoke`, `role_assign`, `role_unassign`, `safety_rollback`, `safety_config_update`
+- `action_type` — one of the actions listed, with when each is written, in [Audit Logging](../api/audit-logging.md#action-types)
 - `entity_type` + `entity_id` — what was acted upon
 - `old_value` + `new_value` — before/after state for update actions
 - `timestamp` — UTC timestamp with timezone
 
-**What is NOT currently logged (gap):** Failed authentication attempts, authorization denials (403 responses), API key creation/deletion. These should be added as a P1 improvement.
+**What is NOT currently logged (gap):** Failed authentication attempts and authorization denials (403 responses). These should be added as a P1 improvement.
 
 ---
 
