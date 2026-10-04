@@ -308,8 +308,9 @@ If you notice suspicious activity on your account:
    issued before it was deactivated have expired (12 hours with the default
    `LOCAL_AUTH_TOKEN_TTL_MINUTES`). A deactivated account's tokens are refused only while
    it stays deactivated.
-3. Changes to your account are not yet recorded in the audit log (#502); keep the account
-   deactivated while you check.
+3. The audit log records sign-ins with a password and an administrator's changes to your
+   account's role, superuser flag or active status. A password change and other changes
+   to your profile are not recorded (#502); keep the account deactivated while you check.
 4. Contact support at support@getexperimently.com
 
 ---

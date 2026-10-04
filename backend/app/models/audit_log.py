@@ -72,6 +72,8 @@ class ActionType(str, Enum):
     USER_DELETE = "user_delete"
     USER_LOGIN = "user_login"
     USER_LOGOUT = "user_logout"
+    USER_ACTIVATE = "user_activate"
+    USER_DEACTIVATE = "user_deactivate"
 
     # Permission Actions
     PERMISSION_GRANT = "permission_grant"
@@ -82,6 +84,27 @@ class ActionType(str, Enum):
     # Safety Actions
     SAFETY_ROLLBACK = "safety_rollback"
     SAFETY_CONFIG_UPDATE = "safety_config_update"
+
+    # API key Actions
+    API_KEY_CREATE = "api_key_create"
+    API_KEY_REVOKE = "api_key_revoke"
+
+    # Global holdout Actions
+    HOLDOUT_CREATE = "holdout_create"
+    HOLDOUT_UPDATE = "holdout_update"
+    HOLDOUT_ACTIVATE = "holdout_activate"
+    HOLDOUT_DEACTIVATE = "holdout_deactivate"
+
+    # Mutual exclusion group Actions. DELETE archives a group, so the action
+    # is ``_archive``.
+    MUTUAL_EXCLUSION_GROUP_CREATE = "mutual_exclusion_group_create"
+    MUTUAL_EXCLUSION_GROUP_UPDATE = "mutual_exclusion_group_update"
+    MUTUAL_EXCLUSION_GROUP_ARCHIVE = "mutual_exclusion_group_archive"
+
+    # Segment Actions. DELETE archives a segment, so the action is ``_archive``.
+    SEGMENT_CREATE = "segment_create"
+    SEGMENT_UPDATE = "segment_update"
+    SEGMENT_ARCHIVE = "segment_archive"
 
 
 class EntityType(str, Enum):
@@ -94,6 +117,10 @@ class EntityType(str, Enum):
     PERMISSION = "permission"
     SAFETY_CONFIG = "safety_config"
     ROLLOUT_SCHEDULE = "rollout_schedule"
+    API_KEY = "api_key"
+    HOLDOUT = "holdout"
+    MUTUAL_EXCLUSION_GROUP = "mutual_exclusion_group"
+    SEGMENT = "segment"
 
 
 class AuditLog(Base, BaseModel):
@@ -192,12 +219,26 @@ class AuditLog(Base, BaseModel):
             ActionType.USER_DELETE: "deleted",
             ActionType.USER_LOGIN: "logged in",
             ActionType.USER_LOGOUT: "logged out",
+            ActionType.USER_ACTIVATE: "activated",
+            ActionType.USER_DEACTIVATE: "deactivated",
             ActionType.PERMISSION_GRANT: "granted permission",
             ActionType.PERMISSION_REVOKE: "revoked permission",
             ActionType.ROLE_ASSIGN: "assigned role",
             ActionType.ROLE_UNASSIGN: "unassigned role",
             ActionType.SAFETY_ROLLBACK: "rolled back",
             ActionType.SAFETY_CONFIG_UPDATE: "updated safety config",
+            ActionType.API_KEY_CREATE: "created",
+            ActionType.API_KEY_REVOKE: "revoked",
+            ActionType.HOLDOUT_CREATE: "created",
+            ActionType.HOLDOUT_UPDATE: "updated",
+            ActionType.HOLDOUT_ACTIVATE: "activated",
+            ActionType.HOLDOUT_DEACTIVATE: "deactivated",
+            ActionType.MUTUAL_EXCLUSION_GROUP_CREATE: "created",
+            ActionType.MUTUAL_EXCLUSION_GROUP_UPDATE: "updated",
+            ActionType.MUTUAL_EXCLUSION_GROUP_ARCHIVE: "archived",
+            ActionType.SEGMENT_CREATE: "created",
+            ActionType.SEGMENT_UPDATE: "updated",
+            ActionType.SEGMENT_ARCHIVE: "archived",
         }
         return action_descriptions.get(self.action_type, self.action_type)
 

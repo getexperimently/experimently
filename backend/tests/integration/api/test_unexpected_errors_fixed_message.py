@@ -25,6 +25,7 @@ from pydantic import BaseModel, ValidationError
 
 from backend.app.api import deps
 from backend.app.api.v1.endpoints import audit_logs as audit_logs_endpoints
+from backend.app.api.v1.endpoints import bulk_toggle as bulk_toggle_endpoints
 from backend.app.api.v1.endpoints import client_errors as client_errors_endpoints
 from backend.app.api.v1.endpoints import feature_flags as feature_flags_endpoints
 from backend.app.api.v1.endpoints import llm_proxy as llm_proxy_endpoints
@@ -133,7 +134,8 @@ def test_a_flag_status_change_answers_the_fixed_message(
 def test_a_bulk_toggle_item_reports_the_fixed_message(
     as_user, developer_user, flag, monkeypatch
 ):
-    monkeypatch.setattr(AuditService, "log_toggle_operation", _async_boom)
+    # Something unexpected fails while one flag is being changed.
+    monkeypatch.setattr(bulk_toggle_endpoints, "transition", _boom)
     client = as_user(developer_user)
     response = client.post(
         "/api/v1/feature-flags/bulk-toggle",

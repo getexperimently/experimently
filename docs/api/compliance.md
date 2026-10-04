@@ -43,9 +43,10 @@ key and name (a flag) or name (an experiment), and a delete the old key, name an
 flag) or name, status and owner (an experiment). Field names containing `password`, `token`,
 `api_key` or `secret` are replaced with `[REDACTED]`.
 
-Not recorded here: logins and logouts, failed logins, role changes, API key changes, flag
-status changes (they go to the [audit log](audit-logging.md)), experiment start, pause and
-completion, and reading, reporting on or exporting this trail. `AuditAction` defines `READ`,
+Not recorded here: sign-ins, role changes, API key changes, flag status changes and
+experiment start, pause and completion, which go to the [audit log](audit-logging.md);
+sign-outs and failed sign-ins, which neither records; and reading, reporting on or
+exporting this trail. `AuditAction` defines `READ`,
 `LOGIN`, `LOGOUT`, `LOGIN_FAILED`, `ROLE_GRANT`, `ROLE_REVOKE`, `KEY_REVOKE`, `EXPORT` and
 `REPORT_GENERATED`, and you can filter on them, but nothing in this release writes them.
 

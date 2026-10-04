@@ -1325,7 +1325,7 @@
           "reason": {
             "anyOf": [
               {
-                "maxLength": 500,
+                "maxLength": 1000,
                 "type": "string"
               },
               {
