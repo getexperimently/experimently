@@ -57,6 +57,10 @@ pytestmark = pytest.mark.unit
 ENGINE_FINGERPRINTS: Dict[str, str] = {
     "1.1.0": "2feed80e7e305c3c8d0b183e1f2905799e8af73b34aa674cd358fa5948d2f089",
     "1.2.0": "4860dd07b1052f1f47329d61cc5fa72f58a1721177f07bb1e912d00754a0a2c3",
+    # 1.3.0 is #217: CUPED's covariate and estimator moved to
+    # ``cuped_metric_result`` (pinned in test_sufficient_stats_fingerprint.py).
+    # ``CupedService``, the path this dataset runs, is unchanged.
+    "1.3.0": "4860dd07b1052f1f47329d61cc5fa72f58a1721177f07bb1e912d00754a0a2c3",
 }
 
 # Two ids where the control sorts AFTER the treatment, so an engine that

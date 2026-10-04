@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Optional
 
-from sqlalchemy import Column, Float, ForeignKey, Index, String
+from sqlalchemy import Column, DateTime, Float, ForeignKey, Index, String
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.ext.declarative import declared_attr
 from sqlalchemy.orm import relationship
@@ -104,6 +104,14 @@ class Event(Base, BaseModel):
     # UTCTimestampString): the column is VARCHAR, so the format is what makes
     # time windows compare correctly.
     created_at = Column(UTCTimestampString, nullable=False, index=True)
+    # When the server stored the row: naive UTC, set once on insert.  CUPED
+    # reads a user's history only if it was stored before the user was
+    # assigned (#217), so this must keep meaning "received at".  It is
+    # declared here without BaseModel's ``onupdate``: an ORM update of an
+    # event (re-tagging, scrubbing) must leave it as it was, or that history
+    # would silently drop out of every covariate.  Python-side only; the
+    # column is unchanged, so there is no migration.
+    updated_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
     # Relationships
     experiment = relationship("Experiment", back_populates="events")

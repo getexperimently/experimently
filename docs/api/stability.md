@@ -71,8 +71,10 @@ it is `beta`) is about its **numbers**: `beta` there means part of the analysis
 is not yet computed as its fields describe, and the notice says which part and
 links the issue. The values come from one table,
 `backend/app/core/analysis_status.py`. A route whose numbers are beta is also
-marked `x-stability: beta` (the CUPED, interaction-pair and novelty routes, issues #217
-and #219), because fixing the numbers will change its response;
+marked `x-stability: beta` (the interaction-pair and novelty routes, #219),
+because fixing the numbers will change its response. The CUPED route's numbers
+are `ga` (#217), and the route stays `x-stability: beta` while its response is
+still being shaped (mean metrics, #439);
 `/interactions/scan` stays stable, and its items keep their shape with the
 not-computed sub-results `null`.
 `POST /api/v1/results/{id}/post-stratification` is beta as well (#443): it

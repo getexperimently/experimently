@@ -307,7 +307,8 @@ The analytics results engine (`backend/app/services/analysis_service.py`) comput
   The results, the sample-size plan, the export and the report use them; a
   results request may name another for itself. Locked once the experiment
   leaves draft.
-- CUPED and sequential testing do not follow the stored level.
+- CUPED follows the stored level and correction; sequential testing does not
+  follow the stored level.
 
 ### REST Endpoints
 
