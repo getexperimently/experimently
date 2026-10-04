@@ -1093,7 +1093,11 @@ def test_the_dashboard_is_registered_by_digest_with_its_own_container():
 
 @pytest.mark.regression
 def test_no_services_stable_and_no_forced_deployment():
-    """QA 2c/3c, scoped to the workflows and scripts/ (PE v1 row 2c)."""
+    """QA 2c/3c, scoped to the workflows and scripts/ (PE v1 row 2c).
+
+    The commands the deployment pages give an operator are held to the same
+    ban in test_deploy_docs.py (#789), which runs on a docs-only change.
+    """
     for path in [
         DEPLOY,
         ROLLBACK,

@@ -686,3 +686,96 @@ def test_the_docs_give_the_deploy_jobs_own_timeout_and_session():
         f"`role-duration-seconds` is {session} in `deploy.yml` (a {timeout}-minute job)"
         in iam
     )
+
+
+DEPLOYMENT_DOCS = DOCS / "deployment"
+
+
+def _fenced_lines(markdown: str) -> list[tuple[int, str]]:
+    """Every uncommented line inside a fenced block, with its line number.
+
+    Prose may name a banned command to say not to use it; a fenced block is
+    what an operator pastes.
+    """
+    found: list[tuple[int, str]] = []
+    inside = False
+    number = 0
+    for line in markdown.splitlines():
+        number += 1
+        if line.lstrip().startswith("```"):
+            inside = not inside
+            continue
+        if inside and not line.lstrip().startswith("#"):
+            found.append((number, line))
+    return found
+
+
+@pytest.mark.regression
+def test_no_services_stable_and_no_forced_deployment_in_the_deployment_docs():
+    """#789: test_dashboard_deploy_wiring.py's ban on the workflows and
+    scripts/, extended to the commands docs/deployment/ tells an operator
+    to paste. The secret rotation procedures restarted the API with
+    `--force-new-deployment` and waited with `services-stable`, neither of
+    which is how a CODE_DEPLOY-controlled service restarts."""
+    pages = sorted(DEPLOYMENT_DOCS.glob("*.md"))
+    assert len(pages) >= 5, pages
+    scanned = 0
+    for page in pages:
+        for number, line in _fenced_lines(page.read_text()):
+            scanned += 1
+            where = f"{page.name}:{number}"
+            assert "--force-new-deployment" not in line, where
+            assert "wait services-stable" not in line, where
+    assert scanned > 500, scanned
+
+
+def _markdown_section(page: Path, heading: str) -> str:
+    text = page.read_text()
+    start = text.index(heading)
+    level = heading.split(" ", 1)[0]
+    rest = text[start + len(heading) :]
+    end = re.search(rf"^{level} ", rest, re.M)
+    return heading + (rest[: end.start()] if end else rest)
+
+
+@pytest.mark.regression
+def test_the_restart_on_the_serving_revision_approves_its_shift_all_at_once():
+    """#789: the restart the runbook gives (after a restore, and the manual path
+    for a secret rotation) created a CodeDeploy deployment and never approved
+    it, so the group's 30-minute approval wait stopped it; and it inherited the
+    group's canary."""
+    section = _markdown_section(
+        DEPLOYMENT_DOCS / "rollback-runbook.md",
+        "## Restart the API on the revision it is serving",
+    )
+    code = "\n".join(line for _, line in _fenced_lines(section))
+    assert "aws deploy create-deployment" in code
+    assert "--deployment-config-name CodeDeployDefault.ECSAllAtOnce" in code
+    assert "aws deploy continue-deployment" in code
+    assert "--deployment-wait-type READY_WAIT" in code
+    assert "aws ecs register-task-definition" in code
+    assert "scripts/api_serving.py" in code
+    assert code.index("create-deployment") < code.index("continue-deployment")
+    assert code.index("continue-deployment") < code.index("api_serving.py")
+    # Every page that sends an operator to restart the API sends them here.
+    runbook = (DEPLOYMENT_DOCS / "rollback-runbook.md").read_text()
+    assert runbook.count("aws deploy create-deployment") == 2, (
+        "one create-deployment in Method 2 and one in the restart section"
+    )
+    for page in ("disaster-recovery.md", "secrets-management.md"):
+        assert (
+            "rollback-runbook.md#restart-the-api-on-the-revision-it-is-serving"
+            in (DEPLOYMENT_DOCS / page).read_text()
+        ), page
+
+
+@pytest.mark.regression
+def test_the_jwt_rotation_does_not_claim_to_take_effect_at_once():
+    """#789: old tasks keep accepting old-key tokens until the shift."""
+    section = _markdown_section(
+        DEPLOYMENT_DOCS / "secrets-management.md",
+        "### Rotate JWT Secret Immediately",
+    )
+    assert "invalidates all active sessions immediately" not in section
+    assert "#restart-the-api-on-its-current-release" in section
+    assert "#how-long-the-old-value-keeps-working" in section

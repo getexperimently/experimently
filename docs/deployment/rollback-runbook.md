@@ -829,16 +829,86 @@ aws rds restore-db-cluster-to-point-in-time \
   --vpc-security-group-ids "<aurora-sg-id>"
 ```
 
-The restart below is correct for this controller and is what you run once the tasks would come back pointing at the right database. Through CodeDeploy, naming the revision already serving: `aws ecs update-service --force-new-deployment` is the usual way to restart a service and is not documented either way for a CODE_DEPLOY-controlled service, which this one is. Rather than find out during a restore, use the call that is correct for this controller regardless:
+Once the tasks would come back pointing at the right database, start new ones on the revision already serving: [Restart the API on the revision it is serving](#restart-the-api-on-the-revision-it-is-serving), below.
 
-```bash
+**RTO for a point-in-time restore: ~30 minutes. RPO: 5 minutes (PITR window).**
+
+---
+
+## Restart the API on the revision it is serving
+
+Use this when the API's tasks have to start again on the release they already run: after a
+secret they read at start has changed ([Secrets Management](secrets-management.md#restart-the-api-on-its-current-release)),
+or after a restore, once the tasks would come back pointing at the right database. ECS reads
+each secret into a task when the task starts, so only new tasks see a new value.
+
+The preferred way is the **Deploy** workflow, run with the tag already serving;
+[Secrets Management](secrets-management.md#with-the-deploy-workflow) says what it does and what
+it asks for. The commands below are for when the workflow is not available. They need an AWS
+role allowed to read the service and the task definitions, register a task definition, and
+create and continue a CodeDeploy deployment, and, for the last step, a checkout of this
+repository.
+
+NOT `aws ecs update-service --force-new-deployment`, the usual way to restart an ECS service.
+This service has a CodeDeploy deployment controller, and on such a service UpdateService
+changes only the desired count, the deployment configuration, the health check grace period,
+task placement and tag settings: new tasks come from a CodeDeploy deployment.
+
+**Step 1. Is a deployment still active?** CodeDeploy accepts one deployment per deployment group
+at a time. A deploy's deployment stays active for about an hour after its traffic shift, while
+the group keeps the old task set, so a restart inside that hour is refused. Nothing printed
+means you can go on:
+
+```{.bash skip reason="aws: reads the real deployment group"}
+aws deploy list-deployments \
+  --application-name experimentation-platform-$ENV \
+  --deployment-group-name "experimentation-$ENV" \
+  --include-only-statuses Created Queued InProgress Baking Ready \
+  --query deployments --output text
+```
+
+If a deployment is listed, wait for it to end (`aws deploy get-deployment --deployment-id <id>`
+shows its status), then start again here. Do not stop it by hand to make room: stopping it with
+auto-rollback moves traffic back to the task set kept from before that deploy, whose tasks
+started before the change and still hold the old value. If the restart cannot wait, the one
+faster way to start new tasks is [Method 1](#method-1-github-actions-manual-rollback-preferred-3-minutes)
+to the previous revision: it stops that deployment and creates its own, whose new tasks read the
+current values. That runs the previous release (read
+[The rolled-back API runs against the current schema](#the-rolled-back-api-runs-against-the-current-schema)
+first), and its own deployment is then active for its hour in turn.
+
+**Step 2. Read the revision serving**, from the PRIMARY task set (not
+`services[0].taskDefinition`, which on this service never moves). It must print exactly one ARN;
+two, or none, means a deployment is in progress: go back to Step 1.
+
+```{.bash skip reason="aws: reads the real service"}
 CURRENT=$(aws ecs describe-services \
   --cluster "experimentation-$ENV" \
   --services experimentation-backend-$ENV \
   --query "services[0].taskSets[?status=='PRIMARY'].taskDefinition" \
   --output text)
+printf 'serving: %s\n' "$CURRENT"
+```
 
-APPSPEC=$(jq -cn --arg td "$CURRENT" '{
+**Step 3. Register a copy of it as a new revision.** Same image, same settings, a new ARN, so
+the check in Step 6 cannot pass before the new tasks are serving:
+
+```{.bash skip reason="aws: registers a real task definition revision"}
+CURRENT_TD=$(aws ecs describe-task-definition --task-definition "$CURRENT" \
+  --query taskDefinition --output json)
+COPY=$(jq -c 'del(.taskDefinitionArn, .revision, .status, .requiresAttributes,
+  .compatibilities, .registeredAt, .registeredBy, .deregisteredAt)' <<<"$CURRENT_TD")
+NEW_ARN=$(aws ecs register-task-definition --cli-input-json "$COPY" \
+  --query taskDefinition.taskDefinitionArn --output text)
+printf 'restarting on: %s\n' "$NEW_ARN"
+```
+
+**Step 4. Create the deployment, all at once.** `--deployment-config-name` overrides the group's
+CANARY_10_PERCENT_15_MINUTES: the revision is the one already serving, and the canary would
+keep 90% of traffic on the old tasks for another fifteen minutes.
+
+```{.bash skip reason="aws: creates a real CodeDeploy deployment"}
+APPSPEC=$(jq -cn --arg td "$NEW_ARN" '{
   version: 1,
   Resources: [{ TargetService: {
     Type: "AWS::ECS::Service",
@@ -849,14 +919,64 @@ APPSPEC=$(jq -cn --arg td "$CURRENT" '{
   }}]
 }')
 
-aws deploy create-deployment \
+DEPLOYMENT_ID=$(aws deploy create-deployment \
   --application-name experimentation-platform-$ENV \
   --deployment-group-name "experimentation-$ENV" \
-  --description "restart after PITR restore" \
-  --revision "$(jq -cn --arg c "$APPSPEC" '{revisionType:"AppSpecContent",appSpecContent:{content:$c}}')"
+  --deployment-config-name CodeDeployDefault.ECSAllAtOnce \
+  --description "restart on the revision serving" \
+  --revision "$(jq -cn --arg c "$APPSPEC" '{revisionType:"AppSpecContent",appSpecContent:{content:$c}}')" \
+  --query deploymentId --output text)
+printf 'deployment: %s\n' "$DEPLOYMENT_ID"
 ```
 
-**RTO for a point-in-time restore: ~30 minutes. RPO: 5 minutes (PITR window).**
+**Step 5. APPROVE THE TRAFFIC SHIFT. Do not skip this.** The deployment group waits up to 30
+minutes for the approval once the new task set is up (status `Ready`), then stops the deployment,
+and auto-rollback discards the new tasks: a restart that is never approved never happens. If the
+loop prints `Failed` or `Stopped`, stop here; the old tasks are still serving, and
+`aws deploy get-deployment --deployment-id "$DEPLOYMENT_ID"` says why.
+
+```{.bash skip reason="aws: reads and approves a real CodeDeploy deployment"}
+STATUS=""
+until [ "$STATUS" = "Ready" ] || [ "$STATUS" = "Failed" ] || [ "$STATUS" = "Stopped" ]; do
+  sleep 5
+  STATUS=$(aws deploy get-deployment --deployment-id "$DEPLOYMENT_ID" \
+             --query deploymentInfo.status --output text)
+done
+printf 'deployment %s: %s\n' "$DEPLOYMENT_ID" "$STATUS"
+```
+
+Then, only if it printed `Ready`:
+
+```{.bash skip reason="aws: approves a real CodeDeploy deployment"}
+aws deploy continue-deployment --deployment-id "$DEPLOYMENT_ID" \
+  --deployment-wait-type READY_WAIT
+```
+
+**Step 6. Confirm the new revision is serving**, from the repository root.
+`scripts/api_serving.py` exits 0 when the new revision is the PRIMARY task set and the
+HTTPS listener's `/api/*` rule forwards to that task set's target group, and 1 while the shift
+is still under way. The loop ends on any other answer, or when the deployment fails or is
+stopped:
+
+```{.bash skip reason="aws: reads the real service, deployment and load balancer"}
+STATUS=""
+RC=1
+while [ "$RC" -eq 1 ] && [ "$STATUS" != "Failed" ] && [ "$STATUS" != "Stopped" ]; do
+  sleep 10
+  RC=0
+  python3 scripts/api_serving.py "experimentation-$ENV" "experimentation-backend-$ENV" "$NEW_ARN" || RC=$?
+  STATUS=$(aws deploy get-deployment --deployment-id "$DEPLOYMENT_ID" \
+             --query deploymentInfo.status --output text)
+done
+printf 'api_serving exit %s; deployment %s: %s\n' "$RC" "$DEPLOYMENT_ID" "$STATUS"
+```
+
+Exit 0 means the restart is done: every request now reaches the new tasks. Exit 3 means the
+new tasks are PRIMARY but the `/api/*` rule forwards elsewhere: read
+[The API route and the PRIMARY task set disagree](deployment-guide.md#the-api-route-and-the-primary-task-set-disagree).
+Exit 2 means the script could not tell; it prints why. The deployment itself reads `Succeeded`
+only after the group terminates the old task set, about an hour after the shift; until then
+an alarm, or a stop with auto-rollback, can still move traffic back to the old tasks.
 
 ---
 

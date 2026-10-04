@@ -305,7 +305,7 @@ REDIS_HOST = os.environ["REDIS_HOST"]            # the Redis stack's primary end
 | Secret | Rotation Frequency | Method | Requires Restart |
 |--------|-------------------|--------|-----------------|
 | `experimentation-database-prod-aurora-credentials` | 180 days | Secrets Manager Lambda rotation (single-user) | Yes: ECS injects it when a task starts |
-| `/prod/experimentation/jwt-secret` | 90 days | Manual rotation (see below) | Yes (force ECS restart) |
+| `/prod/experimentation/jwt-secret` | 90 days | Manual rotation (see below) | Yes ([restart the API](#restart-the-api-on-its-current-release)) |
 | `/prod/experimentation/cognito-config` | On Cognito pool change | Manual update | Yes |
 | GitHub Actions deployment secrets | 365 days | Manual (GitHub Settings) | N/A |
 
@@ -328,7 +328,7 @@ aws secretsmanager describe-secret \
   --query '{RotationEnabled:RotationEnabled,RotationLambdaARN:RotationLambdaARN,LastRotatedDate:LastRotatedDate}'
 ```
 
-The rotation Lambda changes the master password on the cluster and in the secret together. Running tasks keep the value ECS injected when they started, so force a new deployment after a rotation.
+The rotation Lambda changes the master password on the cluster and in the secret together. Running tasks keep the value ECS read for them when they started, so restart the API after a rotation: [Restart the API on its current release](#restart-the-api-on-its-current-release). Not `aws ecs update-service --force-new-deployment`: the API's service is controlled by CodeDeploy, which that call is not for (below).
 
 ---
 
@@ -336,9 +336,20 @@ The rotation Lambda changes the master password on the cluster and in the secret
 
 Use these procedures when a secret is known or suspected to be compromised.
 
+Each one ends by restarting the API, which CodeDeploy refuses for about an hour after any deploy
+([A deployment is still active](#a-deployment-is-still-active)). Check that first, with the
+Rollback Runbook's [Step 1](rollback-runbook.md#restart-the-api-on-the-revision-it-is-serving),
+before you change the secret: from the change on, any task that starts uses the new value while
+the rest keep the old one.
+
 ### Rotate JWT Secret Immediately
 
-Rotating the JWT secret invalidates all active sessions immediately. All users will be logged out and must re-authenticate.
+Rotating the JWT secret invalidates every token the API signed itself: local sign-in tokens and
+the tokens it issues after an SSO sign-in. Tokens issued by Cognito are not signed with it and
+are not affected. It does **not** take effect at once. Tasks that started before the change keep
+accepting tokens signed with the old secret until the restart's traffic shift has completed;
+[How long the old value keeps working](#how-long-the-old-value-keeps-working) says how long that
+is. After the shift, users of those tokens must sign in again.
 
 Step 1: Generate a new JWT secret:
 
@@ -354,24 +365,10 @@ aws secretsmanager put-secret-value \
   --secret-string "$NEW_JWT_SECRET"
 ```
 
-Step 3: Force ECS service to restart and pick up the new secret (New tasks fetch the new secret value at startup):
-
-```bash
-aws ecs update-service \
-  --cluster experimentation-prod \
-  --service experimentation-backend-prod \
-  --force-new-deployment
-```
-
-Step 4: Wait for stabilization:
-
-```bash
-aws ecs wait services-stable \
-  --cluster experimentation-prod \
-  --services experimentation-backend-prod
-
-echo "JWT secret rotated. All existing sessions are now invalid."
-```
+Step 3: Restart the API so new tasks read the new value:
+[Restart the API on its current release](#restart-the-api-on-its-current-release). The rotation
+is done when that procedure confirms the new revision is serving, not when the secret is
+updated.
 
 ### Rotate Database Password Immediately
 
@@ -398,18 +395,10 @@ aws secretsmanager put-secret-value \
   --secret-string "$(python3 -c 'import json, sys; print(json.dumps({"username": "postgres", "password": sys.argv[1]}))' "$NEW_DB_PASSWORD")"
 ```
 
-Step 4: Force an ECS restart so the tasks reconnect with the new credentials, and wait for it to settle:
-
-```bash
-aws ecs update-service \
-  --cluster experimentation-prod \
-  --service experimentation-backend-prod \
-  --force-new-deployment
-
-aws ecs wait services-stable \
-  --cluster experimentation-prod \
-  --services experimentation-backend-prod
-```
+Step 4: Restart the API so the tasks reconnect with the new credentials:
+[Restart the API on its current release](#restart-the-api-on-its-current-release). Until its
+traffic shift completes, the running tasks keep the old password: connections they already hold
+keep working, and any new connection they open is refused.
 
 ### Rotate Compromised API Key (Application-Level)
 
@@ -451,6 +440,93 @@ aws logs filter-log-events \
 The key's owner, or an ADMIN, can instead delete it through the API with `DELETE /api/v1/api-keys/{id}`, or from **Admin → API Keys** in the dashboard. Neither the plaintext nor its `eptk_xxxx` prefix is stored, so identify the key by its name, or get its `id` from the `RETURNING` clause above. `KEY_HASH` is the hex SHA-256 of the key, which is what the platform stores (`hash_api_key` in `backend/app/core/security.py`).
 
 If the key may have been exposed through a vulnerability in Experimently itself, report it privately as [SECURITY.md](https://github.com/getexperimently/experimently/blob/main/SECURITY.md) describes; see [Responding to an incident on your deployment](../security/incident-response.md).
+
+---
+
+## Restart the API on its current release
+
+ECS reads each secret into a task when the task starts. A changed value reaches the API only
+through new tasks, and the API's service is controlled by CodeDeploy, so new tasks come from a
+CodeDeploy deployment. Not `aws ecs update-service --force-new-deployment`, the usual way to
+restart an ECS service: on a CodeDeploy-controlled service, UpdateService may change only the
+desired count, the deployment configuration, the health check grace period, task placement and
+tag settings, and a forced new deployment is not among them.
+
+### With the Deploy workflow
+
+The preferred way: run **Deploy** again with the release that is already serving.
+
+1. Find that release. The API's revision names its image by digest; the repository gives the
+   tag (`vX.Y.Z-<profile>`) for it:
+
+    ```{.bash skip reason="aws: reads the real service, task definition and repository"}
+    CURRENT=$(aws ecs describe-services \
+      --cluster "experimentation-$ENV" \
+      --services "experimentation-backend-$ENV" \
+      --query "services[0].taskSets[?status=='PRIMARY'].taskDefinition" \
+      --output text)
+    IMAGE=$(aws ecs describe-task-definition --task-definition "$CURRENT" \
+      --query "taskDefinition.containerDefinitions[?name=='backend'].image | [0]" \
+      --output text)
+    aws ecr describe-images --repository-name experimentation-platform/backend \
+      --image-ids imageDigest="${IMAGE#*@}" \
+      --query "imageDetails[0].imageTags" --output text
+    ```
+
+2. **Actions → Deploy → Run workflow** from `main`, with `environment`, `version` the tag's
+   `vX.Y.Z` part and `profile` its profile part.
+3. The environment's required reviewer approves the run, as for any deploy. Nothing in AWS has
+   changed before that.
+
+With a release already deployed, the run (the [deployment guide](deployment-guide.md#3-every-deploy)
+has every step):
+
+- refuses, before changing anything, while an earlier CodeDeploy deployment is still active or
+  an API alarm is firing;
+- reuses the image already in the repository (`already exists (...): reusing it`) instead of
+  building one;
+- takes a database snapshot and runs the migration task, which has nothing new to apply;
+- registers a new API revision naming the same image and creates a CodeDeploy deployment with
+  the deployment group's canary;
+- approves the traffic shift itself once every new task is healthy: 10% of traffic moves to the
+  new tasks, then the rest fifteen minutes later;
+- succeeds only when the new revision is the PRIMARY task set and the `/api/*` rule forwards to
+  its target group, then sends a smoke request and rolls the dashboard onto a new revision of
+  its own unchanged image.
+
+### By hand
+
+When the workflow is not available:
+[Restart the API on the revision it is serving](rollback-runbook.md#restart-the-api-on-the-revision-it-is-serving)
+in the Rollback Runbook. It registers a copy of the serving revision, creates the deployment
+all at once, approves the shift and confirms the new revision is serving, with no canary.
+
+### A deployment is still active
+
+CodeDeploy accepts one deployment per deployment group at a time, and every deploy's deployment
+stays active for about an hour after its traffic shift while the group keeps the old task set.
+Inside that hour Deploy refuses with `A deployment is still active`, naming the deployment and
+roughly how long it has left, and a deployment created by hand is refused too. Wait for it to
+end and restart then. Stopping it does not help: it moves traffic back to the task set kept from
+before that deploy, whose tasks still hold the old value. The Rollback Runbook's
+[Step 1](rollback-runbook.md#restart-the-api-on-the-revision-it-is-serving) gives the one faster
+path and what it costs.
+
+### How long the old value keeps working
+
+Tasks keep the value they started with. Until the traffic shift completes, some or all requests
+still reach tasks that started before the change:
+
+- **With Deploy**: from the change until the end of the canary, which is the approval of the
+  run, the snapshot and the migration, starting the new tasks, and fifteen minutes with 90% of
+  traffic still on the old ones: at least the canary's fifteen minutes, plus however long the
+  approval and the steps before it take.
+- **By hand**: until the all-at-once shift, a few minutes after `continue-deployment`.
+- **During that time**, a task that starts in the serving set (a scale-out, or a replacement for
+  a task that stopped) reads the new value. For the JWT secret, a token one task signed can be
+  refused by another until the shift.
+- **For an hour after the shift** the old tasks get no traffic but are kept. An alarm, or a stop
+  with auto-rollback, in that hour moves traffic back to them, and with it the old value.
 
 ---
 
