@@ -144,7 +144,12 @@ SITES: Dict[Tuple[str, str, str], Tuple[int, object]] = {
     ): (1, RouteReached()),
     (
         "backend/app/services/global_holdout_service.py",
-        "GlobalHoldoutService.update_holdout",
+        "GlobalHoldoutService._activate",
+        "is_active",
+    ): (2, RouteReached()),
+    (
+        "backend/app/services/global_holdout_service.py",
+        "GlobalHoldoutService._deactivate",
         "is_active",
     ): (1, RouteReached()),
     (
@@ -349,7 +354,7 @@ def test_the_sites_are_exact():
         f"{sorted((k, n) for k, n in found.items() if expected.get(k) != n)}; "
         f"gone: {sorted(k for k in expected if k not in found)}"
     )
-    assert sum(expected.values()) == 19
+    assert sum(expected.values()) == 21
 
 
 @pytest.mark.parametrize(
