@@ -55,6 +55,11 @@
     "wintercg"
   ],
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/getexperimently/experimently",
+    "directory": "sdk/edge"
+  },
   "jest": {
     "preset": "ts-jest",
     "testEnvironment": "node",
