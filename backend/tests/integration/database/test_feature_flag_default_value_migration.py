@@ -47,8 +47,10 @@ pytestmark = [pytest.mark.integration]
 REVISION = "a89544fb1075"
 PREVIOUS_CORE_HEAD = "d12cbd384bbe"
 #: The core head of this tree, which ``upgrade heads`` runs on to: the next
-#: revision, ``1ab99332f0ba`` (``events.created_at`` in UTC), adds no DDL.
-CORE_HEAD = "1ab99332f0ba"
+#: revision, ``1ab99332f0ba`` (``events.created_at`` in UTC), adds no DDL, and
+#: ``806901fb7735`` (the experiments' correction settings) adds only what a
+#: database built by ``create_all`` already has.
+CORE_HEAD = "806901fb7735"
 #: The modules branch's head, in the previous release and in this one alike.
 MODULES_HEAD = "modules_0002_warehouse_analysis"
 

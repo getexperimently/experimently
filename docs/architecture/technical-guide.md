@@ -302,8 +302,12 @@ The analytics results engine (`backend/app/services/analysis_service.py`) comput
 - Effect size: Cohen's d
 
 **Multiple comparisons correction:**
-- Bonferroni correction (default)
-- Benjamini-Hochberg (FDR) available
+- Each experiment stores a correction method and a confidence level:
+  Benjamini-Hochberg (FDR) at 0.95 by default, Bonferroni or none on request.
+  The results, the sample-size plan, the export and the report use them; a
+  results request may name another for itself. Locked once the experiment
+  leaves draft.
+- CUPED and sequential testing do not follow the stored level.
 
 ### REST Endpoints
 

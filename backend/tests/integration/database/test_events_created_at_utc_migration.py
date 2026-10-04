@@ -30,7 +30,11 @@ The gates, by the plan's numbers (``launch-readiness/events-utc-579``):
 * 13-15 the profile transitions;
 * 17  the downgrade changes no data, and the re-run recipe (``downgrade
       a89544fb1075`` then ``upgrade heads``) rewrites a value written in
-      between while the modules branch keeps its revision;
+      between while the modules branch keeps its revision.  Since
+      ``806901fb7735`` sits above this revision the recipe also runs its
+      downgrade, which drops every experiment's stored correction settings
+      (``upgrade heads`` restores the defaults, not the choices): the
+      migrations page says so, and the recipe test pins it;
 * 18  the rows stay ``str`` in a VARCHAR column, as the previous release reads;
 * a failure at batch k leaves k batches rewritten and a re-run finishes;
 * the documented SQL selects exactly the migration's candidates;
@@ -79,6 +83,9 @@ pytestmark = [pytest.mark.integration]
 REVISION = "1ab99332f0ba"
 #: The core revision it extends: the recipe's downgrade target.
 PARENT = "a89544fb1075"
+#: The core head of this tree, which ``upgrade heads`` runs on to: the
+#: experiments' correction settings (#580), the revision after this one.
+CORE_HEAD = "806901fb7735"
 #: The core head of the previous release (0.16.2), with ``d12cbd384bbe`` and
 #: ``a89544fb1075`` pending in front of this revision.
 RELEASED = "271f03a31742"
@@ -89,7 +96,7 @@ WAREHOUSE_TABLES = {
     "warehouse_analysis_runs",
 }
 
-ROWS = {CORE: {REVISION}, FULL: {REVISION, MODULES_HEAD}}
+ROWS = {CORE: {CORE_HEAD}, FULL: {CORE_HEAD, MODULES_HEAD}}
 PARENT_ROWS = {CORE: {PARENT}, FULL: {PARENT, MODULES_HEAD}}
 RELEASED_ROWS = {CORE: {RELEASED}, FULL: {RELEASED, MODULES_HEAD}}
 
@@ -514,11 +521,28 @@ def test_the_rerun_recipe_rewrites_a_value_written_after_the_first_run(
 ):
     """The documented recipe, exactly: ``downgrade a89544fb1075``, then
     ``upgrade heads``.  On a full install the modules branch keeps its revision
-    and its tables (``-1`` can step that branch back instead)."""
+    and its tables (``-1`` can step that branch back instead).
+
+    It also crosses ``806901fb7735``, whose downgrade drops the experiments'
+    stored correction settings: a stored ``none`` at 0.90 comes back as the
+    defaults.  That is why the migrations page offers the recipe only while
+    ``1ab99332f0ba`` is the core head."""
     tree = _at_parent(test_db, profile, scratch_schema, tmp_path)
     _insert(test_db, scratch_schema, ["2026-10-01T01:00:00+02:00"])
     assert _upgrade(tree, scratch_schema).returncode == 0
     tables = set(inspect(test_db).get_table_names(schema=scratch_schema))
+    experiment = uuid.uuid4()
+    with test_db.begin() as conn:
+        conn.execute(
+            text(
+                f'INSERT INTO "{scratch_schema}".experiments (id, name, status, '
+                "experiment_type, optimization_type, sequential_testing_enabled, "
+                "bayesian_enabled, correction_method, confidence_level, "
+                "created_at, updated_at) VALUES (:id, 'recipe', 'ACTIVE', 'A_B', "
+                "'fixed', false, false, 'none', 0.90, now(), now())"
+            ),
+            {"id": experiment},
+        )
     # Written by the previous release after the first scan.
     (straggler,) = _insert(test_db, scratch_schema, ["2026-10-01T09:00:00+02:00"])
 
@@ -533,6 +557,15 @@ def test_the_rerun_recipe_rewrites_a_value_written_after_the_first_run(
     assert _stored(test_db, scratch_schema)[straggler] == "2026-10-01T07:00:00+00:00"
     after = set(inspect(test_db).get_table_names(schema=scratch_schema))
     assert after == tables
+    with test_db.connect() as conn:
+        settings = conn.execute(
+            text(
+                "SELECT correction_method, confidence_level FROM "
+                f'"{scratch_schema}".experiments WHERE id = :id'
+            ),
+            {"id": experiment},
+        ).one()
+    assert tuple(settings) == ("benjamini_hochberg", 0.95)
     if profile == FULL:
         assert WAREHOUSE_TABLES <= after
 

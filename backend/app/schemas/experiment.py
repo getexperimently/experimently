@@ -28,6 +28,7 @@ from backend.app.core.targeting_adapter import (
 )
 from backend.app.schemas.bandit import OptimizationType
 from backend.app.schemas.bayesian import BayesianConfig
+from backend.app.schemas.results import CorrectionMethod
 from backend.app.schemas.split_url_config import SplitUrlConfig
 from backend.app.schemas.variance_reduction import VarianceReductionConfig
 
@@ -358,6 +359,21 @@ class SequentialTestingConfigInput(BaseModel):
     )
 
 
+#: The descriptions of the two stored analysis settings (#580).
+CORRECTION_METHOD_DESCRIPTION = (
+    "Multiple-comparison correction the results apply across the treatments "
+    "of each metric: none, bonferroni or benjamini_hochberg (default). A "
+    "request to the results may name another for that request only. Locked "
+    "once the experiment leaves draft."
+)
+CONFIDENCE_LEVEL_DESCRIPTION = (
+    "Confidence level the results use for significance and intervals, from "
+    "0.80 to 0.99 (default 0.95). A request to the results may name another "
+    "for that request only. Locked once the experiment leaves draft. CUPED "
+    "and sequential analysis do not follow it."
+)
+
+
 class ExperimentCreate(ExperimentBase):
     """Model for creating a new experiment."""
 
@@ -412,6 +428,18 @@ class ExperimentCreate(ExperimentBase):
     split_url_config: Optional[SplitUrlConfig] = Field(
         default=None,
         description="Split URL experiment configuration (required when experiment_type=split_url).",
+    )
+
+    # #580: how the results judge this experiment
+    correction_method: CorrectionMethod = Field(
+        default=CorrectionMethod.BENJAMINI_HOCHBERG,
+        description=CORRECTION_METHOD_DESCRIPTION,
+    )
+    confidence_level: float = Field(
+        default=0.95,
+        ge=0.80,
+        le=0.99,
+        description=CONFIDENCE_LEVEL_DESCRIPTION,
     )
 
     model_config = ConfigDict(
@@ -523,6 +551,8 @@ NOT_NULL_UPDATE_FIELDS = (
     "experiment_type",
     "sequential_testing_enabled",
     "optimization_type",
+    "correction_method",
+    "confidence_level",
 )
 
 
@@ -537,9 +567,9 @@ class ExperimentUpdate(BaseModel):
     """Model for updating an experiment.
 
     Every field is optional: a field left out is not changed. `name`,
-    `status`, `experiment_type`, `sequential_testing_enabled` and
-    `optimization_type` cannot be set to null; a request that does is
-    refused with 422.
+    `status`, `experiment_type`, `sequential_testing_enabled`,
+    `optimization_type`, `correction_method` and `confidence_level` cannot be
+    set to null; a request that does is refused with 422.
     """
 
     # The NOT_NULL_UPDATE_FIELDS default to None only to mean "not sent":
@@ -622,6 +652,20 @@ class ExperimentUpdate(BaseModel):
     split_url_config: Optional[SplitUrlConfig] = Field(
         default=None,
         description="Split URL experiment configuration.",
+    )
+
+    # #580: how the results judge this experiment; draft only
+    correction_method: CorrectionMethod = Field(
+        default=None,
+        description=CORRECTION_METHOD_DESCRIPTION
+        + " Changeable only while the experiment is a draft; cannot be null.",
+    )
+    confidence_level: float = Field(
+        default=None,
+        ge=0.80,
+        le=0.99,
+        description=CONFIDENCE_LEVEL_DESCRIPTION
+        + " Changeable only while the experiment is a draft; cannot be null.",
     )
 
     model_config = ConfigDict(
@@ -780,6 +824,17 @@ class ExperimentResponse(BaseModel):
 
     # EP-036: Split URL testing configuration
     split_url_config: Optional[Dict[str, Any]] = None
+
+    # #580: how the results judge this experiment. The defaults are what the
+    # migration backfilled; ExperimentService._experiment_to_dict copies the
+    # stored values, so a response never reports a default over a choice.
+    correction_method: CorrectionMethod = Field(
+        default=CorrectionMethod.BENJAMINI_HOCHBERG,
+        description=CORRECTION_METHOD_DESCRIPTION,
+    )
+    confidence_level: float = Field(
+        default=0.95, description=CONFIDENCE_LEVEL_DESCRIPTION
+    )
 
     model_config = ConfigDict(from_attributes=True)
 

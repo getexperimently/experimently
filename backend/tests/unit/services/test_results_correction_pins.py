@@ -1,27 +1,28 @@
-"""What the results paths return today when no correction method is asked for (#580).
+"""What the results paths return when no correction method is asked for (#580).
 
-#580 stores a correction method and a confidence level on each experiment,
-Benjamini-Hochberg by default, and the results paths read them when the
-request names none. The existing characterisation
+Each experiment stores a correction method and a confidence level,
+Benjamini-Hochberg at 0.95 by default, and the results paths read them when
+the request names none. The existing characterisation
 (``test_binomial_metric_result_characterisation.py``) always passes the method
-explicitly, so it cannot see a changed default. This file pins today's
-behaviour with **no** method, so the change that makes the stored setting the
-default shows, as a diff to the expectations here, exactly which numbers
-moved.
+explicitly, so it cannot see a changed default. This file pins the behaviour
+with **no** method. It was written against the earlier default, ``none``; the
+change that made the stored setting the default shows, as its diff to the
+expectations here, exactly which numbers moved.
 
 * **One valid treatment (A3).** A two-variant experiment, and a three-variant
   one in which one treatment has no p-value, so ``k = 1``. Every field except
   ``adjusted_p_value`` is identical under ``none``, Bonferroni,
-  Benjamini-Hochberg and the default (one hash per fixture). Today the
-  default is ``none``, so ``adjusted_p_value`` is null; under either
-  correction it equals the p-value.
+  Benjamini-Hochberg and the default (one hash per fixture). The default is
+  the stored Benjamini-Hochberg, so ``adjusted_p_value`` equals the p-value,
+  as under either correction; under ``none`` it is null.
 * **Three variants (A6).** The characterisation's ``three_variants`` fixture:
   treatment A's purchase p is 0.035, significant at 0.95 uncorrected and not
   after Benjamini-Hochberg (0.071). The precondition test shows the fixture
   really moves the verdict. Then each path that takes the default --
   the service, the variant export and the report's variant rows,
   ``GET /results/{id}`` and ``GET /experiments/{id}/results`` -- is pinned to
-  today's ``none``: treatment A significant, no adjusted p-value.
+  the stored Benjamini-Hochberg: treatment A not significant, adjusted p-value
+  0.071.
 
 Only the database is replaced, as in the characterisation.
 """
@@ -94,13 +95,16 @@ ONE_TREATMENT_PINS: Dict[str, Dict[str, str]] = {
     },
 }
 
-#: The correction a request with no method gets today, on every path.
-TODAYS_DEFAULT = "none"
+#: The correction a request with no method gets, on every path: the stored
+#: one, which for these fixtures is the migration's default.
+STORED_DEFAULT = "benjamini_hochberg"
 
 
 def _experiment(variant_ids: List[str]) -> SimpleNamespace:
     experiment = characterisation._experiment()
     experiment.variants = [v for v in experiment.variants if v.id in variant_ids]
+    experiment.correction_method = STORED_DEFAULT
+    experiment.confidence_level = 0.95
     return experiment
 
 
@@ -264,13 +268,16 @@ def test_with_one_valid_treatment_a_correction_reports_the_p_value(
 
 
 @pytest.mark.parametrize("case", sorted(_ONE_TREATMENT_CASES))
-def test_with_one_valid_treatment_no_method_is_todays_none(case, fake_counts, request):
-    """Today's default: no adjusted p-value anywhere, labelled ``none``."""
+def test_with_one_valid_treatment_no_method_is_the_stored_setting(
+    case, fake_counts, request
+):
+    """The stored default: the adjusted p-value is the p-value, labelled
+    ``benjamini_hochberg``."""
     output = _one_treatment_output(case, _DEFAULT, fake_counts, request)
-    assert output["correction_method"] == TODAYS_DEFAULT
+    assert output["correction_method"] == STORED_DEFAULT
     for name, variant in _treatments(output):
-        assert variant["adjusted_p_value"] is None, name
-    assert output == _one_treatment_output(case, TODAYS_DEFAULT, fake_counts, request)
+        assert variant["adjusted_p_value"] == variant["p_value"], name
+    assert output == _one_treatment_output(case, STORED_DEFAULT, fake_counts, request)
 
 
 # ---------------------------------------------------------------------------
@@ -305,16 +312,16 @@ def test_precondition_the_three_variant_fixture_moves_the_verdict(fake_counts):
     assert bh["is_significant"] is False
 
 
-def test_the_service_default_is_todays_none(fake_counts):
+def test_the_service_default_is_the_stored_setting(fake_counts):
     """What the variant export and the report use: no method passed."""
     fake_counts(_THREE)
     output = _results(_THREE, _ALL_THREE, _DEFAULT)
-    assert output["correction_method"] == TODAYS_DEFAULT
-    assert _purchase_a(output)["is_significant"] is True
-    assert _purchase_a(output)["adjusted_p_value"] is None
+    assert output["correction_method"] == STORED_DEFAULT
+    assert _purchase_a(output)["is_significant"] is False
+    assert _purchase_a(output)["adjusted_p_value"] == pytest.approx(_P_A_BH, rel=1e-9)
 
 
-def test_the_variant_export_and_report_rows_are_todays_none(fake_counts):
+def test_the_variant_export_and_report_rows_are_the_stored_setting(fake_counts):
     """``/export/variants`` and the report's variant rows share
     ``_variants_to_rows``; purchase is the primary metric."""
     fake_counts(_THREE)
@@ -324,7 +331,7 @@ def test_the_variant_export_and_report_rows_are_todays_none(fake_counts):
     )
     (row,) = [r for r in rows if r.variant_id == _TREATMENT_A]
     assert row.p_value == pytest.approx(_P_A, rel=1e-9)
-    assert row.is_significant is True
+    assert row.is_significant is False
 
 
 @pytest.fixture
@@ -376,28 +383,28 @@ _EXPERIMENT_ID = characterisation._experiment().id
     ],
     ids=["results", "experiments-alias"],
 )
-def test_the_results_routes_with_no_method_are_todays_none(
+def test_the_results_routes_with_no_method_are_the_stored_setting(
     superuser_results_client, path
 ):
     response = superuser_results_client.get(path)
     assert response.status_code == 200, response.text
     body = response.json()
-    assert body["correction_method"] == TODAYS_DEFAULT
+    assert body["correction_method"] == STORED_DEFAULT
     assert body["confidence_level"] == 0.95
     variant = _purchase_a(body)
     assert variant["p_value"] == pytest.approx(_P_A, rel=1e-9)
-    assert variant["is_significant"] is True
-    assert variant["adjusted_p_value"] is None
+    assert variant["is_significant"] is False
+    assert variant["adjusted_p_value"] == pytest.approx(_P_A_BH, rel=1e-9)
 
 
 def test_the_results_route_honours_an_explicit_method(superuser_results_client):
-    """Control for the route pins: the same request naming Benjamini-Hochberg
-    does change the verdict, so the routes are computing, not replaying."""
+    """Control for the route pins: the same request naming ``none`` does
+    change the verdict, so the routes are computing, not replaying."""
     response = superuser_results_client.get(
         f"/api/v1/results/{_EXPERIMENT_ID}",
-        params={"correction_method": "benjamini_hochberg"},
+        params={"correction_method": "none"},
     )
     assert response.status_code == 200, response.text
     variant = _purchase_a(response.json())
-    assert variant["is_significant"] is False
-    assert variant["adjusted_p_value"] == pytest.approx(_P_A_BH, rel=1e-9)
+    assert variant["is_significant"] is True
+    assert variant["adjusted_p_value"] is None

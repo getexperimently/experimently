@@ -18,6 +18,8 @@ REQUIRED = (
     "experiment_type",
     "sequential_testing_enabled",
     "optimization_type",
+    "correction_method",
+    "confidence_level",
 )
 
 

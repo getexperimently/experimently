@@ -29,6 +29,7 @@ REPO_ROOT = HERE.parents[3]
 EXPECTED = {
     "test_bayesian_stop_winner.py": 13,
     "test_collection_count.py": 2,
+    "test_multiple_comparison_reference.py": 21,
     "test_sequential_confidence_sequence.py": 18,
 }
 

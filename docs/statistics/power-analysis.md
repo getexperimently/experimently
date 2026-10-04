@@ -177,12 +177,14 @@ plans again from the experiment's own data, with the same formula as above:
   You can type a different rate instead. The results page is cached for up to five minutes and
   the tab is not, so for that long the tab's rate can be newer than the one on the Overview.
 - **MDE**: 5% relative unless you change it. Experiments do not store a planned effect.
-- **Power** 80% and **significance** 5%, two-sided, unless you change them. Two-sided is what
-  the results test.
-- **Correction**: none unless you choose one, the same as the results. With Bonferroni or
-  Benjamini-Hochberg each of the `k - 1` comparisons is planned at `alpha / (k - 1)`. Unlike
-  the Power Calculator, the tab does not apply Bonferroni on its own: the multi-variant
-  paragraph above is about the Power Calculator only.
+- **Power** 80%, two-sided, unless you change it. Two-sided is what the results test.
+- **Significance**: one minus the experiment's stored confidence level (5% for the default
+  0.95) unless you change it, the same as the results.
+- **Correction**: the experiment's stored correction method (Benjamini-Hochberg unless it was
+  created with another) unless you choose another, the same as the results. With Bonferroni
+  or Benjamini-Hochberg each of the `k - 1` comparisons is planned at `alpha / (k - 1)`.
+  Unlike the Power Calculator, the tab does not apply Bonferroni on its own: the
+  multi-variant paragraph above is about the Power Calculator only.
 - **Progress** is the smallest variant's users against the planned number, and the achieved
   power is the power to detect the planned MDE at that size, not the effect observed so far.
 
@@ -191,7 +193,7 @@ every metric is analysed as a conversion today, and it says so. Nothing typed on
 saved.
 
 **Worked example**: a control rate of 12% so far, a 5% relative MDE, 80% power, 5%
-significance:
+significance, two variants (so the correction changes nothing):
 
 - `p1 = 0.12`, `p2 = 0.126`
 - `n = 47,036 per variant`
