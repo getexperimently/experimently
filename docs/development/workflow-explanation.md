@@ -103,3 +103,5 @@ Postgres must be reachable on `localhost:5432` for the backend suites (`docker c
 - Every bug fix ships with a regression test in the suite that would have caught it.
 - A new workflow must either be added to the required-checks list in branch protection
   or documented here as advisory.
+
+<!-- G-run for #872 (docs-only lane); this branch is never merged. -->
