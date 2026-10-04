@@ -182,7 +182,15 @@ experiment is kept.
 
 A global holdout keeps a percentage of new users out of **all** experiments platform-wide. New users in the holdout are not assigned to any experiment: `POST /api/v1/tracking/assign` answers with the control variant. Users who already had an assignment when the holdout was activated keep it. Feature flags ignore the holdout, so flag rollouts and shipped winners reach these users like everyone else.
 
-Only one holdout is meant to be active at a time. Activating a holdout with `PUT /api/v1/holdout/{holdout_id}` deactivates the active one. Creating a holdout with `"is_active": true` does not, so create it inactive and activate it with `PUT`.
+Only one holdout can be active at a time, and the database enforces it. Activating a holdout, with `PUT /api/v1/holdout/{holdout_id}` or by creating it with `"is_active": true`, deactivates the active one. If two activations happen at the same moment, the second answers `409` and can be retried.
+
+Each holdout buckets users with its own salt, so the users one holdout keeps out are not the same users the next one keeps out. While a holdout is active, the API records each new user `POST /api/v1/tracking/assign` answers for, and whether the holdout kept them out; that record starts when the holdout is activated. A holdout that was already active when you upgraded to the release that added this record keeps holding the same users out, but nothing was recorded for it: deactivate it and create a new one to start recording.
+
+### Choosing a size and a duration
+
+Hold out 1–5% of users. Go up to 10% only when traffic is low; above that, the holdout costs your experiments more traffic than it tells you. Run a holdout for 1 to 3 months, then deactivate it and create a new one. The longer a holdout runs, the more shipped features reach its users through flags, so the less it measures. It also keeps the same users out of every experiment. The API accepts 1–20%.
+
+The percentage cannot change once the holdout has been active, because that would move users between the holdout and everyone else. A holdout that has been deactivated cannot be activated again. In both cases, create a new holdout.
 
 ### GET /api/v1/holdout
 
@@ -202,7 +210,7 @@ List all holdout configurations (active and historical). Requires ADMIN role.
 
 ### POST /api/v1/holdout
 
-Create a global holdout. Requires ADMIN role. Creating a holdout does not deactivate the active one; activate a new holdout with `PUT` instead (see above).
+Create a global holdout. Requires ADMIN role. With `"is_active": true` it becomes the active holdout and the one that was active is deactivated.
 
 ```{.bash exec}
 curl -s -X POST localhost:8000/api/v1/holdout \
@@ -226,12 +234,17 @@ curl -s -X POST localhost:8000/api/v1/holdout \
 }
 ```
 
-The response also carries the holdout's `id`, `description`, `owner_id`, `created_at` and
-`updated_at`.
+The response also carries the holdout's `id`, `description`, `owner_id`, `activated_at`,
+`deactivated_at`, `created_at` and `updated_at`.
 
 ### PUT /api/v1/holdout/{holdout_id}
 
-Update holdout configuration. Requires ADMIN role. Sending `"is_active": true` deactivates the active holdout and activates this one.
+Update holdout configuration. Requires ADMIN role. Sending `"is_active": true` deactivates the active holdout and activates this one; sending it to the holdout that is already active changes nothing. `"is_active": false` deactivates it, and it has then ended.
+
+Refused with `422`:
+
+- a different `holdout_percentage` once the holdout has been active: "holdout_percentage cannot change once a holdout has been active: it would move users between the holdout and the rest and mix the two groups. Create a new holdout instead." Sending the same percentage is accepted, so a form that sends every field keeps working;
+- `"is_active": true` on a holdout that has ended: "A holdout that has ended cannot restart. Create a new holdout."
 
 ### GET /api/v1/holdout/check/{user_id}
 
@@ -241,17 +254,20 @@ Check whether a specific user is in the active global holdout:
 curl -s localhost:8000/api/v1/holdout/check/user-123 \
   -H "Authorization: Bearer $TOKEN"
 ```
-<!-- expect: "is_in_holdout":false -->
-<!-- expect: "bucket":44 -->
+<!-- expect: "user_id":"user-123" -->
+<!-- expect: "holdout_percentage":5 -->
 
 ```json
 {"user_id":"user-123","is_in_holdout":false,"holdout_percentage":5,"bucket":44}
 ```
 
-Each user has a fixed `bucket` from 0 to 99, a hash of their id. A user is in the holdout
-when their bucket is below `holdout_percentage`: `user-123`'s bucket is 44, so a 5% holdout
-leaves them out. A new user in the holdout is answered by `POST /api/v1/tracking/assign`
-with the control variant, `"assigned": false` and `"reason": "holdout"`.
+Each user has a `bucket` from 0 to 99, a hash of their id with the active holdout's salt, so
+it stays the same for as long as that holdout is active and is different under the next
+holdout. A user is in the holdout when their bucket is below `holdout_percentage`: here
+`user-123`'s bucket is 44, so a 5% holdout leaves them out. Your bucket will differ, because
+your holdout has its own salt. A new user in the holdout is answered by
+`POST /api/v1/tracking/assign` with the control variant, `"assigned": false` and
+`"reason": "holdout"`.
 
 ---
 

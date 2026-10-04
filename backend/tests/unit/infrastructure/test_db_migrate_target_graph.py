@@ -6,9 +6,9 @@ ones, with alembic's own planner and no database:
 
 * every revision id on disk passes the workflow's allowlist, so the rule
   refuses no real migration;
-* each downgrade the help text gives as an example unapplies exactly one
-  revision, on one branch, with no ambiguity warning -- a bare ``-1`` fails
-  this, because alembic warns that it is ambiguous from two heads;
+* each downgrade the help text gives as an example unapplies exactly the
+  revisions listed for it, on one branch, with no ambiguity warning -- a bare
+  ``-1`` fails this, because alembic warns that it is ambiguous from two heads;
 * the warning in the help text holds: a downgrade to the branch point
   ``a7b8c9d0e1f2`` also unapplies the whole modules branch.
 
@@ -39,10 +39,14 @@ pytestmark = pytest.mark.skipif(
     not DB_MIGRATE.is_file(), reason="this tree has no .github/workflows"
 )
 
-#: The examples the help text and the runbook give, and the one revision each
-#: unapplies from both heads.
+#: The examples the help text and the runbook give, and the revisions each
+#: unapplies from both heads, newest first.  ``a89544fb1075`` was the down
+#: revision of the newest core migration when it became the example; every core
+#: revision added since joins its list (``d29a479daafe``, #445), and the
+#: documents that name it must say what those revisions' downgrades drop
+#: (``test_documented_downgrade_targets.py``).
 NAMED_DOWNGRADES = {
-    "1ab99332f0ba": ["806901fb7735"],
+    "806901fb7735": ["d29a479daafe"],
     "modules_0001_rbac": ["modules_0002_warehouse_analysis"],
 }
 BRANCH_POINT = "a7b8c9d0e1f2"
@@ -86,7 +90,7 @@ def test_every_revision_id_passes_the_workflow_allowlist():
 @pytest.mark.regression
 @pytest.mark.modules
 @pytest.mark.parametrize("target", sorted(NAMED_DOWNGRADES))
-def test_each_named_downgrade_unapplies_one_revision_on_one_branch(target):
+def test_each_named_downgrade_unapplies_its_listed_revisions_on_one_branch(target):
     script = _script()
     assert len(script.revision_map.heads) == 2
     plan = _downgrade_plan(script, target)
@@ -101,9 +105,9 @@ def test_the_branch_point_also_unapplies_the_modules_branch():
     """Backs the help text: "a core id at or below a7b8c9d0e1f2 also unapplies
     the modules branch"."""
     plan = _downgrade_plan(_script(), BRANCH_POINT)
-    # The seven core revisions above it (through 806901fb7735, #580) and the
+    # The eight core revisions above it (through d29a479daafe, #445) and the
     # modules branch's two.
-    assert len(plan) == 9, plan
+    assert len(plan) == 10, plan
     assert [r for r in plan if r.startswith(MODULES_PREFIX)] == [
         "modules_0002_warehouse_analysis",
         "modules_0001_rbac",

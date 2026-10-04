@@ -21,6 +21,7 @@ from backend.app.models.mutual_exclusion_group import (
 from backend.app.services.global_holdout_service import (
     HOLDOUT_SALT,
     GlobalHoldoutService,
+    holdout_bucket,
 )
 from backend.app.services.mutual_exclusion_service import MutualExclusionService
 
@@ -49,11 +50,16 @@ def _make_experiment(exp_id=None, status=ExperimentStatus.ACTIVE, group_id=None)
     return exp
 
 
-def _make_holdout(holdout_id=None, percentage=10, is_active=True):
+def _make_holdout(
+    holdout_id=None, percentage=10, is_active=True, salt="holdout:unit-test"
+):
     holdout = MagicMock(spec=GlobalHoldout)
     holdout.id = holdout_id or uuid4()
     holdout.holdout_percentage = percentage
     holdout.is_active = is_active
+    holdout.hash_salt = salt
+    holdout.activated_at = None
+    holdout.deactivated_at = None
     return holdout
 
 
@@ -238,18 +244,29 @@ class TestHoldoutPercentageDistribution:
             f"Expected ~{holdout_pct}% in holdout, got {actual_pct:.1f}%"
         )
 
-    def test_holdout_service_agrees_with_static(self):
-        """Instance method and static method should produce identical results."""
-        mock_db = MagicMock()
-        mock_db.query.return_value.filter.return_value.first.return_value = None
+    def test_holdout_service_uses_the_holdouts_own_salt(self):
+        """The instance check buckets with the holdout's ``hash_salt`` (#445).
 
-        service = GlobalHoldoutService(mock_db)
+        Rewritten on purpose: before #445 every holdout used the static salt,
+        so instance and static buckets were equal.  Now they are equal only
+        for a legacy-salt holdout; a holdout with its own salt buckets users
+        differently, which is what keeps one holdout's users from being the
+        next one's.
+        """
+        service = GlobalHoldoutService(MagicMock())
+        legacy = _make_holdout(percentage=100, salt=HOLDOUT_SALT)
+        own = _make_holdout(percentage=100, salt="holdout:agree")
 
+        differ = 0
         for i in range(100):
             uid = f"agree_user_{i}"
-            instance_bucket = service._get_holdout_bucket(uid)
             static_bucket = GlobalHoldoutService._get_holdout_bucket_static(uid)
-            assert instance_bucket == static_bucket
+            _, _, legacy_bucket = service.is_user_in_holdout(uid, holdout=legacy)
+            _, _, own_bucket = service.is_user_in_holdout(uid, holdout=own)
+            assert legacy_bucket == static_bucket
+            assert own_bucket == holdout_bucket(uid, "holdout:agree")
+            differ += own_bucket != static_bucket
+        assert differ > 80, differ
 
 
 # ---------------------------------------------------------------------------
@@ -359,14 +376,17 @@ class TestActivationDeactivationFlows:
         service.activate_holdout(holdout_a.id)
         assert holdout_a.is_active is True
 
-        # Now activate B -- the service should call _deactivate_all first
+        # Now activate B -- the service deactivates the OTHER active holdouts
+        # (A), stamping their deactivated_at, before B turns active.
         mock_db.reset_mock()
         mock_db.query.return_value.filter.return_value.first.return_value = holdout_b
+        mock_db.query.return_value.filter.return_value.all.return_value = [holdout_a]
         service.activate_holdout(holdout_b.id)
 
         assert holdout_b.is_active is True
-        # _deactivate_all calls update() on the query
-        mock_db.query.return_value.filter.return_value.update.assert_called()
+        assert holdout_b.activated_at is not None
+        assert holdout_a.is_active is False
+        assert holdout_a.deactivated_at == holdout_b.activated_at
         mock_db.flush.assert_called()
 
     def test_deactivating_holdout_allows_all_users(self):

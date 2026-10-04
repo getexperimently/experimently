@@ -23,7 +23,8 @@ each profile, and runs the documented ``alembic upgrade heads``. Then:
 3. a writer that does not know the columns -- the previous release's image
    after a rollback with ``RUN_MIGRATIONS=false`` -- can still insert an
    experiment, and it gets the defaults;
-4. ``downgrade`` removes exactly the two columns and the two checks.
+4. ``downgrade`` removes exactly the two columns and the two checks, besides
+   what the later revisions it also unapplies drop (``LATER_DOWNGRADE_TABLES``).
 """
 
 from __future__ import annotations
@@ -42,6 +43,13 @@ pytestmark = [pytest.mark.integration]
 #: This revision, and the core revision it extends.
 REVISION = "806901fb7735"
 PREVIOUS_CORE_HEAD = "1ab99332f0ba"
+#: The core head of this tree, which ``upgrade heads`` runs on to past this
+#: revision: ``d29a479daafe`` (#445).
+CORE_HEAD = "d29a479daafe"
+#: Tables that a later core revision's downgrade drops: a downgrade from the
+#: head to this test's target unapplies those revisions too.  ``d29a479daafe``
+#: (#445) drops ``holdout_population``.
+LATER_DOWNGRADE_TABLES = {"holdout_population"}
 #: The modules branch's head, in the previous release and in this one alike.
 MODULES_HEAD = "modules_0002_warehouse_analysis"
 
@@ -50,8 +58,8 @@ PREVIOUS_ROWS = {
     FULL: {PREVIOUS_CORE_HEAD, MODULES_HEAD},
 }
 ROWS = {
-    CORE: {REVISION},
-    FULL: {REVISION, MODULES_HEAD},
+    CORE: {CORE_HEAD},
+    FULL: {CORE_HEAD, MODULES_HEAD},
 }
 
 COLUMNS = ("correction_method", "confidence_level")
@@ -327,4 +335,7 @@ def test_downgrade_removes_the_columns_and_the_checks_and_nothing_else(
     assert _checks(test_db, scratch_schema) == {
         name: definition for name, definition in checks.items() if name not in CHECKS
     }
-    assert set(inspect(test_db).get_table_names(schema=scratch_schema)) == tables
+    assert (
+        set(inspect(test_db).get_table_names(schema=scratch_schema))
+        == tables - LATER_DOWNGRADE_TABLES
+    )

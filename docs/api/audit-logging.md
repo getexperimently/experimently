@@ -218,8 +218,8 @@ an API key, or a request body.
 | `experiment_delete` | `experiment` | `DELETE /experiments/{id}` |
 | `experiment_start`, `experiment_pause`, `experiment_complete` | `experiment` | `/start` (also a resume), `/pause`, `/complete` |
 | `api_key_create`, `api_key_revoke` | `api_key` | `POST /api-keys`, `DELETE /api-keys/{id}` |
-| `holdout_create` | `holdout` | `POST /holdout` |
-| `holdout_update`, `holdout_activate`, `holdout_deactivate` | `holdout` | `PUT /holdout/{id}`, one entry per kind of change. Activating a holdout turns any other active one off, and that holdout gets its own `holdout_deactivate` |
+| `holdout_create` | `holdout` | `POST /holdout`. With `is_active: true` it turns the active holdout off, and that holdout gets its own `holdout_deactivate` |
+| `holdout_update`, `holdout_activate`, `holdout_deactivate` | `holdout` | `PUT /holdout/{id}`, one entry per kind of change. Activating a holdout turns any other active one off, and that holdout gets its own `holdout_deactivate`. An activate or deactivate entry also carries the `activated_at` or `deactivated_at` it set |
 | `mutual_exclusion_group_create`, `mutual_exclusion_group_update`, `mutual_exclusion_group_archive` | `mutual_exclusion_group` | Create, `PUT`, and `DELETE` (which archives). Adding or removing an experiment is an update with `{"experiment_id": ...}` and the `reason` `experiment added` or `experiment removed` |
 | `segment_create`, `segment_update`, `segment_archive` | `segment` | `POST /segments`, `PUT /segments/{id}`, `DELETE /segments/{id}` (which archives) |
 | `user_create`, `user_delete` | `user` | `POST /users/`; `DELETE /users/{id}` and `DELETE /admin/users/{id}`. Deleting your own account is recorded with no `user_id` |

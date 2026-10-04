@@ -38,6 +38,7 @@ from .experiment import (
 )
 from .feature_flag import FeatureFlag, FeatureFlagOverride, FeatureFlagStatus
 from .global_holdout import GlobalHoldout
+from .holdout_population import HoldoutPopulation
 from .llm_experiment import (
     LLMEvaluation,
     LLMEvaluationMetric,
@@ -104,6 +105,7 @@ CORE_MODEL_MODULES = (
     "experiment",
     "feature_flag",
     "global_holdout",
+    "holdout_population",
     "llm_experiment",
     "metrics.metric",
     "mutual_exclusion_group",
@@ -169,6 +171,7 @@ __all__ = [
     "FeatureFlagSafetyConfig",
     "FeatureFlagStatus",
     "GlobalHoldout",
+    "HoldoutPopulation",
     "LLMEvaluation",
     "LLMEvaluationMetric",
     "LLMExperiment",

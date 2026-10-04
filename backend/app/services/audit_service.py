@@ -74,7 +74,13 @@ AUDIT_VALUE_FIELDS: Dict[EntityType, Tuple[str, ...]] = {
     ),
     EntityType.USER: ("username", "role", "is_active", "is_superuser"),
     EntityType.API_KEY: ("name", "scopes", "expires_at", "user_id"),
-    EntityType.HOLDOUT: ("name", "holdout_percentage", "is_active"),
+    EntityType.HOLDOUT: (
+        "name",
+        "holdout_percentage",
+        "is_active",
+        "activated_at",
+        "deactivated_at",
+    ),
     EntityType.MUTUAL_EXCLUSION_GROUP: ("name", "traffic_allocation", "status"),
     EntityType.SEGMENT: ("name", "status"),
 }
