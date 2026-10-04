@@ -14,8 +14,9 @@ documented target unapplies from the current heads, and reads each of those
 revisions' ``downgrade()`` through ``ast`` for a ``drop_column`` call. A
 crossing passes only when the part of the document that names the target
 (its heading section, or for the workflow its line) also names the
-column-dropping revision and says it drops: the recipe has to say so where an
-operator reads it.
+column-dropping revision, with "drop", "drops", "dropped" or "dropping"
+within 200 characters of the id: the recipe has to say so where an operator
+reads it, not cite the revision for some other reason.
 
 When this fails, fix the documents (the target, or a sentence naming the
 revision and what its downgrade drops), never this file.
@@ -127,6 +128,22 @@ def unapplied(script: ScriptDirectory, target: str) -> List[str]:
         return [s.revision.revision for s in script._downgrade_revs(target, heads)]
 
 
+#: "drop", "drops", "dropped" or "dropping" as a whole word: not "dropdown".
+_DROP_WORD = r"\bdrop(?:s|ped|ping)?\b"
+#: How far apart, in characters, the revision id and the drop word may be.
+ANNOUNCE_WINDOW = 200
+
+
+def announces(context: str, revision: str) -> bool:
+    """Whether ``context`` says ``revision``'s downgrade drops something: the
+    id and a drop word within ``ANNOUNCE_WINDOW`` characters of each other,
+    in either order. Both quantifiers are bounded."""
+    rev = re.escape(revision)
+    window = f".{{0,{ANNOUNCE_WINDOW}}}"
+    pattern = rf"\b{rev}\b{window}{_DROP_WORD}|{_DROP_WORD}{window}\b{rev}\b"
+    return re.search(pattern, context, re.S | re.I) is not None
+
+
 def unannounced_crossings(
     found: List[Mention], script: Optional[ScriptDirectory] = None
 ) -> Dict[str, List[str]]:
@@ -142,8 +159,7 @@ def unannounced_crossings(
         for revision in unapplied(script, mention.target):
             if not drops_a_column(script.get_revision(revision).path):
                 continue
-            context = mention.context.lower()
-            if revision in mention.context and "drop" in context:
+            if announces(mention.context, revision):
                 continue
             crossed = problems.setdefault(f"{mention.source}: {mention.target}", [])
             if revision not in crossed:
@@ -188,6 +204,42 @@ def test_a_crossing_the_document_names_and_says_it_drops_passes():
     found = [m for m in mentions(page=page) if m.source == "migrations.md"]
     problems = unannounced_crossings(found)
     assert _DROPPING not in problems.get(f"migrations.md: {_BELOW_IT}", [])
+
+
+def test_a_revision_cited_for_another_reason_is_not_an_announcement():
+    """The id cited for an unrelated reason, and an unrelated "dropdown"
+    elsewhere in the same section, do not announce the crossing."""
+    filler = "The dashboard is unaffected by this step. " * 8
+    page = (
+        f"## Re-run\n\nSee {_DROPPING} for how the event times were rewritten."
+        f"\n\n{filler}\n\nPick the environment from the dropdown.\n\n"
+        f"```bash\nalembic downgrade {_BELOW_IT}\n```\n"
+    )
+    assert "dropdown" in page and _DROPPING in page
+    found = [m for m in mentions(page=page) if m.source == "migrations.md"]
+    assert _DROPPING in unannounced_crossings(found)[f"migrations.md: {_BELOW_IT}"]
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        f"{_DROPPING} also runs, and its downgrade drops a column.",
+        f"Its downgrade dropped a column: {_DROPPING}.",
+    ],
+)
+def test_a_drop_word_next_to_the_revision_announces_it(text):
+    assert announces(text, _DROPPING)
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        f"{_DROPPING} is cited. Pick it from the dropdown.",
+        f"{_DROPPING} " + "x" * (ANNOUNCE_WINDOW + 1) + " drops a column.",
+    ],
+)
+def test_a_distant_or_partial_drop_word_does_not_announce_it(text):
+    assert not announces(text, _DROPPING)
 
 
 def test_no_documented_target_crosses_a_column_dropping_downgrade_unannounced():
