@@ -16,6 +16,7 @@ from backend.app.core.config import settings as app_settings
 from backend.app.core.logging import get_logger
 from backend.app.core.scheduler_tick import run_locked_tick
 from backend.app.db.session import SessionLocal
+from backend.app.models.audit_log import ActionType, EntityType
 from backend.app.models.feature_flag import FeatureFlag
 from backend.app.models.rollout_schedule import (
     RolloutSchedule,
@@ -23,6 +24,12 @@ from backend.app.models.rollout_schedule import (
     RolloutStage,
     RolloutStageStatus,
     TriggerType,
+)
+from backend.app.services.audit_service import (
+    SYSTEM_ROLLOUT_SCHEDULER,
+    AuditService,
+    audit_changes,
+    audit_snapshot,
 )
 from backend.app.services.notification_service import NotificationService
 
@@ -499,6 +506,12 @@ class RolloutScheduler:
         The changes are flushed, not committed: the caller owns the
         transaction and sends the notification after its commit.
 
+        The audit entry (``feature_flag_update`` on the flag, by the rollout
+        scheduler) is added to the same transaction, not a savepoint: if it
+        cannot be written, the stage start fails with it and neither is kept,
+        so the flag's rollout does not widen unrecorded. The next tick tries
+        again (#221).
+
         Args:
             db: Database session
             schedule: The rollout schedule
@@ -522,6 +535,8 @@ class RolloutScheduler:
                 f"Feature flag {schedule.feature_flag_id} not found for rollout schedule {schedule.id}"
             )
 
+        before = audit_snapshot(EntityType.FEATURE_FLAG, feature_flag)
+
         # Mark the stage as in progress
         stage.status = RolloutStageStatus.IN_PROGRESS
         stage.updated_at = current_time
@@ -532,6 +547,21 @@ class RolloutScheduler:
         feature_flag.rollout_percentage = stage.target_percentage
         feature_flag.updated_at = current_time
         db.add(feature_flag)
+
+        old_value, new_value = audit_changes(
+            before, audit_snapshot(EntityType.FEATURE_FLAG, feature_flag)
+        )
+        AuditService.record(
+            db,
+            actor=SYSTEM_ROLLOUT_SCHEDULER,
+            action=ActionType.FEATURE_FLAG_UPDATE,
+            entity_type=EntityType.FEATURE_FLAG,
+            entity_id=feature_flag.id,
+            entity_name=feature_flag.name or feature_flag.key,
+            before=old_value,
+            after=new_value,
+            reason="rollout schedule stage started",
+        )
         db.flush()
 
         logger.info(

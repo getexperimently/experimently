@@ -24,6 +24,8 @@ def _cognito_provider(monkeypatch):
 # Create mock models instead of importing the actual ones to avoid circular dependencies
 class MockUser:
     # Add class attributes that would be accessed in deps.py
+    # (``id`` by the audit entry of a Cognito role sync).
+    id = None
     username = None
     email = None
     is_active = None

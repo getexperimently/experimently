@@ -13,8 +13,8 @@ keeps the ``backend.`` filter from dropping a route silently.
 
 That each ``Audited`` route really writes its entry is pinned by the
 integration tests in ``backend/tests/integration/api/test_audit_route_events.py``.
-``WRITTEN_ACTION_TYPES`` is the union of the ``Audited`` sets here (and of the
-non-route sites, none yet), checked below.
+``WRITTEN_ACTION_TYPES`` is the union of the ``Audited`` sets here and of the
+non-route sites (``test_audit_non_route_inventory.py``), checked below.
 """
 
 from __future__ import annotations
@@ -27,6 +27,7 @@ from fastapi.routing import APIRoute
 from backend.app.main import app
 from backend.app.models.audit_log import ActionType as A
 from backend.app.services.audit_service import WRITTEN_ACTION_TYPES
+from backend.tests.smoke.test_audit_non_route_inventory import NON_ROUTE_ACTIONS
 
 pytestmark = [pytest.mark.smoke]
 
@@ -131,15 +132,14 @@ INVENTORY = {
     ("POST", f"{V1}/safety/feature-flags/{{feature_flag_id}}/config"): NotAudited(
         "a flag's safety config is not on the audited event list"
     ),
-    ("POST", f"{V1}/safety/feature-flags/{{feature_flag_id}}/rollback"): NotAudited(
-        "the rollback is made by the safety service, a non-route site that "
-        "this route inventory does not cover"
+    ("POST", f"{V1}/safety/feature-flags/{{feature_flag_id}}/rollback"): Audited(
+        A.SAFETY_ROLLBACK
     ),
     # --- experiments ---------------------------------------------------------
     ("POST", f"{V1}/experiments/"): Audited(A.EXPERIMENT_CREATE),
     ("POST", f"{V1}/experiments/schedules/process"): NotAudited(
-        "runs the experiment scheduler; its transitions are made by the "
-        "scheduler, a non-route site"
+        "runs the experiment scheduler, a non-route site that writes its "
+        "own entries as system:experiment-scheduler"
     ),
     ("DELETE", f"{V1}/experiments/{{experiment_id}}"): Audited(A.EXPERIMENT_DELETE),
     ("PUT", f"{V1}/experiments/{{experiment_id}}"): EXP_UPDATE,
@@ -233,10 +233,6 @@ INVENTORY = {
     ("POST", f"{V1}/tracking/errors/batch"): SDK,
     ("POST", f"{V1}/tracking/evaluations"): SDK,
 }
-
-#: Actions written outside a route (the schedulers, the safety service,
-#: Cognito). None is written yet.
-NON_ROUTE_ACTIONS: frozenset = frozenset()
 
 
 def _contexts(application):

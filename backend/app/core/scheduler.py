@@ -16,7 +16,14 @@ from backend.app.core.logging import get_logger
 from backend.app.core.metrics import update_active_experiments
 from backend.app.core.scheduler_tick import run_locked_tick
 from backend.app.db.session import SessionLocal
+from backend.app.models.audit_log import ActionType, EntityType
 from backend.app.models.experiment import Experiment, ExperimentStatus
+from backend.app.services.audit_service import (
+    SYSTEM_EXPERIMENT_SCHEDULER,
+    AuditService,
+    audit_changes,
+    audit_snapshot,
+)
 from backend.app.services.experiment_service import stamp_rollout_rule_id
 from backend.app.services.notification_service import NotificationService
 
@@ -145,6 +152,7 @@ class ExperimentScheduler:
                 try:
                     resumed = experiment.status == ExperimentStatus.PAUSED
                     due = experiment.resume_at if resumed else experiment.start_date
+                    before = audit_snapshot(EntityType.EXPERIMENT, experiment)
                     # A scheduled first start stamps the rule id; a scheduled
                     # resume keeps the users the rule admits (#533).
                     stamp_rollout_rule_id(experiment, experiment.status)
@@ -152,6 +160,13 @@ class ExperimentScheduler:
                     experiment.updated_at = current_time
                     db.add(experiment)
                     db.flush()
+                    self._record_transition(
+                        db,
+                        experiment,
+                        ActionType.EXPERIMENT_START,
+                        before,
+                        "scheduled resume" if resumed else "scheduled start",
+                    )
                     savepoint.commit()
                 except Exception:
                     savepoint.rollback()
@@ -195,10 +210,18 @@ class ExperimentScheduler:
                 experiment_id = experiment.id
                 savepoint = db.begin_nested()
                 try:
+                    before = audit_snapshot(EntityType.EXPERIMENT, experiment)
                     experiment.status = ExperimentStatus.COMPLETED
                     experiment.updated_at = current_time
                     db.add(experiment)
                     db.flush()
+                    self._record_transition(
+                        db,
+                        experiment,
+                        ActionType.EXPERIMENT_COMPLETE,
+                        before,
+                        "scheduled end",
+                    )
                     savepoint.commit()
                 except Exception:
                     savepoint.rollback()
@@ -248,6 +271,36 @@ class ExperimentScheduler:
                 "completed": completed_count,
             },
         }
+
+    @staticmethod
+    def _record_transition(
+        db: Session,
+        experiment: Experiment,
+        action: ActionType,
+        before: Dict,
+        reason: str,
+    ) -> None:
+        """The audit entry for a transition just flushed in the row's savepoint.
+
+        It goes in a savepoint of its own inside the row's (#221): if the
+        entry fails, only that inner savepoint is rolled back and one ERROR
+        naming the exception type is logged; the transition still commits and
+        the entry is not retried.
+        """
+        old_value, new_value = audit_changes(
+            before, audit_snapshot(EntityType.EXPERIMENT, experiment)
+        )
+        AuditService.record_in_savepoint(
+            db,
+            actor=SYSTEM_EXPERIMENT_SCHEDULER,
+            action=action,
+            entity_type=EntityType.EXPERIMENT,
+            entity_id=experiment.id,
+            entity_name=experiment.name,
+            before=old_value,
+            after=new_value,
+            reason=reason,
+        )
 
     @staticmethod
     def _update_active_experiments_gauge(db: Session) -> None:

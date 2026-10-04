@@ -26,6 +26,7 @@ from sqlalchemy.orm import Session
 
 from backend.app.core.logger import failure_detail
 from backend.app.core.logging import get_logger
+from backend.app.models.audit_log import ActionType, EntityType
 from backend.app.models.feature_flag import (
     FeatureFlag,
     FeatureFlagStatus,
@@ -39,6 +40,7 @@ from backend.app.models.safety import (
     SafetyRollbackRecord,
     SafetySettings,
 )
+from backend.app.models.user import User
 from backend.app.schemas.safety import (
     FeatureFlagSafetyConfigCreate,
     FeatureFlagSafetyConfigResponse,
@@ -52,6 +54,7 @@ from backend.app.schemas.safety import (
     SafetySettingsResponse,
     SafetySettingsUpdate,
 )
+from backend.app.services.audit_service import SYSTEM_SAFETY_MONITOR, AuditService
 from backend.app.services.feature_flag_service import FlagVerb, transition
 
 logger = get_logger(__name__)
@@ -731,6 +734,7 @@ class SafetyService:
         threshold_value: Optional[float] = None,
         target_percentage: int = 0,
         executed_by_user_id: Optional[UUID] = None,
+        actor: Any = None,
     ) -> RollbackResponse:
         """
         Roll the flag back and record it, in one transaction (#629).
@@ -753,6 +757,12 @@ class SafetyService:
         ``details["paused_schedules"]``. The flag row is locked first and
         nothing commits until the end -- a missing safety config is added with
         ``flush()`` -- so the lock is held until the one commit.
+
+        The audit entry (``safety_rollback`` on the flag) is written in a
+        savepoint of that transaction, by ``actor`` (the calling user) or,
+        when there is none, by the safety monitor. A failed entry never
+        blocks the rollback: the savepoint is rolled back, an ERROR is logged
+        and the rollback still commits (#221).
 
         Never raises: failures are reported with ``success=False`` and the
         transaction is rolled back.
@@ -796,6 +806,8 @@ class SafetyService:
                 )
 
             safety_config = self._get_or_add_safety_config(db, feature_flag_id)
+            # Who the audit entry names, read before anything is changed.
+            audit_actor = self._rollback_actor(db, actor, executed_by_user_id)
 
             deactivated = change == "deactivate"
             if deactivated:
@@ -834,6 +846,24 @@ class SafetyService:
                 executed_by_user_id=executed_by_user_id,
             )
             db.add(record)
+            # The audit entry rides in a savepoint: if it fails, only it is
+            # lost and the rollback below still commits (#221).
+            AuditService.record_in_savepoint(
+                db,
+                actor=audit_actor,
+                action=ActionType.SAFETY_ROLLBACK,
+                entity_type=EntityType.FEATURE_FLAG,
+                entity_id=feature_flag_id,
+                entity_name=feature_flag.name or feature_flag.key,
+                after={
+                    "trigger_type": trigger_name,
+                    "previous_percentage": previous_percentage,
+                    "new_percentage": target_percentage,
+                    "deactivated": deactivated,
+                    "paused_schedules": paused_schedules,
+                },
+                reason=reason,
+            )
             db.commit()
             db.refresh(record)
 
@@ -888,6 +918,18 @@ class SafetyService:
                 details={"reason": reason},
             )
 
+    @staticmethod
+    def _rollback_actor(db: Session, actor: Any, executed_by_user_id: Any) -> Any:
+        """Who a rollback's audit entry names: ``actor``, else the user whose
+        id the rollback records, else the safety monitor."""
+        if actor is not None:
+            return actor
+        if executed_by_user_id is not None:
+            user = db.get(User, executed_by_user_id)
+            if user is not None:
+                return user
+        return SYSTEM_SAFETY_MONITOR
+
     async def rollback_feature_flag(
         self,
         feature_flag_id: UUID,
@@ -895,8 +937,13 @@ class SafetyService:
         reason: Optional[str] = "Manual rollback",
         trigger_type: RollbackTriggerType = RollbackTriggerType.MANUAL,
         executed_by_user_id: Optional[UUID] = None,
+        actor: Any = None,
     ) -> RollbackResponse:
-        """Roll the flag back to ``percentage`` and record it. 404 if the flag is unknown."""
+        """Roll the flag back to ``percentage`` and record it. 404 if the flag is unknown.
+
+        ``actor`` is who the audit entry names: the calling user for a manual
+        rollback; none (the safety monitor) for an automatic one.
+        """
         self._require_flag(feature_flag_id)
         return self.execute_rollback(
             self.db,
@@ -905,6 +952,7 @@ class SafetyService:
             trigger_type=trigger_type,
             target_percentage=percentage or 0,
             executed_by_user_id=executed_by_user_id,
+            actor=actor,
         )
 
     async_rollback_feature_flag = rollback_feature_flag
