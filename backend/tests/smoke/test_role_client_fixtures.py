@@ -80,6 +80,7 @@ ROLE_CLIENT_FIXTURES = frozenset(
         "preview",  # test_segment_preview_limits.py
         "setup_app_overrides",  # test_results_integration.py
         "shared_client",  # test_rollout_schedules_api.py
+        "superuser_results_client",  # test_results_correction_pins.py
     }
 )
 # Defined only under modules/backend/tests, which a core build does not have.

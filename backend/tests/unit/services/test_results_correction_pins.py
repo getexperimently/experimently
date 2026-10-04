@@ -328,7 +328,9 @@ def test_the_variant_export_and_report_rows_are_todays_none(fake_counts):
 
 
 @pytest.fixture
-def api(fake_counts, monkeypatch: pytest.MonkeyPatch) -> Iterator[TestClient]:
+def superuser_results_client(
+    fake_counts, monkeypatch: pytest.MonkeyPatch
+) -> Iterator[TestClient]:
     """The app over the fake session, as a superuser, with no cache, no SRM
     query and no snapshot write (none of them is part of this computation)."""
     fake_counts(_THREE)
@@ -374,8 +376,10 @@ _EXPERIMENT_ID = characterisation._experiment().id
     ],
     ids=["results", "experiments-alias"],
 )
-def test_the_results_routes_with_no_method_are_todays_none(api, path):
-    response = api.get(path)
+def test_the_results_routes_with_no_method_are_todays_none(
+    superuser_results_client, path
+):
+    response = superuser_results_client.get(path)
     assert response.status_code == 200, response.text
     body = response.json()
     assert body["correction_method"] == TODAYS_DEFAULT
@@ -386,10 +390,10 @@ def test_the_results_routes_with_no_method_are_todays_none(api, path):
     assert variant["adjusted_p_value"] is None
 
 
-def test_the_results_route_honours_an_explicit_method(api):
+def test_the_results_route_honours_an_explicit_method(superuser_results_client):
     """Control for the route pins: the same request naming Benjamini-Hochberg
     does change the verdict, so the routes are computing, not replaying."""
-    response = api.get(
+    response = superuser_results_client.get(
         f"/api/v1/results/{_EXPERIMENT_ID}",
         params={"correction_method": "benjamini_hochberg"},
     )
