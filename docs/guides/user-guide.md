@@ -22,8 +22,8 @@ You'll need an account with one of the following roles:
 
 | Role | What You Can Do |
 |------|----------------|
-| **ADMIN** | Manage users; create experiments and change any experiment, but schedule and delete only your own; all flags |
-| **DEVELOPER** | Create experiments and change any experiment, but schedule and delete only your own; create and manage any feature flag |
+| **ADMIN** | Manage users; create, change, schedule and delete any experiment (schedule and delete through the API; the dashboard has no control for them yet); all flags |
+| **DEVELOPER** | Create, change, schedule and delete any experiment (schedule and delete through the API; the dashboard has no control for them yet); create and manage any feature flag |
 | **ANALYST** | View all experiments, results, and reports, and every feature flag (read-only) |
 | **VIEWER** | View every experiment and its results, and every feature flag (read-only) |
 
