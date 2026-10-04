@@ -6,7 +6,6 @@ These endpoints are designed to be called from client applications to participat
 in experiments and record user interactions.
 """
 
-import hashlib
 import logging
 import uuid
 from datetime import datetime, timezone
@@ -17,16 +16,22 @@ from pydantic import ValidationError
 from sqlalchemy.orm import Session
 
 from backend.app.api import deps
+from backend.app.api.sdk_scope import require_sdk_ruleset_key
 from backend.app.core.logger import failure_detail, unexpected_failure
 from backend.app.core.metrics import record_event_tracked, record_experiment_assignment
+from backend.app.models.api_key import APIKey
 from backend.app.models.assignment import Assignment
-from backend.app.models.bandit_state import BanditState
 from backend.app.models.event import Event
 from backend.app.models.experiment import Experiment, ExperimentStatus
 from backend.app.models.feature_flag import FeatureFlag
 from backend.app.schemas.storable_text import storable_text_param
 from backend.app.schemas.tracking import (
+    AssignmentBatchRequest,
+    AssignmentBatchResponse,
     AssignmentRequest,
+    BatchAssignment,
+    BatchAssignmentCounts,
+    BatchVariant,
     EventBatchRequest,
     EventBatchResponse,
     EventCreate,
@@ -35,6 +40,7 @@ from backend.app.schemas.tracking import (
     VariantAssignmentResponse,
 )
 from backend.app.services.assignment_service import AssignmentService
+from backend.app.services.bandit_routing import bandit_chooser
 from backend.app.services.event_service import EventService
 
 # Create router
@@ -71,74 +77,6 @@ def _event_response(event: Event) -> EventResponse:
         created_at=event.created_at,
         updated_at=event.updated_at or datetime.now(timezone.utc),
     )
-
-
-def _bandit_weight(raw: Any) -> float:
-    """Extract a non-negative weight from a BanditState.variant_weights entry.
-
-    The scheduler stores ``{"weight": float, "successes": ..., "pulls": ...}``
-    per variant; plain numeric values are accepted as well.
-    """
-    if isinstance(raw, dict):
-        raw = raw.get("weight", 0.0)
-    try:
-        weight = float(raw or 0.0)
-    except (TypeError, ValueError):
-        return 0.0
-    return weight if weight > 0.0 else 0.0
-
-
-def _select_bandit_variant(
-    experiment: Experiment,
-    bandit_state: Optional[BanditState],
-    user_id: str,
-) -> Optional[uuid.UUID]:
-    """Pick a variant for a *new* user according to the bandit weights.
-
-    Deterministic per ``(user_id, experiment.id)``: the user is hashed into a
-    bucket in ``[0, 1)`` and the bucket is looked up in the cumulative
-    distribution of the normalised weights, so repeated calls for the same
-    user return the same variant before the sticky assignment row exists.
-
-    Variants whose weight is missing or ``0`` receive no traffic.  Returns
-    ``None`` (meaning: use the default traffic-allocation hashing) when the
-    experiment is fixed-allocation, when there is no bandit state, or when
-    every weight is zero.
-    """
-    if experiment is None:
-        return None
-    if (getattr(experiment, "optimization_type", "fixed") or "fixed") == "fixed":
-        return None
-    if bandit_state is None or not bandit_state.variant_weights:
-        return None
-
-    raw_weights = bandit_state.variant_weights
-    if not isinstance(raw_weights, dict):
-        return None
-
-    # Stable ordering so the cumulative walk is reproducible across sessions.
-    variants = sorted(experiment.variants or [], key=lambda v: str(v.id))
-    weighted = [
-        (variant.id, _bandit_weight(raw_weights.get(str(variant.id))))
-        for variant in variants
-    ]
-    weighted = [(vid, w) for vid, w in weighted if w > 0.0]
-    total = sum(w for _, w in weighted)
-    if not weighted or total <= 0.0:
-        return None
-
-    digest = hashlib.md5(
-        f"{user_id}:{experiment.id}:bandit".encode(), usedforsecurity=False
-    ).hexdigest()
-    bucket = int(digest, 16) % 10_000 / 10_000
-
-    cumulative = 0.0
-    for variant_id, weight in weighted:
-        cumulative += weight / total
-        if bucket < cumulative:
-            return variant_id
-    # Floating-point tail: bucket landed at/after the last threshold.
-    return weighted[-1][0]
 
 
 @router.get("/")
@@ -221,16 +159,9 @@ async def assign_user_to_experiment(
     # Multi-armed bandit experiments: route *new* users according to the
     # latest BanditState weights.  Existing (sticky) assignments always win
     # because assign_user returns the stored row before using the override.
-    override_variant_id: Optional[uuid.UUID] = None
-    if (experiment.optimization_type or "fixed") != "fixed":
-        bandit_state = (
-            db.query(BanditState)
-            .filter(BanditState.experiment_id == experiment.id)
-            .first()
-        )
-        override_variant_id = _select_bandit_variant(
-            experiment, bandit_state, request.user_id
-        )
+    override_variant_id: Optional[uuid.UUID] = bandit_chooser(db, experiment)(
+        request.user_id
+    )
 
     try:
         # Attempt to assign the user
@@ -298,6 +229,185 @@ async def assign_user_to_experiment(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=failure_detail("Could not assign the user to the experiment"),
         )
+
+
+#: The 409 for an experiment that stopped accepting users part-way through a
+#: batch (paused, completed or deleted, or its variants changed). The users
+#: before that point are committed, one by one, as N single calls would be.
+EXPERIMENT_CHANGED_DETAIL = (
+    "The experiment changed during the request. Users earlier in the list may "
+    "already be assigned; resending the same request is safe."
+)
+
+#: The sentence of the 500 for any other failure part-way through a batch.
+BATCH_FAILURE_SENTENCE = "Could not assign the users to the experiment"
+
+
+@router.post(
+    "/assign/batch",
+    response_model=AssignmentBatchResponse,
+    summary="Assign a list of users to an experiment (beta)",
+    response_description="Each user's variant, in request order",
+    openapi_extra={"x-stability": "beta"},
+    responses={
+        401: {"description": "No API key, or an unknown, expired or revoked one"},
+        403: {
+            "description": "The key lacks the sdk:ruleset scope, or its owner "
+            "can no longer change feature flags or experiments"
+        },
+        404: {"description": "No ACTIVE experiment has that key; nobody is assigned"},
+        409: {
+            "description": "The experiment changed during the request; users "
+            "earlier in the list may be assigned, and resending is safe"
+        },
+        429: {"description": "More than 60 requests a minute from this address"},
+    },
+)
+def assign_users_to_experiment_batch(
+    request: AssignmentBatchRequest = Body(
+        ..., description="The experiment and its users"
+    ),
+    db: Session = Depends(deps.get_db),
+    api_key: APIKey = Depends(require_sdk_ruleset_key),
+) -> AssignmentBatchResponse:
+    """
+    Assign up to 1,000 users to an ACTIVE experiment in one request.
+
+    Each user gets what ``POST /api/v1/tracking/assign`` would give them, with
+    the bandit weights read at the start of the request: the same eligibility
+    checks for a new user (global holdout, mutual exclusion group, targeting
+    rules against that user's ``context``) and the same sticky answer for a
+    user already assigned. Users are processed in request order and each new
+    assignment is committed on its own, as N single calls would be.
+
+    Only assignments are recorded, never a view event: the user's first
+    ``POST /api/v1/tracking/assign`` records that they saw the experiment.
+
+    **Authentication**: an API key with the ``sdk:ruleset`` scope, whose owner
+    can change feature flags and experiments (ADMIN, DEVELOPER or a superuser).
+
+    A plain ``def``: FastAPI runs it in the thread pool, so a batch does not
+    hold the event loop while it works through its users.
+    """
+    experiment = (
+        db.query(Experiment)
+        .filter(
+            Experiment.key == request.experiment_key,
+            Experiment.status == ExperimentStatus.ACTIVE,
+        )
+        .first()
+    )
+    if not experiment:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Active experiment with key '{request.experiment_key}' not found",
+        )
+
+    # Plain values only from here on: every commit below expires the ORM
+    # objects of a production session, and touching one again reloads it.
+    experiment_id = str(experiment.id)
+    variants = {
+        str(v.id): BatchVariant(
+            name=v.name,
+            is_control=bool(v.is_control),
+            configuration=v.configuration,
+        )
+        for v in experiment.variants
+    }
+    choose = bandit_chooser(db, experiment)
+    service = AssignmentService(db)
+    total = len(request.users)
+
+    assignments: List[BatchAssignment] = []
+    counts = BatchAssignmentCounts()
+    for index, user in enumerate(request.users):
+        try:
+            data = service.assign_user(
+                user_id=user.user_id,
+                experiment_id=experiment_id,
+                track_exposure=False,
+                override_variant_id=choose(user.user_id),
+                context=user.context,
+            )
+        except ValidationError as e:
+            # pydantic's ValidationError is a ValueError, and not the
+            # experiment changing: an unexpected failure.
+            logger.error(
+                "Batch assign failed at user %d of %d in experiment %s (%s)",
+                index + 1,
+                total,
+                experiment_id,
+                type(e).__name__,
+            )
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=failure_detail(BATCH_FAILURE_SENTENCE),
+            )
+        except ValueError as e:
+            # assign_user raises ValueError when the experiment is gone, is no
+            # longer ACTIVE, or its variants no longer fit.
+            logger.warning(
+                "Batch assign stopped at user %d of %d: experiment %s changed (%s)",
+                index + 1,
+                total,
+                experiment_id,
+                type(e).__name__,
+            )
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=EXPERIMENT_CHANGED_DETAIL,
+            )
+        except Exception as e:
+            # The class name only: a database error's text repeats the row's
+            # parameters, the user id among them.
+            logger.error(
+                "Batch assign failed at user %d of %d in experiment %s (%s)",
+                index + 1,
+                total,
+                experiment_id,
+                type(e).__name__,
+            )
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=failure_detail(BATCH_FAILURE_SENTENCE),
+            )
+
+        variant_id = str(data.get("variant_id"))
+        if variant_id not in variants:
+            logger.error(
+                "Batch assign failed at user %d of %d in experiment %s "
+                "(assigned variant not in the experiment)",
+                index + 1,
+                total,
+                experiment_id,
+            )
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=failure_detail(BATCH_FAILURE_SENTENCE),
+            )
+        assigned = bool(data.get("assigned", True))
+        reason = str(data.get("reason") or "assigned")
+        record_experiment_assignment(
+            experiment_id=experiment_id,
+            variant_id=variant_id if assigned else reason,
+        )
+        assignments.append(
+            BatchAssignment(
+                user_id=user.user_id,
+                variant_id=variant_id,
+                assigned=assigned,
+                reason=reason,
+            )
+        )
+        if reason in BatchAssignmentCounts.model_fields:
+            setattr(counts, reason, getattr(counts, reason) + 1)
+
+    return AssignmentBatchResponse(
+        experiment_key=request.experiment_key,
+        variants=variants,
+        assignments=assignments,
+        counts=counts,
+    )
 
 
 @router.post(

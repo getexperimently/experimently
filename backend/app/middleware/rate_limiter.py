@@ -285,6 +285,11 @@ RATE_LIMIT_CONFIG: Dict[str, Tuple[int, int]] = {
     # SSO sign-in start: public; answers whether a domain has SSO, and mints a
     # signed state cookie each time. One call per sign-in in real use.
     "/api/v1/auth/sso/login": (30, 60),
+    # Batch assignment: one request assigns up to 1,000 users, so it gets its
+    # own counter rather than the SDK prefix's 6,000 a minute (60 x 1,000 =
+    # 60,000 users a minute per address). The path is exact: a trailing slash
+    # is answered by FastAPI's 307 redirect to this path, not by the handler.
+    "/api/v1/tracking/assign/batch": (60, 60),
 }
 
 # Default rate limit for all other endpoints

@@ -84,25 +84,29 @@ The request takes:
 ### Scopes
 
 Scopes are stored with the key and returned when you list keys. **One scope is enforced:
-`sdk:ruleset`.** Every other endpoint that accepts an API key (tracking and flag
-evaluation) accepts any active key, whatever its scopes. Names such as
-`read`, `write` or `admin` on existing keys are labels only; nothing checks them.
+`sdk:ruleset`.** Every endpoint that accepts an API key, except the three below, accepts
+any active key, whatever its scopes. Names such as `read`, `write` or `admin` on existing
+keys are labels only; nothing checks them.
 
-`sdk:ruleset` is for a server that evaluates flags locally. These routes answer `403` to a
-key that does not carry it:
+`sdk:ruleset` is for a server: one that evaluates flags locally, or one that assigns lists
+of users to an experiment. These routes answer `403` to a key that does not carry it:
 
 - `GET /api/v1/sdk/ruleset` (beta), which returns every feature flag's targeting rules in the
   form a server-side SDK evaluates locally;
 - `POST /api/v1/tracking/evaluations` (beta), where a server-side SDK reports how many times
   it evaluated each flag locally, so safety monitoring can still compute each flag's error
-  rate.
+  rate;
+- `POST /api/v1/tracking/assign/batch` (beta), which assigns up to 1,000 users to an
+  experiment in one request (see
+  [Assign a customer list to an experiment](../guides/assign-customer-list.md)).
 
 A key with `sdk:ruleset` can therefore download every feature flag's targeting rules,
 including the values in them, so keep such a key on a server and never ship it to a browser
 or a mobile app.
 
 - In the dashboard (**Admin → API Keys → Create API Key**), tick **Server-side local
-  evaluation (sdk:ruleset)**. Leave it unticked for any other key; the key is then created
+  evaluation (sdk:ruleset)**; the same checkbox is the one for assigning lists of users.
+  Leave it unticked for any other key; the key is then created
   with no scopes. The checkbox is disabled, with the reason shown beside it, for a user who
   cannot change feature flags.
 - Through the API, send `"scopes": ["sdk:ruleset"]`.
@@ -299,8 +303,8 @@ analytics-pipeline       → eptk_cccc…
 
 ### Grant `sdk:ruleset` only where it is needed
 
-Give the `sdk:ruleset` scope only to a server that will evaluate flags locally. Every other
-key, including any key used in a browser or a mobile app, should be created without it.
+Give the `sdk:ruleset` scope only to a server that will evaluate flags locally or assign
+lists of users. Every other key, including any key used in a browser or a mobile app, should be created without it.
 Because no other scope limits a key, a separate key per service is what lets you revoke one
 integration without touching the others.
 

@@ -22,6 +22,7 @@ pytestmark = [pytest.mark.smoke]
 SCOPED_ROUTES = {
     ("GET", "/api/v1/sdk/ruleset"),
     ("POST", "/api/v1/tracking/evaluations"),
+    ("POST", "/api/v1/tracking/assign/batch"),
 }
 
 

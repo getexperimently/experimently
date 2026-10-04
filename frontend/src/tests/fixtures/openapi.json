@@ -1193,6 +1193,12 @@
         "summary": "Assign user to experiment variant"
       }
     },
+    "/api/v1/tracking/assign/batch": {
+      "post": {
+        "operationId": "assign_users_to_experiment_batch_api_v1_tracking_assign_batch_post",
+        "summary": "Assign a list of users to an experiment (beta)"
+      }
+    },
     "/api/v1/tracking/assignments/{user_id}": {
       "get": {
         "operationId": "get_user_assignments_api_v1_tracking_assignments__user_id__get",
