@@ -156,7 +156,7 @@ a `404` or a `422`, so an example that doesn't check its output passes when it's
 - **Nothing is installed, and no cloud account is reached.** A block that runs may not
   call a package manager (`pip`, `pipx`, `poetry`, `uv`, `npm`, `npx`, `yarn`, `pnpm`,
   `bun`, `gem`, `composer`, `go get|install|run`, `cargo install`, `mvn`, `gradle`,
-  `swift package|build`, `dotnet add|restore|build`): our package names aren't
+  `swift package|build`, `dotnet add|restore|build`): most of our package names aren't
   published yet, so a run would fetch whatever else holds the name. Nor may it call
   `aws`, `cdk` or `sam`. Writing `\aws`, `"aws"` or `/usr/local/bin/aws` is the same
   command. Text inside a here-document is checked like any other line, even one

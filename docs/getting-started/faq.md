@@ -72,10 +72,10 @@ The platform supports a range of statistical approaches:
 
 ### What SDKs are available?
 
-**Not yet published.** None of the packages below is on its registry yet, so installing them by
-name fails today. Each SDK's page ([JavaScript](../sdk/javascript.md), [Python](../sdk/python.md),
-[Java](../sdk/java.md), [React](../sdk/react.md)) says how to install it from this repository
-instead.
+The Python SDK is on PyPI (`pip install experimently`, 0.1.0, beta). **The others are not
+published yet:** none of them is on its registry, so installing them by name fails today. Each
+SDK's page ([JavaScript](../sdk/javascript.md), [Java](../sdk/java.md), [React](../sdk/react.md))
+says how to install it from this repository instead.
 
 | SDK | Package |
 |-----|---------|
