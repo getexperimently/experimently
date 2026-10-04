@@ -14,6 +14,8 @@ gate then enforces by refusing its tags.
 
 from __future__ import annotations
 
+import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -326,3 +328,450 @@ def test_every_npm_sdk_names_its_repository(sdk: str) -> None:
         f"sdk/{sdk}/package.json repository.directory is "
         f"{repository.get('directory')!r}, expected 'sdk/{sdk}'"
     )
+
+
+# --------------------------------------------------------------------------
+# #773: a job that installs or tests cannot request an OIDC token, and the
+# publish job checks the package it uploads against the tag
+# --------------------------------------------------------------------------
+#
+# Two sets carry the change in progress, and both are exact, so that neither
+# half of it can be undone without a test going red:
+#
+#   UNSPLIT_TOKEN_JOBS  jobs that still install or test while holding
+#                       `id-token: write`. Only `npm`, until it is split the
+#                       way PyPI is; then this becomes the empty set.
+#   PUBLISH_JOBS        jobs split out to hold the token and publish only.
+#                       `pypi` now; `npm` joins it when that job is split.
+
+UNSPLIT_TOKEN_JOBS = {"npm"}
+PUBLISH_JOBS = {"pypi"}
+RELEASE_ENVIRONMENT = "sdk-release"
+
+#: A step whose `run:` installs packages, runs a test suite or builds one.
+INSTALLS_OR_TESTS = re.compile(
+    r"\bnpm\s+(ci|install|test|run)\b"
+    r"|\bpip3?\s+install\b|-m\s+pip\s+install\b"
+    r"|\bpytest\b|-m\s+build\b|\btwine\b"
+)
+EXPRESSION = re.compile(r"\$\{\{\s*(.*?)\s*\}\}")
+PYPA_PIN = re.compile(r"pypa/gh-action-pypi-publish@([0-9a-f]{40})")
+
+
+def _workflow() -> dict:
+    return yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
+
+
+def _effective_permissions(workflow: dict, job: dict):
+    """A job with no `permissions:` block inherits the workflow's."""
+    if "permissions" in job:
+        return job["permissions"]
+    return workflow.get("permissions")
+
+
+def _can_request_oidc(permissions) -> bool:
+    if permissions == "write-all":
+        return True
+    return isinstance(permissions, dict) and permissions.get("id-token") == "write"
+
+
+def _installs_or_tests(job: dict) -> bool:
+    return any(INSTALLS_OR_TESTS.search(_run_of(step)) for step in job.get("steps", []))
+
+
+def _step(job: str, name: str) -> dict:
+    steps = [s for s in _workflow()["jobs"][job]["steps"] if s.get("name") == name]
+    assert len(steps) == 1, (
+        f"expected one {job!r} step named {name!r}, found {len(steps)}"
+    )
+    return steps[0]
+
+
+@pytest.mark.regression
+def test_no_job_that_installs_or_tests_can_request_an_oidc_token() -> None:
+    """B1. Effective permissions, so a workflow-level grant is seen too.
+
+    On the old file both `pypi` and `npm` installed, tested and held
+    `id-token: write`. The set is exact: it fails if the PyPI split is undone,
+    and again once npm is split and the set is not emptied with it.
+    """
+    workflow = _workflow()
+    holding = {
+        name
+        for name, job in workflow["jobs"].items()
+        if _installs_or_tests(job)
+        and _can_request_oidc(_effective_permissions(workflow, job))
+    }
+    assert holding == UNSPLIT_TOKEN_JOBS, (
+        f"jobs that install or test and can request an OIDC token: "
+        f"{sorted(holding)}; expected exactly {sorted(UNSPLIT_TOKEN_JOBS)}"
+    )
+
+
+def test_the_release_environment_and_the_token_sit_on_the_publish_jobs_only() -> None:
+    """B3. The approval and the token belong to the jobs that publish."""
+    workflow = _workflow()
+    expected = PUBLISH_JOBS | UNSPLIT_TOKEN_JOBS
+    with_environment = set()
+    with_token = set()
+    for name, job in workflow["jobs"].items():
+        environment = job.get("environment")
+        if isinstance(environment, dict):
+            environment = environment.get("name")
+        if environment is not None:
+            assert environment == RELEASE_ENVIRONMENT, (name, environment)
+            with_environment.add(name)
+        if _can_request_oidc(_effective_permissions(workflow, job)):
+            with_token.add(name)
+    assert with_environment == expected, (
+        f"jobs in the {RELEASE_ENVIRONMENT!r} environment: {sorted(with_environment)}; "
+        f"expected exactly {sorted(expected)}"
+    )
+    assert with_token == expected, (
+        f"jobs that can request an OIDC token: {sorted(with_token)}; "
+        f"expected exactly {sorted(expected)}"
+    )
+
+
+def test_no_publish_job_run_block_contains_an_expression() -> None:
+    """C3. In a publish job, values reach a script through `env:` only."""
+    jobs = _workflow()["jobs"]
+    assert PUBLISH_JOBS <= set(jobs), sorted(PUBLISH_JOBS - set(jobs))
+    found = [
+        (name, step.get("name") or step.get("uses"))
+        for name in sorted(PUBLISH_JOBS)
+        for step in jobs[name]["steps"]
+        if "${{" in _run_of(step)
+    ]
+    assert not found, f"a publish-job run: block contains ${{{{ }}}}: {found}"
+
+
+def test_the_pypi_build_and_publish_jobs_are_a_pair() -> None:
+    """B11. Same condition; the publish job needs the build; the build job
+    keeps every check it had and cannot request a token."""
+    workflow = _workflow()
+    build = workflow["jobs"]["pypi-build"]
+    publish = workflow["jobs"]["pypi"]
+    condition = "needs.resolve.outputs.ecosystem == 'pypi'"
+    assert build.get("if") == condition
+    assert publish.get("if") == condition
+    assert build.get("needs") == "resolve"
+    assert set(publish.get("needs") or []) == {"resolve", "pypi-build"}
+    assert build.get("permissions") == {"contents": "read"}
+    assert "environment" not in build
+    assert publish.get("name") == "publish to PyPI"
+
+    names = [s.get("name") or s.get("uses") for s in build["steps"]]
+    order = [
+        "Run the SDK's tests",
+        "Build",
+        "Check the distributions",
+        "Built version matches the tag",
+        "Record the distributions",
+        "Upload the checked distributions",
+    ]
+    indices = [names.index(n) for n in order]
+    assert indices == sorted(indices), f"pypi-build steps out of order: {names}"
+    assert "twine check dist/*" in _run_of(build["steps"][names.index(order[2])])
+
+
+def test_the_pypi_publish_job_runs_only_the_download_the_check_and_the_upload() -> None:
+    """B2. Exactly three steps; no checkout, no Python set-up, no install."""
+    publish = _workflow()["jobs"]["pypi"]
+    steps = publish["steps"]
+    assert [s.get("name") for s in steps[:2]] == [
+        "Download the checked distributions",
+        "Check the distributions against the tag",
+    ], [s.get("name") or s.get("uses") for s in steps]
+    assert len(steps) == 3, [s.get("name") or s.get("uses") for s in steps]
+
+    download, check, upload = steps
+    assert download.get("uses") == "actions/download-artifact@v8"
+    assert download.get("with") == {
+        "name": "pypi-dist",
+        "path": "${{ github.workspace }}/dist",
+    }
+    assert "run" not in download
+
+    assert "uses" not in check
+    assert "working-directory" not in check
+    assert _run_of(check).startswith("set -euo pipefail\npython3 - <<'PY'\n")
+    assert not INSTALLS_OR_TESTS.search(_run_of(check))
+
+    assert PYPA_PIN.fullmatch(str(upload.get("uses"))), upload.get("uses")
+    assert upload.get("with") == {"packages-dir": "dist/"}
+    assert set(upload) == {"uses", "with"}
+
+
+def test_the_pypa_action_is_pinned_to_a_commit_with_its_version() -> None:
+    """The publish action runs beside the token: a full commit SHA, not a
+    branch, with the version it is in a comment for the reader."""
+    lines = [
+        line
+        for line in WORKFLOW.read_text(encoding="utf-8").splitlines()
+        if "pypa/gh-action-pypi-publish@" in line and not line.lstrip().startswith("#")
+    ]
+    assert len(lines) == 1, lines
+    assert re.search(
+        r"uses: pypa/gh-action-pypi-publish@[0-9a-f]{40} # v\d+\.\d+\.\d+$", lines[0]
+    ), lines[0]
+
+
+def test_the_publish_job_compares_with_the_digest_the_build_job_recorded() -> None:
+    """B4. The expected digest comes from the build job's output, not from a
+    file that travels in the same artifact."""
+    workflow = _workflow()
+    build = workflow["jobs"]["pypi-build"]
+    assert build.get("outputs") == {"digest": "${{ steps.record.outputs.digest }}"}
+    record = _step("pypi-build", "Record the distributions")
+    assert record.get("id") == "record"
+    assert "digest=" in _run_of(record)
+
+    check = _step("pypi", "Check the distributions against the tag")
+    assert check.get("env") == {
+        "NAME": "${{ needs.resolve.outputs.name }}",
+        "VERSION": "${{ needs.resolve.outputs.version }}",
+        "DIGEST": "${{ needs.pypi-build.outputs.digest }}",
+    }
+    script = _run_of(check)
+    assert 'os.environ["DIGEST"]' in script
+    assert "if digest != expected_digest:" in script
+
+
+def test_the_distributions_are_uploaded_once_and_never_overwritten() -> None:
+    """B5. An empty upload fails the build job; an existing artifact of the
+    same name is not replaced."""
+    upload = _step("pypi-build", "Upload the checked distributions")
+    assert upload.get("uses") == "actions/upload-artifact@v7"
+    assert upload.get("with") == {
+        "name": "pypi-dist",
+        "path": "sdk/${{ needs.resolve.outputs.sdk }}/dist/",
+        "if-no-files-found": "error",
+        "overwrite": False,
+    }
+
+
+# The steps' scripts, run the way the runner runs them: bash -eo pipefail,
+# with `env:` resolved from the values given and `python3`/`python` this
+# interpreter. A copy of the idea in test_dashboard_deploy_wiring.py's Runner,
+# cut down to what these steps use, rather than an import of it: that one
+# fakes aws and curl, which nothing here calls.
+
+
+def _run_step(
+    step: dict, values: dict[str, str], tmp_path: Path, cwd: Path
+) -> subprocess.CompletedProcess:
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir(exist_ok=True)
+    for name in ("python3", "python"):
+        if not (bin_dir / name).exists():
+            (bin_dir / name).symlink_to(sys.executable)
+    output = tmp_path / "github_output"
+    output.touch()
+
+    def resolve(match: re.Match) -> str:
+        expression = match.group(1)
+        assert expression in values, f"no value for ${{{{ {expression} }}}}"
+        return values[expression]
+
+    env = {
+        "PATH": f"{bin_dir}{os.pathsep}{os.environ.get('PATH', '')}",
+        "GITHUB_OUTPUT": str(output),
+        "GITHUB_WORKSPACE": str(tmp_path / "workspace"),
+        "HOME": str(tmp_path),
+    }
+    for key, value in (step.get("env") or {}).items():
+        env[key] = EXPRESSION.sub(resolve, str(value))
+    script = tmp_path / "step.sh"
+    script.write_text(_run_of(step), encoding="utf-8")
+    return subprocess.run(
+        ["bash", "--noprofile", "--norc", "-eo", "pipefail", str(script)],
+        cwd=cwd,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+
+
+def _outputs(tmp_path: Path) -> dict[str, str]:
+    lines = (tmp_path / "github_output").read_text(encoding="utf-8").splitlines()
+    return dict(line.split("=", 1) for line in lines if "=" in line)
+
+
+def _dist_files(project: str, version: str) -> dict[str, bytes]:
+    stem = re.sub(r"[-_.]+", "_", project).lower()
+    return {
+        f"{stem}-{version}-py3-none-any.whl": f"wheel {project} {version}".encode(),
+        f"{stem}-{version}.tar.gz": f"sdist {project} {version}".encode(),
+    }
+
+
+def _record(tmp_path: Path, files: dict[str, bytes]) -> str:
+    """Run the build job's record step over `files`; return its digest."""
+    sdk = tmp_path / "sdk"
+    (sdk / "dist").mkdir(parents=True)
+    for name, data in files.items():
+        (sdk / "dist" / name).write_bytes(data)
+    result = _run_step(
+        _step("pypi-build", "Record the distributions"), {}, tmp_path, sdk
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    return _outputs(tmp_path)["digest"]
+
+
+def _check(
+    tmp_path: Path, files: dict[str, bytes], name: str, version: str, digest: str
+) -> subprocess.CompletedProcess:
+    """Run the publish job's check over `files` in $GITHUB_WORKSPACE/dist."""
+    dist = tmp_path / "workspace" / "dist"
+    dist.mkdir(parents=True)
+    for filename, data in files.items():
+        (dist / filename).write_bytes(data)
+    return _run_step(
+        _step("pypi", "Check the distributions against the tag"),
+        {
+            "needs.resolve.outputs.name": name,
+            "needs.resolve.outputs.version": version,
+            "needs.pypi-build.outputs.digest": digest,
+        },
+        tmp_path,
+        tmp_path / "workspace",
+    )
+
+
+@pytest.mark.parametrize("project", ["experimently", "experimently-openfeature"])
+def test_the_check_accepts_what_the_build_job_recorded(
+    project: str, tmp_path: Path
+) -> None:
+    files = _dist_files(project, "0.1.0")
+    digest = _record(tmp_path, files)
+    result = _check(tmp_path, files, project, "0.1.0", digest)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert f"2 file(s) for {project} 0.1.0" in result.stdout
+
+
+SIBLING_WHEEL = "experimently_openfeature-0.1.0-py3-none-any.whl"
+
+
+#: Each case is checked twice over: the build job recording a digest of the
+#: changed set (so the digest agrees and only the name, version and file
+#: checks stand between it and the upload), and the original set.
+REFUSALS = [
+    (
+        "a same-version wheel of the sibling project",
+        lambda f: {**f, SIBLING_WHEEL: b"sibling"},
+        f"{SIBLING_WHEEL} is for 'experimently_openfeature', not 'experimently'",
+    ),
+    (
+        "a same-version sdist of the sibling project",
+        lambda f: {**f, "experimently_openfeature-0.1.0.tar.gz": b"sibling"},
+        "is for 'experimently_openfeature', not 'experimently'",
+    ),
+    (
+        "a wheel at another version",
+        lambda f: {**f, "experimently-0.0.9-py3-none-any.whl": b"old"},
+        "is version '0.0.9', not '0.1.0'",
+    ),
+    (
+        "a stray file",
+        lambda f: {**f, "notes.txt": b"x"},
+        "notes.txt is neither a wheel nor an sdist",
+    ),
+    (
+        "a digest file beside the distributions",
+        lambda f: {**f, "SHA256SUMS": b"x"},
+        "SHA256SUMS is neither a wheel nor an sdist",
+    ),
+]
+
+
+@pytest.mark.parametrize("recorded", ["the changed set", "the original set"])
+@pytest.mark.parametrize(
+    ("case", "change", "refusal"),
+    REFUSALS,
+    ids=[case for case, _, _ in REFUSALS],
+)
+def test_the_check_refuses(
+    case: str, change, refusal: str, recorded: str, tmp_path: Path
+) -> None:
+    """Condition 4: each of these must stop the upload, whichever set the
+    build job's digest describes."""
+    files = _dist_files("experimently", "0.1.0")
+    changed = change(files)
+    digest = _record(
+        tmp_path / "build", changed if recorded == "the changed set" else files
+    )
+    result = _check(tmp_path / "publish", changed, "experimently", "0.1.0", digest)
+    assert result.returncode == 1, (case, result.stdout, result.stderr)
+    assert refusal in result.stdout, (case, result.stdout)
+
+
+def test_the_check_refuses_a_byte_changed_after_the_digest_was_recorded(
+    tmp_path: Path,
+) -> None:
+    """B4: the harness flips one byte of the wheel between the two jobs."""
+    files = _dist_files("experimently", "0.1.0")
+    digest = _record(tmp_path / "build", files)
+    flipped = {
+        name: (data[:-1] + bytes([data[-1] ^ 1]) if name.endswith(".whl") else data)
+        for name, data in files.items()
+    }
+    result = _check(tmp_path / "publish", flipped, "experimently", "0.1.0", digest)
+    assert result.returncode == 1, result.stdout
+    assert "the downloaded files have digest" in result.stdout, result.stdout
+    assert f"the build job recorded {digest}" in result.stdout, result.stdout
+
+
+def test_the_check_refuses_an_empty_download(tmp_path: Path) -> None:
+    """B5: no files is a refusal, not a vacuous pass."""
+    digest = _record(tmp_path / "build", _dist_files("experimently", "0.1.0"))
+    result = _check(tmp_path / "publish", {}, "experimently", "0.1.0", digest)
+    assert result.returncode == 1, result.stdout
+    assert "nothing was downloaded into" in result.stdout, result.stdout
+
+
+def test_the_check_refuses_a_missing_digest(tmp_path: Path) -> None:
+    files = _dist_files("experimently", "0.1.0")
+    result = _check(tmp_path, files, "experimently", "0.1.0", "")
+    assert result.returncode == 1, result.stdout
+    assert "the build job recorded no usable digest" in result.stdout
+
+
+def test_the_check_compares_the_whole_normalised_name(tmp_path: Path) -> None:
+    """`Experimently.OpenFeature` and `experimently_openfeature` are one
+    project under PEP 503; `experimently` is a different one."""
+    files = _dist_files("experimently-openfeature", "0.1.0")
+    digest = _record(tmp_path, files)
+    result = _check(tmp_path, files, "Experimently.OpenFeature", "0.1.0", digest)
+    assert result.returncode == 0, result.stdout + result.stderr
+
+    other = tmp_path / "other"
+    other.mkdir()
+    result = _check(other, files, "experimently", "0.1.0", digest)
+    assert result.returncode == 1, result.stdout
+
+
+@pytest.mark.parametrize(
+    ("tag", "wheel_version", "ok"),
+    [
+        ("0.1.0", "0.1.0", True),
+        ("1.0.0rc1", "1.0.0rc1", True),
+        ("1.0.0-rc.1", "1.0.0rc1", False),
+    ],
+)
+def test_the_build_job_refuses_a_version_not_in_its_pep_440_spelling(
+    tag: str, wheel_version: str, ok: bool, tmp_path: Path
+) -> None:
+    """The publish job compares file names with the tag as strings, so the
+    build job refuses a tag it would only refuse after approval."""
+    sdk = tmp_path / "sdk"
+    (sdk / "dist").mkdir(parents=True)
+    (sdk / "dist" / f"experimently-{wheel_version}-py3-none-any.whl").write_bytes(b"w")
+    result = _run_step(
+        _step("pypi-build", "Built version matches the tag"),
+        {"needs.resolve.outputs.version": tag},
+        tmp_path,
+        sdk,
+    )
+    assert (result.returncode == 0) is ok, result.stdout + result.stderr

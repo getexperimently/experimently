@@ -27,6 +27,14 @@
 # created on first use and approves nothing. The required-reviewer rule is
 # repository configuration, not something this file can assert, so it is on the
 # P3.8 checklist beside the registry configuration above.
+#
+# PyPI releases are built and tested in `pypi-build`, which cannot request an
+# OIDC token, and published by `pypi`, which holds the token and the
+# environment, installs nothing, and checks the package it uploads against the
+# tag before uploading it. So the environment's approval for a PyPI release is
+# asked for after the tests and checks have passed. The npm job still installs,
+# tests and publishes in one job; it is split the same way separately.
+# backend/tests/smoke/test_sdk_release_wiring.py pins both shapes.
 name: SDK Release
 
 on:
@@ -122,19 +130,25 @@ jobs:
 
   # ---------------------------------------------------------------------------
   # PyPI: sdk/python, sdk/openfeature-python
+  #
+  # Two jobs. `pypi-build` installs, tests and builds, and cannot request an
+  # OIDC token: its permissions are `contents: read` and nothing else. It
+  # uploads `dist/` and records a digest of what it uploaded. `pypi` holds the
+  # token and the `sdk-release` environment, installs nothing, and publishes
+  # only after checking the files it downloaded against that digest and
+  # against the tag. The environment's approval is therefore asked for after
+  # the tests and checks have passed.
   # ---------------------------------------------------------------------------
-  pypi:
-    name: publish to PyPI
+  pypi-build:
+    name: test and build for PyPI
     needs: resolve
     if: needs.resolve.outputs.ecosystem == 'pypi'
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    environment:
-      name: sdk-release
-      url: https://pypi.org/project/${{ needs.resolve.outputs.name }}
     permissions:
       contents: read
-      id-token: write   # trusted publishing
+    outputs:
+      digest: ${{ steps.record.outputs.digest }}
     steps:
       - uses: actions/checkout@v7
 
@@ -183,12 +197,138 @@ jobs:
               _, built, _, _ = parse_wheel_filename(wheel.name)
               if built != expected:
                   sys.exit(f"{wheel.name} is version {built}, expected {expected}")
+          # The publish job compares file names with the tag as strings, so a
+          # tag in any other spelling would only be refused after approval.
+          if str(expected) != os.environ["VERSION"]:
+              sys.exit(
+                  f"the tag says {os.environ['VERSION']}, which PEP 440 spells "
+                  f"{expected}; tag and manifest must use that spelling"
+              )
           print(f"{len(wheels)} wheel(s) at {expected}")
           PY
 
-      - uses: pypa/gh-action-pypi-publish@release/v1
+      # One line per file, `<sha256>  <name>`, sorted by name; the digest is
+      # the sha256 of that listing. The publish job recomputes it over what it
+      # downloaded and compares it with this job's output.
+      - name: Record the distributions
+        id: record
+        working-directory: sdk/${{ needs.resolve.outputs.sdk }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import hashlib, os, pathlib, sys
+
+          files = sorted(pathlib.Path("dist").iterdir(), key=lambda p: p.name)
+          if not files or not all(p.is_file() for p in files):
+              sys.exit("dist/ must hold files only, and at least one")
+          listing = "".join(
+              f"{hashlib.sha256(p.read_bytes()).hexdigest()}  {p.name}\n" for p in files
+          )
+          digest = hashlib.sha256(listing.encode()).hexdigest()
+          print(listing, end="")
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as out:
+              out.write(f"digest={digest}\n")
+          print(f"digest {digest}")
+          PY
+
+      - name: Upload the checked distributions
+        uses: actions/upload-artifact@v7
         with:
-          packages-dir: sdk/${{ needs.resolve.outputs.sdk }}/dist
+          name: pypi-dist
+          path: sdk/${{ needs.resolve.outputs.sdk }}/dist/
+          if-no-files-found: error
+          overwrite: false
+
+  pypi:
+    name: publish to PyPI
+    needs: [resolve, pypi-build]
+    if: needs.resolve.outputs.ecosystem == 'pypi'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment:
+      name: sdk-release
+      url: https://pypi.org/project/${{ needs.resolve.outputs.name }}
+    permissions:
+      contents: read
+      id-token: write   # trusted publishing
+    steps:
+      - name: Download the checked distributions
+        uses: actions/download-artifact@v8
+        with:
+          name: pypi-dist
+          path: ${{ github.workspace }}/dist
+
+      # Standard library only: this job installs nothing. Every file must be a
+      # wheel or an sdist whose name and version are the tag's, compared on
+      # the PEP 503 normalised name, exactly; nothing else may be present; and
+      # the digest of the set must equal the one `pypi-build` recorded.
+      - name: Check the distributions against the tag
+        env:
+          NAME: ${{ needs.resolve.outputs.name }}
+          VERSION: ${{ needs.resolve.outputs.version }}
+          DIGEST: ${{ needs.pypi-build.outputs.digest }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import hashlib, os, pathlib, re, sys
+
+          def normalise(name):
+              return re.sub(r"[-_.]+", "-", name).lower()
+
+          name = os.environ["NAME"]
+          version = os.environ["VERSION"]
+          expected_digest = os.environ["DIGEST"]
+          dist = pathlib.Path(os.environ["GITHUB_WORKSPACE"]) / "dist"
+
+          problems = []
+          if not name or not version:
+              problems.append("the tag resolved no name or no version")
+          if not re.fullmatch(r"[0-9a-f]{64}", expected_digest):
+              problems.append(f"the build job recorded no usable digest: {expected_digest!r}")
+          files = sorted(dist.iterdir(), key=lambda p: p.name) if dist.is_dir() else []
+          if not files:
+              problems.append(f"nothing was downloaded into {dist}")
+          for path in files:
+              filename = path.name
+              if path.is_symlink() or not path.is_file():
+                  problems.append(f"{filename} is not a regular file")
+                  continue
+              if filename.endswith(".whl"):
+                  project, _, rest = filename[: -len(".whl")].partition("-")
+                  file_version = rest.split("-", 1)[0]
+              elif filename.endswith(".tar.gz"):
+                  project, _, file_version = filename[: -len(".tar.gz")].partition("-")
+              else:
+                  problems.append(f"{filename} is neither a wheel nor an sdist")
+                  continue
+              if normalise(project) != normalise(name):
+                  problems.append(f"{filename} is for {project!r}, not {name!r}")
+              if file_version != version:
+                  problems.append(f"{filename} is version {file_version!r}, not {version!r}")
+
+          if not problems:
+              listing = "".join(
+                  f"{hashlib.sha256(p.read_bytes()).hexdigest()}  {p.name}\n" for p in files
+              )
+              digest = hashlib.sha256(listing.encode()).hexdigest()
+              if digest != expected_digest:
+                  problems.append(
+                      f"the downloaded files have digest {digest}; the build job "
+                      f"recorded {expected_digest}"
+                  )
+
+          for problem in problems:
+              print(f"::error::{problem}")
+          if problems:
+              sys.exit(1)
+          print(f"{len(files)} file(s) for {name} {version}, digest {expected_digest}")
+          PY
+
+      # Pinned to a commit. Dependabot moves the pin, and CI never runs this
+      # job, so a pin bump merges on checks that do not exercise it.
+      - uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
+        with:
+          packages-dir: dist/
 
   # ---------------------------------------------------------------------------
   # npm: sdk/js, sdk/edge, sdk/openfeature, sdk/react, sdk/react-native
