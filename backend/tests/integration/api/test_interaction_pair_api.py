@@ -347,3 +347,44 @@ def test_the_statement_timeout_reaches_the_fixed_500(
     assert detail.startswith("Could not analyse the two experiments")
     assert "statement timeout" not in response.text
     assert "canceling" not in response.text
+
+
+@pytest.mark.regression
+def test_a_planted_interaction_is_found_through_the_route(
+    admin_client, db_session, make_experiment
+):
+    """S3 against PostgreSQL: A's lift is +20 points in B's control and -10 in
+    B's treatment, 400 users per cell; one cell has no converter."""
+    pricing = _make(make_experiment, db_session, "Masked pricing")
+    onboarding = _make(make_experiment, db_session, "Masked onboarding")
+    tag = uuid.uuid4().hex[:6]
+    assignments, events = [], []
+    plan = {
+        ("control", "control"): 40,
+        ("control", "treatment"): 40,
+        ("treatment", "control"): 120,
+        ("treatment", "treatment"): 0,
+    }
+    for (p, o), converters in plan.items():
+        for i in range(400):
+            user = f"m-{tag}-{p}-{o}-{i}"
+            assignments += [(pricing, p, user), (onboarding, o, user)]
+            if i < converters:
+                events.append((pricing, p, user, "signup"))
+            if i < 60:
+                events.append((onboarding, o, user, "signup"))
+    _seed(db_session, assignments, events)
+    try:
+        response = admin_client.get(
+            f"/api/v1/interactions/{pricing.id}/{onboarding.id}"
+        )
+        assert response.status_code == 200, response.text
+        body = response.json()
+        pricing_row, onboarding_row = body["interaction_results"]
+        assert pricing_row["experiment_id"] == str(pricing.id)
+        assert pricing_row["is_significant"] is True
+        assert [a["effect"] for a in pricing_row["arms"]] == pytest.approx([0.2, -0.1])
+        assert onboarding_row["unavailable_reason"] is None
+        assert body["has_interaction"] is True
+    finally:
+        _cleanup(db_session, [pricing, onboarding])

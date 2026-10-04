@@ -367,3 +367,110 @@ def test_the_reason_order_is_published():
         "too_few_shared_users",
         "too_few_conversions",
     )
+
+
+# ---------------------------------------------------------------------------
+# Tested rows: the decision (needs the fit)
+# ---------------------------------------------------------------------------
+
+
+def _masked(a_variants=("control", "treatment")) -> List[User]:
+    """A's treatment: +5 points in B's control, -5 points in B's treatment.
+
+    2,000 users per cell, base 10%: A's pooled lift is 0, the interaction is
+    large.  B has no effect of its own.
+    """
+    users = cell("control", "control", 2000, 200, 200)
+    users += cell("control", "treatment", 2000, 200, 200)
+    users += cell(a_variants[1], "control", 2000, 300, 200)
+    users += cell(a_variants[1], "treatment", 2000, 100, 200)
+    return users
+
+
+@pytest.mark.regression
+def test_s3_a_masked_effect_is_found():
+    """The pooled lift is 0, so /results sees nothing; the interaction is found."""
+    a, b = _experiment("Pricing"), _experiment("Onboarding")
+    response = analyse(a, b, _masked())
+    row_a, row_b = response.interaction_results
+    assert row_a.unavailable_reason is None
+    assert row_a.is_significant is True
+    assert row_a.p_value < 1e-10
+    assert [arm.effect for arm in row_a.arms] == pytest.approx([0.05, -0.05])
+    assert [arm.relative_lift for arm in row_a.arms] == pytest.approx([0.5, -0.5])
+    assert response.has_interaction is True
+    found = [rec for rec in response.recommendations if "differs across" in rec]
+    assert len(found) == 1
+    assert "percentage points" in found[0]
+    assert "corrected p" in found[0]
+    assert "who enters" in found[0]
+    # The two experiments' rows are 2 x 2 tables of different outcomes here.
+    assert row_b.experiment_id == str(b.id)
+
+
+def test_no_interaction_gives_false_only_when_every_row_was_tested():
+    a, b = _experiment("A"), _experiment("B")
+    users = []
+    for va, xa in (("control", 200), ("treatment", 300)):
+        for vb in ("control", "treatment"):
+            users += cell(va, vb, 2000, xa, 200, tag=va)
+    response = analyse(a, b, users)
+    assert reasons(response) == [None, None]
+    assert [row.is_significant for row in response.interaction_results] == [False] * 2
+    assert response.has_interaction is False
+    assert any("no interaction found" in rec for rec in response.recommendations)
+
+
+def test_has_interaction_is_null_when_a_row_has_a_reason_and_none_is_significant():
+    a, b = _experiment("A"), _experiment("B", metric_type=MetricType.REVENUE)
+    users = []
+    for va, xa in (("control", 200), ("treatment", 300)):
+        for vb in ("control", "treatment"):
+            users += cell(va, vb, 2000, xa, 200, tag=va)
+    response = analyse(a, b, users)
+    assert reasons(response) == [None, ia.NOT_A_PROPORTION_METRIC]
+    assert response.interaction_results[0].is_significant is False
+    assert response.has_interaction is None
+
+
+def _two_treatments(correction):
+    a = _experiment("A", variants=("control", "t1", "t2"), correction=correction)
+    b = _experiment("B")
+    users = _masked(("control", "t1"))
+    users += cell("t2", "control", 2000, 220, 200, tag="t2")
+    users += cell("t2", "treatment", 2000, 220, 200, tag="t2")
+    return analyse(a, b, users)
+
+
+def test_the_stored_correction_is_applied_across_the_experiments_rows():
+    response = _two_treatments("bonferroni")
+    t1, t2 = response.interaction_results[:2]
+    assert t1.correction_method == "bonferroni"
+    assert t1.corrected_p_value == pytest.approx(min(1.0, 2 * t1.p_value))
+    assert t2.corrected_p_value == pytest.approx(min(1.0, 2 * t2.p_value))
+    assert t1.is_significant is True
+
+
+def test_correction_none_leaves_corrected_null_and_decides_on_p():
+    response = _two_treatments("none")
+    t1 = response.interaction_results[0]
+    assert t1.corrected_p_value is None
+    assert t1.is_significant is (t1.p_value < 0.05)
+    found = [rec for rec in response.recommendations if "differs across" in rec]
+    assert "(p = " in found[0]
+
+
+def test_the_stored_level_decides():
+    """A p-value between 0.01 and 0.05: significant at 0.95, not at 0.99."""
+    users = []
+    for va, lift in (("control", 0), ("treatment", 1)):
+        users += cell(va, "control", 3000, 300 + 45 * lift, 300, tag="c")
+        users += cell(va, "treatment", 3000, 300 + 0 * lift, 300, tag="t")
+    rows = {}
+    for level in (0.95, 0.99):
+        a, b = _experiment("A", level=level), _experiment("B")
+        rows[level] = analyse(a, b, users).interaction_results[0]
+    p = rows[0.95].p_value
+    assert 0.01 < p < 0.05
+    assert rows[0.95].is_significant is True
+    assert rows[0.99].is_significant is False
