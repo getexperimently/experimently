@@ -198,6 +198,16 @@ docker compose up -d --wait`}</code>
               <a href={`mailto:${CONTACT_EMAIL}`} className="text-slate-700 underline hover:text-slate-900">
                 {CONTACT_EMAIL}
               </a>
+              . Built by{' '}
+              <a
+                href="https://www.linkedin.com/in/ashish-markanday/"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-slate-700 underline hover:text-slate-900"
+              >
+                Ashish Markanday
+              </a>
+              .
             </span>
             <nav className="flex gap-5">
               <Link href="/docs" className="hover:text-slate-900">
@@ -205,6 +215,8 @@ docker compose up -d --wait`}</code>
               </Link>
               <a
                 href="https://github.com/getexperimently/experimently"
+                target="_blank"
+                rel="noopener noreferrer"
                 className="hover:text-slate-900"
               >
                 Source
