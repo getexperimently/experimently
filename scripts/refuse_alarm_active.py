@@ -4,7 +4,8 @@
     python3 scripts/refuse_alarm_active.py \\
         --application <application> --group <deployment group> \\
         --environment <env> --stage before-build|before-migration \\
-        --expect <alarm name> [--expect <alarm name> ...] [--alarms-overridden]
+        --expect <alarm name> [--expect <alarm name> ...] [--alarms-overridden] \\
+        [--expect-config <deployment config name>]
 
 CodeDeploy stops every deployment to the API's group while one of the
 group's alarms is in ALARM. Deploy creates its deployment after the snapshot
@@ -33,6 +34,17 @@ into ALARM after it has passed still stops the deployment, after the
 migration, and the run ends in the "Migrated, not deployed" warning. Deploy
 runs it twice for that reason: before anything is built, and again
 immediately before the snapshot and migration.
+
+The group's deployment config (#795, #212 PE condition 7): with
+`--expect-config`, the group's `deploymentConfigName` (from the same
+`get-deployment-group` answer) is compared with it, the config the CDK stack
+gives the group (rendered into deploy.yml's job env and pinned to a synth by
+the CDK suite). Every forward deployment uses the group's config, so a group
+whose stack change was merged but never deployed still shifts traffic the old
+way. A different or missing name is a `::warning` annotation and a log line,
+never a refusal: the exit status is decided by the alarms alone. Deploy passes
+`--expect-config` in the before-build run only, so the warning shows once a
+run.
 
 READ-ONLY: `OPERATIONS` is the whole allow-list; both of its calls read.
 
@@ -101,10 +113,10 @@ def _one_line(value: object, limit: int = 200) -> str:
     return redact(" ".join(str(value)[:limit].split()))
 
 
-def configured_alarms(
+def read_group(
     aws: Callable[[Sequence[str]], dict], application: str, group: str
-) -> tuple[list[str], str | None]:
-    """The alarm names the group polls, or the reason it polls none."""
+) -> dict:
+    """The group's `deploymentGroupInfo`."""
     info = aws(
         [
             "deploy",
@@ -117,6 +129,11 @@ def configured_alarms(
     ).get("deploymentGroupInfo")
     if not isinstance(info, dict):
         raise ValueError("get-deployment-group returned no deploymentGroupInfo")
+    return info
+
+
+def configured_alarms(info: dict) -> tuple[list[str], str | None]:
+    """The alarm names the group polls, or the reason it polls none."""
     config = info.get("alarmConfiguration")
     if not isinstance(config, dict):
         return [], "has no alarm configuration"
@@ -132,6 +149,35 @@ def configured_alarms(
     if not names:
         return [], "has its alarm configuration enabled with no alarm in it"
     return names, None
+
+
+def config_warning(info: dict, expected: str, where: str) -> tuple[str, str] | None:
+    """(title, message) when the group's deployment config is not `expected`."""
+    actual = info.get("deploymentConfigName")
+    if not expected.strip():
+        return (
+            "The deployment config was not checked",
+            "--expect-config named no deployment config, so the config of "
+            f"deployment group {where} was not compared with the stack's.",
+        )
+    if not isinstance(actual, str) or not actual.strip():
+        return (
+            "The deployment group names no deployment config",
+            f"Deployment group {where} returned no deploymentConfigName; the "
+            f"Fargate stack gives it {_one_line(expected, 100)}. Check the group "
+            "before relying on how this deployment shifts traffic. This deploy "
+            "goes on.",
+        )
+    if actual != expected:
+        return (
+            "The deployment group's config differs from the stack's",
+            f"Deployment group {where} uses {_one_line(actual, 100)}; the Fargate "
+            f"stack gives it {_one_line(expected, 100)}. This deployment shifts "
+            f"traffic the way {_one_line(actual, 100)} does. A stack change was "
+            "merged and not deployed, or the group was changed by hand: deploy "
+            "the Fargate stack. This deploy goes on.",
+        )
+    return None
 
 
 def alarm_states(
@@ -174,6 +220,7 @@ def main(
     parser.add_argument("--stage", required=True, choices=sorted(STAGES))
     parser.add_argument("--expect", action="append", required=True, default=[])
     parser.add_argument("--alarms-overridden", action="store_true")
+    parser.add_argument("--expect-config", default=None)
     try:
         args = parser.parse_args(sys.argv[1:] if argv is None else argv)
     except SystemExit:
@@ -186,7 +233,8 @@ def main(
     where = f"{args.application}/{args.group}"
 
     try:
-        names, why_none = configured_alarms(aws, args.application, args.group)
+        info = read_group(aws, args.application, args.group)
+        names, why_none = configured_alarms(info)
         states = alarm_states(aws, names) if names else {}
     except (AwsError, ValueError, json.JSONDecodeError) as exc:
         print(
@@ -195,6 +243,16 @@ def main(
             "could not read the alarms is not a check that found none firing."
         )
         return UNKNOWN
+
+    if args.expect_config is not None:
+        warning = config_warning(info, args.expect_config, where)
+        if warning is None:
+            print(f"deployment group {where} uses {args.expect_config}")
+        else:
+            # The annotation, and the same words as a plain line in the log.
+            title, message = warning
+            print(f"::warning title={title}::{message}")
+            print(f"warning: {title}. {message}")
 
     if why_none is not None:
         print(

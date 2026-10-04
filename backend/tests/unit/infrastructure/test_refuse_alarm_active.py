@@ -14,7 +14,10 @@ conditions 4(h) and 11:
   alarm's state is still printed;
 * an AWS error, or a state the script does not know, is exit 2;
 * it runs twice in deploy.yml: before the build, and immediately before the
-  snapshot.
+  snapshot;
+* with `--expect-config` (the before-build run only), a group whose
+  `deploymentConfigName` differs from the stack's, or is missing, is a
+  `::warning` annotation and a log line, never a refusal (#795).
 
 No AWS call is made anywhere in this file. The script's `aws` callable is
 answered by real botocore clients under a `Stubber`, so every request is
@@ -95,6 +98,14 @@ def stack_alarms(env: str = ENV) -> list[str]:
 
 BLUE, GREEN = stack_alarms()
 
+#: The deployment config deploy.yml expects the group to use, read from its job
+#: env (pinned to the synthesised DeploymentConfigName by
+#: infrastructure/tests/test_codedeploy_alarms.py), so it is not typed here.
+STACK_CONFIG = _job(DEPLOY)["env"]["CODEDEPLOY_DEPLOYMENT_CONFIG"]
+OTHER_CONFIG = "CodeDeployDefault.ECSAllAtOnce"
+#: Passed as `deployment_config` to leave deploymentConfigName out.
+MISSING = object()
+
 
 # --- botocore Stubber behind the script's `aws` callable -----------------------
 
@@ -137,12 +148,18 @@ class StubbedAws:
     # Queueing ----------------------------------------------------------------
 
     def group(
-        self, config: dict | None, application: str = APPLICATION, group: str = GROUP
+        self,
+        config: dict | None,
+        application: str = APPLICATION,
+        group: str = GROUP,
+        deployment_config: Any = STACK_CONFIG,
     ):
         info: dict[str, Any] = {
             "applicationName": application,
             "deploymentGroupName": group,
         }
+        if deployment_config is not MISSING:
+            info["deploymentConfigName"] = deployment_config
         if config is not None:
             info["alarmConfiguration"] = config
         self.stubs["deploy"].add_response(
@@ -240,7 +257,13 @@ def alarm(name: str, state: str, reason: str = "Threshold Crossed") -> dict:
     }
 
 
-def run(aws: StubbedAws, *extra: str, stage: str = "before-build", expect=None) -> int:
+def run(
+    aws: StubbedAws,
+    *extra: str,
+    stage: str = "before-build",
+    expect=None,
+    expect_config: str | None = None,
+) -> int:
     argv = [
         "--application",
         APPLICATION,
@@ -253,6 +276,8 @@ def run(aws: StubbedAws, *extra: str, stage: str = "before-build", expect=None) 
     ]
     for name in stack_alarms() if expect is None else expect:
         argv += ["--expect", name]
+    if expect_config is not None:
+        argv += ["--expect-config", expect_config]
     return refuse.main([*argv, *extra], aws=aws)
 
 
@@ -264,7 +289,7 @@ def run(aws: StubbedAws, *extra: str, stage: str = "before-build", expect=None) 
 def test_ok_and_insufficient_data_pass_and_are_printed(aws, capsys, state):
     aws.group(config(BLUE, GREEN))
     aws.alarms(sorted([BLUE, GREEN]), [alarm(BLUE, "OK"), alarm(GREEN, state)])
-    assert run(aws) == refuse.OK
+    assert run(aws, expect_config=STACK_CONFIG) == refuse.OK
     out = capsys.readouterr().out
     assert f"{BLUE}: OK since 2026-09-28T14:05:00+00:00" in out
     assert f"{GREEN}: {state} since" in out
@@ -448,6 +473,142 @@ def test_the_script_is_read_only():
         assert flag not in literals, flag
 
 
+# --- the group's deployment config (#795) ---------------------------------------
+
+CONFIG_WARNINGS = {
+    "differs": "::warning title=The deployment group's config differs from the stack's::",
+    "missing": "::warning title=The deployment group names no deployment config::",
+    "unchecked": "::warning title=The deployment config was not checked::",
+}
+
+
+def _warnings(out: str) -> list[str]:
+    return [ln for ln in out.splitlines() if ln.startswith("::warning")]
+
+
+@pytest.mark.regression
+@pytest.mark.parametrize("stage", sorted(refuse.STAGES))
+def test_the_stacks_config_is_logged_and_warns_nothing(aws, capsys, stage):
+    aws.group(config(BLUE, GREEN), deployment_config=STACK_CONFIG)
+    aws.alarms(sorted([BLUE, GREEN]), [alarm(BLUE, "OK"), alarm(GREEN, "OK")])
+    assert run(aws, stage=stage, expect_config=STACK_CONFIG) == refuse.OK
+    out = capsys.readouterr().out
+    assert f"deployment group {APPLICATION}/{GROUP} uses {STACK_CONFIG}" in out
+    assert _warnings(out) == [] and "::error" not in out
+    aws.assert_done()
+
+
+@pytest.mark.regression
+@pytest.mark.parametrize("overridden", [False, True])
+def test_a_different_config_warns_and_does_not_refuse(aws, capsys, overridden):
+    """PE C7: a group the stack change never reached warns; the exit status is
+    the alarms' alone."""
+    aws.group(config(BLUE, GREEN), deployment_config=OTHER_CONFIG)
+    aws.alarms(sorted([BLUE, GREEN]), [alarm(BLUE, "OK"), alarm(GREEN, "OK")])
+    extra = ["--alarms-overridden"] if overridden else []
+    assert run(aws, *extra, expect_config=STACK_CONFIG) == refuse.OK
+    out = capsys.readouterr().out
+    (warning,) = _warnings(out)
+    assert warning.startswith(
+        CONFIG_WARNINGS["differs"]
+        + f"Deployment group {APPLICATION}/{GROUP} uses {OTHER_CONFIG}; the "
+        f"Fargate stack gives it {STACK_CONFIG}."
+    ), warning
+    assert warning.endswith("This deploy goes on."), warning
+    # And as a plain line in the log, not only as an annotation.
+    assert (
+        "warning: The deployment group's config differs from the stack's. "
+        f"Deployment group {APPLICATION}/{GROUP} uses {OTHER_CONFIG}"
+    ) in out
+    assert "::error" not in out
+    aws.assert_done()
+
+
+@pytest.mark.regression
+def test_a_different_config_does_not_change_an_alarm_refusal(aws, capsys):
+    aws.group(config(BLUE, GREEN), deployment_config=OTHER_CONFIG)
+    aws.alarms(sorted([BLUE, GREEN]), [alarm(BLUE, "OK"), alarm(GREEN, "ALARM")])
+    assert run(aws, expect_config=STACK_CONFIG) == refuse.REFUSED
+    out = capsys.readouterr().out
+    assert CONFIG_WARNINGS["differs"] in out
+    assert f"::error title=An alarm is already firing::{GREEN}" in out
+    aws.assert_done()
+
+
+@pytest.mark.regression
+@pytest.mark.parametrize("value", [MISSING, "  "])
+def test_a_missing_config_warns_and_does_not_refuse(aws, capsys, value):
+    aws.group(config(BLUE, GREEN), deployment_config=value)
+    aws.alarms(sorted([BLUE, GREEN]), [alarm(BLUE, "OK"), alarm(GREEN, "OK")])
+    assert run(aws, expect_config=STACK_CONFIG) == refuse.OK
+    out = capsys.readouterr().out
+    (warning,) = _warnings(out)
+    assert warning.startswith(
+        CONFIG_WARNINGS["missing"]
+        + f"Deployment group {APPLICATION}/{GROUP} returned no deploymentConfigName; "
+        f"the Fargate stack gives it {STACK_CONFIG}."
+    ), warning
+    assert "warning: The deployment group names no deployment config. " in out
+    assert "::error" not in out
+    aws.assert_done()
+
+
+@pytest.mark.regression
+@pytest.mark.parametrize("expected", ["", "  "])
+def test_an_empty_expected_config_warns_and_does_not_refuse(aws, capsys, expected):
+    """The job env lost its value: warn that nothing was compared, go on."""
+    aws.group(config(BLUE, GREEN), deployment_config=OTHER_CONFIG)
+    aws.alarms(sorted([BLUE, GREEN]), [alarm(BLUE, "OK"), alarm(GREEN, "OK")])
+    assert run(aws, expect_config=expected) == refuse.OK
+    out = capsys.readouterr().out
+    (warning,) = _warnings(out)
+    assert warning.startswith(CONFIG_WARNINGS["unchecked"]), warning
+    assert "::error" not in out
+    aws.assert_done()
+
+
+@pytest.mark.regression
+def test_without_expect_config_the_config_is_not_compared(aws, capsys):
+    """The before-migration run passes no --expect-config: no second warning."""
+    aws.group(config(BLUE, GREEN), deployment_config=OTHER_CONFIG)
+    aws.alarms(sorted([BLUE, GREEN]), [alarm(BLUE, "OK"), alarm(GREEN, "OK")])
+    assert run(aws, stage="before-migration") == refuse.OK
+    out = capsys.readouterr().out
+    assert _warnings(out) == [] and "deploymentConfig" not in out
+    assert OTHER_CONFIG not in out
+    aws.assert_done()
+
+
+@pytest.mark.regression
+def test_only_the_before_build_run_passes_the_job_envs_config():
+    """Warn once a run (PE C7): the before-build step passes --expect-config
+    from the job env, the before-migration step does not pass it at all, and
+    no step spells a config name itself."""
+    passed = {}
+    for step in _steps(DEPLOY):
+        run_text = step.get("run", "")
+        if "scripts/refuse_alarm_active.py" in run_text:
+            stage = re.search(r"--stage ([\w-]+)", run_text).group(1)
+            passed[stage] = re.findall(r"--expect-config (\S+)", run_text)
+    assert passed == {
+        "before-build": ['"$CODEDEPLOY_DEPLOYMENT_CONFIG"'],
+        "before-migration": [],
+    }, passed
+    assert "CodeDeployDefault." not in json.dumps(
+        [s for s in _steps(DEPLOY) if "refuse_alarm_active" in s.get("run", "")]
+    )
+    literals = {
+        node.value
+        for node in ast.walk(
+            ast.parse((SCRIPTS / "refuse_alarm_active.py").read_text())
+        )
+        if isinstance(node, ast.Constant) and isinstance(node.value, str)
+    }
+    assert not [v for v in literals if "CodeDeployDefault." in v], (
+        "the script spells a deployment config name; it must come from --expect-config"
+    )
+
+
 # --- pinned to the CDK's names --------------------------------------------------
 
 
@@ -473,7 +634,8 @@ def test_the_expected_alarms_are_the_stacks():
             passed = [rendered[var] for var in variables]
             assert passed == stack_alarms(env), (step["name"], passed)
             # Nothing else is passed as an --expect (a literal would dodge this).
-            assert step["run"].count("--expect") == len(variables), step["name"]
+            # (--expect-config is a different flag, counted apart.)
+            assert step["run"].count("--expect ") == len(variables), step["name"]
 
 
 # --- deploy.yml: placement and the step itself --------------------------------------
@@ -505,21 +667,22 @@ def test_it_runs_before_the_build_and_immediately_before_the_snapshot():
         assert "if" not in step and "continue-on-error" not in step
 
 
-def _scenario(state_blue: str, state_green: str) -> list[dict]:
+def _scenario(
+    state_blue: str, state_green: str, deployment_config: Any = STACK_CONFIG
+) -> list[dict]:
+    info: dict[str, Any] = {
+        "applicationName": APPLICATION,
+        "deploymentGroupName": GROUP,
+        "alarmConfiguration": config(BLUE, GREEN),
+    }
+    if deployment_config is not MISSING:
+        info["deploymentConfigName"] = deployment_config
     return [
         rule(
             "deploy get-deployment-group",
             f"--application-name {APPLICATION}",
             f"--deployment-group-name {GROUP}",
-            answers=[
-                {
-                    "deploymentGroupInfo": {
-                        "applicationName": APPLICATION,
-                        "deploymentGroupName": GROUP,
-                        "alarmConfiguration": config(BLUE, GREEN),
-                    }
-                }
-            ],
+            answers=[{"deploymentGroupInfo": info}],
         ),
         rule(
             "cloudwatch describe-alarms",
@@ -589,3 +752,40 @@ def test_the_step_fails_closed_when_aws_fails(runner, name):
     code, out, _, _ = runner.run(DEPLOY, _step(DEPLOY, name))
     assert code == 2, out
     assert "::error title=Could not read the API's alarms::AccessDenied" in out
+
+
+#: (group's deploymentConfigName, the warning the before-build step prints).
+STEP_CONFIG_CASES = {
+    "correct": (STACK_CONFIG, None),
+    "wrong": (OTHER_CONFIG, CONFIG_WARNINGS["differs"]),
+    "missing": (MISSING, CONFIG_WARNINGS["missing"]),
+}
+
+
+@pytest.mark.regression
+@pytest.mark.parametrize("case", sorted(STEP_CONFIG_CASES))
+def test_the_before_build_step_warns_on_the_groups_config_as_written(runner, case):
+    """deploy.yml's own step, against the fake aws: the job env's config
+    reaches the script, and a wrong or missing one warns and exits 0."""
+    deployment_config, expected = STEP_CONFIG_CASES[case]
+    runner.scenario(_scenario("OK", "OK", deployment_config))
+    code, out, _, _ = runner.run(DEPLOY, _step(DEPLOY, STEP_NAMES[0]))
+    assert code == 0, out
+    warnings = _warnings(out)
+    if expected is None:
+        assert warnings == [], out
+        assert f"deployment group {APPLICATION}/{GROUP} uses {STACK_CONFIG}" in out
+    else:
+        assert len(warnings) == 1 and warnings[0].startswith(expected), out
+        assert f"the Fargate stack gives it {STACK_CONFIG}" in warnings[0]
+        assert "\nwarning: " in out
+
+
+@pytest.mark.regression
+@pytest.mark.parametrize("case", ["wrong", "missing"])
+def test_the_before_migration_step_does_not_warn_again(runner, case):
+    deployment_config, _ = STEP_CONFIG_CASES[case]
+    runner.scenario(_scenario("OK", "OK", deployment_config))
+    code, out, _, _ = runner.run(DEPLOY, _step(DEPLOY, STEP_NAMES[1]))
+    assert code == 0, out
+    assert _warnings(out) == [], out
