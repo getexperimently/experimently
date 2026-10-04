@@ -5,9 +5,9 @@ experiment and no flag, as history (#217).
 Such an event has ``experiment_id``, ``feature_flag_id`` and ``variant_id``
 all null, so it counts in no experiment's results. Only an absent key
 (missing, ``null`` or ``""``) records it; a key that is given and not found
-keeps the 404, or the batch item's error. ``/tracking/events`` (by ids),
-``EventService.track_conversion`` and ``track_exposure`` still refuse an
-event with neither id.
+keeps the 404, or the batch item's error. ``/tracking/events`` (by ids) and
+``EventService``'s own writers (``track_conversion`` and the variant-view
+writer) still refuse an event with neither id.
 
 The gates here, with the defect each was run against, are listed in the pull
 request that added them:
@@ -186,13 +186,17 @@ def _get(client, path, **params):
     return response.json()
 
 
-def _strip_volatile(value):
+def _canonical(value):
+    """``value`` without the request-time keys, and with each breakdown's
+    segments sorted: the segment query has no ORDER BY, so their order can
+    change with nothing else changing."""
     if isinstance(value, dict):
-        return {
-            k: _strip_volatile(v) for k, v in value.items() if k not in VOLATILE_KEYS
-        }
+        return {k: _canonical(v) for k, v in value.items() if k not in VOLATILE_KEYS}
     if isinstance(value, list):
-        return [_strip_volatile(v) for v in value]
+        items = [_canonical(v) for v in value]
+        if items and all(isinstance(i, dict) and "segment_value" in i for i in items):
+            items.sort(key=lambda i: str(i["segment_value"]))
+        return items
     return value
 
 
@@ -262,7 +266,29 @@ def _snapshot(client, db_session, exp) -> str:
     }
     assert snapshot["export_variants"], "the export lists no variant of the experiment"
     assert snapshot["export_experiments"], "the export does not list the experiment"
-    return json.dumps(_strip_volatile(snapshot), sort_keys=True, default=str)
+    return json.dumps(_canonical(snapshot), sort_keys=True, default=str)
+
+
+def _leaves(value, path=""):
+    if isinstance(value, dict):
+        for key, item in value.items():
+            yield from _leaves(item, f"{path}.{key}")
+    elif isinstance(value, list):
+        for index, item in enumerate(value):
+            yield from _leaves(item, f"{path}[{index}]")
+    else:
+        yield path, value
+
+
+def _differences(before: str, after: str) -> list:
+    """The snapshot leaves that differ, for the assertion message."""
+    old = dict(_leaves(json.loads(before)))
+    new = dict(_leaves(json.loads(after)))
+    return [
+        f"{path}: {old.get(path)!r} -> {new.get(path)!r}"
+        for path in sorted(set(old) | set(new))
+        if old.get(path) != new.get(path)
+    ][:20]
 
 
 def _send_untagged(client, events) -> None:
@@ -445,7 +471,7 @@ class TestGivenKeysThatAreNotFound:
 
 
 class TestOtherWritersStillRefuse:
-    """``/tracking/events`` (by ids), track_conversion and track_exposure."""
+    """``/tracking/events`` (by ids) and EventService's own writers."""
 
     def test_events_by_ids_refuses_an_event_with_neither_id(
         self, admin_client, db_session, untagged_users
@@ -468,7 +494,7 @@ class TestOtherWritersStillRefuse:
             EventService(db_session).track_conversion(user_id, "purchase")
         assert db_session.query(Event).filter(Event.user_id == user_id).count() == 0
 
-    def test_track_exposure_refuses_an_event_with_neither_id(
+    def test_the_variant_view_writer_refuses_an_event_with_neither_id(
         self, db_session, untagged_users
     ):
         user_id = _user()
@@ -528,7 +554,7 @@ def test_untagged_events_change_no_results_path(
 
     db_session.expire_all()
     after = _snapshot(admin_client, db_session, exp)
-    assert after == before
+    assert after == before, _differences(before, after)
 
 
 def test_global_event_totals_rise_by_exactly_the_untagged_events(
@@ -577,6 +603,7 @@ def test_an_untagged_event_after_assignment_counts_nowhere(
     assert response.status_code == 200, response.text
 
     db_session.expire_all()
-    assert _snapshot(admin_client, db_session, exp) == before
+    after = _snapshot(admin_client, db_session, exp)
+    assert after == before, _differences(before, after)
     assert response.json()["experiment_id"] is None
     assert response.json()["variant_id"] is None
