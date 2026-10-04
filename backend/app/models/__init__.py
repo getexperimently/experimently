@@ -38,6 +38,7 @@ from .experiment import (
 )
 from .feature_flag import FeatureFlag, FeatureFlagOverride, FeatureFlagStatus
 from .global_holdout import GlobalHoldout
+from .holdout_population import HoldoutPopulation
 from .llm_experiment import (
     LLMEvaluation,
     LLMEvaluationMetric,
@@ -170,6 +171,7 @@ __all__ = [
     "FeatureFlagSafetyConfig",
     "FeatureFlagStatus",
     "GlobalHoldout",
+    "HoldoutPopulation",
     "LLMEvaluation",
     "LLMEvaluationMetric",
     "LLMExperiment",
