@@ -28,7 +28,7 @@ import importlib.util
 import re
 
 import pytest
-from fastapi.routing import APIWebSocketRoute
+from fastapi.routing import APIRoute, APIWebSocketRoute
 from fastapi.testclient import TestClient
 
 from backend.app.main import app
@@ -164,7 +164,11 @@ def _http_routes(application):
     for route in application.routes:
         contexts = getattr(route, "effective_route_contexts", None)
         if contexts is None:
-            continue
+            # A route declared on the app itself (``@app.post``) is a plain
+            # APIRoute, with no contexts: it is its own context.
+            if not isinstance(route, APIRoute):
+                continue
+            contexts = (route,)
         for ctx in contexts() if callable(contexts) else contexts:
             for method in getattr(ctx, "methods", None) or ():
                 yield method, ctx.path
@@ -226,7 +230,7 @@ def test_the_inventory_is_exactly_this():
     expected = _expected()
     unclassified = sorted(found - expected.keys())
     gone = sorted(expected.keys() - found)
-    assert not unclassified, f"routes with no class here: {unclassified}"
+    assert not unclassified, f"unclassified: {unclassified}"
     assert not gone, f"classified routes the application no longer serves: {gone}"
     assert {k: expected[k] for k in found} == expected
     assert len(found) == (FULL_COUNT if _full_profile() else CORE_COUNT)
