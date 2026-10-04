@@ -10,6 +10,33 @@ longer applies and release-please can generate this file directly. Until it
 does, entries below 0.2.2 are hand-written and the links in them are the
 reason why.
 
+## [0.21.0](https://github.com/getexperimently/experimently/compare/v0.20.0...v0.21.0) (2026-10-04)
+
+
+### ⚠ BREAKING CHANGES
+
+* **results:** `GET /results/{id}/cuped` uses each user's own events in the `covariate_lookback_days` (default 7) before their assignment as the covariate, instead of their position in the order of assignment, so `theta`, `variance_reduction_pct` and every `adjusted_*` value change for experiments set to `cuped` or `cuped_plus`. `metrics` has one entry per metric and treatment (`variant_id`, `variant_name`) instead of one for the first treatment; intervals use the experiment's `confidence_level`, and `corrected_p_value` applies its `correction_method`. A metric that cannot be computed is listed with `unavailable_reason` instead of being left out. `none` numbers are unchanged apart from the confidence level; `winsorization` on a conversion metric is listed with `winsorization_needs_mean_metric` instead of numbers that clipped every conversion to 0 below a 1% rate.
+
+### Features
+
+* **audit:** automatic changes record who made them: the schedulers, the safety monitor and Cognito sign-in ([#851](https://github.com/getexperimently/experimently/issues/851)) ([010d314](https://github.com/getexperimently/experimently/commit/010d314f39afdf305a25bf878edc2b61971748b9))
+* **audit:** export the audit log as CSV or JSON, and label, filter and download it on the dashboard ([#861](https://github.com/getexperimently/experimently/issues/861)) ([c64ad44](https://github.com/getexperimently/experimently/commit/c64ad44e16073966c877c21db9ab3993bc0f55b2))
+* **deploy:** api_serving.py --explain names why it answered as it did ([#862](https://github.com/getexperimently/experimently/issues/862)) ([23a92c6](https://github.com/getexperimently/experimently/commit/23a92c67ee953a4b7bf5aa997d5fa9da81b54616))
+* **deploy:** the rollback's stop step records what it stopped and how its wait ended ([#864](https://github.com/getexperimently/experimently/issues/864)) ([45523d1](https://github.com/getexperimently/experimently/commit/45523d13dea4dfa90cf54022344e644c53b26d5c))
+* **results:** CUPED adjusts for each user's own events before assignment ([#856](https://github.com/getexperimently/experimently/issues/856)) ([bb2f432](https://github.com/getexperimently/experimently/commit/bb2f4322bdbef82a14294cbd7739dbb197cd8928))
+* **segments:** a segment can be a list of user ids, with routes to add and remove members ([#858](https://github.com/getexperimently/experimently/issues/858)) ([756885e](https://github.com/getexperimently/experimently/commit/756885e9de204cd46bc7fab2b1ba88d685fd9de4))
+
+
+### Bug Fixes
+
+* **interactions:** /scan answers 500 when its database reads fail ([#857](https://github.com/getexperimently/experimently/issues/857)) ([75dd8c1](https://github.com/getexperimently/experimently/commit/75dd8c1717c865fcadaa834cba9da97808c435ad))
+* **warehouse:** read real Snowflake answers (Z offset, SHOW COLUMNS null?) ([#863](https://github.com/getexperimently/experimently/issues/863)) ([3d8a041](https://github.com/getexperimently/experimently/commit/3d8a041ba19210a3d73f1489b03d4b40d902c2b2))
+
+
+### Documentation
+
+* **sdk:** the Python SDK installs from PyPI ([#865](https://github.com/getexperimently/experimently/issues/865)) ([ba721e5](https://github.com/getexperimently/experimently/commit/ba721e5ca1bd12bb38a5bae042d8aae37784484d))
+
 ## [0.20.0](https://github.com/getexperimently/experimently/compare/v0.19.0...v0.20.0) (2026-10-04)
 
 
