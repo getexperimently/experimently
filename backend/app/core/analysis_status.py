@@ -47,8 +47,9 @@ class AnalysisLabel:
 
 
 #: Keyed by the analysis, not the route: ``interactions`` labels
-#: ``GET /interactions/{a}/{b}``, ``cuped`` labels ``GET /results/{id}/cuped``
-#: and ``sequential`` labels ``GET /results/{id}/sequential``.
+#: ``GET /interactions/{a}/{b}``, ``cuped`` labels ``GET /results/{id}/cuped``,
+#: ``sequential`` labels ``GET /results/{id}/sequential`` and ``holdout``
+#: labels ``GET /holdout/{id}/results``.
 ANALYSIS_STATUS: Dict[str, AnalysisLabel] = {
     # #217: the covariate is each user's own events before assignment.  The
     # route itself stays x-stability: beta (its response shape may change).
@@ -74,6 +75,19 @@ ANALYSIS_STATUS: Dict[str, AnalysisLabel] = {
         "level shown by the boundary (1/alpha). alpha_spending is always empty: "
         "the planned-looks (alpha-spending) table is not computed yet. "
         f"{_ISSUES}/232",
+    ),
+    # GET /holdout/{id}/results (#445).  The route appends one sentence when
+    # held-out users were assigned to an experiment while it was active.
+    "holdout": AnalysisLabel(
+        BETA,
+        "Beta: this measures the combined effect of running experiments' "
+        "treatment arms on users first seen while the holdout was active. "
+        "Feature flags and split-URL experiments ignore the holdout: once a "
+        "winner ships behind a flag, users in the holdout get it too, so "
+        "shipped features are not part of this comparison. "
+        "always_valid_ci_lower and always_valid_ci_upper stay valid however "
+        "often you check. "
+        f"{_ISSUES}/445",
     ),
     # Warehouse analysis (#312): proportion and mean results computed from
     # the per-variant counts and sums a warehouse returns, by

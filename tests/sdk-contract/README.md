@@ -121,3 +121,12 @@ Three entries need no toolchain beyond node or a JVM, but get there differently 
 
 Contract details (endpoints, bodies, fan-out rule, smoke output format) live in
 `docs/sdk-guide.md` ("Endpoint contract").
+
+**The fan-out rule includes held-out answers.** An assignment the server answered with
+`"assigned": false` (the global holdout, a mutual exclusion group or targeting turned the user
+away) is cached like any other, and a key-less `track()` fans out to it. Holdout results
+(`GET /api/v1/holdout/{id}/results`, #445) depend on this: they count a held-out user's events
+exactly as everyone else's, so an SDK that dropped `assigned: false` answers from the fan-out would
+leave the holdout group without events and report a difference that is not there. The JavaScript
+SDK pins it (`fans out to an assignment the global holdout answered`, in
+`sdk/js/__tests__/client.test.ts`).
