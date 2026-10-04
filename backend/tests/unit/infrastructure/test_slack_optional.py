@@ -138,6 +138,8 @@ def test_the_summary_says_once_that_slack_was_not_notified(
     # The job's last step, so the line ends the summary; only when unset.
     assert note is steps[-1], note.get("name")
     assert str(note.get("if", "")).strip() == NOTE_IF, note.get("if")
+    # A failed summary write must not turn a green job red.
+    assert note.get("continue-on-error") is True, note.get("name")
     # Run it as the runner would: exactly one line lands in the summary.
     summary = tmp_path / "summary.md"
     summary.write_text("before\n")

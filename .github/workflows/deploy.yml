@@ -1472,5 +1472,7 @@ jobs:
       # missing optional secret is a valid setup, so it is not a warning.
       - name: Say Slack was not notified
         if: always() && env.SLACK_ON != 'true'
+        # A failed summary write must not turn a green job red.
+        continue-on-error: true
         run: |
           printf '\n%s\n' "Slack: not notified -- SLACK_BOT_TOKEN is not set (optional; docs/deployment/README.md)." >> "$GITHUB_STEP_SUMMARY"
