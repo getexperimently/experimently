@@ -871,6 +871,50 @@ def test_segment_create_update_archive(client, fresh, developer):
     assert _values(row)[1] == {"status": "archived"}
 
 
+#: A user id that must never appear in an audit entry (#440, #221 EM C8).
+MEMBER_MARKER = "ae221-member-marker-7f3c"
+
+
+@pytest.mark.regression
+def test_segment_members_add_and_remove_record_counts_only(client, fresh, developer):
+    h = _auth(developer)
+    response = client.post(
+        f"{V1}/segments",
+        json={"name": f"{P} id list", "kind": "id_list"},
+        headers=h,
+    )
+    assert response.status_code == 201, response.text
+    sid = response.json()["id"]
+    ids = [MEMBER_MARKER, f"{MEMBER_MARKER}-2", MEMBER_MARKER]
+
+    w = Written(fresh)
+    response = client.post(f"{V1}/segments/{sid}/members", json={"add": ids}, headers=h)
+    assert response.status_code == 200, response.text
+    row = _one(w, "segment_update", "segment", sid, developer)
+    assert _values(row) == (
+        None,
+        {"added": 2, "already_members": 0, "member_count": 2},
+    )
+    assert row.reason == "members added"
+    assert MEMBER_MARKER not in json.dumps(
+        [row.old_value, row.new_value, row.reason, row.entity_name]
+    )
+
+    w = Written(fresh)
+    response = client.post(
+        f"{V1}/segments/{sid}/members/remove",
+        json={"remove": [MEMBER_MARKER, "ae221-never-added"]},
+        headers=h,
+    )
+    assert response.status_code == 200, response.text
+    row = _one(w, "segment_update", "segment", sid, developer)
+    assert _values(row) == (None, {"removed": 1, "not_members": 1, "member_count": 1})
+    assert row.reason == "members removed"
+    assert MEMBER_MARKER not in json.dumps(
+        [row.old_value, row.new_value, row.reason, row.entity_name]
+    )
+
+
 # --- G3: users and sign-in ----------------------------------------------------
 
 

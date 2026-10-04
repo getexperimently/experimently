@@ -80,6 +80,7 @@ nav:
 - Feature Flags:
   - Creating Feature Flags: feature-flags/create.md
   - Targeting & Rules: Enhanced_Rules_Engine_Reference.md
+  - Segments: guides/segments.md
   - Gradual Rollouts: feature-flags/rollouts.md
   - Safety Monitoring: feature-flags/safety.md
 - A/B Testing & Experiments:

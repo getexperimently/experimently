@@ -47,8 +47,13 @@ pytestmark = [pytest.mark.integration]
 #: This revision, and the core revision it extends.
 REVISION = "d29a479daafe"
 PREVIOUS_CORE_HEAD = "806901fb7735"
-#: The core head of this tree.
-CORE_HEAD = "d29a479daafe"
+#: The core head of this tree: ``37dcb2969766`` (#440), the revision after this
+#: one.
+CORE_HEAD = "37dcb2969766"
+#: Tables that a later core revision's downgrade drops: a downgrade from the
+#: head to this test's target unapplies those revisions too.  ``37dcb2969766``
+#: (#440) drops ``segment_members``.
+LATER_DOWNGRADE_TABLES = {"segment_members"}
 MODULES_HEAD = "modules_0002_warehouse_analysis"
 
 PREVIOUS_ROWS = {
@@ -309,7 +314,10 @@ def test_downgrade_drops_the_table_index_and_columns_and_keeps_the_deactivation(
     assert down.returncode == 0, down.stderr[-3000:]
 
     assert _rows(test_db, scratch_schema) == PREVIOUS_ROWS[CORE]
-    assert _tables(test_db, scratch_schema) == tables_before - {TABLE}
+    assert (
+        _tables(test_db, scratch_schema)
+        == tables_before - {TABLE} - LATER_DOWNGRADE_TABLES
+    )
     assert not NEW_COLUMNS & _columns(test_db, scratch_schema)
     assert _indexdef(test_db, scratch_schema) is None
     with test_db.connect() as conn:

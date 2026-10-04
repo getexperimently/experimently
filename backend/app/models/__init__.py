@@ -79,7 +79,7 @@ from .rollout_schedule import (
 from .safety import FeatureFlagSafetyConfig, SafetyRollbackRecord, SafetySettings
 from .scheduler_run import SchedulerRun
 from .seed_marker import SeedMarker
-from .segment import Segment
+from .segment import Segment, SegmentMember
 from .user import (
     Permission,
     Role,
@@ -201,6 +201,7 @@ __all__ = [
     "SchedulerRun",
     "SeedMarker",
     "Segment",
+    "SegmentMember",
     "TriggerType",
     "User",
     "UserRole",
