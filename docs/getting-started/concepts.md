@@ -232,7 +232,7 @@ Your SDK client is initialized with an API key, which is stored in the database 
 | **Experiment** | A controlled test that assigns users to variants and measures outcomes |
 | **Feature flag** | A runtime configuration key that controls feature visibility |
 | **Guardrail metric** | A secondary metric that must not degrade beyond a threshold |
-| **Holdout** | A group of users excluded from all experiments, used to measure cumulative experiment impact |
+| **Holdout** | A percentage of new users kept out of all experiments, to compare with everyone else. Users already assigned keep their assignments, and feature flags ignore it |
 | **Hypothesis** | A falsifiable statement predicting what will happen in an experiment and why |
 | **MAB** | Multi-Armed Bandit; an adaptive experiment that shifts traffic toward better-performing variants |
 | **MDE** | Minimum Detectable Effect; the smallest improvement worth measuring |

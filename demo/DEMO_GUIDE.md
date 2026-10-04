@@ -238,7 +238,7 @@ See `demo/streampulse/README.md`.
 > Into your own AWS account with the AWS CDK — ECS Fargate, Aurora PostgreSQL, ElastiCache Redis — following docs/self-hosting/cdk.md, then dispatching the Deploy workflow for staging or prod. You own all the infrastructure. It is not one command, and the cost is real (Aurora, NAT gateways, a load balancer); cdk.md says what a teardown leaves behind.
 
 **"Can we run A/B tests across multiple products simultaneously?"**
-> Yes. Mutual Exclusion Groups ensure users are never in conflicting experiments. The Global Holdout group lets you measure the cumulative impact of all experiments combined.
+> Yes. Mutual Exclusion Groups ensure users are never in conflicting experiments. The Global Holdout keeps a percentage of new users out of every experiment, as a baseline to compare with everyone else. Users already assigned keep their assignments, and feature flags ignore it, so shipped features reach the holdout too.
 
 **"What if an experiment goes wrong?"**
 > Safety monitoring watches error rates and latency in real time. If a feature flag causes problems, it auto-rolls back. For experiments, you can pause or stop at any time.

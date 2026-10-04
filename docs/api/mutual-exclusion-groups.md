@@ -1,6 +1,6 @@
 # Mutual Exclusion Groups & Global Holdout
 
-Mutual exclusion groups prevent users from being enrolled in multiple conflicting experiments simultaneously. A global holdout reserves a clean control group that is excluded from all experiments, enabling long-term measurement of cumulative experiment impact.
+Mutual exclusion groups prevent users from being enrolled in multiple conflicting experiments simultaneously. A global holdout keeps a percentage of new users out of every experiment, so you can compare them with everyone else (feature flags ignore it).
 
 The commands on this page run as written against the stack from the
 [Quick Start](../getting-started/quick-start.md), in one terminal, top to bottom. Each one uses
@@ -180,9 +180,9 @@ experiment is kept.
 
 ## Global Holdout
 
-A global holdout reserves a percentage of users from **all** experiments platform-wide. Users in the holdout group see no experiments — they experience the baseline product. This lets you measure the cumulative effect of all experiments running on the platform.
+A global holdout keeps a percentage of new users out of **all** experiments platform-wide. New users in the holdout are not assigned to any experiment: `POST /api/v1/tracking/assign` answers with the control variant. Users who already had an assignment when the holdout was activated keep it. Feature flags ignore the holdout, so flag rollouts and shipped winners reach these users like everyone else.
 
-Only one holdout can be active at a time.
+Only one holdout is meant to be active at a time. Activating a holdout with `PUT /api/v1/holdout/{holdout_id}` deactivates the active one. Creating a holdout with `"is_active": true` does not, so create it inactive and activate it with `PUT`.
 
 ### GET /api/v1/holdout
 
@@ -202,7 +202,7 @@ List all holdout configurations (active and historical). Requires ADMIN role.
 
 ### POST /api/v1/holdout
 
-Create a global holdout. Requires ADMIN role. Creating a new active holdout automatically deactivates the existing one.
+Create a global holdout. Requires ADMIN role. Creating a holdout does not deactivate the active one; activate a new holdout with `PUT` instead (see above).
 
 ```{.bash exec}
 curl -s -X POST localhost:8000/api/v1/holdout \
@@ -231,7 +231,7 @@ The response also carries the holdout's `id`, `description`, `owner_id`, `create
 
 ### PUT /api/v1/holdout/{holdout_id}
 
-Update holdout configuration. Requires ADMIN role.
+Update holdout configuration. Requires ADMIN role. Sending `"is_active": true` deactivates the active holdout and activates this one.
 
 ### GET /api/v1/holdout/check/{user_id}
 
