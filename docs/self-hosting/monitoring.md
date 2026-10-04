@@ -67,6 +67,12 @@ No authentication is required (the endpoint should be restricted at the network 
 | `db_query_duration_seconds` | Histogram | Database query latency |
 | `cache_hits_total` | Counter | Redis cache hits |
 | `cache_misses_total` | Counter | Redis cache misses |
+| `rate_limit_redis_fallback_active` | Gauge | 1 while this process counts rate limits per process because Redis is unavailable; 0 while it counts them in Redis |
+| `rate_limit_redis_fallbacks_total` | Counter | Times this process switched rate limiting from Redis to per-process counting |
+
+Each API process exports its own values: with more than one worker per container, a scrape sees
+the worker that answered it. While `rate_limit_redis_fallback_active` is 1, per-IP rate limits are
+multiplied by the number of API processes; the limiter tries Redis again every 30 s.
 
 ### Sample Prometheus Scrape Config
 

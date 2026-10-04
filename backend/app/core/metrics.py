@@ -75,6 +75,20 @@ rate_limit_rejections_total: Counter = Counter(
     ["endpoint"],
 )
 
+# Whether this process counts rate limits per process because Redis failed
+# (backend.app.middleware.rate_limiter). No labels: the reason and the error
+# text go to the log line only.
+rate_limit_redis_fallback_active: Gauge = Gauge(
+    "rate_limit_redis_fallback_active",
+    "1 while this process counts rate limits per process because Redis is "
+    "unavailable; 0 while it counts them in Redis",
+)
+
+rate_limit_redis_fallbacks_total: Counter = Counter(
+    "rate_limit_redis_fallbacks_total",
+    "Times this process switched rate limiting from Redis to per-process counting",
+)
+
 active_experiments_gauge: Gauge = Gauge(
     "active_experiments_gauge",
     "Number of currently active experiments",
@@ -183,6 +197,17 @@ def record_rate_limit_hit(endpoint: str) -> None:
 def record_rate_limit_rejection(endpoint: str) -> None:
     """Increment the rate-limit rejections counter."""
     rate_limit_rejections_total.labels(endpoint=endpoint).inc()
+
+
+def record_rate_limit_redis_fallback() -> None:
+    """This process switched rate limiting from Redis to per-process counting."""
+    rate_limit_redis_fallback_active.set(1)
+    rate_limit_redis_fallbacks_total.inc()
+
+
+def record_rate_limit_redis_recovery() -> None:
+    """This process counts rate limits in Redis again."""
+    rate_limit_redis_fallback_active.set(0)
 
 
 def record_scheduler_tick(name: str, status: str, duration_seconds: float) -> None:

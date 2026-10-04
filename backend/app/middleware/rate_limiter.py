@@ -3,8 +3,9 @@ Rate limiting middleware for Experimently.
 
 Provides a Redis-backed rate limiter (fixed-window via INCR + EXPIRE) with
 automatic fallback to an in-memory sliding-window limiter when Redis is
-unavailable.  The middleware attaches standard rate-limit headers to every
-response and records Prometheus counters for hits and rejections.
+unavailable; Redis is tried again every ``REDIS_RETRY_SECONDS``.  The
+middleware attaches standard rate-limit headers to every response and records
+Prometheus counters for hits and rejections.
 """
 
 import logging
@@ -19,7 +20,12 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import Response
 from starlette.types import ASGIApp
 
+from backend.app.core.logger import get_logger
+
 logger = logging.getLogger(__name__)
+#: The fallback transitions log through structlog so their keyword fields
+#: survive the production JSON renderer (stdlib ``extra=`` fields do not).
+log = get_logger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -71,54 +77,163 @@ class SlidingWindowRateLimiter:
 # ---------------------------------------------------------------------------
 
 
+#: How long the limiter counts per process after a Redis error before it tries
+#: Redis again. A constant, not a setting.
+REDIS_RETRY_SECONDS = 30.0
+
+#: Log messages for the fallback transitions. Every line also carries a
+#: ``rate_limiter`` field: ``per_process`` or ``redis``.
+FALLBACK_MESSAGE = (
+    "rate limiter: Redis unavailable, counting requests per process; "
+    f"retrying Redis every {int(REDIS_RETRY_SECONDS)} s"
+)
+STILL_UNAVAILABLE_MESSAGE = "rate limiter: Redis still unavailable"
+RECOVERED_MESSAGE = "rate limiter: Redis reachable again, counting requests in Redis"
+
+
 class RedisRateLimiter:
     """
     Fixed-window rate limiter backed by Redis ``INCR`` + ``EXPIRE``.
 
-    On any Redis error the limiter transparently falls back to the
-    in-memory :class:`SlidingWindowRateLimiter` so that the application
-    keeps serving traffic even when Redis is temporarily unreachable.
+    On any Redis error the limiter falls back to the in-memory
+    :class:`SlidingWindowRateLimiter` so that the application keeps serving
+    traffic when Redis is unreachable. While it does, the count is per process,
+    so a per-IP limit is multiplied by the number of API processes.
+
+    The fallback lasts :data:`REDIS_RETRY_SECONDS`. Inside that window no
+    request touches Redis. The first request after it is the retry: it runs the
+    real pipeline on the existing client (redis-py reconnects the pool itself),
+    or builds and pings a client when the first connect failed. Success returns
+    the limiter to Redis; another error starts a new window. A failed first
+    connect at startup is simply the first entry into the fallback.
+
+    How long one retry can hold the event loop. The client is built with
+    ``retry=Retry(NoBackoff(), 0)``: redis-py's default of ten retries with
+    backoff turns one failure into 15-25 s of blocking, which a retry every
+    30 s would repeat. With retries off:
+
+    * Redis unreachable: one connect timeout, 2 s.
+    * Redis slow but answering: up to 1 s per command (the socket timeout).
+    * The no-client branch (connect, ping, pipeline, expire in a row): up to
+      about 5 s at the timeout edges.
+    * DNS resolution and the TLS handshake are not bounded by either timeout.
+
+    Precondition for "one retry per window per process": ``is_allowed`` is
+    synchronous with no ``await`` between the window check and the re-arm, the
+    middleware calls it on the event loop thread, and there is one instance
+    per process. If the call ever moves to a thread or becomes async, the
+    window check and the re-arm need a lock (or an equivalent guarantee).
+
+    Counts at a switch are not carried over. Redis to memory: the in-memory
+    window holds only what this process recorded there earlier. Memory to
+    Redis: Redis keys keep their TTLs, so counting resumes from what survived.
+    Around a transition a client can get up to one Redis budget plus one
+    in-memory budget per process in a window.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, clock: Callable[[], float] = time.monotonic) -> None:
         # The connection parameters (REDIS_HOST/PORT/PASSWORD/DB/SSL) are read
         # from the settings by create_redis_client on first use.
         self._redis_client: Optional[object] = None
         self._redis_available: bool = True
+        #: While ``_redis_available`` is False, Redis is not touched before this.
+        self._retry_at: float = 0.0
+        #: When this fallback began (``clock()``), for ``fallback_seconds``.
+        self._fallback_since: float = 0.0
+        self._clock = clock
         self._fallback = SlidingWindowRateLimiter()
 
     def _get_redis(self):
-        """Lazy-connect to Redis on first call."""
-        if self._redis_client is None and self._redis_available:
+        """The Redis client, connecting (and pinging) if there is none yet.
+
+        Returns None when the connect fails; the failure starts the fallback.
+        """
+        if self._redis_client is None:
             try:
+                from redis.backoff import NoBackoff
+                from redis.retry import Retry
+
                 from backend.app.core.redis_client import create_redis_client
 
-                self._redis_client = create_redis_client(
+                client = create_redis_client(
                     socket_connect_timeout=2,
                     socket_timeout=1,
                     decode_responses=True,
+                    # No client retries: see the class docstring.
+                    retry=Retry(NoBackoff(), 0),
                 )
                 # Test connectivity
-                self._redis_client.ping()
-                self._redis_available = True
-                logger.info("Rate limiter connected to Redis")
+                client.ping()
             except Exception as exc:
-                logger.warning(
-                    "Rate limiter Redis unavailable, using in-memory fallback: %s", exc
-                )
-                self._redis_client = None
-                self._redis_available = False
+                self._enter_fallback(exc)
+                return None
+            self._redis_client = client
+            logger.info("Rate limiter connected to Redis")
         return self._redis_client
+
+    def _enter_fallback(self, exc: BaseException) -> None:
+        """Count per process until ``REDIS_RETRY_SECONDS`` from now.
+
+        Logs a warning on the switch from Redis, and only debug for a failed
+        retry, so an outage is one warning per process however long it lasts.
+        ``detail`` (the exception text, which can name the Redis host) goes to
+        the log only, truncated, and never into a metric or a response.
+        """
+        was_available = self._redis_available
+        now = self._clock()
+        self._redis_available = False
+        self._retry_at = now + REDIS_RETRY_SECONDS
+        if was_available:
+            self._fallback_since = now
+            log.warning(
+                FALLBACK_MESSAGE,
+                rate_limiter="per_process",
+                reason=type(exc).__name__,
+                detail=str(exc)[:200],
+                retry_seconds=int(REDIS_RETRY_SECONDS),
+            )
+            try:
+                from backend.app.core.metrics import record_rate_limit_redis_fallback
+
+                record_rate_limit_redis_fallback()
+            except Exception:
+                pass  # Metrics are best-effort
+        else:
+            log.debug(
+                STILL_UNAVAILABLE_MESSAGE,
+                rate_limiter="per_process",
+                reason=type(exc).__name__,
+                fallback_seconds=round(now - self._fallback_since, 1),
+            )
+
+    def _leave_fallback(self) -> None:
+        """Redis answered a retry: count in Redis again."""
+        self._redis_available = True
+        log.warning(
+            RECOVERED_MESSAGE,
+            rate_limiter="redis",
+            fallback_seconds=round(self._clock() - self._fallback_since, 1),
+        )
+        try:
+            from backend.app.core.metrics import record_rate_limit_redis_recovery
+
+            record_rate_limit_redis_recovery()
+        except Exception:
+            pass  # Metrics are best-effort
 
     def is_allowed(self, key: str, limit: int, window_seconds: int) -> Tuple[bool, int]:
         """
         Check whether a request identified by *key* is within the rate limit.
 
-        Uses Redis ``INCR`` with a fixed-window TTL.  Falls back to the
-        in-memory limiter on any Redis error.
+        Uses Redis ``INCR`` with a fixed-window TTL. Falls back to the
+        in-memory limiter on any Redis error, and inside the retry window
+        after one.
         """
+        if not self._redis_available and self._clock() < self._retry_at:
+            return self._fallback.is_allowed(key, limit, window_seconds)
+
         client = self._get_redis()
-        if client is None or not self._redis_available:
+        if client is None:
             return self._fallback.is_allowed(key, limit, window_seconds)
 
         redis_key = f"ratelimit:{key}"
@@ -134,17 +249,18 @@ class RedisRateLimiter:
             # First request in this window — set expiry
             if ttl == -1:
                 client.expire(redis_key, window_seconds)
-
-            if current_count > limit:
-                return False, 0
-
-            remaining = limit - current_count
-            return True, remaining
-
         except Exception as exc:
-            logger.warning("Redis rate-limit error, falling back to in-memory: %s", exc)
-            self._redis_available = False
+            self._enter_fallback(exc)
             return self._fallback.is_allowed(key, limit, window_seconds)
+
+        if not self._redis_available:
+            self._leave_fallback()
+
+        if current_count > limit:
+            return False, 0
+
+        remaining = limit - current_count
+        return True, remaining
 
 
 # ---------------------------------------------------------------------------

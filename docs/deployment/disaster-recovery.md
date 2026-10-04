@@ -329,7 +329,9 @@ If restore does not complete within 30 minutes: escalate to Engineering Lead and
 
 ## Scenario 5: ElastiCache Redis Failure
 
-**Detection:** Application logs show Redis connection errors. `/health` reports
+**Detection:** Each API task logs `rate limiter: Redis unavailable, counting requests per process`
+once, at the first request after Redis fails, and `rate limiter: Redis reachable again` within
+30 s of Redis recovering (query below). `/health` reports
 `checks.redis.status` as `unhealthy` but stays ready (200) unless `REDIS_REQUIRED=true`. The
 Redis alarms are one per node, `RedisHighCPU-001-$ENV` (and `-002-`, `-003-` in prod), on
 `EngineCPUUtilization` for `experimentation-redis-$ENV-redis-001` and its siblings. They treat
@@ -340,10 +342,25 @@ missing data as breaching, so a node that stops publishing metrics puts its alar
 ### Application Behavior During Redis Failure
 
 The API is designed to keep serving without Redis. Two parts of that are pinned by tests:
-- **Rate limiting** falls back to an in-memory limiter in each task
+- **Rate limiting** falls back to per-task counts, so per-IP limits are multiplied by the running
+  task count, and retries Redis every 30 s
   (`backend/tests/unit/middleware/test_rate_limiter.py`).
 - **Readiness** does not fail unless `REDIS_REQUIRED=true`
   (`backend/tests/unit/core/test_health_endpoints.py`).
+
+Which tasks are counting per process, and since when (CloudWatch Logs Insights on
+`/ecs/experimentation-backend-$ENV`):
+
+```text
+fields @timestamp, @logStream, rate_limiter, reason, fallback_seconds, event
+| filter logger = "backend.app.middleware.rate_limiter" and ispresent(rate_limiter)
+| sort @timestamp asc
+```
+
+`rate_limiter` is `per_process` on the line that starts the fallback and `redis` on the line that
+ends it; `fallback_seconds` on the second says how long it lasted. `reason` and `detail` name the
+error, which is the place to look when a wrong `REDIS_HOST` or a TLS mismatch keeps a task in the
+fallback after every deploy.
 
 ### Immediate Response
 

@@ -51,6 +51,19 @@ fields @timestamp
 | sort @timestamp asc
 ```
 
+### Rate Limiter Switching to Per-Process Counts
+
+```text
+fields @timestamp, @logStream, rate_limiter, reason, fallback_seconds, event
+| filter logger = "backend.app.middleware.rate_limiter" and ispresent(rate_limiter)
+| sort @timestamp asc
+```
+
+*When Redis fails, each API process logs one warning with `rate_limiter = "per_process"` and
+counts rate limits on its own, so per-IP limits are multiplied by the running task count. It tries
+Redis again every 30 s and logs one warning with `rate_limiter = "redis"` when Redis answers.
+Failed retries are logged at debug level only.*
+
 ## Performance Analysis Queries
 
 ### High Latency Requests
