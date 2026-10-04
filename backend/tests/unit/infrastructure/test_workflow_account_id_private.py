@@ -183,7 +183,17 @@ _NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 #: or a case arm's `)`.
 _ASSIGNED = re.compile(r"(?:^|(?<=[\s)]))([A-Za-z_][A-Za-z0-9_]*)=")
 _PRINTS = re.compile(r"(?:^|[;&|(){}]|\bthen|\belse|\bdo)\s*(?:echo|printf)\b")
-_READ = re.compile(r"^\s*read\s+(?:-r\s+)?((?:[A-Za-z_][A-Za-z0-9_]*\s*)+)<<<(.*)$")
+#: The names are possessive (`*+`): a name cannot be split into two, so a
+#: long `read` line that does not match fails at once instead of trying every
+#: split (nine names took minutes). The set of lines matched is unchanged.
+_READ = re.compile(r"^\s*read\s+(?:-r\s+)?((?:[A-Za-z_][A-Za-z0-9_]*+\s*)+)<<<(.*)$")
+#: `read -r A B <"$file"`: what the file holds is not known here, so every
+#: name it sets is tainted.
+_READ_FILE = re.compile(
+    r"^\s*read\s+(?:-r\s+)?((?:[A-Za-z_][A-Za-z0-9_]*+\s*)+)<(?!<)\s*(\S+)\s*$"
+)
+#: The here-string of one variable: `<<<"$out"`, `<<<"${out}"`, `<<<$out`.
+_ONE_VARIABLE = re.compile(r'^\s*"?\$\{?([A-Za-z_][A-Za-z0-9_]*)\}?"?\s*$')
 _SUMMARY_END = re.compile(r'^\}\s*>>\s*"?\$\{?GITHUB_STEP_SUMMARY\}?"?\s*$')
 _ANNOTATION = re.compile(r"::(error|warning|notice)\b")
 
@@ -304,22 +314,43 @@ def _value_taint(value: str, tainted: set[str]) -> bool:
     return bool(unstripped(_without_substitutions(value), tainted))
 
 
-def _read_taint(source: str, count: int, tainted: set[str]) -> list[bool]:
-    """Per name of `read -r A B C <<<"$(aws ... --query '...[x, y, z]')"`."""
+def _query_fields(source: str) -> list[bool] | None:
+    """Per field of a command substitution's `--query '...[x, y, z]'`, whether
+    it reads a sensitive source; None when ``source`` asks for no such list."""
+    if "$(" not in source:
+        return None
     fields = re.search(r"\.\[(.*)\]", source)
-    if fields:
-        depth, parts, current = 0, [], ""
-        for char in fields.group(1):
-            depth += char in "[("
-            depth -= char in "])"
-            if char == "," and depth == 0:
-                parts.append(current)
-                current = ""
-            else:
-                current += char
-        parts.append(current)
-        if len(parts) == count:
-            return [bool(SENSITIVE_SOURCE.search(part)) for part in parts]
+    if not fields:
+        return None
+    depth, parts, current = 0, [], ""
+    for char in fields.group(1):
+        depth += char in "[("
+        depth -= char in "])"
+        if char == "," and depth == 0:
+            parts.append(current)
+            current = ""
+        else:
+            current += char
+    parts.append(current)
+    return [bool(SENSITIVE_SOURCE.search(part)) for part in parts]
+
+
+def _read_taint(
+    source: str,
+    count: int,
+    tainted: set[str],
+    fields_of: dict[str, list[bool]] | None = None,
+) -> list[bool]:
+    """Per name of `read -r A B C <<<"$(aws ... --query '...[x, y, z]')"`, and
+    of `out="$(aws ... --query '...[x, y, z]')" ...; read -r A B C <<<"$out"`
+    (``fields_of`` holds each variable's fields, from its assignment): the
+    second form is the one that can see the aws exit status (#816)."""
+    one = _ONE_VARIABLE.match(source)
+    if one and fields_of and len(fields_of.get(one.group(1), [])) == count:
+        return list(fields_of[one.group(1)])
+    fields = _query_fields(source)
+    if fields is not None and len(fields) == count:
+        return fields
     return [_value_taint(source, tainted)] * count
 
 
@@ -334,6 +365,8 @@ def leaks(script: str, env: dict[str, Any]) -> list[str]:
     it, because GITHUB_ENV exports reach every later step undeclared.
     """
     tainted = _step_taint(env)
+    # A variable assigned a `$(... --query '...[x, y, z]')`: its fields.
+    fields_of: dict[str, list[bool]] = {}
     found: list[str] = []
     in_summary = False
     lines = _logical_lines(script)
@@ -345,12 +378,15 @@ def leaks(script: str, env: dict[str, Any]) -> list[str]:
                 tainted.add(name)
         prints = bool(_PRINTS.search(stripped))
         read = _READ.match(line)
+        read_file = _READ_FILE.match(line)
         if read:
             names = read.group(1).split()
             for name, verdict in zip(
-                names, _read_taint(read.group(2), len(names), tainted)
+                names, _read_taint(read.group(2), len(names), tainted, fields_of)
             ):
                 (tainted.add if verdict else tainted.discard)(name)
+        elif read_file:
+            tainted.update(read_file.group(1).split())
         elif not prints:
             # `a="$x" b="$y"`, `1) why="..." ;;`: each name gets the verdict
             # of its own value, which runs to the next assignment.
@@ -362,6 +398,11 @@ def leaks(script: str, env: dict[str, Any]) -> list[str]:
                     tainted.add(match.group(1))
                 else:
                     tainted.discard(match.group(1))
+                fields = _query_fields(value)
+                if fields is None:
+                    fields_of.pop(match.group(1), None)
+                else:
+                    fields_of[match.group(1)] = fields
         if stripped == "{":
             # A group is a summary only when it is redirected to one.
             closing = next(
@@ -485,6 +526,71 @@ def test_no_summary_or_annotation_prints_an_arn_an_image_or_the_account(path):
             {"REF": "${{ steps.x.outputs.image }}"},
             ["REF"],
         ),
+        # #816: the aws call's own assignment, so its exit status is seen,
+        # then a here-string of it. Each name keeps its own field's verdict.
+        (
+            'out="$(aws ecs describe-services --query "services[0].'
+            "[taskSets[?status=='PRIMARY'] | [0].taskDefinition, "
+            'runningCount]" 2>"$e")" || rc=$?\n'
+            'read -r serving running <<<"$out"\n'
+            "printf '%s\\n' \"::error::$running running\"\n"
+            "printf '%s\\n' \"::error::serving $serving\"",
+            {},
+            ["serving"],
+        ),
+        (
+            'out="$(aws ecs describe-services --query "services[0].'
+            "[taskSets[?status=='PRIMARY'] | [0].taskDefinition, "
+            'runningCount]")" || rc=$?\n'
+            'read -r serving running <<<"${out}"\n'
+            "printf '%s\\n' \"::error::${running} on ${serving##*/}\"",
+            {},
+            [],
+        ),
+        # The variable itself still holds the ARN.
+        (
+            'out="$(aws ecs describe-services --query "services[0].'
+            "[taskSets[?status=='PRIMARY'] | [0].taskDefinition, "
+            'runningCount]")"\n'
+            "printf '%s\\n' \"::error::got $out\"",
+            {},
+            ["out"],
+        ),
+        # A variable with no field list is judged whole, as before.
+        (
+            'out="$(aws ecs describe-services --query taskDefinition)"\n'
+            'read -r a b <<<"$out"\n'
+            "printf '%s\\n' \"::error::$b\"",
+            {},
+            ["b"],
+        ),
+        # Reassigned without a field list: the old fields are forgotten.
+        (
+            'out="$(aws ecs describe-services --query "services[0].'
+            '[runningCount, desiredCount]")"\n'
+            'out="$(aws ecs describe-services --query taskDefinition)"\n'
+            'read -r a b <<<"$out"\n'
+            "printf '%s\\n' \"::error::$a\"",
+            {},
+            ["a"],
+        ),
+        # Read from a file: what it holds is not known here, so every name
+        # is tainted (before #816 this shape was not seen at all).
+        (
+            'aws ecs describe-services --query "services[0].'
+            "[taskSets[?status=='PRIMARY'] | [0].taskDefinition, "
+            'runningCount]" >"$f"\n'
+            'read -r serving running <"$f"\n'
+            "printf '%s\\n' \"::error::serving $serving\"",
+            {},
+            ["serving"],
+        ),
+        (
+            'read -r serving running <"$f"\n'
+            "printf '%s\\n' \"::error::serving ${serving##*/}\"",
+            {},
+            [],
+        ),
     ],
     ids=[
         "bare-arn",
@@ -503,6 +609,13 @@ def test_no_summary_or_annotation_prints_an_arn_an_image_or_the_account(path):
         "an-output-group-is-not-a-summary",
         "a-case-arm-assignment",
         "an-echo-in-a-case-arm",
+        "read-from-a-variable-taints-by-position",
+        "read-from-a-variable-stripped",
+        "the-variable-itself-is-tainted",
+        "read-from-a-variable-with-no-fields-is-judged-whole",
+        "a-reassignment-forgets-the-fields",
+        "read-from-a-file-taints-every-name",
+        "read-from-a-file-stripped",
     ],
 )
 def test_the_leak_check_itself(script, env, expected):
