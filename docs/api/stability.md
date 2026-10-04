@@ -77,6 +77,8 @@ are `ga` (#217), and the route stays `x-stability: beta` while its response is
 still being shaped (mean metrics, #439);
 `/interactions/scan` stays stable, and its items keep their shape with the
 not-computed sub-results `null`.
+`GET /api/v1/holdout/{holdout_id}/results` is beta in both senses (#445): its
+numbers carry `analysis_status: "beta"` and the route is `x-stability: beta`.
 `POST /api/v1/results/{id}/post-stratification` is beta as well (#443): it
 answers 501 until it computes its estimate from an experiment's own
 assignments and events, rather than report numbers that do not.

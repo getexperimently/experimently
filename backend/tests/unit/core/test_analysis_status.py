@@ -51,11 +51,17 @@ EXPECTED_STATUS = {
     "interactions": "beta",
     "novelty": "beta",
     "sequential": "beta",
+    "holdout": "beta",
     "warehouse_proportion": "ga",
     "warehouse_mean": "ga",
 }
 
-EXPECTED_ISSUE = {"interactions": 219, "novelty": 219, "sequential": 232}
+EXPECTED_ISSUE = {
+    "interactions": 219,
+    "novelty": 219,
+    "sequential": 232,
+    "holdout": 445,
+}
 
 
 # ---------------------------------------------------------------------------
@@ -164,6 +170,7 @@ BETA_OPERATIONS = {
     ("get", "/api/v1/results/{experiment_id}/cuped"),
     ("get", "/api/v1/interactions/{exp_a_id}/{exp_b_id}"),
     ("get", "/api/v1/interactions/{exp_a_id}/{exp_b_id}/novelty"),
+    ("get", "/api/v1/holdout/{holdout_id}/results"),
 }
 
 STILL_STABLE = {

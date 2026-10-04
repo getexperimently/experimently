@@ -339,7 +339,7 @@ The following capabilities were added after the initial platform release. See th
 | Component | Description | Doc |
 |-----------|-------------|-----|
 | Mutual Exclusion Groups (EP-022) | Consistent-hashing traffic partitioning to prevent cross-experiment contamination | [mutual-exclusion-groups.md](../api/mutual-exclusion-groups.md) |
-| Global Holdout (EP-022) | Platform-wide clean control group for cumulative impact measurement | [mutual-exclusion-groups.md](../api/mutual-exclusion-groups.md) |
+| Global Holdout (EP-022) | Keeps a percentage of new users out of every experiment; `GET /api/v1/holdout/{id}/results` (beta) compares them with everyone else first seen while it was active. Feature flags and split-URL experiments ignore it. | [mutual-exclusion-groups.md](../api/mutual-exclusion-groups.md) |
 
 ### Data & Integrations
 

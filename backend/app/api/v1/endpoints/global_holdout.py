@@ -15,6 +15,11 @@ active one.  Refused: a different ``holdout_percentage`` once the holdout has
 been active (422), restarting an ended holdout (422), and an activation that
 races another one (409).
     GET    /api/v1/holdout/check/{uid} — check if user is in holdout
+    GET    /api/v1/holdout/{id}/results — holdout vs everyone else (beta)
+
+The results route is declared after ``/check/{user_id}``: declared first, it
+would take ``GET /holdout/check/results`` and answer 422 for a user called
+``results``.
 """
 
 import logging
@@ -34,6 +39,7 @@ from backend.app.schemas.global_holdout import (
     GlobalHoldoutResponse,
     GlobalHoldoutUpdate,
     HoldoutCheckResponse,
+    HoldoutResultsResponse,
 )
 from backend.app.services.audit_service import (
     AuditService,
@@ -47,6 +53,7 @@ from backend.app.services.global_holdout_service import (
     HoldoutEnded,
     HoldoutPercentageLocked,
 )
+from backend.app.services.holdout_results import holdout_results
 
 logger = logging.getLogger(__name__)
 
@@ -342,3 +349,55 @@ def check_user_holdout(
         holdout_percentage=holdout_percentage,
         bucket=bucket,
     )
+
+
+# ---------------------------------------------------------------------------
+# Results (beta).  Declared after /check/{user_id}; see the module docstring.
+# ---------------------------------------------------------------------------
+
+
+@router.get(
+    "/{holdout_id}/results",
+    response_model=HoldoutResultsResponse,
+    summary="Beta: results for a global holdout",
+    description=(
+        "For one event name, the share of users who sent at least one "
+        "matching event: the users the holdout kept out against everyone else "
+        "first seen while it was active. Every user recorded is in their "
+        "group, users refused by targeting or mutual exclusion included; a "
+        "user with an assignment before they were first seen is in neither. "
+        "An event counts when its own time and the time the server received "
+        "it are both between the user's first-seen time and window_end, so "
+        "events received after a holdout ends never change its results. Each "
+        "group needs 100 users. Any role that can read experiment results can "
+        "read this."
+    ),
+    tags=["Global Holdout"],
+    openapi_extra={"x-stability": "beta"},
+)
+def get_holdout_results(
+    holdout_id: UUID,
+    metric: str = Query(
+        ...,
+        min_length=1,
+        max_length=255,
+        description="The event name to count, matched exactly, e.g. purchase.",
+    ),
+    db: Session = Depends(deps.get_db),
+    current_user: User = Depends(deps.get_current_active_user),
+) -> HoldoutResultsResponse:
+    """Compare the holdout's users with everyone else for ``metric``."""
+    if not current_user.is_superuser and not check_permission(
+        current_user, ResourceType.EXPERIMENT, Action.READ
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not enough permissions to read holdout results",
+        )
+    holdout = GlobalHoldoutService(db).get_holdout(holdout_id)
+    if not holdout:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Holdout {holdout_id} not found",
+        )
+    return HoldoutResultsResponse(**holdout_results(db, holdout, metric))

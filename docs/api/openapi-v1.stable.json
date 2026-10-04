@@ -5758,6 +5758,297 @@
         "title": "HoldoutCheckResponse",
         "type": "object"
       },
+      "HoldoutDifference": {
+        "description": "Not in holdout minus in holdout: positive means the experiments raised it.",
+        "properties": {
+          "absolute": {
+            "description": "not_in_holdout conversion_rate minus in_holdout conversion_rate. Positive means the running experiments raised the metric.",
+            "title": "Absolute",
+            "type": "number"
+          },
+          "always_valid_ci_lower": {
+            "description": "Lower bound of the 95% confidence sequence for absolute (mSPRT, tau squared 0.001); it stays valid however often you check.",
+            "title": "Always Valid Ci Lower",
+            "type": "number"
+          },
+          "always_valid_ci_upper": {
+            "description": "Upper bound of the 95% confidence sequence for absolute (mSPRT, tau squared 0.001); it stays valid however often you check.",
+            "title": "Always Valid Ci Upper",
+            "type": "number"
+          },
+          "ci_lower": {
+            "description": "Lower bound of the 95% interval for absolute (Agresti-Caffo), for reading once. It is computed separately from p_value and can disagree with is_significant near the boundary.",
+            "title": "Ci Lower",
+            "type": "number"
+          },
+          "ci_upper": {
+            "description": "Upper bound of the 95% interval for absolute (Agresti-Caffo), for reading once. It is computed separately from p_value and can disagree with is_significant near the boundary.",
+            "title": "Ci Upper",
+            "type": "number"
+          },
+          "is_significant": {
+            "description": "p_value < 0.05, from Fisher's exact test. It follows p_value, not the interval: near the boundary the interval can include 0 while this is true, or exclude 0 while it is false.",
+            "title": "Is Significant",
+            "type": "boolean"
+          },
+          "p_value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Fisher's exact test, the test /results uses. The interval is computed separately and can disagree with it near the boundary.",
+            "title": "P Value"
+          },
+          "relative_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "absolute as a percentage of the in_holdout rate; null when that rate is 0.",
+            "title": "Relative Pct"
+          }
+        },
+        "required": [
+          "absolute",
+          "ci_lower",
+          "ci_upper",
+          "is_significant",
+          "always_valid_ci_lower",
+          "always_valid_ci_upper"
+        ],
+        "title": "HoldoutDifference",
+        "type": "object"
+      },
+      "HoldoutGroup": {
+        "description": "One arm of a holdout's results.",
+        "properties": {
+          "conversion_rate": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "conversions / users, from 0 to 1; null when users is 0.",
+            "title": "Conversion Rate"
+          },
+          "conversions": {
+            "description": "Users who sent at least one matching event in their window.",
+            "minimum": 0,
+            "title": "Conversions",
+            "type": "integer"
+          },
+          "excluded_users": {
+            "description": "Users of this group left out of both groups because they had an experiment assignment before they were first seen. About the holdout percentage of excluded_users is expected here.",
+            "minimum": 0,
+            "title": "Excluded Users",
+            "type": "integer"
+          },
+          "group": {
+            "description": "in_holdout: users the holdout kept out of every experiment. not_in_holdout: everyone else first seen while it was active.",
+            "enum": [
+              "in_holdout",
+              "not_in_holdout"
+            ],
+            "title": "Group",
+            "type": "string"
+          },
+          "label": {
+            "description": "'In holdout' or 'Not in holdout'.",
+            "title": "Label",
+            "type": "string"
+          },
+          "users": {
+            "description": "Users analysed in this group: first seen while the holdout was active, less the excluded ones. Users refused by targeting or mutual exclusion are in their group.",
+            "minimum": 0,
+            "title": "Users",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "group",
+          "label",
+          "users",
+          "conversions",
+          "excluded_users"
+        ],
+        "title": "HoldoutGroup",
+        "type": "object"
+      },
+      "HoldoutResultsResponse": {
+        "description": "A holdout's users against everyone else, for one metric (beta).",
+        "properties": {
+          "activated_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "UTC.",
+            "title": "Activated At"
+          },
+          "analysis_notice": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "What the beta numbers do and do not measure.",
+            "title": "Analysis Notice"
+          },
+          "analysis_status": {
+            "description": "Whether the numbers can be relied on: 'beta'.",
+            "enum": [
+              "ga",
+              "beta"
+            ],
+            "title": "Analysis Status",
+            "type": "string"
+          },
+          "deactivated_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "UTC.",
+            "title": "Deactivated At"
+          },
+          "difference": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/HoldoutDifference"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "excluded_users": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Users left out of both groups because they had an experiment assignment before they were first seen; null when the holdout cannot be measured.",
+            "title": "Excluded Users"
+          },
+          "groups": {
+            "description": "Empty when the holdout cannot be measured; otherwise in_holdout, then not_in_holdout.",
+            "items": {
+              "$ref": "#/components/schemas/HoldoutGroup"
+            },
+            "title": "Groups",
+            "type": "array"
+          },
+          "holdout_id": {
+            "format": "uuid",
+            "title": "Holdout Id",
+            "type": "string"
+          },
+          "holdout_name": {
+            "title": "Holdout Name",
+            "type": "string"
+          },
+          "holdout_percentage": {
+            "title": "Holdout Percentage",
+            "type": "integer"
+          },
+          "holdout_users_with_assignments": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Users in the holdout group assigned to an experiment inside their window. 0 normally; more after a rollback to a release that does not record holdouts, and analysis_notice then says so. Null when the holdout cannot be measured.",
+            "title": "Holdout Users With Assignments"
+          },
+          "message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Present exactly when unavailable_reason is set.",
+            "title": "Message"
+          },
+          "metric": {
+            "description": "The event name, as sent.",
+            "title": "Metric",
+            "type": "string"
+          },
+          "unavailable_reason": {
+            "anyOf": [
+              {
+                "enum": [
+                  "activated_before_measurement",
+                  "not_activated",
+                  "too_few_users",
+                  "no_events"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Why difference is null; null exactly when difference is set. activated_before_measurement: the holdout was active before its users were recorded. not_activated: it has not been activated since. too_few_users: a group has fewer than 100 users. no_events: neither group sent a matching event.",
+            "title": "Unavailable Reason"
+          },
+          "window_end": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "End of every user's window (UTC): deactivated_at, or the time of the request while the holdout is active. Null when the holdout cannot be measured.",
+            "title": "Window End"
+          }
+        },
+        "required": [
+          "holdout_id",
+          "holdout_name",
+          "holdout_percentage",
+          "metric",
+          "analysis_status"
+        ],
+        "title": "HoldoutResultsResponse",
+        "type": "object"
+      },
       "InteractionAnalysisResponse": {
         "description": "Full interaction analysis response for a pair of experiments.",
         "properties": {
@@ -19706,6 +19997,70 @@
           "Global Holdout",
           "Global Holdout"
         ]
+      }
+    },
+    "/api/v1/holdout/{holdout_id}/results": {
+      "get": {
+        "description": "For one event name, the share of users who sent at least one matching event: the users the holdout kept out against everyone else first seen while it was active. Every user recorded is in their group, users refused by targeting or mutual exclusion included; a user with an assignment before they were first seen is in neither. An event counts when its own time and the time the server received it are both between the user's first-seen time and window_end, so events received after a holdout ends never change its results. Each group needs 100 users. Any role that can read experiment results can read this.",
+        "operationId": "get_holdout_results_api_v1_holdout__holdout_id__results_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "holdout_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Holdout Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "The event name to count, matched exactly, e.g. purchase.",
+            "in": "query",
+            "name": "metric",
+            "required": true,
+            "schema": {
+              "description": "The event name to count, matched exactly, e.g. purchase.",
+              "maxLength": 255,
+              "minLength": 1,
+              "title": "Metric",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HoldoutResultsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Beta: results for a global holdout",
+        "tags": [
+          "Global Holdout",
+          "Global Holdout"
+        ],
+        "x-stability": "beta"
       }
     },
     "/api/v1/interactions/scan": {
