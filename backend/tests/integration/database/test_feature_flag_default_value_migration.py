@@ -48,8 +48,9 @@ REVISION = "a89544fb1075"
 PREVIOUS_CORE_HEAD = "d12cbd384bbe"
 #: The core head of this tree, which ``upgrade heads`` runs on to: the next
 #: revision, ``1ab99332f0ba`` (``events.created_at`` in UTC), adds no DDL, and
-#: ``d29a479daafe`` (holdout population) finds its objects already built by
-#: ``create_all`` and adds none.
+#: ``806901fb7735`` (the experiments' correction settings) adds only what a
+#: database built by ``create_all`` already has, and ``d29a479daafe`` (holdout
+#: population) finds its objects already built by ``create_all`` and adds none.
 CORE_HEAD = "d29a479daafe"
 #: Tables that a later core revision's downgrade drops: a downgrade from the
 #: head to this test's target unapplies those revisions too.  ``d29a479daafe``

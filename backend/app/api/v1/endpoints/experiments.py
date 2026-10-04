@@ -744,9 +744,20 @@ async def update_experiment(
         update_data = experiment_in.model_dump(exclude_unset=True)
         update_data.pop("status", None)
 
-        # For non-draft experiments, prevent updates to restricted fields
+        # For non-draft experiments, prevent updates to restricted fields.
+        # This runs after the superuser passes the guard above, so it binds
+        # every role: once an experiment leaves draft, nobody changes how its
+        # results are judged (#580). It works on presence, so re-sending the
+        # stored value is refused too.
         if experiment.status != ExperimentStatus.DRAFT:
-            restricted_fields = ["variants", "metrics", "start_date", "end_date"]
+            restricted_fields = [
+                "variants",
+                "metrics",
+                "start_date",
+                "end_date",
+                "correction_method",
+                "confidence_level",
+            ]
             for field in restricted_fields:
                 if field in update_data:
                     raise HTTPException(
@@ -1390,7 +1401,8 @@ async def get_experiment_results(
     Requires READ on experiments (who created the experiment is not
     considered), refuses DRAFT experiments, and then delegates to the analytics
     results engine, so this endpoint returns exactly the same payload as
-    ``GET /api/v1/results/{experiment_id}`` with default options.
+    ``GET /api/v1/results/{experiment_id}`` with default options: the
+    experiment's stored correction method and confidence level.
 
     Raises:
         HTTPException 400: If the experiment is in DRAFT status
@@ -1411,10 +1423,14 @@ async def get_experiment_results(
             detail="Cannot get results for experiments in DRAFT status",
         )
 
+    # None, explicitly: the route function's own defaults are ``Query``
+    # objects, not values. None means the experiment's stored settings, so
+    # this goes through the same resolution, cache key, snapshot rule and
+    # labels as ``GET /results/{id}`` with no options (#580).
     return results_endpoints.get_experiment_results(
         experiment_id=experiment_id,
-        confidence_level=0.95,
-        correction_method="none",
+        confidence_level=None,
+        correction_method=None,
         use_cache=True,
         breakdown=None,
         db=db,

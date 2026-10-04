@@ -46,7 +46,7 @@ pytestmark = pytest.mark.skipif(
 #: documents that name it must say what those revisions' downgrades drop
 #: (``test_documented_downgrade_targets.py``).
 NAMED_DOWNGRADES = {
-    "a89544fb1075": ["d29a479daafe", "1ab99332f0ba"],
+    "806901fb7735": ["d29a479daafe"],
     "modules_0001_rbac": ["modules_0002_warehouse_analysis"],
 }
 BRANCH_POINT = "a7b8c9d0e1f2"
@@ -105,7 +105,9 @@ def test_the_branch_point_also_unapplies_the_modules_branch():
     """Backs the help text: "a core id at or below a7b8c9d0e1f2 also unapplies
     the modules branch"."""
     plan = _downgrade_plan(_script(), BRANCH_POINT)
-    assert len(plan) == 9, plan
+    # The eight core revisions above it (through d29a479daafe, #445) and the
+    # modules branch's two.
+    assert len(plan) == 10, plan
     assert [r for r in plan if r.startswith(MODULES_PREFIX)] == [
         "modules_0002_warehouse_analysis",
         "modules_0001_rbac",

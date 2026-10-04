@@ -363,3 +363,32 @@ def test_full_api_matches_full_snapshot(full_snapshot):
         "`make openapi` if intended):",
         errors,
     )
+
+
+#: #580: each experiment stores these, and the results read them by default.
+CORRECTION_SETTINGS = ("correction_method", "confidence_level")
+
+
+@pytest.mark.regression
+def test_the_snapshot_carries_the_stored_correction_settings(stable_snapshot):
+    """Regenerating the snapshot proves only that it matches the code; this
+    says what the code must contain. A field missing from ExperimentResponse
+    would let a client read a default over the stored choice (#580)."""
+    schemas = stable_snapshot["components"]["schemas"]
+    for name in ("ExperimentCreate", "ExperimentUpdate", "ExperimentResponse"):
+        properties = schemas[name]["properties"]
+        assert set(CORRECTION_SETTINGS) <= set(properties), name
+    created = schemas["ExperimentCreate"]["properties"]
+    assert created["correction_method"]["default"] == "benjamini_hochberg"
+    assert created["confidence_level"]["default"] == 0.95
+
+    # The results routes take no fixed default: omitted means stored.
+    for path in (
+        "/api/v1/results/{experiment_id}",
+        "/api/v1/results/{experiment_id}/sample-size",
+    ):
+        parameters = {
+            p["name"]: p for p in stable_snapshot["paths"][path]["get"]["parameters"]
+        }
+        for name in CORRECTION_SETTINGS:
+            assert parameters[name]["schema"].get("default") is None, (path, name)

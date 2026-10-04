@@ -154,7 +154,9 @@ def _get(client, exp_id, expect: int = 200, **params) -> Dict:
 
 @pytest.mark.regression
 def test_plans_from_the_observed_control_rate_and_counts_the_smallest_arm(client, seed):
-    """On main: required 57763 from baseline 0.1, current 50 (= 100 // 2)."""
+    """Three variants with no options: the experiment's stored correction,
+    Benjamini-Hochberg by default (#580), plans each of the two comparisons
+    at 0.05 / 2."""
     exp = seed(
         [
             ("control", True, 34, 50, 6),  # 6 / 50 = 0.12
@@ -169,20 +171,21 @@ def test_plans_from_the_observed_control_rate_and_counts_the_smallest_arm(client
         data["required_sample_size_per_variant"],
         data["baseline_rate"],
         data["current_sample_size_per_variant"],
-    ) == (_reference(0.12, 0.05, 0.05, 0.8), 0.12, 20)
-    assert data["required_sample_size_per_variant"] == 47036
+    ) == (_reference(0.12, 0.05, 0.025, 0.8), 0.12, 20)
+    # The worked example in docs/statistics/power-analysis.md.
+    assert data["required_sample_size_per_variant"] == 56961
     assert data["baseline_source"] == "observed"
     assert data["baseline_users"] == 50
-    assert data["achieved_power"] == compute_power(20, 0.12, 0.126, 0.05, True)
+    assert data["achieved_power"] == compute_power(20, 0.12, 0.126, 0.025, True)
     assert data["is_adequate"] is False
     assert data["unavailable_reason"] is None
     assert data["mde"] == 0.05
     assert data["mde_absolute"] == pytest.approx(0.006)
     assert data["confidence_level"] == 0.95
     assert data["power_target"] == 0.8
-    assert data["alpha"] == pytest.approx(0.05)
+    assert data["alpha"] == pytest.approx(0.025)
     assert data["comparisons"] == 2
-    assert data["correction_method"] == "none"
+    assert data["correction_method"] == "benjamini_hochberg"
     assert data["analysed_as"] == "conversion"
     assert data["metric_name"] == "Purchase"
     assert data["metric_type"] == "conversion"
@@ -226,7 +229,7 @@ def test_a_correction_plans_each_comparison_at_alpha_over_k_minus_1(
     assert data["required_sample_size_per_variant"] == _reference(
         0.12, 0.05, 0.025, 0.8
     )
-    plain = _get(client, exp.id)
+    plain = _get(client, exp.id, correction_method="none")
     assert (
         plain["required_sample_size_per_variant"]
         < data["required_sample_size_per_variant"]
@@ -402,7 +405,9 @@ def test_a_requested_baseline_just_inside_the_limit_is_still_planned(client, see
 def test_the_tab_and_the_guided_setup_agree(client, seed, alpha, power, variants):
     """
     Every significance and power the guided setup offers, at two and three
-    variants, with ``==``. Neither applies a correction by default.
+    variants, with ``==``. The guided setup plans without a correction
+    (#820), so the tab is asked for ``none``; its default is the
+    experiment's stored correction (#580).
     test_sample_size_one_formula.py pins the guided setup and /utils to the
     same helper; this adds the results tab, which needs a database.
     """
@@ -417,6 +422,7 @@ def test_the_tab_and_the_guided_setup_agree(client, seed, alpha, power, variants
         mde=0.05,
         confidence_level=round(1 - alpha, 2),
         power_target=power,
+        correction_method="none",
     )
     response = client.get(
         "/api/v1/experiments/analysis/sample-size",

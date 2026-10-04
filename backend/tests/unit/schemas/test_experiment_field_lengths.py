@@ -7,6 +7,8 @@ request-level behaviour for the metric fields is pinned by
 ``backend/tests/integration/api/test_experiment_metric_field_lengths.py``.
 """
 
+import enum
+
 import annotated_types
 import pytest
 from pydantic import BaseModel, ValidationError
@@ -32,6 +34,11 @@ PAIRS = [
 
 
 def _max_length(schema: type[BaseModel], field: str):
+    """The field's ``max_length``; for an enum field, its longest value's
+    length, which bounds it as surely (``correction_method``, #580)."""
+    annotation = schema.model_fields[field].annotation
+    if isinstance(annotation, type) and issubclass(annotation, enum.Enum):
+        return max(len(member.value) for member in annotation)
     for item in schema.model_fields[field].metadata:
         if isinstance(item, annotated_types.MaxLen):
             return item.max_length
@@ -49,6 +56,16 @@ def _string_columns(model):
     return out
 
 
+def _fits(schema: type[BaseModel], field: str, column_length: int) -> bool:
+    """A string field must carry the column's length; an enum field's longest
+    value must fit in it."""
+    limit = _max_length(schema, field)
+    annotation = schema.model_fields[field].annotation
+    if isinstance(annotation, type) and issubclass(annotation, enum.Enum):
+        return limit <= column_length
+    return limit == column_length
+
+
 @pytest.mark.regression
 @pytest.mark.parametrize(
     "schema, model", PAIRS, ids=[schema.__name__ for schema, _ in PAIRS]
@@ -58,8 +75,7 @@ def test_every_bounded_string_column_has_the_same_schema_limit(schema, model):
     mismatches = {
         field: (columns[field], _max_length(schema, field))
         for field in schema.model_fields
-        if columns.get(field) is not None
-        and _max_length(schema, field) != columns[field]
+        if columns.get(field) is not None and not _fits(schema, field, columns[field])
     }
     assert mismatches == {}, "field: (column length, schema max_length)"
 

@@ -46,7 +46,8 @@ PREVIOUS_CORE_HEAD = "8fd44fb483a2"
 CORE_HEAD = "d29a479daafe"
 #: Tables that a later core revision's downgrade drops: a downgrade from the
 #: head to this test's target unapplies those revisions too.  ``d29a479daafe``
-#: (#445) drops ``holdout_population``.
+#: (#445) drops ``holdout_population``; ``806901fb7735`` (#580) drops columns
+#: and checks, no table.
 LATER_DOWNGRADE_TABLES = {"holdout_population"}
 #: The modules branch's head, in the previous release and in this one alike.
 MODULES_HEAD = "modules_0002_warehouse_analysis"
@@ -344,8 +345,13 @@ def test_downgrade_removes_the_column_and_the_check_and_nothing_else(
 
     assert _rows(test_db, scratch_schema) == PREVIOUS_ROWS[profile]
     assert _column(test_db, scratch_schema) is None
+    # The downgrade to the previous core head also unapplies every revision
+    # above this one; ``806901fb7735`` (#580) drops its own two checks.
+    later = {"ck_experiments_correction_method", "ck_experiments_confidence_level"}
     assert _checks(test_db, scratch_schema) == {
-        name: definition for name, definition in checks.items() if name != CHECK
+        name: definition
+        for name, definition in checks.items()
+        if name != CHECK and name not in later
     }
     assert (
         set(inspect(test_db).get_table_names(schema=scratch_schema))

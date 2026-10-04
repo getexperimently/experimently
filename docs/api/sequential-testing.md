@@ -84,6 +84,10 @@ Sequential testing is set on the experiment, when you create it
 | `sequential_testing_config.spending_function` | `obrien_fleming` \| `pocock` | `obrien_fleming` | Accepted and stored; no alpha-spending table is computed yet |
 | `sequential_testing_config.planned_looks` | int | `10` | Accepted and stored (1–100); no alpha-spending table is computed yet |
 
+The sequential analysis uses its own `alpha`. It does not follow the experiment's
+stored `confidence_level` or `correction_method`, which judge the fixed-horizon results
+([How results are judged](endpoints.md#how-results-are-judged)).
+
 Run the commands on this page in one terminal, in order, against the stack from the
 [Quick Start](../getting-started/quick-start.md). Each uses the shell variables set by the
 ones before it. Log in first:

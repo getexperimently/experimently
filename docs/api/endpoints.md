@@ -596,7 +596,10 @@ curl -X POST "http://localhost:8000/api/v1/users/" \
 
 ### Get Experiment Results
 - **Endpoint**: `GET /api/v1/experiments/{experiment_id}/results`
-- **Description**: Get experiment results and analysis
+- **Description**: Get experiment results and analysis. The same payload as
+  `GET /api/v1/results/{experiment_id}` with no options: the experiment's
+  stored `correction_method` and `confidence_level` (see
+  [How results are judged](#how-results-are-judged)).
 - **Headers**: Authorization: Bearer {token}
 - **Path Parameters**:
   - experiment_id: string (UUID)
@@ -621,6 +624,46 @@ curl -X POST "http://localhost:8000/api/v1/users/" \
     }
   }
   ```
+
+### How results are judged
+
+Each experiment stores a `correction_method` (`none`, `bonferroni` or
+`benjamini_hochberg`) and a `confidence_level` (0.80 to 0.99). A new
+experiment gets `benjamini_hochberg` at `0.95` unless `POST
+/api/v1/experiments/` names others; experiments created before these fields
+existed were given the same defaults. Both are returned by every experiment
+response.
+
+- `GET /api/v1/results/{experiment_id}`, its alias
+  `GET /api/v1/experiments/{experiment_id}/results`,
+  `GET /api/v1/results/{experiment_id}/sample-size`, the data export and the
+  experiment report use the stored values. `?correction_method=` and
+  `?confidence_level=` on the first and third apply to that request only; the
+  response's `correction_method` and `confidence_level` say what the numbers
+  were computed under. `?correction_method=none` shows the uncorrected
+  numbers.
+- With one treatment the correction changes no decision: `adjusted_p_value`
+  equals `p_value`, and `is_significant`, the winner and the summary are the
+  same as with `none`. With two or more treatments it can: a treatment with
+  `p_value` 0.035 has `adjusted_p_value` 0.071 under `benjamini_hochberg`
+  when the other treatment's p-value is higher, and is not significant at
+  0.95.
+- Both fields can be changed with `PUT /api/v1/experiments/{experiment_id}`
+  only while the experiment is a `draft`. After that nobody can change them,
+  a superuser included, and re-sending the stored value is refused as well
+  (`Cannot update correction_method for experiments in active status`). An
+  experiment that was already running when these fields were added keeps
+  `benjamini_hochberg` for good; `?correction_method=none` on its results
+  shows the numbers it showed before. A clone is a draft and starts with its
+  source's values.
+- Not affected: the breakdown (`?breakdown=`) uses the stored confidence
+  level only as its base alpha, with its own Bonferroni correction over
+  segments; CUPED (a 95% interval) and sequential testing (its own `alpha`) do
+  not follow the stored level; the Bayesian results, interaction detection,
+  post-stratification, live results (a fixed, uncorrected 0.05), the AI
+  interpretation, the power calculator (`GET
+  /api/v1/experiments/analysis/sample-size`) and warehouse analysis runs are
+  unchanged.
 
 ## Feature Flag Endpoints
 
@@ -1157,7 +1200,8 @@ once the experiment is started again.
 
 Every field of `PUT /api/v1/experiments/{experiment_id}` is optional: a field
 left out keeps its value. `name`, `status`, `experiment_type`,
-`sequential_testing_enabled` and `optimization_type` cannot be set to `null`;
+`sequential_testing_enabled`, `optimization_type`, `correction_method` and
+`confidence_level` cannot be set to `null`;
 such a request is refused with 422, nothing is changed, and the message names
 the field, for example `name cannot be null`. `name` is at most 100
 characters, as on create. Other fields, such as `description`, may still be
@@ -1167,7 +1211,8 @@ A refusal because of the experiment's state is a 400 whose detail names the
 state; a 403 means the caller's role may not update experiments, and is
 decided before the state is looked at. Outside `draft`, only a superuser may
 change an experiment's other fields (`Cannot update experiments in active
-status`), and `variants` and `metrics` cannot be changed by anyone
+status`), and `variants`, `metrics`, `start_date`, `end_date`,
+`correction_method` and `confidence_level` cannot be changed by anyone
 (`Cannot update variants for experiments in active status`).
 
 `schedule` is not accepted by this endpoint. A request that contains it, with
@@ -1851,9 +1896,9 @@ they give at that MDE, and every input used with where it came from. Nothing is 
 |---|---|---|
 | `baseline_conversion_rate` | the control variant's observed rate so far | above 0, below 1 |
 | `mde` | `0.05` (relative: 12% → 12.6%) | above 0, below 1 |
-| `confidence_level` | `0.95` | 0.80 to 0.99 |
+| `confidence_level` | the experiment's stored `confidence_level` | 0.80 to 0.99 |
 | `power_target` | `0.80` | 0.50 to 0.99 |
-| `correction_method` | `none` | `none`, `bonferroni`, `benjamini_hochberg`; the last two plan each comparison at `alpha / (variants - 1)` |
+| `correction_method` | the experiment's stored `correction_method` | `none`, `bonferroni`, `benjamini_hochberg`; the last two plan each comparison at `alpha / (variants - 1)` |
 
 **Response** (`SampleSizeResult`): `required_sample_size_per_variant`, `current_sample_size_per_variant`
 (the smallest variant), `is_adequate`, `achieved_power`, `baseline_rate`, `baseline_source`

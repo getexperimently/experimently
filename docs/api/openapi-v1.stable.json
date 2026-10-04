@@ -3277,6 +3277,19 @@
             "title": "Bayesian Enabled",
             "type": "boolean"
           },
+          "confidence_level": {
+            "default": 0.95,
+            "description": "Confidence level the results use for significance and intervals, from 0.80 to 0.99 (default 0.95). A request to the results may name another for that request only. Locked once the experiment leaves draft. CUPED and sequential analysis do not follow it.",
+            "maximum": 0.99,
+            "minimum": 0.8,
+            "title": "Confidence Level",
+            "type": "number"
+          },
+          "correction_method": {
+            "$ref": "#/components/schemas/CorrectionMethod",
+            "default": "benjamini_hochberg",
+            "description": "Multiple-comparison correction the results apply across the treatments of each metric: none, bonferroni or benjamini_hochberg (default). A request to the results may name another for that request only. Locked once the experiment leaves draft."
+          },
           "description": {
             "anyOf": [
               {
@@ -3573,6 +3586,17 @@
             "default": false,
             "title": "Bayesian Enabled",
             "type": "boolean"
+          },
+          "confidence_level": {
+            "default": 0.95,
+            "description": "Confidence level the results use for significance and intervals, from 0.80 to 0.99 (default 0.95). A request to the results may name another for that request only. Locked once the experiment leaves draft. CUPED and sequential analysis do not follow it.",
+            "title": "Confidence Level",
+            "type": "number"
+          },
+          "correction_method": {
+            "$ref": "#/components/schemas/CorrectionMethod",
+            "default": "benjamini_hochberg",
+            "description": "Multiple-comparison correction the results apply across the treatments of each metric: none, bonferroni or benjamini_hochberg (default). A request to the results may name another for that request only. Locked once the experiment leaves draft."
           },
           "created_at": {
             "format": "date-time",
@@ -4046,7 +4070,7 @@
         "type": "string"
       },
       "ExperimentUpdate": {
-        "description": "Model for updating an experiment.\n\nEvery field is optional: a field left out is not changed. `name`,\n`status`, `experiment_type`, `sequential_testing_enabled` and\n`optimization_type` cannot be set to null; a request that does is\nrefused with 422.",
+        "description": "Model for updating an experiment.\n\nEvery field is optional: a field left out is not changed. `name`,\n`status`, `experiment_type`, `sequential_testing_enabled`,\n`optimization_type`, `correction_method` and `confidence_level` cannot be\nset to null; a request that does is refused with 422.",
         "example": {
           "description": "Testing different button colors with updated hypothesis",
           "hypothesis": "Changing the button color to dark blue will increase conversion rates",
@@ -4081,6 +4105,17 @@
             ],
             "description": "Turn Bayesian analysis on or off. Turning it on with no stored or supplied bayesian_config stores the default BayesianConfig.",
             "title": "Bayesian Enabled"
+          },
+          "confidence_level": {
+            "description": "Confidence level the results use for significance and intervals, from 0.80 to 0.99 (default 0.95). A request to the results may name another for that request only. Locked once the experiment leaves draft. CUPED and sequential analysis do not follow it. Changeable only while the experiment is a draft; cannot be null.",
+            "maximum": 0.99,
+            "minimum": 0.8,
+            "title": "Confidence Level",
+            "type": "number"
+          },
+          "correction_method": {
+            "$ref": "#/components/schemas/CorrectionMethod",
+            "description": "Multiple-comparison correction the results apply across the treatments of each metric: none, bonferroni or benjamini_hochberg (default). A request to the results may name another for that request only. Locked once the experiment leaves draft. Changeable only while the experiment is a draft; cannot be null."
           },
           "description": {
             "anyOf": [
@@ -16361,7 +16396,7 @@
     },
     "/api/v1/experiments/{experiment_id}/results": {
       "get": {
-        "description": "Get experiment results and statistical analysis.\n\nRequires READ on experiments (who created the experiment is not\nconsidered), refuses DRAFT experiments, and then delegates to the analytics\nresults engine, so this endpoint returns exactly the same payload as\n``GET /api/v1/results/{experiment_id}`` with default options.\n\nRaises:\n    HTTPException 400: If the experiment is in DRAFT status\n    HTTPException 403: If the caller's role does not hold READ on experiments\n    HTTPException 404: If the experiment does not exist",
+        "description": "Get experiment results and statistical analysis.\n\nRequires READ on experiments (who created the experiment is not\nconsidered), refuses DRAFT experiments, and then delegates to the analytics\nresults engine, so this endpoint returns exactly the same payload as\n``GET /api/v1/results/{experiment_id}`` with default options: the\nexperiment's stored correction method and confidence level.\n\nRaises:\n    HTTPException 400: If the experiment is in DRAFT status\n    HTTPException 403: If the caller's role does not hold READ on experiments\n    HTTPException 404: If the experiment does not exist",
         "operationId": "get_experiment_results_api_v1_experiments__experiment_id__results_get",
         "parameters": [
           {
@@ -21620,7 +21655,7 @@
     },
     "/api/v1/results/{experiment_id}": {
       "get": {
-        "description": "Get comprehensive statistical results for an experiment.\n\nReturns per-metric, per-variant statistics including p-values,\nconfidence intervals, effect sizes, and an overall recommendation.\n\nResults are cached in Redis (TTL = 5 min for running experiments,\n24 h for completed/paused ones).  Pass ``use_cache=false`` to force\na fresh computation.\n\nSupply ``breakdown=<dimension>`` to receive an additional per-segment\nbreakdown of results (Issue #28).  Supported dimensions include\n``platform``, ``country``, and ``user_tier``, but any dimension key\npresent in event metadata is accepted.  Breakdowns are always marked\nexploratory and use Bonferroni-corrected significance thresholds.",
+        "description": "Get comprehensive statistical results for an experiment.\n\nReturns per-metric, per-variant statistics including p-values,\nconfidence intervals, effect sizes, and an overall recommendation.\n\nResults are cached in Redis (TTL = 5 min for running experiments,\n24 h for completed/paused ones).  Pass ``use_cache=false`` to force\na fresh computation.\n\nSupply ``breakdown=<dimension>`` to receive an additional per-segment\nbreakdown of results (Issue #28).  Supported dimensions include\n``platform``, ``country``, and ``user_tier``, but any dimension key\npresent in event metadata is accepted.  Breakdowns are always marked\nexploratory and use Bonferroni-corrected significance thresholds.\n\n``confidence_level`` and ``correction_method`` default to the\nexperiment's stored settings (#580); a value in the request applies to\nthat request only.  The settings are resolved before the cache key is\nbuilt, and the analysis snapshot is written only for a computation under\nthe stored settings.",
         "operationId": "get_experiment_results_api_v1_results__experiment_id__get",
         "parameters": [
           {
@@ -21634,26 +21669,42 @@
             }
           },
           {
+            "description": "Confidence level for this request. Omit it to use the experiment's stored confidence_level (0.95 unless set otherwise).",
             "in": "query",
             "name": "confidence_level",
             "required": false,
             "schema": {
-              "default": 0.95,
-              "maximum": 0.99,
-              "minimum": 0.8,
-              "title": "Confidence Level",
-              "type": "number"
+              "anyOf": [
+                {
+                  "maximum": 0.99,
+                  "minimum": 0.8,
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Confidence level for this request. Omit it to use the experiment's stored confidence_level (0.95 unless set otherwise).",
+              "title": "Confidence Level"
             }
           },
           {
+            "description": "Multiple-comparison correction for this request. Omit it to use the experiment's stored correction_method (benjamini_hochberg unless set otherwise). 'none' shows the uncorrected numbers.",
             "in": "query",
             "name": "correction_method",
             "required": false,
             "schema": {
-              "default": "none",
-              "pattern": "^(none|bonferroni|benjamini_hochberg)$",
-              "title": "Correction Method",
-              "type": "string"
+              "anyOf": [
+                {
+                  "pattern": "^(none|bonferroni|benjamini_hochberg)$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Multiple-comparison correction for this request. Omit it to use the experiment's stored correction_method (benjamini_hochberg unless set otherwise). 'none' shows the uncorrected numbers.",
+              "title": "Correction Method"
             }
           },
           {
@@ -22151,17 +22202,23 @@
             }
           },
           {
-            "description": "Confidence level of the two-sided test. Default 0.95.",
+            "description": "Confidence level of the two-sided test. Omit it to use the experiment's stored confidence_level.",
             "in": "query",
             "name": "confidence_level",
             "required": false,
             "schema": {
-              "default": 0.95,
-              "description": "Confidence level of the two-sided test. Default 0.95.",
-              "maximum": 0.99,
-              "minimum": 0.8,
-              "title": "Confidence Level",
-              "type": "number"
+              "anyOf": [
+                {
+                  "maximum": 0.99,
+                  "minimum": 0.8,
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Confidence level of the two-sided test. Omit it to use the experiment's stored confidence_level.",
+              "title": "Confidence Level"
             }
           },
           {
@@ -22179,16 +22236,22 @@
             }
           },
           {
-            "description": "Correction for comparing several variants with the control. 'bonferroni' and 'benjamini_hochberg' plan each comparison at alpha / (variants - 1). Default 'none', as on the results.",
+            "description": "Correction for comparing several variants with the control. 'bonferroni' and 'benjamini_hochberg' plan each comparison at alpha / (variants - 1). Omit it to use the experiment's stored correction_method, as the results do.",
             "in": "query",
             "name": "correction_method",
             "required": false,
             "schema": {
-              "default": "none",
-              "description": "Correction for comparing several variants with the control. 'bonferroni' and 'benjamini_hochberg' plan each comparison at alpha / (variants - 1). Default 'none', as on the results.",
-              "pattern": "^(none|bonferroni|benjamini_hochberg)$",
-              "title": "Correction Method",
-              "type": "string"
+              "anyOf": [
+                {
+                  "pattern": "^(none|bonferroni|benjamini_hochberg)$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Correction for comparing several variants with the control. 'bonferroni' and 'benjamini_hochberg' plan each comparison at alpha / (variants - 1). Omit it to use the experiment's stored correction_method, as the results do.",
+              "title": "Correction Method"
             }
           }
         ],

@@ -88,6 +88,9 @@ def _make_mock_experiment(
         _make_mock_variant(name="Treatment", is_control=False),
     ]
     exp.metric_definitions = [_make_mock_metric()]
+    # The stored analysis settings the results read (#580).
+    exp.correction_method = "benjamini_hochberg"
+    exp.confidence_level = 0.95
     return exp
 
 

@@ -238,10 +238,16 @@ Rank  5: churn                p=0.4100  adj_p=0.4100  not significant
 
 ## Integration with the Existing Results API
 
-The `GET /api/v1/results/{experiment_id}` endpoint already accepts a
-`correction_method` query parameter, `none` (the default), `bonferroni` or
-`benjamini_hochberg`. It applies the correction to the p-values in the main results
-response, and each variant then carries an `adjusted_p_value`:
+Each experiment stores a `correction_method` (`none`, `bonferroni` or
+`benjamini_hochberg`), Benjamini-Hochberg unless it was created with another, and
+`GET /api/v1/results/{experiment_id}` applies it across the treatments of each metric:
+each treatment then carries an `adjusted_p_value`, and `is_significant` is decided on
+it. With one treatment the adjusted p-value equals the p-value and no decision changes.
+The stored method can be changed only while the experiment is a draft.
+
+A request can name another method for itself with the `correction_method` query
+parameter; `none` shows the uncorrected numbers. The response's `correction_method`
+says which one was applied:
 
 ```{.bash exec}
 curl -s "localhost:8000/api/v1/results/$EXP_ID?correction_method=benjamini_hochberg" \

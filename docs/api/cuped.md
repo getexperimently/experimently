@@ -95,7 +95,9 @@ the results below say which method was applied.
 
 Returns the adjusted treatment effect for each of the experiment's metrics, comparing the
 control with the first treatment variant. It takes no query parameters: the method comes
-from the experiment. Any logged-in user can read it; an experiment that doesn't exist
+from the experiment. Its intervals are at 95% whatever the experiment's stored
+`confidence_level`, and it applies no multiple-comparison correction
+([How results are judged](endpoints.md#how-results-are-judged)). Any logged-in user can read it; an experiment that doesn't exist
 answers `404`.
 
 ```{.bash exec}

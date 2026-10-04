@@ -44,6 +44,7 @@ from backend.app.schemas.variance_reduction import (
     VarianceReductionMethod,
 )
 from backend.app.services.analysis_service import AnalysisService
+from backend.app.services.analysis_settings import resolve_analysis_settings
 from backend.app.services.analysis_snapshot_service import record_snapshot
 from backend.app.services.cache import CacheService
 from backend.app.services.cuped_service import CupedService
@@ -378,10 +379,23 @@ def _compute_dimensional_breakdown(
 @router.get("/{experiment_id}", response_model=ExperimentResultsResponse)
 def get_experiment_results(
     experiment_id: UUID,
-    confidence_level: float = Query(default=0.95, ge=0.80, le=0.99),
-    correction_method: str = Query(
-        default="none",
+    confidence_level: Optional[float] = Query(
+        default=None,
+        ge=0.80,
+        le=0.99,
+        description=(
+            "Confidence level for this request. Omit it to use the "
+            "experiment's stored confidence_level (0.95 unless set otherwise)."
+        ),
+    ),
+    correction_method: Optional[str] = Query(
+        default=None,
         pattern="^(none|bonferroni|benjamini_hochberg)$",
+        description=(
+            "Multiple-comparison correction for this request. Omit it to use "
+            "the experiment's stored correction_method (benjamini_hochberg "
+            "unless set otherwise). 'none' shows the uncorrected numbers."
+        ),
     ),
     use_cache: bool = Query(default=True),
     breakdown: Optional[str] = Query(
@@ -410,9 +424,35 @@ def get_experiment_results(
     ``platform``, ``country``, and ``user_tier``, but any dimension key
     present in event metadata is accepted.  Breakdowns are always marked
     exploratory and use Bonferroni-corrected significance thresholds.
+
+    ``confidence_level`` and ``correction_method`` default to the
+    experiment's stored settings (#580); a value in the request applies to
+    that request only.  The settings are resolved before the cache key is
+    built, and the analysis snapshot is written only for a computation under
+    the stored settings.
     """
+    experiment = db.query(Experiment).filter(Experiment.id == experiment_id).first()
+    if experiment is None:
+        raise HTTPException(status_code=404, detail="Experiment not found")
+    try:
+        stored = resolve_analysis_settings(experiment)
+        settings = resolve_analysis_settings(
+            experiment, confidence_level, correction_method
+        )
+    except Exception as exc:
+        raise unexpected_failure(
+            exc,
+            "Experiment results",
+            "Could not compute the experiment's results",
+            db=db,
+            logger=logger,
+        )
+
     cache_key = _results_cache_key(
-        experiment_id, confidence_level, correction_method, breakdown
+        experiment_id,
+        settings.confidence_level,
+        settings.correction_method,
+        breakdown,
     )
 
     # --- Cache read ---
@@ -430,24 +470,9 @@ def get_experiment_results(
         service = AnalysisService(db)
         result = service.get_experiment_results(
             experiment_id,
-            confidence_level=confidence_level,
-            correction_method=correction_method,
+            confidence_level=settings.confidence_level,
+            correction_method=settings.correction_method,
         )
-    except TypeError:
-        # The service may not accept keyword arguments yet — call without them
-        try:
-            service = AnalysisService(db)
-            result = service.get_experiment_results(experiment_id)
-        except ValueError:
-            raise HTTPException(status_code=404, detail="Experiment not found")
-        except Exception as exc:
-            raise unexpected_failure(
-                exc,
-                "Experiment results",
-                "Could not compute the experiment's results",
-                db=db,
-                logger=logger,
-            )
     except ValueError:
         raise HTTPException(status_code=404, detail="Experiment not found")
     except Exception as exc:
@@ -484,7 +509,7 @@ def get_experiment_results(
                 experiment_id=experiment_id,
                 dimension=breakdown,
                 db=db,
-                base_alpha=1.0 - confidence_level,
+                base_alpha=1.0 - result["confidence_level"],
             )
 
         # --- P0 statistical credibility: sample-ratio mismatch ---
@@ -496,8 +521,10 @@ def get_experiment_results(
             status=raw_status,
             start_date=result.get("start_date"),
             end_date=result.get("end_date"),
-            confidence_level=confidence_level,
-            correction_method=correction_method,
+            # What the numbers were computed under, from the computation
+            # itself rather than from the request (#580).
+            confidence_level=result["confidence_level"],
+            correction_method=result["correction_method"],
             sample_size_adequate=result.get("sample_size_adequate", False),
             computed_at=result.get("computed_at", datetime.now(timezone.utc)),
             summary=summary_data,
@@ -517,7 +544,11 @@ def get_experiment_results(
         )
 
     # --- Persist audit snapshots (best-effort; never fails the response) ---
-    _record_results_snapshots(db, response)
+    # Only a computation under the experiment's stored settings is recorded:
+    # a request asking for other settings must not leave an audit row that
+    # reads as the experiment's own results.
+    if settings == stored:
+        _record_results_snapshots(db, response)
 
     # --- Cache write ---
     try:
@@ -778,11 +809,14 @@ def get_sample_size_status(
             "12% -> 12.6%. Default 0.05."
         ),
     ),
-    confidence_level: float = Query(
-        default=0.95,
+    confidence_level: Optional[float] = Query(
+        default=None,
         ge=0.80,
         le=0.99,
-        description="Confidence level of the two-sided test. Default 0.95.",
+        description=(
+            "Confidence level of the two-sided test. Omit it to use the "
+            "experiment's stored confidence_level."
+        ),
     ),
     power_target: float = Query(
         default=0.80,
@@ -790,13 +824,14 @@ def get_sample_size_status(
         le=0.99,
         description="Target power. Default 0.80.",
     ),
-    correction_method: str = Query(
-        default="none",
+    correction_method: Optional[str] = Query(
+        default=None,
         pattern="^(none|bonferroni|benjamini_hochberg)$",
         description=(
             "Correction for comparing several variants with the control. "
             "'bonferroni' and 'benjamini_hochberg' plan each comparison at "
-            "alpha / (variants - 1). Default 'none', as on the results."
+            "alpha / (variants - 1). Omit it to use the experiment's stored "
+            "correction_method, as the results do."
         ),
     ),
     db: Session = Depends(get_db),
@@ -839,6 +874,10 @@ def get_sample_size_status(
         raise HTTPException(status_code=404, detail="Experiment not found")
 
     try:
+        confidence_level, correction_method = resolve_analysis_settings(
+            experiment, confidence_level, correction_method
+        )
+
         from sqlalchemy import func as sqla_func
 
         from backend.app.models.assignment import Assignment

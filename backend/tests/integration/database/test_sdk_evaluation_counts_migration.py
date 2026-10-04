@@ -38,8 +38,9 @@ REVISION = "8fd44fb483a2"
 PREVIOUS_CORE_HEAD = "b8c9d0e1f2a3"
 #: The core head of this tree: ``upgrade heads`` runs on past this revision to
 #: ``d29a479daafe`` (holdout population), through ``271f03a31742``,
-#: ``d12cbd384bbe``, ``a89544fb1075`` and ``1ab99332f0ba``; a database built by
-#: ``create_all`` already carries what they build, so they add nothing here.
+#: ``d12cbd384bbe``, ``a89544fb1075``, ``1ab99332f0ba`` and ``806901fb7735``
+#: (the experiments' correction settings); a database built by ``create_all``
+#: already carries what they build, so they add nothing here.
 CORE_HEAD = "d29a479daafe"
 #: Tables that a later core revision's downgrade drops: a downgrade from the
 #: head to this test's target unapplies those revisions too.  ``d29a479daafe``

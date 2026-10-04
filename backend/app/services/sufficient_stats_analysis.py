@@ -41,10 +41,39 @@ class BinomialVariant(NamedTuple):
 BinomialCounts = Tuple[Any, int, int]
 
 
+#: The correction methods ``adjusted_p_values`` knows, as stored and as sent.
+CORRECTION_METHODS = ("none", "bonferroni", "benjamini_hochberg")
+
+
+class UnknownCorrectionMethodError(Exception):
+    """A correction method that is not one of ``CORRECTION_METHODS``.
+
+    Deliberately not a ``ValueError``: the results route answers a
+    ``ValueError`` with 404 and the export reads one as "no results", and
+    either would hide a method spelt wrongly somewhere in the code (#580).
+    Raised, it reaches the route's ``unexpected_failure`` (500).
+    """
+
+    def __init__(self, method: Any) -> None:
+        self.method = method
+        super().__init__(
+            f"Unknown correction method {method!r}; expected one of "
+            f"{', '.join(CORRECTION_METHODS)}"
+        )
+
+
 def adjusted_p_values(
     p_values: List[Optional[float]], method: str
 ) -> List[Optional[float]]:
-    """Multiple-comparison correction across the treatment variants of one metric."""
+    """Multiple-comparison correction across the treatment variants of one metric.
+
+    Raises:
+        UnknownCorrectionMethodError: ``method`` is not one of
+            ``CORRECTION_METHODS``, whatever the p-values are. An unknown
+            spelling used to mean "no correction", silently.
+    """
+    if method not in CORRECTION_METHODS:
+        raise UnknownCorrectionMethodError(method)
     valid = [(i, p) for i, p in enumerate(p_values) if p is not None]
     adjusted: List[Optional[float]] = [None] * len(p_values)
     if not valid or method == "none":
@@ -62,7 +91,7 @@ def adjusted_p_values(
             running = min(running, p * k / rank)
             adjusted[i] = min(1.0, running)
         return adjusted
-    return adjusted
+    raise AssertionError(f"unreachable: {method!r}")  # pragma: no cover
 
 
 def effect_size_label(abs_effect: float) -> str:

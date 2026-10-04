@@ -46,7 +46,7 @@ pytestmark = [pytest.mark.integration]
 
 #: This revision, and the core revision it extends.
 REVISION = "d29a479daafe"
-PREVIOUS_CORE_HEAD = "1ab99332f0ba"
+PREVIOUS_CORE_HEAD = "806901fb7735"
 #: The core head of this tree.
 CORE_HEAD = "d29a479daafe"
 MODULES_HEAD = "modules_0002_warehouse_analysis"

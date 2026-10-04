@@ -49,13 +49,13 @@ Rolling back across this revision while a holdout is active invalidates that
 holdout's measurement: deactivate it and create a new one after upgrading
 again (``docs/deployment/rollback-runbook.md``).
 
-Core chain, extending the core head ``1ab99332f0ba`` (generated with
-``revision --autogenerate --head 1ab99332f0ba``).  Nothing here touches a
-module table, so a full checkout still has exactly two heads: this revision
-and ``modules_0002_warehouse_analysis``.
+Core chain, extending the core head ``806901fb7735`` (#580).  Generated with
+``revision --autogenerate --head 1ab99332f0ba`` and re-parented when #580
+merged first.  Nothing here touches a module table, so a full checkout still
+has exactly two heads: this revision and ``modules_0002_warehouse_analysis``.
 
 Revision ID: d29a479daafe
-Revises: 1ab99332f0ba
+Revises: 806901fb7735
 Create Date: 2026-10-03
 """
 
@@ -69,7 +69,7 @@ from sqlalchemy.dialects import postgresql
 
 # revision identifiers, used by Alembic.
 revision: str = "d29a479daafe"
-down_revision: Union[str, None] = "1ab99332f0ba"
+down_revision: Union[str, None] = "806901fb7735"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
