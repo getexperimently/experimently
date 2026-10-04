@@ -5,10 +5,13 @@ import { AnalysisNotice } from '@/components/results/shared/AnalysisNotice';
 
 // The interaction analysis's notice, as the API sends it (#219).
 const INTERACTIONS_NOTICE =
-  "Beta: only the overlap between the two experiments' users is measured. " +
-  'The interaction, novelty and SUTVA analyses are not computed yet, so ' +
-  'interaction_result, novelty_result and sutva_result are null and ' +
-  'overall_risk reflects the overlap alone. ' +
+  "Beta: tests whether each treatment's lift, in percentage points, on its " +
+  "experiment's primary conversion metric differs across the other " +
+  "experiment's variants, among the users in both. p_value is uncorrected; " +
+  "corrected_p_value applies the experiment's stored correction across its " +
+  "own treatments, and is_significant uses it at the experiment's " +
+  'confidence level. Pairs are tested one at a time, with no correction ' +
+  'across pairs. Secondary and non-conversion metrics are not tested. ' +
   'https://github.com/getexperimently/experimently/issues/219';
 
 describe('AnalysisNotice', () => {
@@ -18,7 +21,7 @@ describe('AnalysisNotice', () => {
     const region = screen.getByRole('region', { name: /beta/i });
     // The label is text, not colour alone.
     expect(within(region).getByTestId('analysis-notice-label')).toHaveTextContent(/^Beta$/);
-    expect(region).toHaveTextContent(/only the overlap between the two experiments' users is measured/i);
+    expect(region).toHaveTextContent(/tests whether each treatment's lift, in percentage points/i);
     // The "Beta:" prefix is not repeated after the label.
     expect(screen.getByTestId('analysis-notice-text').textContent).not.toMatch(/^Beta:/);
 

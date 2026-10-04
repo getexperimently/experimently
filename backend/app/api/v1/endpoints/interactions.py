@@ -3,17 +3,17 @@ Cross-experiment interaction detection endpoints (Issue #25).
 
 GET /api/v1/interactions/scan                     — scan all active experiments
 GET /api/v1/interactions/{exp_a_id}/{exp_b_id}    — analyze a specific pair (beta)
-GET /api/v1/interactions/{exp_a_id}/{exp_b_id}/novelty — novelty sub-analysis (beta)
 
-Only the overlap is measured (#219): the interaction, novelty and SUTVA
-sub-results are null (not computed) and the risk level comes from the overlap.
-The two beta routes say so in ``analysis_status``/``analysis_notice``.
+``/scan`` reports overlap only: its interaction, novelty and SUTVA sub-results
+are null and the risk level comes from the overlap.  The pair route (beta,
+#219) reports the real overlap and tests whether each treatment's lift differs
+across the other experiment's arms (``InteractionPairResponse``).
 
-Access: DEVELOPER and above (VIEWER gets 403 on write-like analysis endpoints).
+Access: ANALYST, DEVELOPER or ADMIN (VIEWER gets 403).
 """
 
 import logging
-from typing import Any, Type
+from typing import Any
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -26,7 +26,6 @@ from backend.app.schemas.interaction import (
     ActiveInteractionScanResponse,
     InteractionAnalysisResponse,
     InteractionPairResponse,
-    NoveltyAnalysisResponse,
     RiskLevel,
 )
 from backend.app.services.interaction_detection_service import (
@@ -38,10 +37,13 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-#: The two analyses whose numbers are not computed yet (#219).  The routes are
-#: beta in the OpenAPI document (docs/api/stability.md) as well as in the
-#: response's analysis_status.
+#: The pair route is beta in the OpenAPI document (docs/api/stability.md) as
+#: well as in the response's analysis_status (#219).
 _BETA = {"x-stability": "beta"}
+
+#: The fixed answers of the pair route.
+SAME_EXPERIMENT = "The two experiments must be different."
+EXPERIMENT_NOT_FOUND = "{} does not match an experiment."
 
 
 # ---------------------------------------------------------------------------
@@ -60,7 +62,7 @@ def _require_developer(current_user: User) -> None:
     if role in (UserRole.VIEWER,):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="DEVELOPER role or higher is required to access interaction analysis.",
+            detail="Interaction analysis needs the ANALYST, DEVELOPER or ADMIN role.",
         )
 
 
@@ -69,15 +71,8 @@ def _require_developer(current_user: User) -> None:
 # ---------------------------------------------------------------------------
 
 
-def _to_response(
-    analysis: InteractionAnalysis,
-    model: Type[InteractionAnalysisResponse] = InteractionAnalysisResponse,
-) -> InteractionAnalysisResponse:
-    """Convert an InteractionAnalysis dataclass to a response schema.
-
-    ``/scan`` (stable) answers with ``InteractionAnalysisResponse``; the beta
-    pair route with ``InteractionPairResponse``, which adds the labels.
-    """
+def _to_response(analysis: InteractionAnalysis) -> InteractionAnalysisResponse:
+    """Convert an InteractionAnalysis dataclass to ``/scan``'s item schema."""
     from backend.app.schemas.interaction import (
         InteractionResultSchema,
         NoveltyResultSchema,
@@ -109,7 +104,7 @@ def _to_response(
             warning_message=analysis.sutva_result.warning_message,
         )
 
-    return model(
+    return InteractionAnalysisResponse(
         experiment_a_id=analysis.experiment_a_id,
         experiment_b_id=analysis.experiment_b_id,
         overlap_coefficient=analysis.overlap_coefficient,
@@ -119,24 +114,6 @@ def _to_response(
         sutva_result=sutva_result,
         overall_risk=RiskLevel(analysis.overall_risk),
         recommendations=analysis.recommendations,
-    )
-
-
-def _make_empty_response(exp_a_id: str, exp_b_id: str) -> InteractionPairResponse:
-    """Return a minimal response for non-overlapping experiment pairs."""
-    return InteractionPairResponse(
-        experiment_a_id=exp_a_id,
-        experiment_b_id=exp_b_id,
-        overlap_coefficient=0.0,
-        has_significant_overlap=False,
-        interaction_result=None,
-        novelty_result=None,
-        sutva_result=None,
-        overall_risk=RiskLevel.LOW,
-        recommendations=[
-            "No significant user overlap detected between these experiments. "
-            "Interaction analysis is not required."
-        ],
     )
 
 
@@ -186,58 +163,9 @@ def scan_interactions(
 
 
 @router.get(
-    "/{exp_a_id}/{exp_b_id}/novelty",
-    response_model=NoveltyAnalysisResponse,
-    summary="Beta: novelty sub-analysis (not computed yet)",
-    openapi_extra=_BETA,
-)
-def analyze_novelty(
-    exp_a_id: UUID,
-    exp_b_id: UUID,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user),
-) -> Any:
-    """Return the novelty sub-analysis for a pair of experiments.
-
-    Beta (#219): novelty is not computed yet, so the answer is
-    ``computed: false`` with ``has_novelty`` and ``decline_rate`` null -- never
-    ``has_novelty: false``, which would read as "no novelty found".
-
-    This route MUST be defined before /{exp_a_id}/{exp_b_id} to avoid
-    the path segment "novelty" being captured as exp_b_id.
-    """
-    _require_developer(current_user)
-
-    service = InteractionDetectionService()
-    try:
-        analysis = service.analyze_experiment_pair(str(exp_a_id), str(exp_b_id), db)
-    except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc))
-
-    if analysis is not None and analysis.novelty_result is not None:
-        return NoveltyAnalysisResponse(
-            computed=True,
-            has_novelty=analysis.novelty_result.has_novelty,
-            decline_rate=analysis.novelty_result.decline_rate,
-            recommendation=analysis.novelty_result.recommendation,
-        )
-
-    return NoveltyAnalysisResponse(
-        computed=False,
-        has_novelty=None,
-        decline_rate=None,
-        recommendation=(
-            "Novelty is not computed yet: it needs the daily treatment effect, "
-            "which this analysis does not read. A null has_novelty means not "
-            "computed, not that no novelty was found."
-        ),
-    )
-
-
-@router.get(
     "/{exp_a_id}/{exp_b_id}",
     response_model=InteractionPairResponse,
-    summary="Beta: interaction analysis of two experiments (overlap only)",
+    summary="Beta: do two experiments' effects interact?",
     openapi_extra=_BETA,
 )
 def analyze_pair(
@@ -246,24 +174,43 @@ def analyze_pair(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
 ) -> Any:
-    """Analyze interaction between two specific experiments.
+    """The overlap of two experiments, and whether their effects interact.
 
-    Beta (#219): only the overlap is measured.  ``interaction_result``,
-    ``novelty_result`` and ``sutva_result`` are null (not computed) and
-    ``overall_risk`` comes from the overlap alone.
-
-    Returns a minimal response (overlap_coefficient=0, has_significant_overlap=False)
-    when experiments do not share a significant portion of users.
+    Beta (#219).  For each treatment of each experiment: does its lift, in
+    percentage points, on the experiment's primary conversion metric differ
+    across the other experiment's arms, among the users in both?  Any two
+    experiments, in any status.  A row that cannot be tested says why in
+    ``unavailable_reason``.
     """
     _require_developer(current_user)
+    if exp_a_id == exp_b_id:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=SAME_EXPERIMENT
+        )
 
     service = InteractionDetectionService()
     try:
-        analysis = service.analyze_experiment_pair(str(exp_a_id), str(exp_b_id), db)
-    except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc))
-
-    if analysis is None:
-        return _make_empty_response(str(exp_a_id), str(exp_b_id))
-
-    return _to_response(analysis, InteractionPairResponse)
+        service.bound_statement_time(db)
+        experiment_a = service.load_experiment(db, exp_a_id)
+        if experiment_a is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=EXPERIMENT_NOT_FOUND.format("experiment_a_id"),
+            )
+        experiment_b = service.load_experiment(db, exp_b_id)
+        if experiment_b is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=EXPERIMENT_NOT_FOUND.format("experiment_b_id"),
+            )
+        return service.analyze_pair_interactions(experiment_a, experiment_b, db)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise unexpected_failure(
+            exc,
+            "Interaction analysis",
+            "Could not analyse the two experiments",
+            db=db,
+            logger=logger,
+        )

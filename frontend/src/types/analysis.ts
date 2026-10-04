@@ -5,7 +5,7 @@
  */
 export type AnalysisStatus = 'ga' | 'beta';
 
-/** Fields the sequential, CUPED, interaction and novelty responses carry. */
+/** Fields the sequential, CUPED and interaction-pair responses carry. */
 export interface AnalysisStatusFields {
   analysis_status?: AnalysisStatus | null;
   analysis_notice?: string | null;

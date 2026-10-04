@@ -66,7 +66,7 @@ The platform supports a range of statistical approaches:
 | Bayesian (Beta-Binomial) | Posterior credible intervals, Bayes factors, probability of superiority, ROPE |
 | Multi-armed bandit | Thompson Sampling, UCB1, and Epsilon-Greedy adaptive traffic allocation |
 | Dimensional analysis | Segment-level breakdowns with Bonferroni correction and heterogeneous treatment effect detection |
-| Interaction detection (beta) | Jaccard overlap between experiments; the interaction, novelty and SUTVA analyses are not computed yet (#219) |
+| Interaction detection (beta) | Jaccard overlap between experiments; whether one experiment's lift on its primary conversion metric differs across another's arms |
 
 ---
 

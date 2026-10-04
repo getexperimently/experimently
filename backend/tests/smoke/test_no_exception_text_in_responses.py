@@ -495,8 +495,6 @@ ALLOWED: Dict[Tuple[str, str, str], Tuple[int, str]] = {
         1,
         SERVICE_VALUEERROR,
     ),
-    (f"{E}/interactions.py", "analyze_novelty", "ValueError"): (1, SERVICE_VALUEERROR),
-    (f"{E}/interactions.py", "analyze_pair", "ValueError"): (1, SERVICE_VALUEERROR),
     (f"{E}/llm_experiments.py", "create_llm_experiment", "ValueError"): (
         1,
         SERVICE_VALUEERROR,

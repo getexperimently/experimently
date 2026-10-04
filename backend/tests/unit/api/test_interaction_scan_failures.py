@@ -143,7 +143,7 @@ def test_scan_403_for_a_viewer_passes_through(scan_client):
 
     assert resp.status_code == 403
     assert resp.json() == {
-        "detail": "DEVELOPER role or higher is required to access interaction analysis."
+        "detail": "Interaction analysis needs the ANALYST, DEVELOPER or ADMIN role."
     }
     db.rollback.assert_not_called()
 
