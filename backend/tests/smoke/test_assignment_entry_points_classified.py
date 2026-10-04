@@ -68,7 +68,6 @@ INVENTORY: Dict[str, str] = {
     "backend/app/services/assignment_service.py::AssignmentService.reassign_user": UNRECORDED,
     "backend/app/services/assignment_service.py::AssignmentService.delete_assignments_by_experiment": DELETES,
     "backend/app/api/v1/endpoints/results.py::_get_sequential_data._count_assignments": READS,
-    "backend/app/api/v1/endpoints/results.py::get_cuped_results_data._get_outcomes": READS,
     # Raw SQL in an f-string (FROM {schema}.assignments).
     "backend/app/api/v1/endpoints/results.py::_compute_dimensional_breakdown": READS,
     "backend/app/api/v1/endpoints/results.py::get_sample_size_status": READS,
@@ -85,6 +84,7 @@ INVENTORY: Dict[str, str] = {
     "backend/app/services/assignment_service.py::AssignmentService.get_user_assignments": READS,
     "backend/app/services/audience_service.py::AudienceService.preview_audience_size": READS,
     "backend/app/services/event_matching.py::_assigned_pairs": READS,
+    "backend/app/services/event_matching.py::assignment_times": READS,
     "backend/app/services/event_service.py::EventService.track_conversion": READS,
     "backend/app/services/export_service.py::ExportService._count_assignments": READS,
     "backend/app/services/export_service.py::ExportService._experiments_to_rows": READS,

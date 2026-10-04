@@ -71,8 +71,10 @@ it is `beta`) is about its **numbers**: `beta` there means part of the analysis
 is not yet computed as its fields describe, and the notice says which part and
 links the issue. The values come from one table,
 `backend/app/core/analysis_status.py`. A route whose numbers are beta is also
-marked `x-stability: beta` (the CUPED, interaction-pair and novelty routes, issues #217
-and #219), because fixing the numbers will change its response;
+marked `x-stability: beta` (the interaction-pair and novelty routes, #219),
+because fixing the numbers will change its response. The CUPED route's numbers
+are `ga` (#217), and the route stays `x-stability: beta` while its response is
+still being shaped (mean metrics, #439);
 `/interactions/scan` stays stable, and its items keep their shape with the
 not-computed sub-results `null`.
 `POST /api/v1/results/{id}/post-stratification` is beta as well (#443): it
@@ -97,6 +99,7 @@ Stable operations changed this way, before any user depended on them:
 | `POST /api/v1/segments`, `PUT /api/v1/segments/{segment_id}`, `POST /api/v1/segments/{segment_id}/preview`, `POST /api/v1/segments/{segment_id}/evaluate`, `GET`/`DELETE /api/v1/segments/{segment_id}`, `GET /api/v1/segments/{segment_id}/experiments`, `POST /api/v1/segments/bulk-evaluate` | #440 | Segment `rules` must be in the targeting rule format that flags and experiments use (`{"logical_operator", "groups": [{"conditions": [...]}]}`, operators such as `equals`), with at least one group and at most 20 groups, 50 conditions, 10 `regex` conditions and 1,000 list values; the old `{"operator", "conditions"}` format and anything else answer 422 on create, update and preview. Evaluate answers 409 for a segment stored in the old format, and bulk-evaluate answers `false` for it; stored segments are left as they are. `{segment_id}` is a UUID, and other text answers 422. See [Upgrading: segment rules](endpoints.md#upgrading-segment-rules). |
 | `POST /api/v1/segments`, `GET /api/v1/segments`, `GET`/`PUT /api/v1/segments/{segment_id}`, `POST /api/v1/segments/{segment_id}/evaluate`, `POST /api/v1/segments/bulk-evaluate`, `POST /api/v1/segments/{segment_id}/preview` | #440 (id lists) | A segment has a `kind`, `rules` (the default) or `id_list`, set on create and never changed. `rules` is optional on create: required for a rules segment and refused for an id list (422), so a create that leaves `kind` out still needs `rules` as before. Every segment in a response carries `kind`; an id list's `rules` is `null`, and `GET /api/v1/segments/{segment_id}` fills `member_count` for it. A `PUT` that sends `kind`, or `rules` for an id list, answers 422. Evaluate and bulk-evaluate answer an id list on `user_context.user_id`. Preview takes the same body and answers 422 when it has no `rules`. Segments stored before the upgrade are rules segments. The member routes `POST /api/v1/segments/{segment_id}/members` and `/members/remove` are new and beta. See [Segments made from a list of user IDs](endpoints.md#segments-made-from-a-list-of-user-ids-beta). |
 | `POST /api/v1/tracking/track`, `POST /api/v1/tracking/batch` | #217 | `experiment_key` and `feature_flag_key` are both optional. An event with neither (missing, `null` or `""`) is stored with `experiment_id`, `feature_flag_id` and `variant_id` null, where it used to answer 422 (and one such entry failed a whole batch with 422). Such an event is history and counts in no experiment's results; tag outcome events. A key that is given and not found still answers 404, or is reported in the batch's `errors`; the detail names only the keys that were sent. The OpenAPI document does not change. See [Track Event](endpoints.md#track-event). |
+| `GET /api/v1/interactions/scan` | #853 | When reading the active experiments or their assignments fails, the scan answers 500 with a fixed message and the request ID. It used to answer 200 as if nothing were running: `total_active_experiments: 0`, or the pairs whose assignments could not be read left out. A scan whose reads succeed answers as before. The OpenAPI document does not change. |
 
 ## Deprecated operations
 

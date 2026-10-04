@@ -39,6 +39,12 @@ An account that existed before its first Cognito sign-in is used only once an
 administrator has linked it by setting its ``external_id``; nothing here links
 a row by username or email. A row's username, email and name are never
 rewritten from Cognito.
+
+Two outcomes write an audit entry (#221), each in a savepoint so that a
+failed entry costs neither the sign-in nor the change: case 1's role sync
+writes ``role_assign`` by ``system:cognito-sync`` with ``{role,
+is_superuser}`` before and after, and case 8 writes ``user_create`` by the new
+user. A failed entry is logged as an ERROR and is not retried.
 """
 
 import logging
@@ -50,7 +56,15 @@ from sqlalchemy.orm import Session
 
 from backend.app.core.cognito import map_cognito_groups_to_role, should_be_superuser
 from backend.app.core.config import settings
+from backend.app.models.audit_log import ActionType, EntityType
 from backend.app.models.user import User, UserRole
+from backend.app.services.audit_service import (
+    SYSTEM_COGNITO_SYNC,
+    AuditService,
+    audit_identity,
+    audit_snapshot,
+    role_value,
+)
 
 #: The record of a refused Cognito sign-in -- the same logger the token check
 #: in ``auth_service`` writes to. Its ``reason`` field is one of the codes below.
@@ -174,8 +188,20 @@ def resolve_cognito_user(db: Session, user_data: Mapping[str, Any]) -> User:
         if settings.SYNC_ROLES_ON_LOGIN and (
             user.role != role or user.is_superuser != is_superuser
         ):
+            before = role_value(user)
             user.role = role
             user.is_superuser = is_superuser
+            AuditService.record_in_savepoint(
+                db,
+                actor=SYSTEM_COGNITO_SYNC,
+                action=ActionType.ROLE_ASSIGN,
+                entity_type=EntityType.USER,
+                entity_id=user.id,
+                entity_name=user.username or str(user.id),
+                before=before,
+                after=role_value(user),
+                reason="Cognito groups changed",
+            )
             db.commit()
             db.refresh(user)
         return user
@@ -226,9 +252,21 @@ def resolve_cognito_user(db: Session, user_data: Mapping[str, Any]) -> User:
             field=too_long,
         )
 
-    # 8. A new account, linked to this Cognito user from the start.
+    # 8. A new account, linked to this Cognito user from the start. Its
+    # audit entry rides in a savepoint: the account is created either way.
     db.add(user)
     try:
+        db.flush()
+        AuditService.record_in_savepoint(
+            db,
+            actor=user,
+            action=ActionType.USER_CREATE,
+            entity_type=EntityType.USER,
+            entity_id=user.id,
+            entity_name=user.username or str(user.id),
+            after=audit_identity(audit_snapshot(EntityType.USER, user)),
+            reason="first sign-in",
+        )
         db.commit()
     except SQLAlchemyError:
         # 9. Most likely a concurrent first sign-in of the same identity

@@ -736,7 +736,14 @@ def test_a_rollback_commits_exactly_once_on_a_flag_with_no_config(
 
     session = session_factory()
     commits = []
-    event.listen(session, "after_commit", lambda s: commits.append(1))
+
+    def count(s):
+        # A savepoint's release also fires after_commit (the audit entry is
+        # written in one, #221); it is not a commit and releases no lock.
+        if not s.in_nested_transaction():
+            commits.append(1)
+
+    event.listen(session, "after_commit", count)
     try:
         result = SafetyService(session).execute_rollback(
             session, flag.id, target_percentage=0

@@ -47,7 +47,7 @@ pytestmark = pytest.mark.unit
 #: What this release says about each analysis.  Changing a status is a
 #: decision: change it here and in the table together.
 EXPECTED_STATUS = {
-    "cuped": "beta",
+    "cuped": "ga",
     "interactions": "beta",
     "novelty": "beta",
     "sequential": "beta",
@@ -55,7 +55,7 @@ EXPECTED_STATUS = {
     "warehouse_mean": "ga",
 }
 
-EXPECTED_ISSUE = {"cuped": 217, "interactions": 219, "novelty": 219, "sequential": 232}
+EXPECTED_ISSUE = {"interactions": 219, "novelty": 219, "sequential": 232}
 
 
 # ---------------------------------------------------------------------------

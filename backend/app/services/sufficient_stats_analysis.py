@@ -607,3 +607,233 @@ def mean_metric_result(
         "has_significant_result": any(v["is_significant"] for v in results),
         "winning_variant_id": winner["variant_id"] if winner else None,
     }
+
+
+# ---------------------------------------------------------------------------
+# CUPED from per-arm sums (#217)
+# ---------------------------------------------------------------------------
+
+#: ``(variant, n, sum_y, sum_x, sum_y2, sum_x2, sum_xy)``: the units in an arm
+#: and, over their outcome ``y`` and covariate ``x``, the five sums.
+CupedSums = Tuple[Any, int, float, float, float, float, float]
+
+#: Reason a treatment row carries when neither arm's outcome varies.
+NO_VARIATION_REASON = "no_variation"
+
+#: Reason a treatment row carries when the covariate leaves no residual
+#: variation in either arm: the adjusted standard error would be 0 (or a
+#: rounding residue), and a p-value from it would claim certainty the data
+#: cannot give.
+NO_RESIDUAL_VARIATION_REASON = "no_residual_variation"
+
+
+class _CupedArm(NamedTuple):
+    variant: Any
+    n: int
+    sum_y: float
+    sum_x: float
+    syy: float  # within-arm sum of squares of y about the arm's mean
+    sxx: float
+    sxy: float
+
+
+def _cuped_arm(
+    variant: Any,
+    n: Any,
+    sum_y: Any,
+    sum_x: Any,
+    sum_y2: Any,
+    sum_x2: Any,
+    sum_xy: Any,
+) -> _CupedArm:
+    if isinstance(n, bool) or not isinstance(n, int) or n < 0:
+        raise SufficientStatsRefused("n is not a non-negative integer")
+    sums = [float(v) for v in (sum_y, sum_x, sum_y2, sum_x2, sum_xy)]
+    if not all(math.isfinite(v) for v in sums):
+        raise SufficientStatsRefused("a sum is not finite")
+    sum_y, sum_x, sum_y2, sum_x2, sum_xy = sums
+    if n == 0:
+        if any(sums):
+            raise SufficientStatsRefused("an arm with no units has non-zero sums")
+        return _CupedArm(variant, 0, 0.0, 0.0, 0.0, 0.0, 0.0)
+    syy = sum_y2 - sum_y * sum_y / n
+    sxx = sum_x2 - sum_x * sum_x / n
+    sxy = sum_xy - sum_x * sum_y / n
+    # Rounding can leave a tiny negative where the true value is 0; a clearly
+    # negative sum of squares no sample could produce.
+    for value, total in ((syy, sum_y2), (sxx, sum_x2)):
+        if value < -1e-9 * max(1.0, abs(total)):
+            raise SufficientStatsRefused("the sums give a negative variance")
+    syy = max(syy, 0.0)
+    sxx = max(sxx, 0.0)
+    if sxy * sxy > syy * sxx * (1 + 1e-9) + 1e-9:
+        raise SufficientStatsRefused("the sums give a correlation above 1")
+    return _CupedArm(variant, n, sum_y, sum_x, syy, sxx, sxy)
+
+
+def cuped_metric_result(
+    arms: Sequence[CupedSums],
+    confidence_level: float,
+    correction_method: str,
+    *,
+    metric: Any,
+    adjust: bool = True,
+) -> List[Dict[str, Any]]:
+    """One metric's CUPED comparisons, every treatment against the control.
+
+    The estimate is the regression ``y ~ C(arm) + x`` fitted by ordinary least
+    squares, computed from sums alone, so a caller with the sums from
+    somewhere else (a warehouse) gets the same numbers:
+
+    * ``theta`` is the pooled within-arm slope ``sum_k Sxy_k / sum_k Sxx_k``
+      over **every** arm, the ``x`` coefficient of that regression; 0 when
+      ``adjust`` is false or when ``x`` does not vary within any arm (for a
+      0/1 covariate, coverage of exactly 0 or 100%);
+    * each arm's adjusted mean is ``ybar_k - theta * (xbar_k - xbar)``, centred
+      on the grand mean ``xbar`` so it stays on the outcome's scale;
+    * its variance is ``(Syy_k - 2 theta Sxy_k + theta^2 Sxx_k) / (n_k - 1)
+      / n_k``, the residual variance of the arm over its size;
+    * the effect is the treatment's adjusted mean minus the control's, with a
+      two-sided z-test and an interval at ``two_sided_z(confidence_level)``;
+    * ``variance_reduction_pct`` is ``100 * (1 - Var(adjusted effect) /
+      Var(unadjusted effect))``.  It can be negative: the pooled slope is
+      fitted over every arm, and an arm whose own slope differs can end up
+      with a larger variance than without adjustment.  For the same reason,
+      adding an arm changes the other arms' adjusted effects;
+    * ``corrected_p_value`` applies ``correction_method`` across the
+      treatments of this metric (``adjusted_p_values``).
+
+    A treatment with fewer than 2 units gets ``unavailable_reason``
+    ``fewer_than_2_units`` and no numbers.  It is still part of the pooled
+    fit, where it contributes nothing: an arm of one unit has no within-arm
+    variation.  A treatment whose outcome, and the control's, does not vary
+    at all gets ``no_variation``; one where the covariate leaves no residual
+    variation in either arm (the adjusted standard error would be 0) gets
+    ``no_residual_variation``.  Neither carries a p-value.
+
+    Args:
+        arms: ``(variant, n, sum_y, sum_x, sum_y2, sum_x2, sum_xy)`` per arm,
+            in report order; ``variant`` has ``id``, ``name`` and
+            ``is_control``, and exactly one should be the control.
+        confidence_level: the level of the interval and of ``is_significant``.
+        correction_method: ``none``, ``bonferroni`` or ``benjamini_hochberg``.
+        metric: the metric's identity (``id`` and ``name``).
+        adjust: false for the method ``none``: theta is 0 and the adjusted
+            numbers are the unadjusted ones.
+
+    Returns:
+        One dict per treatment, in report order.
+
+    Raises:
+        SufficientStatsRefused: a count or sum is malformed or not finite, or
+            the sums are ones no sample could produce.
+        SufficientStatsNotComputed: the control has fewer than 2 units.
+        UnknownCorrectionMethodError: ``correction_method`` is not one of
+            ``CORRECTION_METHODS``.
+        ValueError: when no variant is the control, or the level is not
+            strictly between 0 and 1.
+    """
+    if correction_method not in CORRECTION_METHODS:
+        raise UnknownCorrectionMethodError(correction_method)
+    z_crit = two_sided_z(confidence_level)
+    alpha = 1.0 - confidence_level
+    parsed = [_cuped_arm(*row) for row in arms]
+    control = next((a for a in parsed if a.variant.is_control), None)
+    if control is None:
+        raise ValueError("No variant is the control")
+    if control.n < 2:
+        raise SufficientStatsNotComputed(
+            FEWER_THAN_2_UNITS, "Not computed: fewer than 2 units"
+        )
+
+    pooled_sxx = sum(a.sxx for a in parsed)
+    pooled_sxy = sum(a.sxy for a in parsed)
+    scale = max(1.0, sum(abs(a.sum_x) for a in parsed))
+    theta = pooled_sxy / pooled_sxx if adjust and pooled_sxx > 1e-12 * scale else 0.0
+    total_n = sum(a.n for a in parsed)
+    x_grand = sum(a.sum_x for a in parsed) / total_n
+
+    def _stats(arm: _CupedArm) -> Tuple[float, float, float, float]:
+        """Adjusted mean, its variance, unadjusted mean, its variance."""
+        y_mean = arm.sum_y / arm.n
+        x_mean = arm.sum_x / arm.n
+        adjusted_mean = y_mean - theta * (x_mean - x_grand)
+        residual = arm.syy - 2.0 * theta * arm.sxy + theta * theta * arm.sxx
+        residual = max(residual, 0.0)
+        return (
+            adjusted_mean,
+            residual / (arm.n - 1) / arm.n,
+            y_mean,
+            arm.syy / (arm.n - 1) / arm.n,
+        )
+
+    c_adj, c_var, c_mean, c_uvar = _stats(control)
+    rows: List[Dict[str, Any]] = []
+    for arm in parsed:
+        if arm.variant.is_control:
+            continue
+        row: Dict[str, Any] = {
+            "metric_id": str(metric.id),
+            "metric_name": metric.name,
+            "variant_id": str(arm.variant.id),
+            "variant_name": arm.variant.name,
+            "control_variant_id": str(control.variant.id),
+            "control_sample_size": control.n,
+            "treatment_sample_size": arm.n,
+            "adjusted_control_mean": None,
+            "adjusted_treatment_mean": None,
+            "adjusted_effect": None,
+            "adjusted_se": None,
+            "adjusted_p_value": None,
+            "adjusted_ci_lower": None,
+            "adjusted_ci_upper": None,
+            "unadjusted_effect": None,
+            "unadjusted_se": None,
+            "corrected_p_value": None,
+            "is_significant": False,
+            "variance_reduction_pct": None,
+            "theta": None,
+            "unavailable_reason": None,
+        }
+        if arm.n < 2:
+            row["unavailable_reason"] = FEWER_THAN_2_UNITS
+            rows.append(row)
+            continue
+        t_adj, t_var, t_mean, t_uvar = _stats(arm)
+        unadjusted_var = t_uvar + c_uvar
+        if unadjusted_var <= 0.0:
+            row["unavailable_reason"] = NO_VARIATION_REASON
+            rows.append(row)
+            continue
+        adjusted_var = t_var + c_var
+        # Relative, so the residue of an exact fit (1e-17, not 0) is caught too.
+        if adjusted_var <= 1e-12 * unadjusted_var:
+            row["unavailable_reason"] = NO_RESIDUAL_VARIATION_REASON
+            rows.append(row)
+            continue
+        effect = t_adj - c_adj
+        se = math.sqrt(adjusted_var)
+        p_value = float(2.0 * stats.norm.sf(abs(effect) / se))
+        row.update(
+            adjusted_control_mean=c_adj,
+            adjusted_treatment_mean=t_adj,
+            adjusted_effect=effect,
+            adjusted_se=se,
+            adjusted_p_value=p_value,
+            adjusted_ci_lower=effect - z_crit * se,
+            adjusted_ci_upper=effect + z_crit * se,
+            unadjusted_effect=t_mean - c_mean,
+            unadjusted_se=math.sqrt(unadjusted_var),
+            variance_reduction_pct=100.0 * (1.0 - adjusted_var / unadjusted_var),
+            theta=theta,
+        )
+        rows.append(row)
+
+    corrected = adjusted_p_values(
+        [row["adjusted_p_value"] for row in rows], correction_method
+    )
+    for row, adj in zip(rows, corrected):
+        row["corrected_p_value"] = adj
+        decisive = adj if adj is not None else row["adjusted_p_value"]
+        row["is_significant"] = bool(decisive is not None and decisive < alpha)
+    return rows
