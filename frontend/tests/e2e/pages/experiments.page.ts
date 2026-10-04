@@ -2,6 +2,14 @@ import { type Page, type Locator, expect } from "@playwright/test";
 import { CommonPage } from "./common.page";
 
 /**
+ * The Estimate step's heading: `STEP_HEADINGS.estimate` in
+ * src/components/experiments/new/Wizard.tsx. Since #580 the step also asks how
+ * the results will be judged (confidence level and correction, both with
+ * defaults, so a journey need not touch them).
+ */
+export const ESTIMATE_STEP_HEADING = "How results will be judged, and how many users you need";
+
+/**
  * Page object for the experiments list (`/experiments`), guided setup
  * (`/experiments/new`), the single-page form (`/experiments/new?advanced`) and
  * the detail page (`/experiments/[id]`).
@@ -190,7 +198,7 @@ export class ExperimentsPage {
       await this.metricEventInputs.first().fill(options.metricEventName);
     }
     await this.nextStep("Set up the versions users will see");
-    await this.nextStep("How many users will you need?");
+    await this.nextStep(ESTIMATE_STEP_HEADING);
     if (options.estimate) {
       await this.estimateBaseline.fill(options.estimate.baselinePct);
       await this.estimateMde.fill(options.estimate.mdePct);

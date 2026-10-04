@@ -101,8 +101,54 @@ describe('SampleSizeMeter', () => {
       );
       expect(screen.getByTestId('sample-size-baseline-source')).toHaveTextContent('Entered by you.');
       expect(screen.getByTestId('sample-size-power-source')).toHaveTextContent('Entered by you.');
-      expect(screen.getByTestId('sample-size-significance-source')).toHaveTextContent('Default.');
+      // The confidence level is the experiment's stored one unless changed here (#580).
+      expect(screen.getByTestId('sample-size-significance-source')).toHaveTextContent(
+        "From the experiment's settings."
+      );
       expect(screen.getByRole('button', { name: 'Use the observed rate' })).toBeInTheDocument();
+    });
+
+    it('says the correction is the experiment\'s, until the user changes it', () => {
+      const { rerender } = render(
+        <SampleSizeMeter data={{ ...observed, comparisons: 2, correction_method: 'benjamini_hochberg' }} />
+      );
+      expect(screen.getByTestId('sample-size-correction-source')).toHaveTextContent(
+        "From the experiment's settings."
+      );
+      expect(screen.getByLabelText('Correction')).toHaveAccessibleDescription(
+        "From the experiment's settings."
+      );
+      rerender(
+        <SampleSizeMeter
+          data={{ ...observed, comparisons: 2, correction_method: 'bonferroni' }}
+          overrides={{ correction_method: 'bonferroni' }}
+        />
+      );
+      expect(screen.getByTestId('sample-size-correction-source')).toHaveTextContent('Entered by you.');
+    });
+
+    it('labels the no-correction option "None", with no claim about the results', () => {
+      render(<SampleSizeMeter data={{ ...observed, comparisons: 2 }} />);
+      const options = Array.from(
+        (screen.getByLabelText('Correction') as HTMLSelectElement).options
+      ).map((o) => o.textContent);
+      expect(options).toEqual(['None', 'Bonferroni', 'Benjamini-Hochberg']);
+    });
+
+    it('renders a stored 92% confidence level truthfully: 8% significance (PE condition 14)', () => {
+      render(
+        <SampleSizeMeter
+          data={{ ...observed, confidence_level: 0.92 }}
+          onRecalculate={jest.fn()}
+        />
+      );
+      const select = screen.getByLabelText('Significance (two-sided)') as HTMLSelectElement;
+      expect(select.selectedOptions[0].textContent).toBe("8% (this experiment's setting)");
+      expect(screen.getByTestId('sample-size-required')).toHaveTextContent('8% significance, two-sided.');
+      expect(screen.getByTestId('sample-size-significance-source')).toHaveTextContent(
+        "From the experiment's settings."
+      );
+      expect(screen.queryByTestId('sample-size-stale')).not.toBeInTheDocument();
     });
   });
 
@@ -208,16 +254,33 @@ describe('SampleSizeMeter', () => {
       expect(screen.queryByTestId('sample-size-guide-only')).not.toBeInTheDocument();
     });
 
-    it('says a 3-variant plan makes no correction, like the results', () => {
+    it('says a 3-variant plan makes no correction, as the experiment is set', () => {
       render(
         <SampleSizeMeter data={{ ...observed, comparisons: 2, confidence_level: 0.95, alpha: 0.05 }} />
       );
       expect(screen.getByTestId('sample-size-correction-note')).toHaveTextContent(
-        'With 3 variants, this plan makes no correction for comparing several variants with the control, the same as the results. Choose a correction to plan each comparison at 2.5% significance.'
+        'With 3 variants, this plan makes no correction for comparing several variants with the control: the experiment is set to no correction. Choose a correction to plan each comparison at 2.5% significance.'
       );
     });
 
-    it('says what a correction did', () => {
+    it("says a plan uses the experiment's own correction", () => {
+      render(
+        <SampleSizeMeter
+          data={{
+            ...observed,
+            comparisons: 2,
+            confidence_level: 0.95,
+            alpha: 0.025,
+            correction_method: 'benjamini_hochberg',
+          }}
+        />
+      );
+      expect(screen.getByTestId('sample-size-correction-note')).toHaveTextContent(
+        "With 3 variants, this plan uses the experiment's correction (Benjamini-Hochberg): each of the 2 comparisons with the control is planned at 2.5% significance."
+      );
+    });
+
+    it('says what a correction chosen on the tab did', () => {
       render(
         <SampleSizeMeter
           data={{
@@ -227,6 +290,7 @@ describe('SampleSizeMeter', () => {
             alpha: 0.05 / 3,
             correction_method: 'bonferroni',
           }}
+          overrides={{ correction_method: 'bonferroni' }}
         />
       );
       expect(screen.getByTestId('sample-size-correction-note')).toHaveTextContent(

@@ -8,11 +8,20 @@
  * what is wrong. Nothing here ever enters the create request.
  */
 import { SampleSizeQuery } from '@/services/experiments';
+import { DEFAULT_CONFIDENCE_LEVEL } from '@/components/results/shared/analysisSettings';
 
 /** Statistical power offered, as fractions; the first is the default. */
 export const POWER_OPTIONS = [0.8, 0.9, 0.95] as const;
-/** Two-sided significance levels offered, as fractions; the first is the default. */
-export const SIGNIFICANCE_OPTIONS = [0.05, 0.01, 0.1] as const;
+
+/**
+ * The two-sided significance the estimate plans at: 1 - the experiment's
+ * confidence level, chosen in "How results will be judged" on the same step.
+ * The estimate plans each comparison at this level and makes no correction for
+ * comparing several variants with the control (#820 would add one).
+ */
+export function estimateSignificance(confidenceLevel: number): number {
+  return Number((1 - confidenceLevel).toFixed(4));
+}
 
 export interface EstimateInputs {
   /** Baseline conversion rate, in percent. */
@@ -20,7 +29,6 @@ export interface EstimateInputs {
   /** Minimum detectable effect, RELATIVE, in percent: 5 means 12% -> 12.6%. */
   mdePct: string;
   power: number;
-  significance: number;
   /** Users per day, optional. */
   dailyUsers: string;
   /** Share of those users in the experiment, in percent; blank means all of them. */
@@ -31,7 +39,6 @@ export const INITIAL_ESTIMATE_INPUTS: EstimateInputs = {
   baselinePct: '',
   mdePct: '',
   power: POWER_OPTIONS[0],
-  significance: SIGNIFICANCE_OPTIONS[0],
   dailyUsers: '',
   sharePct: '',
 };
@@ -63,7 +70,11 @@ function readNumber(text: string): number | null {
  * refuses a treatment rate of 100% or more itself, with a 422 carrying the
  * `ceiling` sentence word for word (a backend test reads it from this file).
  */
-export function buildEstimateQuery(inputs: EstimateInputs, variantCount: number): EstimateQueryResult {
+export function buildEstimateQuery(
+  inputs: EstimateInputs,
+  variantCount: number,
+  confidenceLevel: number = DEFAULT_CONFIDENCE_LEVEL,
+): EstimateQueryResult {
   if (variantCount < 2) return { ok: false, problem: ESTIMATE_PROBLEMS.variants };
 
   const baselinePct = readNumber(inputs.baselinePct);
@@ -81,7 +92,7 @@ export function buildEstimateQuery(inputs: EstimateInputs, variantCount: number)
     baseline_rate: baseline,
     minimum_detectable_effect: mde,
     statistical_power: inputs.power,
-    significance_level: inputs.significance,
+    significance_level: estimateSignificance(confidenceLevel),
     variant_count: variantCount,
   };
 

@@ -1,9 +1,24 @@
 import React from 'react';
-import { ExperimentResultsResponse, RecommendationAction } from '@/types/results';
+import {
+  CorrectionMethod,
+  ExperimentResultsResponse,
+  RecommendationAction,
+} from '@/types/results';
 import { WinnerIndicator } from '@/components/results/shared/WinnerIndicator';
+import {
+  correctionName,
+  describeSettings,
+  formatConfidence,
+  mostComparisons,
+} from '@/components/results/shared/analysisSettings';
 
 interface ExperimentSummaryProps {
   experiment: ExperimentResultsResponse;
+  /**
+   * The experiment's stored settings, when they could be read. Only used to
+   * say so when the results were computed with other ones.
+   */
+  stored?: { correction_method: CorrectionMethod; confidence_level: number } | null;
   /** Opens the Sample Size tab; the link to it is shown only when given. */
   onOpenSampleSize?: () => void;
 }
@@ -45,7 +60,29 @@ function StatusBadge({ status }: { status: string }) {
   );
 }
 
-export function ExperimentSummary({ experiment, onOpenSampleSize }: ExperimentSummaryProps) {
+/**
+ * The Analysis row: the confidence level and correction the results were
+ * computed with, and how many comparisons the correction covered. "k" is the
+ * most treatments with a p-value on any one metric.
+ */
+export function analysisSentence(experiment: ExperimentResultsResponse): string {
+  const level = formatConfidence(experiment.confidence_level);
+  const method = experiment.correction_method;
+  const k = mostComparisons(experiment.metrics);
+  if (k === 1) {
+    return `${level} confidence · one comparison with the control on each metric, so no correction is needed`;
+  }
+  if (method === 'none') {
+    return k >= 2
+      ? `${level} confidence · no correction (chosen for this experiment)`
+      : `${level} confidence · no correction`;
+  }
+  return k >= 2
+    ? `${level} confidence · ${correctionName(method)} correction for the ${k} comparisons with the control on each metric`
+    : `${level} confidence · ${correctionName(method)} correction`;
+}
+
+export function ExperimentSummary({ experiment, stored, onOpenSampleSize }: ExperimentSummaryProps) {
   const { summary } = experiment;
   const rec = RECOMMENDATION_CONFIG[summary.recommendation];
 
@@ -109,6 +146,23 @@ export function ExperimentSummary({ experiment, onOpenSampleSize }: ExperimentSu
           }
           testId="minimum-sample"
         />
+      </div>
+
+      <div className="text-sm text-slate-700" data-testid="analysis-summary">
+        <p>
+          <span className="font-medium text-slate-900">Analysis:</span>{' '}
+          <span data-testid="analysis-summary-text">{analysisSentence(experiment)}</span>
+        </p>
+        {stored &&
+          (stored.correction_method !== experiment.correction_method ||
+            Math.abs(stored.confidence_level - experiment.confidence_level) > 1e-9) && (
+            <p data-testid="analysis-summary-override">
+              Shown with{' '}
+              {describeSettings(experiment.confidence_level, experiment.correction_method)};
+              this experiment is set to{' '}
+              {describeSettings(stored.confidence_level, stored.correction_method)}.
+            </p>
+          )}
       </div>
 
       {onOpenSampleSize && (

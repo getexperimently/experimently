@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { ResultsService } from '@/services/results';
+import { ExperimentsService } from '@/services/experiments';
 import {
+  CorrectionMethod,
   ExperimentResultsResponse,
   DailyResultsResponse,
   SampleSizeOverrides,
@@ -11,6 +13,7 @@ import {
 import { analysedAsRate, rateDescription } from '@/components/results/shared/resultFormat';
 import { SequentialTestingResponse } from '@/types/sequential';
 import { ExperimentSummary } from './ExperimentSummary';
+import { CorrectedResultsNotice } from './CorrectedResultsNotice';
 import { SampleSizeMeter } from './SampleSizeMeter';
 import { ConversionChart } from '@/components/results/Visualizations/ConversionChart';
 import { TrendChart } from '@/components/results/Visualizations/TrendChart';
@@ -23,6 +26,32 @@ import { LiveResultsPanel } from '@/components/experiments/LiveResultsPanel';
 
 interface ResultsDashboardProps {
   experimentId: string;
+}
+
+/** The experiment's stored settings, as `GET /results/{id}` takes them. */
+export interface StoredAnalysisSettings {
+  correction_method: CorrectionMethod;
+  confidence_level: number;
+}
+
+/**
+ * The experiment's stored settings, or null when the experiment cannot be read
+ * or does not carry them. Never throws: without them the results are still
+ * asked for, and the server uses the stored settings itself.
+ */
+async function loadStoredSettings(experimentId: string): Promise<StoredAnalysisSettings | null> {
+  try {
+    const experiment = await ExperimentsService.get(experimentId);
+    if (experiment?.correction_method && typeof experiment.confidence_level === 'number') {
+      return {
+        correction_method: experiment.correction_method,
+        confidence_level: experiment.confidence_level,
+      };
+    }
+  } catch {
+    // Fall through: the results request goes without settings.
+  }
+  return null;
 }
 
 type Tab = 'overview' | 'trends' | 'sample-size' | 'sequential' | 'breakdowns' | 'live';
@@ -69,6 +98,8 @@ export function ResultsDashboard({ experimentId }: ResultsDashboardProps) {
   const [selectedBreakdown, setSelectedBreakdown] = useState<string | null>(null);
   const [breakdown, setBreakdown] = useState<DimensionalBreakdownResponse | null>(null);
   const [breakdownLoading, setBreakdownLoading] = useState(false);
+  // The settings every results request sends (D49), once the experiment is read.
+  const [stored, setStored] = useState<StoredAnalysisSettings | null>(null);
 
   const fetchSampleSize = useCallback(async (overrides: SampleSizeOverrides = {}) => {
     // Only the latest request may write state, so a slow answer for an
@@ -102,8 +133,17 @@ export function ResultsDashboard({ experimentId }: ResultsDashboardProps) {
     setSampleSize(null);
     void fetchSampleSize();
     try {
+      // The dashboard sends the experiment's stored correction and confidence
+      // level. If the experiment cannot be read, the results are still asked
+      // for, with no settings, and the server uses the stored ones.
+      const resultsRequest = loadStoredSettings(experimentId).then((settings) => {
+        setStored(settings);
+        return settings
+          ? ResultsService.getResults(experimentId, settings)
+          : ResultsService.getResults(experimentId);
+      });
       const [r, d] = await Promise.all([
-        ResultsService.getResults(experimentId),
+        resultsRequest,
         ResultsService.getDailyResults(experimentId),
       ]);
       setResults(r);
@@ -136,14 +176,17 @@ export function ResultsDashboard({ experimentId }: ResultsDashboardProps) {
     }
     setBreakdownLoading(true);
     try {
-      const r = await ResultsService.getResults(experimentId, { breakdown: dim });
+      const r = await ResultsService.getResults(
+        experimentId,
+        stored ? { breakdown: dim, ...stored } : { breakdown: dim }
+      );
       setBreakdown(r.breakdown ?? null);
     } catch {
       setBreakdown(null);
     } finally {
       setBreakdownLoading(false);
     }
-  }, [experimentId]);
+  }, [experimentId, stored]);
 
   useEffect(() => {
     fetchAll();
@@ -191,7 +234,12 @@ export function ResultsDashboard({ experimentId }: ResultsDashboardProps) {
     <div className="space-y-6" data-testid="results-dashboard">
       <ExperimentSummary
         experiment={results}
+        stored={stored}
         onOpenSampleSize={() => setActiveTab('sample-size')}
+      />
+      <CorrectedResultsNotice
+        metrics={results.metrics}
+        correctionMethod={results.correction_method}
       />
 
       {/* Tab navigation */}

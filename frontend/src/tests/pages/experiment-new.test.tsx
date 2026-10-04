@@ -147,6 +147,8 @@ describe('NewExperimentPage', () => {
         { name: 'Purchase', event_name: 'purchase', metric_type: 'conversion', is_primary: true },
         { name: 'Revenue', event_name: 'purchase', metric_type: 'revenue', is_primary: false },
       ],
+      confidence_level: 0.95,
+      correction_method: 'benjamini_hochberg',
     });
   });
 

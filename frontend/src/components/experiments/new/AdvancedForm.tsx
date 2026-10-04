@@ -8,6 +8,8 @@ import { VariantsEditor } from './VariantsEditor';
 import { MetricsEditor } from './MetricsEditor';
 import { CreateError, footMessage } from './createErrors';
 import { TargetingProblems } from './TargetingProblems';
+import { AnalysisSettingsFields } from './AnalysisSettingsFields';
+import { correctionName, formatConfidence } from '@/components/results/shared/analysisSettings';
 
 interface AdvancedFormProps {
   state: ExperimentFormState;
@@ -49,6 +51,26 @@ export function AdvancedForm({ state, dispatch, error, isSubmitting, onSubmit }:
       <section className="bg-white rounded-lg border border-slate-200 p-6 space-y-4" data-testid="metrics-section">
         <MetricsEditor metrics={state.metrics} dispatch={dispatch} />
       </section>
+
+      {/* Analysis settings: collapsed, with the current values in the summary,
+          so nothing hidden changes how the results are judged. Not called
+          "Advanced": this whole page is the advanced form. */}
+      <details className="bg-white rounded-lg border border-slate-200 p-6" data-testid="analysis-settings-details">
+        <summary className="cursor-pointer text-base font-semibold text-slate-800" data-testid="analysis-settings-summary">
+          Analysis settings: {formatConfidence(state.confidenceLevel)} confidence,{' '}
+          {state.correctionMethod === 'none'
+            ? 'no correction'
+            : `${correctionName(state.correctionMethod)} correction`}
+        </summary>
+        <div className="mt-4">
+          <AnalysisSettingsFields
+            confidenceLevel={state.confidenceLevel}
+            correctionMethod={state.correctionMethod}
+            dispatch={dispatch}
+            variantCount={state.variants.length}
+          />
+        </div>
+      </details>
 
       {/* Targeting Rules */}
       <section className="bg-white rounded-lg border border-slate-200 p-6 space-y-4" data-testid="targeting-section">

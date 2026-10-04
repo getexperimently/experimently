@@ -3,6 +3,7 @@
  * `backend/app/schemas/experiment.py` (`ExperimentResponse`, `ExperimentCreate`,
  * `VariantResponse`, `MetricResponse`) — do not rename them client-side.
  */
+import { CorrectionMethod } from './results';
 
 export type ExperimentStatus = 'draft' | 'active' | 'paused' | 'completed' | 'archived';
 export type ExperimentType = 'a_b' | 'mv' | 'split_url' | 'bandit';
@@ -67,6 +68,12 @@ export interface Experiment {
   optimization_type?: OptimizationType | string;
   experiment_metadata?: Record<string, unknown> | null;
   split_url_config?: Record<string, unknown> | null;
+  /**
+   * How the results are judged (#580). Set on create, changeable only while
+   * the experiment is a draft: a PUT carrying either afterwards is refused.
+   */
+  confidence_level?: number;
+  correction_method?: CorrectionMethod;
 }
 
 /** `VariantBase` (create payload) */
@@ -105,6 +112,10 @@ export interface CreateExperimentRequest {
   variants: VariantInput[];
   metrics: MetricInput[];
   optimization_type?: OptimizationType;
+  /** 0.80 to 0.99; the API's default is 0.95. */
+  confidence_level?: number;
+  /** The API's default is `benjamini_hochberg`. */
+  correction_method?: CorrectionMethod;
 }
 
 /** `ExperimentListResponse` (offset pagination: `skip`/`limit`). */

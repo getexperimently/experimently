@@ -77,6 +77,43 @@ describe('ResultsService.getResults', () => {
   });
 });
 
+// A9 (#580): the dashboard's stored settings reach the URL exactly. buildQuery
+// drops undefined, so a field the service forgot would vanish silently.
+describe('ResultsService.getResults analysis settings', () => {
+  it('sends the correction method and confidence level it is given', async () => {
+    mockOk({});
+    await ResultsService.getResults('abc', {
+      correction_method: 'benjamini_hochberg',
+      confidence_level: 0.9,
+    });
+    const url = new URL(mockFetch.mock.calls[0][0] as string);
+    expect(url.pathname).toBe('/api/v1/results/abc');
+    expect(url.searchParams.get('correction_method')).toBe('benjamini_hochberg');
+    expect(url.searchParams.get('confidence_level')).toBe('0.9');
+  });
+
+  it('sends them beside a breakdown', async () => {
+    mockOk({});
+    await ResultsService.getResults('abc', {
+      breakdown: 'country',
+      correction_method: 'none',
+      confidence_level: 0.92,
+    });
+    const url = new URL(mockFetch.mock.calls[0][0] as string);
+    expect(url.searchParams.get('breakdown')).toBe('country');
+    expect(url.searchParams.get('correction_method')).toBe('none');
+    expect(url.searchParams.get('confidence_level')).toBe('0.92');
+  });
+
+  it('sends neither when none is given, so the server uses the stored ones', async () => {
+    mockOk({});
+    await ResultsService.getResults('abc');
+    const url = new URL(mockFetch.mock.calls[0][0] as string);
+    expect(url.searchParams.has('correction_method')).toBe(false);
+    expect(url.searchParams.has('confidence_level')).toBe(false);
+  });
+});
+
 describe('ResultsService.getDailyResults', () => {
   it('calls the correct URL', async () => {
     mockOk({ experiment_id: 'abc', series: [] });
