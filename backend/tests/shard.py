@@ -24,9 +24,18 @@ the shards. A report holds:
   ``pre_deselected``, the number of items any other plugin deselected (``-m``,
   ``-k``, ``--deselect``; ``--lf`` on a file named on the command line, which
   deselects after this hook runs). Over a directory ``--lf`` drops the passing
-  tests while collecting instead, so only ``last_failed`` shows it. N shards
+  tests while collecting instead, so only ``last_failed`` shows it. Also
+  ``unannounced_drops``: items collected (``pytest_itemcollected``, which fires
+  before any ``pytest_collection_modifyitems``) minus the items left when this
+  hook runs minus those deselected before it -- a conftest that does
+  ``del items[...]`` without ``pytest_deselected`` makes it non-zero; and
+  ``disabled_plugins`` (every ``-p no:NAME``, from the command line, ini
+  ``addopts`` or ``PYTEST_ADDOPTS``) and ``autoload_disabled``, because
+  disabling a plugin that generates tests shrinks every shard alike. N shards
   that each agree on a narrowed set would otherwise prove a partition of the
-  wrong thing;
+  wrong thing. What none of this sees: a plugin that changes which tests are
+  collected without removing items (a generator that yields fewer parameters,
+  a ``collect_ignore`` edit), which is code in the tree, not session options;
 * ``collect_errors``: the node ids of collectors that failed;
 * ``ran``: one record per executed item, from ``pytest_runtest_logreport``:
   ``nodeid``, ``outcome`` (passed, failed, skipped, xfailed, xpassed, error)
@@ -141,6 +150,9 @@ class _ShardSession:
         self._selecting = False
         self.selection_done = False
         self.pre_deselected = 0
+        self.deselected_before_hook = 0
+        self.items_collected = 0
+        self.unannounced_drops = 0
         self.collected: list[str] = []
         self.selected: list[str] = []
         self.collect_errors: list[str] = []
@@ -150,6 +162,11 @@ class _ShardSession:
     def pytest_deselected(self, items) -> None:
         if not self._selecting:
             self.pre_deselected += len(items)
+            if not self.selection_done:
+                self.deselected_before_hook += len(items)
+
+    def pytest_itemcollected(self, item) -> None:
+        self.items_collected += 1
 
     def pytest_collectreport(self, report) -> None:
         if report.failed:
@@ -158,6 +175,9 @@ class _ShardSession:
     @pytest.hookimpl(trylast=True)
     def pytest_collection_modifyitems(self, config, items) -> None:
         self.collected = sorted(item.nodeid for item in items)
+        self.unannounced_drops = (
+            self.items_collected - len(items) - self.deselected_before_hook
+        )
         keep, drop = [], []
         for item in items:
             if shard_of(item.nodeid, self.total) == self.index:
@@ -212,6 +232,16 @@ class _ShardSession:
             ],
             "last_failed": bool(getattr(option, "lf", False)),
             "pre_deselected": self.pre_deselected,
+            "unannounced_drops": self.unannounced_drops,
+            "disabled_plugins": sorted(
+                str(p)[3:]
+                for p in (getattr(option, "plugins", None) or [])
+                if str(p).startswith("no:")
+            ),
+            "autoload_disabled": bool(
+                getattr(option, "disable_plugin_autoload", False)
+                or os.environ.get("PYTEST_DISABLE_PLUGIN_AUTOLOAD")
+            ),
             "collect_errors": sorted(self.collect_errors),
             "ran": self.ran,
         }

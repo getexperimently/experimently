@@ -3,7 +3,8 @@
 
     python3 scripts/check_test_shards.py --suite backend/tests/integration \\
         [--allow-skip 'backend/tests/integration=<exact skip reason>' ...] \\
-        [--any-skip <suite>] <report or directory> [...]
+        [--any-skip <suite>] [--allow-disabled-plugin <suite>=cov ...] \
+        <report or directory> [...]
 
 Each sharded pytest session writes a report (backend/tests/shard.py). A
 directory is searched recursively for ``shard-*.json``; a file is read whatever
@@ -16,14 +17,24 @@ For every ``--suite``, it exits 0 only when all of these hold:
 * every shard collected the same, non-empty list of node ids;
 * the selected lists are non-empty, disjoint, and together equal that list;
 * nothing narrowed any shard (``-m``, ``-k``, ``--deselect``, ``--ignore``,
-  ``--ignore-glob``, ``--lf``, or an item another plugin deselected), and no
-  collector failed;
+  ``--ignore-glob``, ``--lf``, an item another plugin deselected, an item
+  removed before the shard hook without being deselected, a ``-p no:NAME``
+  not allowed below, or plugin autoload turned off), and no collector failed;
 * every selected test has exactly one ``ran`` record, nothing else ran, and
   each outcome is passed, xfailed, or skipped with an allowed reason.
 
 Skips: none is allowed unless named. ``--allow-skip SUITE=REASON`` allows one
 exact reason (repeat it); ``--any-skip SUITE`` leaves the suite's skips
-unconstrained. There is no narrowing allowance.
+unconstrained.
+
+Disabled plugins: ``--allow-disabled-plugin SUITE=NAME`` allows one
+``-p no:NAME`` (the CI commands pass ``-p no:cov``, so they name ``cov``).
+There is no other narrowing allowance.
+
+What it cannot see: anything that changes which tests are collected without
+removing an item or touching the session's options -- a test generator that
+yields fewer parameters, a ``collect_ignore`` entry, a deleted test file. Those
+are changes to the tree, reviewed as code, and every shard agrees on them.
 
 Exit status: 0 proven; 1 a rule refused; 2 a usage error, or a report that is
 unreadable, unparsable, truncated or malformed.
@@ -104,6 +115,12 @@ def load_report(path: Path) -> dict:
     _int(doc, "shard", where, 1)
     _int(doc, "of", where, 1)
     _int(doc, "pre_deselected", where, 0)
+    drops = doc.get("unannounced_drops")
+    if isinstance(drops, bool) or not isinstance(drops, int):
+        raise BadReport(f"{where}: 'unannounced_drops' is not an integer")
+    _str_list(doc, "disabled_plugins", where)
+    if not isinstance(doc.get("autoload_disabled"), bool):
+        raise BadReport(f"{where}: 'autoload_disabled' is not a boolean")
     for key in ("collected", "selected", "deselect", "ignore", "ignore_glob"):
         _str_list(doc, key, where)
     _str_list(doc, "collect_errors", where)
@@ -143,7 +160,7 @@ def find_reports(paths: list[str]) -> list[Path]:
     return found
 
 
-def _narrowing(doc: dict) -> list[str]:
+def _narrowing(doc: dict, plugins_allowed: set[str]) -> list[str]:
     narrowed = []
     for key in ("markexpr", "keyword"):
         if doc[key]:
@@ -157,11 +174,24 @@ def _narrowing(doc: dict) -> list[str]:
         narrowed.append(
             f"pre_deselected={doc['pre_deselected']} (items another plugin deselected)"
         )
+    if doc["unannounced_drops"]:
+        narrowed.append(
+            f"unannounced_drops={doc['unannounced_drops']} (items collected but "
+            "gone before the shard hook, never deselected)"
+        )
+    disabled = [p for p in doc["disabled_plugins"] if p not in plugins_allowed]
+    if disabled:
+        narrowed.append(f"disabled_plugins={disabled} (-p no:)")
+    if doc["autoload_disabled"]:
+        narrowed.append("autoload_disabled=True (plugin autoload is off)")
     return narrowed
 
 
 def check_suite(
-    suite: str, docs: list[dict], allowed: set[str] | None
+    suite: str,
+    docs: list[dict],
+    allowed: set[str] | None,
+    plugins_allowed: set[str] | frozenset[str] = frozenset(),
 ) -> tuple[list[str], int]:
     """Return the problems with one suite's reports, and the tests proven."""
     if not docs:
@@ -223,7 +253,7 @@ def check_suite(
             problems.append(
                 f"{tag} selected {len(stray)} not collected: {_examples(stray)}"
             )
-        narrowed = _narrowing(doc)
+        narrowed = _narrowing(doc, set(plugins_allowed))
         if narrowed:
             problems.append(f"{tag}: narrowed by {', '.join(narrowed)}")
         if doc["collect_errors"]:
@@ -291,6 +321,9 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
         "--allow-skip", action="append", default=[], metavar="SUITE=REASON"
     )
     parser.add_argument("--any-skip", action="append", default=[], metavar="SUITE")
+    parser.add_argument(
+        "--allow-disabled-plugin", action="append", default=[], metavar="SUITE=NAME"
+    )
     parser.add_argument("paths", nargs="+")
     try:
         return parser.parse_args(argv)
@@ -319,6 +352,17 @@ def run(argv: list[str]) -> int:
             if allowed[suite] is None:
                 raise Usage(f"--allow-skip {entry!r}: {suite} already has --any-skip")
             allowed[suite].add(reason)
+        plugins_allowed: dict[str, set[str]] = {s: set() for s in suites}
+        for entry in args.allow_disabled_plugin:
+            suite, sep, name = entry.partition("=")
+            suite = _norm_suite(suite)
+            if not sep or not name or name.startswith("no:"):
+                raise Usage(f"--allow-disabled-plugin {entry!r}: expected SUITE=NAME")
+            if suite not in plugins_allowed:
+                raise Usage(
+                    f"--allow-disabled-plugin {entry!r}: {suite} is not a --suite"
+                )
+            plugins_allowed[suite].add(name)
         paths = find_reports(args.paths)
         docs = [load_report(p) for p in paths]
     except Usage as exc:
@@ -334,7 +378,9 @@ def run(argv: list[str]) -> int:
     failed = False
     for suite in suites:
         mine = [d for d in docs if _norm_suite(d["suite"]) == suite]
-        problems, proven = check_suite(suite, mine, allowed[suite])
+        problems, proven = check_suite(
+            suite, mine, allowed[suite], plugins_allowed[suite]
+        )
         if problems:
             failed = True
             for problem in problems:

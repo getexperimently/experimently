@@ -258,6 +258,76 @@ def test_the_root_conftest_loads_the_plugin(tmp_path):
     assert 0 < len(doc["selected"]) < len(doc["collected"])
 
 
+def _report_of(pytester, monkeypatch, tmp_path, *args: str) -> dict:
+    report = tmp_path / "shard.json"
+    _shard(monkeypatch, "1/1", report)
+    pytester.inline_run("-p", PLUGIN, *args)
+    return json.loads(report.read_text())
+
+
+@pytest.mark.regression
+@pytest.mark.parametrize(
+    "args, deselected",
+    [
+        ((), 0),
+        # pytest drops a path given twice before it collects it: no drop.
+        (("test_ten.py", "test_ten.py"), 0),
+        (("-k", "not 3"), 1),
+        (("--deselect", "test_ten.py::test_n[0]"), 1),
+    ],
+)
+def test_ordinary_sessions_announce_every_item_they_lose(
+    pytester, monkeypatch, tmp_path, args, deselected
+):
+    pytester.makepyfile(
+        test_ten="""
+        import pytest
+
+        @pytest.mark.parametrize("n", range(10))
+        def test_n(n):
+            pass
+        """
+    )
+    doc = _report_of(pytester, monkeypatch, tmp_path, "-p", "no:cacheprovider", *args)
+    assert doc["unannounced_drops"] == 0
+    assert doc["pre_deselected"] == deselected
+    assert len(doc["collected"]) == 10 - deselected
+
+
+@pytest.mark.regression
+def test_a_conftest_that_drops_items_is_counted(pytester, monkeypatch, tmp_path):
+    pytester.makepyfile(
+        test_ten="""
+        import pytest
+
+        @pytest.mark.parametrize("n", range(10))
+        def test_n(n):
+            pass
+        """
+    )
+    pytester.makeconftest(
+        """
+        def pytest_collection_modifyitems(items):
+            del items[-3:]
+        """
+    )
+    doc = _report_of(pytester, monkeypatch, tmp_path, "-p", "no:cacheprovider")
+    assert (len(doc["collected"]), doc["unannounced_drops"]) == (7, 3)
+    assert doc["pre_deselected"] == 0
+
+
+@pytest.mark.regression
+def test_disabled_plugins_are_recorded_from_every_source(
+    pytester, monkeypatch, tmp_path
+):
+    pytester.makepyfile(test_one="def test_a(): pass")
+    pytester.makeini("[pytest]\naddopts = -p no:doctest\n")
+    monkeypatch.setenv("PYTEST_ADDOPTS", "-p no:cacheprovider")
+    doc = _report_of(pytester, monkeypatch, tmp_path, "-p", "no:stepwise")
+    assert doc["disabled_plugins"] == ["cacheprovider", "doctest", "stepwise"]
+    assert doc["autoload_disabled"] is False
+
+
 BAD_SPECS = [
     "0/4",
     "5/4",

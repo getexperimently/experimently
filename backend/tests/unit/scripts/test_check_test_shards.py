@@ -104,6 +104,57 @@ BASE_TREE = {
 }
 
 VARIANTS = {
+    # A conftest that removes items without pytest_deselected. A directory
+    # conftest registers after the root plugins, so even its trylast hook runs
+    # before the shard's.
+    "conftest_drop": {
+        "conftest.py": """
+            def pytest_collection_modifyitems(items):
+                del items[-5:]
+            """
+    },
+    "conftest_drop_trylast": {
+        "conftest.py": """
+            import pytest
+
+            @pytest.hookimpl(trylast=True)
+            def pytest_collection_modifyitems(items):
+                del items[-5:]
+            """
+    },
+    # The control: a wrapper truncates after the shard hook has selected.
+    "wrapper_drop": {
+        "conftest.py": """
+            import pytest
+
+            @pytest.hookimpl(wrapper=True)
+            def pytest_collection_modifyitems(items):
+                result = yield
+                del items[-2:]
+                return result
+            """
+    },
+    # A plugin, loaded by the rootdir conftest, that generates parameters.
+    "generator": {
+        "ROOT:conftest.py": """
+            pytest_plugins = ["gen_plugin"]
+            """,
+        "ROOT:gen_plugin.py": """
+            def pytest_generate_tests(metafunc):
+                if "extra" in metafunc.fixturenames:
+                    metafunc.parametrize("extra", [1, 2, 3, 4])
+            """,
+        "test_generated.py": """
+            import pytest
+
+            @pytest.fixture
+            def extra():
+                return 0
+
+            def test_extra(extra):
+                pass
+            """,
+    },
     "runtime_ids": {
         "test_runtime.py": """
             import uuid
@@ -140,7 +191,9 @@ def _write_tree(root: Path, variant: str | None) -> Path:
     if variant:
         files.update(VARIANTS[variant])
     for name, body in files.items():
-        (tests / name).write_text(textwrap.dedent(body))
+        # "ROOT:" files go beside the suite: the rootdir conftest, a plugin.
+        target = root / name[5:] if name.startswith("ROOT:") else tests / name
+        target.write_text(textwrap.dedent(body))
     return root
 
 
@@ -256,6 +309,12 @@ class Fixtures:
                 # through collection; --lf deselects them after the shard hook.
                 return run_shards(root, out, 2, "--lf", cache=True, target=LF_FILE)
             return run_shards(root, out, 2, "--lf", cache=True)
+        if name == "generator_disabled":
+            root = _write_tree(where / "tree", "generator")
+            return run_shards(root, out, 2, env={"PYTEST_ADDOPTS": "-p no:gen_plugin"})
+        if name == "autoload_disabled":
+            root = _write_tree(where / "tree", None)
+            return run_shards(root, out, 2, env={"PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1"})
         if name == "addopts_regression":
             root = _write_tree(where / "tree", None)
             return run_shards(root, out, 2, env={"PYTEST_ADDOPTS": "-m regression"})
@@ -277,9 +336,21 @@ def fixtures(tmp_path_factory) -> Fixtures:
     return Fixtures(tmp_path_factory.mktemp("shard-fixtures"))
 
 
-def check(*args: str | Path) -> subprocess.CompletedProcess:
+# The fixture sessions pass ``-p no:cov`` (as the CI commands do) and, unless
+# they need the cache, ``-p no:cacheprovider``. ``check`` names both for every
+# ``--suite`` it is given; ``plugins_named=False`` leaves them refused.
+FIXTURE_DISABLED = ("cov", "cacheprovider")
+
+
+def check(*args: str | Path, plugins_named: bool = True) -> subprocess.CompletedProcess:
+    argv = [str(a) for a in args]
+    if plugins_named:
+        suites = [argv[i + 1] for i, a in enumerate(argv[:-1]) if a == "--suite"]
+        for suite in suites:
+            for name in FIXTURE_DISABLED:
+                argv += ["--allow-disabled-plugin", f"{suite}={name}"]
     return subprocess.run(
-        [sys.executable, str(SCRIPT), *map(str, args)],
+        [sys.executable, str(SCRIPT), *argv],
         capture_output=True,
         text=True,
         timeout=120,
@@ -596,6 +667,101 @@ def test_last_failed_deselection_is_refused_through_pre_deselected(fixtures):
     assert any("selected but did not run" in p for p in found), result.stdout
 
 
+# --- items removed without a trace, and disabled plugins ----------------
+
+
+@pytest.mark.regression
+@pytest.mark.parametrize("variant", ["conftest_drop", "conftest_drop_trylast"])
+def test_items_removed_before_the_shard_hook_are_refused(fixtures, variant):
+    """Every shard agrees on the shrunk list and nothing is deselected, so
+    only the ground-truth count from pytest_itemcollected can see it."""
+    reports = fixtures.get(variant)
+    docs = [_load(r) for r in reports]
+    clean = len(_load(fixtures.get("clean")[0])["collected"])
+    assert all(len(d["collected"]) == clean - 5 for d in docs), "the drop took effect"
+    assert all(d["pre_deselected"] == 0 for d in docs)
+    result = check("--suite", SUITE, "--any-skip", SUITE, *reports)
+    assert result.returncode == 1
+    assert problems(result) == [
+        f"PROBLEM: {SUITE}: shard {d['shard']}: narrowed by unannounced_drops=5 "
+        "(items collected but gone before the shard hook, never deselected)"
+        for d in docs
+    ]
+
+
+@pytest.mark.regression
+def test_items_removed_after_the_shard_hook_are_refused(fixtures):
+    reports = fixtures.get("wrapper_drop")
+    docs = [_load(r) for r in reports]
+    assert all(d["unannounced_drops"] == 0 for d in docs)
+    result = check("--suite", SUITE, "--any-skip", SUITE, *reports)
+    assert result.returncode == 1
+    found = problems(result)
+    assert found and all("selected but did not run" in p for p in found), result.stdout
+
+
+def test_a_generating_plugin_is_counted_when_loaded(fixtures):
+    reports = fixtures.get("generator")
+    assert (
+        sum(
+            "test_generated.py::test_extra[" in n
+            for n in _load(reports[0])["collected"]
+        )
+        == 4
+    )
+    result = check("--suite", SUITE, "--any-skip", SUITE, *reports)
+    assert result.returncode == 0, result.stdout
+
+
+@pytest.mark.regression
+def test_a_disabled_plugin_is_refused(fixtures):
+    """PYTEST_ADDOPTS="-p no:gen_plugin": four generated tests become one on
+    every shard, and every partition rule still holds."""
+    reports = fixtures.get("generator_disabled")
+    docs = [_load(r) for r in reports]
+    loaded = len(_load(fixtures.get("generator")[0])["collected"])
+    assert all(len(d["collected"]) == loaded - 3 for d in docs), "it took effect"
+    result = check("--suite", SUITE, "--any-skip", SUITE, *reports)
+    assert result.returncode == 1
+    assert problems(result) == [
+        f"PROBLEM: {SUITE}: shard {d['shard']}: narrowed by "
+        "disabled_plugins=['gen_plugin'] (-p no:)"
+        for d in docs
+    ]
+    named = check(
+        "--suite",
+        SUITE,
+        "--any-skip",
+        SUITE,
+        "--allow-disabled-plugin",
+        f"{SUITE}=gen_plugin",
+        *reports,
+    )
+    assert named.returncode == 0, named.stdout
+
+
+@pytest.mark.regression
+def test_the_ci_plugins_must_be_named(fixtures):
+    reports = fixtures.get("clean")
+    result = check("--suite", SUITE, "--any-skip", SUITE, *reports, plugins_named=False)
+    assert result.returncode == 1
+    assert all(
+        "disabled_plugins=['cacheprovider', 'cov'] (-p no:)" in p
+        for p in problems(result)
+    ), result.stdout
+
+
+@pytest.mark.regression
+def test_turning_plugin_autoload_off_is_refused(fixtures):
+    reports = fixtures.get("autoload_disabled")
+    result = check("--suite", SUITE, "--any-skip", SUITE, *reports)
+    assert result.returncode == 1
+    found = problems(result)
+    assert found and all("narrowed by autoload_disabled=True" in p for p in found), (
+        result.stdout
+    )
+
+
 # --- reports the checker cannot read --------------------------------------
 
 
@@ -655,6 +821,9 @@ def test_no_reports_at_all_is_refused(tmp_path):
         ["DIR"],
         ["--suite", SUITE],
         ["--suite", SUITE, "--allow-skip", "elsewhere=reason", "DIR"],
+        ["--suite", SUITE, "--allow-disabled-plugin", "elsewhere=cov", "DIR"],
+        ["--suite", SUITE, "--allow-disabled-plugin", SUITE, "DIR"],
+        ["--suite", SUITE, "--allow-disabled-plugin", f"{SUITE}=no:cov", "DIR"],
         ["--suite", SUITE, "--allow-skip", SUITE, "DIR"],
         ["--suite", SUITE, "--any-skip", "elsewhere", "DIR"],
         ["--suite", SUITE, "--any-skip", SUITE, "--allow-skip", f"{SUITE}=r", "DIR"],
