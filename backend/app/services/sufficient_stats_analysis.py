@@ -620,6 +620,12 @@ CupedSums = Tuple[Any, int, float, float, float, float, float]
 #: Reason a treatment row carries when neither arm's outcome varies.
 NO_VARIATION_REASON = "no_variation"
 
+#: Reason a treatment row carries when the covariate leaves no residual
+#: variation in either arm: the adjusted standard error would be 0 (or a
+#: rounding residue), and a p-value from it would claim certainty the data
+#: cannot give.
+NO_RESIDUAL_VARIATION_REASON = "no_residual_variation"
+
 
 class _CupedArm(NamedTuple):
     variant: Any
@@ -701,7 +707,9 @@ def cuped_metric_result(
     ``fewer_than_2_units`` and no numbers.  It is still part of the pooled
     fit, where it contributes nothing: an arm of one unit has no within-arm
     variation.  A treatment whose outcome, and the control's, does not vary
-    at all gets ``no_variation``.
+    at all gets ``no_variation``; one where the covariate leaves no residual
+    variation in either arm (the adjusted standard error would be 0) gets
+    ``no_residual_variation``.  Neither carries a p-value.
 
     Args:
         arms: ``(variant, n, sum_y, sum_x, sum_y2, sum_x2, sum_xy)`` per arm,
@@ -798,13 +806,14 @@ def cuped_metric_result(
             rows.append(row)
             continue
         adjusted_var = t_var + c_var
+        # Relative, so the residue of an exact fit (1e-17, not 0) is caught too.
+        if adjusted_var <= 1e-12 * unadjusted_var:
+            row["unavailable_reason"] = NO_RESIDUAL_VARIATION_REASON
+            rows.append(row)
+            continue
         effect = t_adj - c_adj
         se = math.sqrt(adjusted_var)
-        if se > 0.0:
-            p_value = float(2.0 * stats.norm.sf(abs(effect) / se))
-        else:
-            # The covariate explains every unit's outcome exactly.
-            p_value = 0.0 if effect != 0.0 else 1.0
+        p_value = float(2.0 * stats.norm.sf(abs(effect) / se))
         row.update(
             adjusted_control_mean=c_adj,
             adjusted_treatment_mean=t_adj,

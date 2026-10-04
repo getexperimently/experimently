@@ -201,6 +201,7 @@ class CupedMetricResult(BaseModel):
         description=(
             "Null, or why this comparison was not computed: not_a_proportion_metric, "
             "winsorization_needs_mean_metric, fewer_than_2_units, no_variation, "
+            "no_residual_variation, "
             "no_control_variant, no_treatment_variant, covariate_metric_not_found, "
             "metric_has_no_event_name or result_invalid."
         ),

@@ -32,6 +32,7 @@ import statsmodels.formula.api as smf
 
 from backend.app.services.sufficient_stats_analysis import (
     FEWER_THAN_2_UNITS,
+    NO_RESIDUAL_VARIATION_REASON,
     NO_VARIATION_REASON,
     BinomialVariant,
     SufficientStatsNotComputed,
@@ -306,6 +307,37 @@ def test_no_variation_in_either_arm_is_a_reason():
     )
     assert row["unavailable_reason"] == NO_VARIATION_REASON
     assert row["adjusted_effect"] is None
+
+
+@pytest.mark.regression
+def test_an_exact_fit_has_no_numbers_never_a_zero_se_p_value():
+    """Two 2-user arms where y = x within each arm: the pooled slope explains
+    every outcome, the adjusted variance is 0 while the unadjusted is not.
+    Reporting SE 0 and p 0 would claim certainty two users per arm cannot give."""
+    [row] = cuped_metric_result(
+        [_sums(CONTROL, [0, 1], [0, 1]), _sums(T1, [0, 1], [0, 1])],
+        0.95,
+        "none",
+        metric=_METRIC,
+    )
+    assert row["unavailable_reason"] == NO_RESIDUAL_VARIATION_REASON
+    assert row["adjusted_se"] is None
+    assert row["adjusted_p_value"] is None
+    assert row["is_significant"] is False
+
+
+@pytest.mark.regression
+def test_an_exact_fit_with_an_effect_has_no_numbers_either():
+    """y = x + const per arm with a shifted treatment: an effect, still SE 0."""
+    [row] = cuped_metric_result(
+        [_sums(CONTROL, [0, 1], [0, 1]), _sums(T1, [0, 1], [-1, 0])],
+        0.95,
+        "none",
+        metric=_METRIC,
+    )
+    assert row["unavailable_reason"] == NO_RESIDUAL_VARIATION_REASON
+    assert row["adjusted_p_value"] is None
+    assert row["is_significant"] is False
 
 
 @pytest.mark.parametrize(

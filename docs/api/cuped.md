@@ -284,6 +284,7 @@ Three things can surprise:
 | `winsorization_needs_mean_metric` | The method is `winsorization`, which this view does not apply to a conversion metric |
 | `fewer_than_2_units` | The control or this treatment has fewer than 2 assigned users |
 | `no_variation` | Neither arm's outcome varies (in each arm nobody, or everybody, converted): there is no standard error to compute |
+| `no_residual_variation` | History predicts every user's outcome exactly in both arms, so the adjusted standard error would be 0 and no p-value can be given |
 | `no_control_variant` / `no_treatment_variant` | The experiment has no control, or no treatment; the row has no variant |
 | `covariate_metric_not_found` | `covariate_metric_id` is not one of the experiment's metrics (after a `PUT` replaced them, say) |
 | `metric_has_no_event_name` | The metric whose event is the history has no `event_name` |
