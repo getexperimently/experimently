@@ -196,9 +196,11 @@ See `demo/streampulse/README.md`.
 
 **Audit Trail:**
 - Navigate to `/admin/audit`
-- Show: HMAC-SHA256 signed entries — "Every action is tamper-proof. If someone changes a row, the signature breaks."
-- Show the log: user logins, experiment starts, flag toggles, RBAC changes
-  - "For SOC 2, you need a complete, verifiable audit trail. This is built in."
+- Show: each entry records who acted, what changed (old and new value) and when. No API edits or deletes an entry.
+  These entries are not signed; do not describe them as signed or tamper-proof.
+- Show the log: what it records today is flag status changes (toggle, enable, disable, unarchive), bulk toggles
+  and an admin's changes to a user's role or active status
+  - "You can filter these entries by action, resource type and date. More event types are coming (#221)."
 - Show compliance report export: `/api/v1/compliance/report` → downloads CSV/JSON
 
 **RBAC:**
@@ -216,7 +218,8 @@ See `demo/streampulse/README.md`.
   mocks; treat them as roadmap in demos until the P5 path tests are green.
 
 **Key talking points:**
-- SOC 2 / ISO 27001 ready — HMAC audit trail, compliance reports
+- Controls that support a SOC 2 / ISO 27001 program — an audit log of flag status and user role changes, and with the
+  `compliance` module HMAC-SHA256 signed compliance events and report exports
 - RBAC with four built-in roles (custom roles: roadmap)
 - Full REST API + SDKs (Python, JavaScript, Java, React, Go)
 - Deployable to your AWS account — you own the data, it never leaves your VPC
@@ -229,7 +232,7 @@ See `demo/streampulse/README.md`.
 > Not today. Warehouse analysis is being rebuilt (#312).
 
 **"Is it SOC 2 compliant?"**
-> The platform is not certified and we do not claim it. What it gives you are controls that support your own program: an append-only audit log of every change in the core profile, and with the `compliance` module HMAC-SHA256 signed audit events with exportable report packs. Your auditor decides what they satisfy.
+> The platform is not certified and we do not claim it. What it gives you are controls that support your own program: an audit log of flag status changes, bulk toggles and admin changes to a user's role or active status in the core profile, where no API edits or deletes an entry, and with the `compliance` module HMAC-SHA256 signed audit events with exportable report packs. Your auditor decides what they satisfy.
 
 **"What about our tech stack?"**
 > We have SDKs for Python, JavaScript/TypeScript, Java (Spring Boot auto-configuration), and React (with hooks and SSR support). The REST API means you can integrate from anything.
