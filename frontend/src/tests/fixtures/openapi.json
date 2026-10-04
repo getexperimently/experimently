@@ -698,13 +698,7 @@
     "/api/v1/interactions/{exp_a_id}/{exp_b_id}": {
       "get": {
         "operationId": "analyze_pair_api_v1_interactions__exp_a_id___exp_b_id__get",
-        "summary": "Beta: interaction analysis of two experiments (overlap only)"
-      }
-    },
-    "/api/v1/interactions/{exp_a_id}/{exp_b_id}/novelty": {
-      "get": {
-        "operationId": "analyze_novelty_api_v1_interactions__exp_a_id___exp_b_id__novelty_get",
-        "summary": "Beta: novelty sub-analysis (not computed yet)"
+        "summary": "Beta: do two experiments' effects interact?"
       }
     },
     "/api/v1/llm-experiments/": {

@@ -3,23 +3,27 @@ Unit tests for the interaction detection API endpoints.
 
 Covers:
 - GET /api/v1/interactions/scan
-- GET /api/v1/interactions/{exp_a_id}/{exp_b_id}
-- GET /api/v1/interactions/{exp_a_id}/{exp_b_id}/novelty
+- GET /api/v1/interactions/{exp_a_id}/{exp_b_id}: the refusals, and one
+  failure path (any other error is a 500 with a fixed sentence)
+- GET /api/v1/interactions/{exp_a_id}/{exp_b_id}/novelty is gone (404)
 - Role-based access control
-- Schema validation
 """
 
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 from uuid import uuid4
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy.exc import OperationalError
 
 from backend.app.api.deps import get_current_active_user, get_db
 from backend.app.main import app
+from backend.app.models.experiment import MetricType
 from backend.app.models.user import UserRole
 from backend.app.services.interaction_detection_service import (
     InteractionAnalysis,
+    InteractionDetectionService,
     InteractionResult,
     NoveltyResult,
     SUTVAResult,
@@ -213,132 +217,187 @@ class TestScanEndpoint:
 # TestAnalyzePairEndpoint
 # ---------------------------------------------------------------------------
 
+SERVICE = "backend.app.services.interaction_detection_service"
+FAILURE = "Could not analyse the two experiments"
+
+
+def _fake_experiment(name):
+    return SimpleNamespace(
+        id=uuid4(),
+        name=name,
+        variants=[
+            SimpleNamespace(id=uuid4(), name="control", is_control=True),
+            SimpleNamespace(id=uuid4(), name="treatment", is_control=False),
+        ],
+        metric_definitions=[
+            SimpleNamespace(
+                id=uuid4(),
+                name="Signup",
+                event_name="signup",
+                metric_type=MetricType.CONVERSION,
+                is_primary=True,
+            )
+        ],
+        mutual_exclusion_group_id=None,
+        correction_method="benjamini_hochberg",
+        confidence_level=0.95,
+    )
+
+
+def _found(*experiments):
+    return patch.object(
+        InteractionDetectionService, "load_experiment", side_effect=list(experiments)
+    )
+
+
+def _no_users():
+    """Readers for two experiments that share nobody."""
+    return (
+        patch.object(InteractionDetectionService, "_arm_totals", return_value={}),
+        patch.object(
+            InteractionDetectionService, "_shared_assignments", return_value={}
+        ),
+    )
+
 
 class TestAnalyzePairEndpoint:
     """Tests for GET /api/v1/interactions/{exp_a_id}/{exp_b_id}."""
 
     def test_analyze_pair_returns_200(self, developer_client):
         client, _, _ = developer_client
-        exp_a = str(uuid4())
-        exp_b = str(uuid4())
-        analysis = _make_analysis(exp_a, exp_b)
-        with patch(
-            "backend.app.api.v1.endpoints.interactions.InteractionDetectionService"
-        ) as MockSvc:
-            MockSvc.return_value.analyze_experiment_pair.return_value = analysis
-            response = client.get(f"/api/v1/interactions/{exp_a}/{exp_b}")
-        assert response.status_code == 200
+        a, b = _fake_experiment("A"), _fake_experiment("B")
+        totals, shared = _no_users()
+        with _found(a, b), totals, shared:
+            response = client.get(f"/api/v1/interactions/{a.id}/{b.id}")
+        assert response.status_code == 200, response.text
+        body = response.json()
+        assert body["experiment_a_id"] == str(a.id)
+        assert body["shared_users"] == 0
+        assert [r["unavailable_reason"] for r in body["interaction_results"]] == [
+            "no_shared_users",
+            "no_shared_users",
+        ]
+        assert body["has_interaction"] is None
+        for gone in ("overall_risk", "interaction_result", "novelty_result"):
+            assert gone not in body
 
-    def test_analyze_pair_returns_404_when_exp_a_not_found(self, developer_client):
-        client, _, _ = developer_client
-        exp_a = str(uuid4())
-        exp_b = str(uuid4())
-        with patch(
-            "backend.app.api.v1.endpoints.interactions.InteractionDetectionService"
-        ) as MockSvc:
-            MockSvc.return_value.analyze_experiment_pair.side_effect = ValueError(
-                f"Experiment {exp_a} not found"
-            )
-            response = client.get(f"/api/v1/interactions/{exp_a}/{exp_b}")
-        assert response.status_code == 404
+    def test_analyst_may_ask(self):
+        user = _make_user(role=UserRole.ANALYST, is_superuser=False)
+        app.dependency_overrides[get_db] = _override_get_db(_make_mock_db())
+        app.dependency_overrides[get_current_active_user] = lambda: user
+        try:
+            a, b = _fake_experiment("A"), _fake_experiment("B")
+            totals, shared = _no_users()
+            with TestClient(app) as client, _found(a, b), totals, shared:
+                response = client.get(f"/api/v1/interactions/{a.id}/{b.id}")
+        finally:
+            app.dependency_overrides.clear()
+        assert response.status_code == 200, response.text
 
-    def test_analyze_pair_returns_404_when_exp_b_not_found(self, developer_client):
-        client, _, _ = developer_client
-        exp_a = str(uuid4())
-        exp_b = str(uuid4())
-        with patch(
-            "backend.app.api.v1.endpoints.interactions.InteractionDetectionService"
-        ) as MockSvc:
-            MockSvc.return_value.analyze_experiment_pair.side_effect = ValueError(
-                f"Experiment {exp_b} not found"
-            )
-            response = client.get(f"/api/v1/interactions/{exp_a}/{exp_b}")
-        assert response.status_code == 404
-
-    def test_analyze_pair_non_overlapping_returns_200_with_flag(self, developer_client):
-        """Non-overlapping experiments: service returns None, endpoint returns 200 with has_significant_overlap=false."""
-        client, _, _ = developer_client
-        exp_a = str(uuid4())
-        exp_b = str(uuid4())
-        with patch(
-            "backend.app.api.v1.endpoints.interactions.InteractionDetectionService"
-        ) as MockSvc:
-            MockSvc.return_value.analyze_experiment_pair.return_value = None
-            response = client.get(f"/api/v1/interactions/{exp_a}/{exp_b}")
-        assert response.status_code == 200
-        data = response.json()
-        assert data["has_significant_overlap"] is False
-
-    def test_analyze_pair_response_includes_overall_risk(self, developer_client):
-        client, _, _ = developer_client
-        exp_a = str(uuid4())
-        exp_b = str(uuid4())
-        analysis = _make_analysis(exp_a, exp_b, overall_risk="high")
-        with patch(
-            "backend.app.api.v1.endpoints.interactions.InteractionDetectionService"
-        ) as MockSvc:
-            MockSvc.return_value.analyze_experiment_pair.return_value = analysis
-            response = client.get(f"/api/v1/interactions/{exp_a}/{exp_b}")
-        data = response.json()
-        assert "overall_risk" in data
-
-    def test_analyze_pair_response_includes_recommendations(self, developer_client):
-        client, _, _ = developer_client
-        exp_a = str(uuid4())
-        exp_b = str(uuid4())
-        analysis = _make_analysis(exp_a, exp_b)
-        with patch(
-            "backend.app.api.v1.endpoints.interactions.InteractionDetectionService"
-        ) as MockSvc:
-            MockSvc.return_value.analyze_experiment_pair.return_value = analysis
-            response = client.get(f"/api/v1/interactions/{exp_a}/{exp_b}")
-        data = response.json()
-        assert "recommendations" in data
-        assert isinstance(data["recommendations"], list)
-
-    def test_analyze_pair_overlap_coefficient_in_valid_range(self, developer_client):
-        client, _, _ = developer_client
-        exp_a = str(uuid4())
-        exp_b = str(uuid4())
-        analysis = _make_analysis(exp_a, exp_b)
-        with patch(
-            "backend.app.api.v1.endpoints.interactions.InteractionDetectionService"
-        ) as MockSvc:
-            MockSvc.return_value.analyze_experiment_pair.return_value = analysis
-            response = client.get(f"/api/v1/interactions/{exp_a}/{exp_b}")
-        data = response.json()
-        assert 0.0 <= data["overlap_coefficient"] <= 1.0
-
-
-# ---------------------------------------------------------------------------
-# TestNoveltyEndpoint
-# ---------------------------------------------------------------------------
-
-
-class TestNoveltyEndpoint:
-    """Tests for GET /api/v1/interactions/{exp_a_id}/{exp_b_id}/novelty."""
-
-    def test_novelty_returns_novelty_result_schema(self, developer_client):
-        client, _, _ = developer_client
-        exp_a = str(uuid4())
-        exp_b = str(uuid4())
-        novelty = NoveltyResult(
-            has_novelty=False,
-            decline_rate=0.0,
-            recommendation="Stable effect.",
+    def test_viewer_gets_403_naming_the_roles(self, viewer_client):
+        client, _, _ = viewer_client
+        response = client.get(f"/api/v1/interactions/{uuid4()}/{uuid4()}")
+        assert response.status_code == 403
+        assert response.json()["detail"] == (
+            "Interaction analysis needs the ANALYST, DEVELOPER or ADMIN role."
         )
-        with patch(
-            "backend.app.api.v1.endpoints.interactions.InteractionDetectionService"
-        ) as MockSvc:
-            MockSvc.return_value.analyze_experiment_pair.return_value = _make_analysis(
-                exp_a, exp_b
-            )
-            response = client.get(f"/api/v1/interactions/{exp_a}/{exp_b}/novelty")
-        assert response.status_code == 200
-        data = response.json()
-        assert "has_novelty" in data
-        assert "decline_rate" in data
-        assert "recommendation" in data
+
+    def test_the_same_experiment_twice_is_422(self, developer_client):
+        client, _, _ = developer_client
+        same = uuid4()
+        with patch.object(InteractionDetectionService, "load_experiment") as load:
+            response = client.get(f"/api/v1/interactions/{same}/{same}")
+        assert response.status_code == 422
+        assert response.json()["detail"] == "The two experiments must be different."
+        load.assert_not_called()
+
+    @pytest.mark.parametrize("missing", ["experiment_a_id", "experiment_b_id"])
+    def test_an_unknown_experiment_is_404_naming_the_parameter(
+        self, developer_client, missing
+    ):
+        client, _, mock_db = developer_client
+        a, b = uuid4(), uuid4()
+        found = (
+            [None] if missing == "experiment_a_id" else [_fake_experiment("A"), None]
+        )
+        with patch.object(
+            InteractionDetectionService, "load_experiment", side_effect=found
+        ):
+            response = client.get(f"/api/v1/interactions/{a}/{b}")
+        assert response.status_code == 404
+        detail = response.json()["detail"]
+        assert detail == f"{missing} does not match an experiment."
+        assert str(a) not in response.text and str(b) not in response.text
+        mock_db.rollback.assert_not_called()
+
+    def test_both_unknown_names_experiment_a_id(self, developer_client):
+        client, _, _ = developer_client
+        with patch.object(
+            InteractionDetectionService, "load_experiment", side_effect=[None, None]
+        ):
+            response = client.get(f"/api/v1/interactions/{uuid4()}/{uuid4()}")
+        assert (
+            response.json()["detail"] == "experiment_a_id does not match an experiment."
+        )
+
+    @pytest.mark.regression
+    @pytest.mark.parametrize(
+        "failing",
+        [
+            "load_b",
+            "totals_a",
+            "totals_b",
+            "shared",
+            "converters",
+        ],
+    )
+    def test_a_database_error_in_any_read_is_a_500_with_a_fixed_sentence(
+        self, developer_client, failing
+    ):
+        """X2: no read is swallowed, the second experiment's included."""
+        client, _, mock_db = developer_client
+        a, b = _fake_experiment("A"), _fake_experiment("B")
+        boom = OperationalError("SELECT secret_table", {}, Exception("conn reset"))
+        found = [a, boom] if failing == "load_b" else [a, b]
+        totals = {
+            "totals_a": [boom],
+            "totals_b": [{str(a.variants[0].id): 1}, boom],
+        }.get(failing, [{str(a.variants[0].id): 1}, {str(b.variants[0].id): 1}])
+        user_pair = (str(a.variants[0].id), str(b.variants[0].id))
+        # Only the converters case needs a shared user to reach its read; with
+        # none, a swallowed read elsewhere would answer a consistent 200.
+        shared = {
+            "shared": boom,
+            "converters": {"u1": user_pair},
+        }.get(failing, {})
+        converters = boom if failing == "converters" else set()
+        with (
+            patch.object(
+                InteractionDetectionService, "load_experiment", side_effect=found
+            ),
+            patch.object(
+                InteractionDetectionService, "_arm_totals", side_effect=totals
+            ),
+            patch.object(
+                InteractionDetectionService,
+                "_shared_assignments",
+                side_effect=[shared],
+            ),
+            patch(f"{SERVICE}.converting_user_ids", side_effect=[converters] * 4),
+        ):
+            response = client.get(f"/api/v1/interactions/{a.id}/{b.id}")
+        assert response.status_code == 500, response.text
+        detail = response.json()["detail"]
+        assert detail.startswith(FAILURE)
+        for text in ("secret_table", "conn reset", "OperationalError"):
+            assert text not in response.text
+        mock_db.rollback.assert_called()
+
+    def test_the_novelty_route_is_gone(self, developer_client):
+        client, _, _ = developer_client
+        response = client.get(f"/api/v1/interactions/{uuid4()}/{uuid4()}/novelty")
+        assert response.status_code == 404
+        assert response.json() == {"detail": "Not Found"}
 
 
 # ---------------------------------------------------------------------------

@@ -292,7 +292,7 @@ CORE_TAGS_METADATA = [
     },
     {
         "name": "Interactions",
-        "description": "Cross-experiment interaction detection: overlap analysis, statistical interaction tests, novelty effect detection, and SUTVA violation checks",
+        "description": "Experiments that share users: the overlap between them, and (beta) whether one experiment's effect differs across the other's arms",
     },
     {
         "name": "AI Design",
