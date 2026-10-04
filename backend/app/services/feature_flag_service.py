@@ -12,10 +12,12 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from backend.app.core.pattern_match import PatternUnevaluable, report_unevaluable
+from backend.app.core.rules_engine import SegmentMembershipUnavailable
 from backend.app.core.targeting_adapter import (
     expand_context,
     match_targeting_rule,
     normalise_targeting_rules,
+    segment_ids_in,
 )
 from backend.app.models.feature_flag import (
     ArchivedFlagError,
@@ -32,6 +34,12 @@ from backend.app.schemas.feature_flag import (
 )
 from backend.app.schemas.metrics import ErrorLogCreate
 from backend.app.services.metrics_service import MetricsService
+from backend.app.services.segment_membership import (
+    SegmentMemberships,
+    log_unavailable,
+    resolve_segment_memberships,
+    with_memberships,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -358,15 +366,43 @@ class FeatureFlagService:
             .all()
         )
 
+        # Segment membership is resolved once for every segment any flag
+        # references (#440). A flag fails only if it references a segment
+        # whose membership could not be decided, so each flag answers here
+        # as it does on /evaluate.
+        referenced = set()
+        for flag in flags:
+            rules = flag.targeting_rules
+            if rules and not isinstance(rules, list):
+                referenced |= segment_ids_in(
+                    normalise_targeting_rules(rules, owner=f"flag:{flag.key}")
+                )
+        memberships = None
+        if referenced:
+            memberships = resolve_segment_memberships(
+                self.db, user_id, expand_context(context or {}), referenced
+            )
+            if memberships.unavailable:
+                log_unavailable("feature flags", memberships.unavailable)
+
         # Evaluate each flag for the user
         result = {}
         for flag in flags:
-            result[flag.key] = self.evaluate_flag(flag, user_id, context)
+            if memberships is None:
+                result[flag.key] = self.evaluate_flag(flag, user_id, context)
+            else:
+                result[flag.key] = self.evaluate_flag(
+                    flag, user_id, context, memberships=memberships
+                )
 
         return result
 
     def evaluate_flag(
-        self, flag: FeatureFlag, user_id: str, context: Optional[Dict[str, Any]] = None
+        self,
+        flag: FeatureFlag,
+        user_id: str,
+        context: Optional[Dict[str, Any]] = None,
+        memberships: Optional[SegmentMemberships] = None,
     ) -> bool:
         """
         Evaluate a feature flag for a specific user.
@@ -379,10 +415,18 @@ class FeatureFlagService:
         Returns:
             Boolean indicating if the flag is enabled for this user
         """
-        return self.evaluate_flag_detailed(flag, user_id, context)["enabled"]
+        if memberships is None:
+            return self.evaluate_flag_detailed(flag, user_id, context)["enabled"]
+        return self.evaluate_flag_detailed(
+            flag, user_id, context, memberships=memberships
+        )["enabled"]
 
     def evaluate_flag_detailed(
-        self, flag: FeatureFlag, user_id: str, context: Optional[Dict[str, Any]] = None
+        self,
+        flag: FeatureFlag,
+        user_id: str,
+        context: Optional[Dict[str, Any]] = None,
+        memberships: Optional[SegmentMemberships] = None,
     ) -> Dict[str, Any]:
         """
         Evaluate a feature flag for a user and explain the outcome.
@@ -409,10 +453,21 @@ class FeatureFlagService:
         consulted, and no error-log row is written, so the safety monitor does
         not count it.
 
+        A rule that uses a segment (``in_segment``/``not_in_segment``, #440)
+        is matched on membership resolved from the database for ``user_id``
+        (:mod:`backend.app.services.segment_membership`), never on the
+        context. When any referenced segment's membership cannot be decided
+        (unknown, not active, rules not valid, a database error), the flag is
+        disabled with reason ``error``, one WARNING names the segments, and
+        no error-log row is written.
+
         Args:
             flag: Feature flag model object
             user_id: ID of the user
             context: Optional context data for rule evaluation
+            memberships: Membership already resolved for this user
+                (``get_user_flags`` resolves every flag's segments at once).
+                Its unavailable segments were logged by the caller.
 
         Returns:
             ``{"enabled": bool, "reason": "targeting_rule" | "rollout" |
@@ -439,7 +494,9 @@ class FeatureFlagService:
                 result = False
                 reason = REASON_INACTIVE
             else:
-                matched = self._match_targeting_rule(flag, user_id, context or {})
+                matched = self._match_targeting_rule(
+                    flag, user_id, context or {}, memberships
+                )
                 if matched is not None:
                     targeting_rule_id, rule_percentage = matched
                     reason = REASON_TARGETING_RULE
@@ -455,6 +512,17 @@ class FeatureFlagService:
             # Abandon the whole ruleset: falling through to the global rollout
             # would serve the flag to users a rule was written to leave out.
             report_unevaluable(exc, f"flag:{flag.key}")
+            targeting_rule_id = None
+            result = False
+            reason = REASON_ERROR
+
+        except SegmentMembershipUnavailable as exc:
+            # The same: membership of a referenced segment is unknown, so the
+            # ruleset is abandoned. No error-log row: the safety monitor
+            # counts those, and a segment archived or a database blip is not
+            # the flag misbehaving.
+            if memberships is None:
+                log_unavailable(f"flag:{flag.key}", exc.segment_ids)
             targeting_rule_id = None
             result = False
             reason = REASON_ERROR
@@ -509,7 +577,11 @@ class FeatureFlagService:
         return {"enabled": result, "reason": reason, "rule_id": targeting_rule_id}
 
     def _match_targeting_rule(
-        self, flag: FeatureFlag, user_id: str, context: Dict[str, Any]
+        self,
+        flag: FeatureFlag,
+        user_id: str,
+        context: Dict[str, Any],
+        memberships: Optional[SegmentMemberships] = None,
     ) -> Optional[Tuple[str, int]]:
         """
         Find the first targeting rule of ``flag`` that matches ``user_id``/``context``.
@@ -518,6 +590,10 @@ class FeatureFlagService:
             ``(rule_id, rollout_percentage)`` for the matching rule, or ``None``
             when the flag has no rules, none match, or the stored shape cannot
             be interpreted (the caller then applies the global rollout).
+
+        Raises:
+            SegmentMembershipUnavailable: the rules reference a segment whose
+                membership could not be decided.
         """
         rules = flag.targeting_rules
         if not rules:
@@ -538,7 +614,21 @@ class FeatureFlagService:
         native_rules = normalise_targeting_rules(rules, owner=f"flag:{flag.key}")
         if native_rules is None:
             return None
-        matched = match_targeting_rule(native_rules, expand_context(context))
+        expanded = expand_context(context)
+        segment_ids = segment_ids_in(native_rules)
+        members = None
+        if segment_ids:
+            if memberships is None:
+                memberships = resolve_segment_memberships(
+                    self.db, user_id, expanded, segment_ids
+                )
+            undecided = memberships.undecided(segment_ids)
+            if undecided:
+                raise SegmentMembershipUnavailable(undecided)
+            members = memberships.members
+        matched = match_targeting_rule(
+            native_rules, with_memberships(expanded, members)
+        )
         if matched is None:
             return None
         return matched.id, int(matched.rollout_percentage)

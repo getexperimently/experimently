@@ -18,7 +18,7 @@ Pinned here, without a database:
   ``reason`` and ``rule_id``, over a grid of users and contexts (V6);
 * nothing accepted is dropped: an accepted non-empty value is never read as
   "no rules" by ``normalise_targeting_rules`` (V7);
-* the SDK ruleset vectors split exactly 138 accepted / 4 refused / 2 legacy
+* the SDK ruleset vectors split exactly 141 accepted / 4 refused / 2 legacy
   rows the API now refuses (V12);
 * native rules: a key outside the schema is refused at every level -- the
   rule, its condition group, nested groups at any depth, conditions, and
@@ -41,12 +41,14 @@ from unittest.mock import MagicMock
 import pytest
 from pydantic import ValidationError
 
+from backend.app.core.rules_engine import SEGMENT_MEMBERSHIP_KEY
 from backend.app.core.targeting_adapter import (
     MAX_LIST_ITEMS,
     TargetingRulesError,
     expand_context,
     match_targeting_rule,
     normalise_targeting_rules,
+    segment_ids_in,
     validate_experiment_targeting,
     validate_flag_targeting,
 )
@@ -54,6 +56,7 @@ from backend.app.core.validation_errors import render_validation_errors
 from backend.app.models.feature_flag import FeatureFlagStatus
 from backend.app.schemas.feature_flag import FeatureFlagCreate, FeatureFlagUpdate
 from backend.app.services import feature_flag_service as ffs
+from backend.scripts import generate_ruleset_vectors as ruleset_vectors
 from backend.tests.unit.core.test_experiment_targeting_validation import (
     ACCEPTED as EXPERIMENT_ACCEPTED,
 )
@@ -668,9 +671,15 @@ def _accepts(value: Any) -> bool:
 def _expected(service, flag, rules, user_id, context) -> Tuple[bool, str, Any]:
     """What the validator's reading of the rules gives, computed without the
     flag service's own matching."""
-    matched = (
-        match_targeting_rule(rules, expand_context(context or {})) if rules else None
-    )
+    ctx = expand_context(context or {})
+    segment_ids = segment_ids_in(rules)
+    if segment_ids:
+        # Membership as the stubbed resolver gives it (#440).
+        memberships = ruleset_vectors.stub_memberships(None, user_id, ctx, segment_ids)
+        if memberships.undecided(segment_ids):
+            return False, "error", None
+        ctx[SEGMENT_MEMBERSHIP_KEY] = memberships.members
+    matched = match_targeting_rule(rules, ctx) if rules else None
     if matched is None:
         return service._evaluate_percentage_rollout(flag, user_id), "rollout", None
     enabled = service._evaluate_percentage_rollout(
@@ -682,9 +691,12 @@ def _expected(service, flag, rules, user_id, context) -> Tuple[bool, str, Any]:
 @pytest.mark.regression
 def test_what_is_accepted_is_what_the_flag_evaluator_applies(monkeypatch):
     monkeypatch.setattr(ffs, "MetricsService", MagicMock())
+    monkeypatch.setattr(
+        ffs, "resolve_segment_memberships", ruleset_vectors.stub_memberships
+    )
     service = ffs.FeatureFlagService(db=MagicMock())
     corpus = _accepted_corpus()
-    assert len(corpus) == len(ACCEPTED) + 138 + 446
+    assert len(corpus) == len(ACCEPTED) + 141 + 446
     with_rules = 0
     diverged = []
     for name, raw in corpus:
@@ -771,7 +783,7 @@ def test_the_ruleset_vectors_split_exactly():
             accepted.append(flag["key"])
         else:
             refused.append(flag["key"])
-    assert (len(accepted), len(refused), len(legacy)) == (138, 4, 2)
+    assert (len(accepted), len(refused), len(legacy)) == (141, 4, 2)
     assert sorted(refused) == [
         "empty-list",
         "unconvertible-attribute",

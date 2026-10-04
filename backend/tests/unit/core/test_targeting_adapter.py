@@ -218,6 +218,8 @@ class TestOperatorMapping:
             "time_window",
             "array_contains",
             "array_intersects",
+            "in_segment",
+            "not_in_segment",
         }
         assert set(DASHBOARD_OPERATORS) == expected
 

@@ -57,6 +57,10 @@ from backend.app.schemas.segment import (
 )
 from backend.app.schemas.storable_text import contains_unstorable_text
 from backend.app.schemas.targeting_rule import TargetingRules
+from backend.app.services.segment_membership import (
+    segment_in_use_detail,
+    segment_references,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -69,10 +73,12 @@ class SegmentChangeRefused(Exception):
     """A change to a segment that its kind or status does not allow.
 
     ``message`` is fixed text chosen here (counts at most, never a user id or
-    a value from the request); the route answers it with ``status_code``.
+    a value from the request), or the structured ``segment_in_use`` detail
+    (the referencing flags' and experiments' ids, keys and names); the route
+    answers it with ``status_code``.
     """
 
-    def __init__(self, status_code: int, message: str) -> None:
+    def __init__(self, status_code: int, message: Any) -> None:
         self.status_code = status_code
         self.message = message
         super().__init__(message)
@@ -225,6 +231,23 @@ def _locked_id_list(db: Session, segment_id: Union[UUID, str], verb: str) -> Seg
     return segment
 
 
+def _refuse_if_in_use(db: Session, segment_id: Any) -> None:
+    """Refuse archiving or deactivating a segment that targeting still uses.
+
+    A flag that is not archived, or an experiment that is draft, active or
+    paused, whose rules reference the segment would stop evaluating (its
+    membership becomes unavailable). Query errors propagate.
+
+    Raises:
+        SegmentChangeRefused: 409 with the structured ``segment_in_use``
+            detail listing them.
+    """
+    flags, experiments = segment_references(db, segment_id)
+    if flags or experiments:
+        db.rollback()
+        raise SegmentChangeRefused(409, segment_in_use_detail(flags, experiments))
+
+
 class AudienceService:
     """
     Service for audience segment management and evaluation.
@@ -332,11 +355,15 @@ class AudienceService:
 
         Raises:
             ValueError: If the segment does not exist.
-            SegmentChangeRefused: ``rules`` sent for an id-list segment (422).
+            SegmentChangeRefused: ``rules`` sent for an id-list segment (422);
+                a status other than active while a flag or experiment
+                references the segment (409, structured detail).
         """
         segment = AudienceService.get_segment(db, segment_id)
         if data.rules is not None and _is_id_list(segment):
             raise SegmentChangeRefused(422, "rules: an id_list segment has no rules")
+        if data.status is not None and data.status != SegmentStatus.ACTIVE:
+            _refuse_if_in_use(db, segment.id)
 
         if data.name is not None:
             segment.name = data.name
@@ -363,8 +390,11 @@ class AudienceService:
 
         Raises:
             ValueError: If the segment does not exist.
+            SegmentChangeRefused: a flag or experiment references the segment
+                (409, structured detail).
         """
         segment = AudienceService.get_segment(db, segment_id)
+        _refuse_if_in_use(db, segment.id)
         segment.status = ModelSegmentStatus.ARCHIVED
         db.commit()
         logger.info("Archived segment %s", segment_id)

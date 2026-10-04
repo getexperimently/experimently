@@ -27,6 +27,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from backend.app.api import deps
+from backend.app.api.segment_rules import refuse_unusable_segments
 from backend.app.core.logger import unexpected_failure
 from backend.app.core.metrics import record_flag_evaluation
 from backend.app.core.permissions import (
@@ -336,6 +337,9 @@ async def create_feature_flag(
             detail=_flag_key_taken_detail(feature_flag_in.key),
         )
 
+    # Every segment the rules name exists and is active (#440).
+    refuse_unusable_segments(db, feature_flag_in.targeting_rules)
+
     # Create feature flag
     try:
         # The creator is the owner.  It is set by the service on the stored row,
@@ -532,6 +536,10 @@ async def update_feature_flag(
         "rollout_percentage": flag.rollout_percentage,
     }
     before_audit = audit_snapshot(EntityType.FEATURE_FLAG, flag)
+
+    # Every segment the rules name exists and is active (#440).
+    if "targeting_rules" in feature_flag_in.model_fields_set:
+        refuse_unusable_segments(db, feature_flag_in.targeting_rules)
 
     # Update feature flag
     try:

@@ -34,7 +34,7 @@ pytestmark = pytest.mark.unit
 
 #: Pinned. A change here is a change to what the SDKs must answer locally:
 #: regenerate the vectors and say why in the pull request.
-EXPECTED_COUNTS = {"flags": 144, "cases": 2172, "must_local": 1294}
+EXPECTED_COUNTS = {"flags": 147, "cases": 2181, "must_local": 1294}
 
 #: The launch local-operator set (engine names).
 LAUNCH_LOCAL_OPERATORS = {
@@ -209,6 +209,62 @@ def test_each_class_carries_its_answer(
     case = _find(vectors, flag, context, user)
     assert case["must_local"] is must_local
     assert case["expected"]["reason"] == expected
+
+
+@pytest.mark.parametrize("flag", ["segment-in", "segment-not-in", "segment-unknown"])
+def test_segment_flags_are_remote(vectors, flag):
+    """A flag that uses a segment is served remote, with no rules (#440).
+
+    Membership lives on the server, so the ruleset carries neither the rules
+    nor the segment id, and every case is one the SDK must ask about.
+    """
+    entry = next(e for e in vectors["ruleset"]["flags"] if e["key"] == flag)
+    assert entry == {"active": True, "evaluation": "remote", "key": flag}
+    cases = [case for case in vectors["cases"] if case["flag"] == flag]
+    assert len(cases) == 3
+    assert not any(case["must_local"] for case in cases)
+
+
+@pytest.mark.parametrize(
+    "flag, user, context, expected",
+    [
+        ("segment-in", "user-1", None, (True, "targeting_rule")),
+        ("segment-in", "user-7", None, (False, "rollout")),
+        # A list sent as "$segments" is not membership.
+        (
+            "segment-in",
+            "user-7",
+            {"$segments": [generator.VECTOR_SEGMENT]},
+            (False, "rollout"),
+        ),
+        ("segment-not-in", "user-1", None, (False, "rollout")),
+        ("segment-not-in", "user-7", None, (True, "targeting_rule")),
+        # A segment whose membership is unknown: never "not a member".
+        ("segment-unknown", "user-1", None, (False, "error")),
+        ("segment-unknown", "user-7", None, (False, "error")),
+    ],
+)
+def test_segment_cases_carry_the_server_answer(vectors, flag, user, context, expected):
+    case = _find(vectors, flag, context, user)
+    assert (case["expected"]["enabled"], case["expected"]["reason"]) == expected
+
+
+def test_the_generator_stubs_the_resolver():
+    """The generator answers membership from its table, never from a database."""
+    flag = generator.stored_flag(
+        {
+            "key": "segment-probe",
+            "status": "ACTIVE",
+            "rollout_percentage": 0,
+            "targeting_rules": generator.dashboard(
+                generator.cond("segment", "in_segment", generator.VECTOR_SEGMENT)
+            ),
+        }
+    )
+    assert generator.server_answer(flag, "user-1", None) == {
+        "enabled": True,
+        "reason": "targeting_rule",
+    }
 
 
 def test_every_local_operator_and_reason_is_exercised_locally(vectors):

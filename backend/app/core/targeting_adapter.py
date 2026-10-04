@@ -33,12 +33,13 @@ from __future__ import annotations
 import json
 import logging
 import re
-from typing import Any, Dict, List, Optional, Tuple
+import uuid
+from typing import Any, Dict, Iterator, List, Optional, Tuple
 
 from pydantic import ValidationError
 
 from backend.app.core.log_once import EVALUATION_NOTES
-from backend.app.core.rules_engine import evaluate_rule
+from backend.app.core.rules_engine import SEGMENT_OPERATORS, evaluate_rule
 from backend.app.schemas.targeting_rule import (
     Condition,
     LogicalOperator,
@@ -88,8 +89,25 @@ _SEMVER_OPERATOR_MAP: Dict[str, str] = {
     "semver_lte": "lte",
 }
 
+#: Segment membership (#440): the dashboard names are the engine's names.
+_SEGMENT_OPERATOR_MAP: Dict[str, OperatorType] = {
+    "in_segment": OperatorType.IN_SEGMENT,
+    "not_in_segment": OperatorType.NOT_IN_SEGMENT,
+}
+
 #: Every dashboard operator the adapter understands.
-DASHBOARD_OPERATORS = frozenset(_SIMPLE_OPERATOR_MAP) | frozenset(_SEMVER_OPERATOR_MAP)
+DASHBOARD_OPERATORS = (
+    frozenset(_SIMPLE_OPERATOR_MAP)
+    | frozenset(_SEMVER_OPERATOR_MAP)
+    | frozenset(_SEGMENT_OPERATOR_MAP)
+)
+
+#: The attribute a segment condition names. It is not read from the context:
+#: membership is resolved by the server.
+SEGMENT_ATTRIBUTE = "segment"
+
+#: Most distinct segments one ruleset may reference.
+MAX_REFERENCED_SEGMENTS = 10
 
 _NUMERIC_OPERATORS = frozenset(
     {
@@ -473,6 +491,12 @@ def _validate_segment_rules(value: Any) -> TargetingRules:
         raise TargetingRulesError("", _SEGMENT_LIST_LIMIT)
 
     rules = _validated_dashboard(value, _FLAG)
+    # Membership of one segment is never decided by another's (#440).
+    nested = next(_segment_conditions(rules, "groups"), None)
+    if nested is not None:
+        raise TargetingRulesError(
+            _join(nested[0], "operator"), "a segment cannot refer to a segment"
+        )
     # ``"beta, staff"`` is a list for ``in`` once converted, so the total
     # is counted again on what membership evaluates.
     if _converted_list_elements(rules) > MAX_SEGMENT_LIST_ELEMENTS:
@@ -524,6 +548,7 @@ def _validate_targeting(value: Any, *, kind: str) -> Optional[TargetingRules]:
     if not rules.rules and rules.default_rule is None:
         return None
     _check_list_sizes(rules, groups_base)
+    _check_segment_conditions(rules, groups_base)
     _check_rule_validator(rules, groups_base)
     return rules
 
@@ -819,6 +844,97 @@ def _check_list_sizes(rules: TargetingRules, groups_base: Optional[str]) -> None
         walk(rules.default_rule.rule, "default_rule.rule")
 
 
+def is_segment_id(value: Any) -> bool:
+    """A segment id as stored: canonical lowercase hyphenated UUID text."""
+    if not isinstance(value, str) or len(value) != 36:
+        return False
+    try:
+        return str(uuid.UUID(value)) == value
+    except ValueError:
+        return False
+
+
+def _segment_conditions(
+    rules: TargetingRules, groups_base: Optional[str]
+) -> Iterator[Tuple[str, Condition]]:
+    """Every segment condition in ``rules`` with its path, ``default_rule`` last.
+
+    Paths are in the submitted value's terms, as for the other checks: for
+    the dashboard shape ``groups[i].conditions[j]``, for the native shape
+    ``rules[i].rule...`` and ``default_rule.rule...``. Groups are walked with
+    an explicit stack.
+    """
+    roots = [
+        (rule.rule, "" if groups_base is not None else f"rules[{index}].rule")
+        for index, rule in enumerate(rules.rules)
+    ]
+    if rules.default_rule is not None:
+        roots.append((rules.default_rule.rule, "default_rule.rule"))
+    for root, root_path in roots:
+        stack = [(root, root_path)]
+        while stack:
+            group, path = stack.pop()
+            for ci, condition in enumerate(group.conditions):
+                if condition.operator in SEGMENT_OPERATORS:
+                    yield _join(path, f"conditions[{ci}]"), condition
+            stack.extend(
+                (child, _join(path, f"groups[{gi}]"))
+                for gi, child in reversed(list(enumerate(group.groups or [])))
+            )
+
+
+def segment_ids_in(rules: Optional[TargetingRules]) -> frozenset:
+    """The segment ids ``rules`` reference, ``default_rule`` included.
+
+    Only text values are collected; a stored value that is not text cannot
+    be a segment id, and :func:`~backend.app.core.rules_engine.segment_condition_holds`
+    refuses it when it is evaluated.
+    """
+    if rules is None:
+        return frozenset()
+    return frozenset(
+        condition.value
+        for _path, condition in _segment_conditions(rules, None)
+        if isinstance(condition.value, str)
+    )
+
+
+def _check_segment_conditions(
+    rules: TargetingRules, groups_base: Optional[str]
+) -> None:
+    """Refuse a segment condition the evaluator would not apply as written.
+
+    * the attribute must be ``segment`` and the value a segment id (the
+      canonical text of a UUID);
+    * a segment condition in a native ``default_rule`` is refused: the
+      evaluator returns ``default_rule`` without evaluating its conditions,
+      so the condition would mean "every user";
+    * at most :data:`MAX_REFERENCED_SEGMENTS` distinct segments.
+
+    Whether each segment exists and is active is checked against the
+    database by the routes that write rules
+    (``backend.app.services.segment_membership.segment_reference_problem``).
+    """
+    referenced = set()
+    for path, condition in _segment_conditions(rules, groups_base):
+        if path.startswith("default_rule"):
+            raise TargetingRulesError(
+                _join(path, "operator"),
+                "a segment condition is not evaluated in default_rule",
+            )
+        if condition.attribute != SEGMENT_ATTRIBUTE:
+            raise TargetingRulesError(
+                _join(path, "attribute"), 'must be "segment" for this operator'
+            )
+        if not is_segment_id(condition.value):
+            raise TargetingRulesError(_join(path, "value"), "must be a segment id")
+        referenced.add(condition.value)
+    if len(referenced) > MAX_REFERENCED_SEGMENTS:
+        raise TargetingRulesError(
+            "", f"at most {MAX_REFERENCED_SEGMENTS} segments may be referenced"
+        )
+
+
 def _check_rule_validator(rules: TargetingRules, groups_base: Optional[str]) -> None:
     # Imported here: rule_validation is only needed on the write path.
     from backend.app.core.rule_validation import RuleValidator, ValidationSeverity
@@ -908,6 +1024,12 @@ def convert_dashboard_condition(condition: Dict[str, Any]) -> Condition:
             value=_semver_value(value),
             additional_value=_SEMVER_OPERATOR_MAP[operator],
         )
+
+    segment_operator = _SEGMENT_OPERATOR_MAP.get(operator)
+    if segment_operator is not None:
+        # The value is the segment id, kept as stored; the write path checks
+        # it (``_check_segment_conditions``).
+        return Condition(attribute=attribute, operator=segment_operator, value=value)
 
     engine_operator = _SIMPLE_OPERATOR_MAP.get(operator)
     if engine_operator is None:

@@ -30,8 +30,18 @@ from backend.app.core.security import create_local_access_token, get_password_ha
 from backend.app.main import app
 from backend.app.models.api_key import APIKey
 from backend.app.models.feature_flag import FeatureFlag, FeatureFlagStatus
+from backend.app.models.segment import (
+    Segment,
+    SegmentKind,
+    SegmentMember,
+    SegmentStatus,
+)
 from backend.app.models.user import User, UserRole
-from backend.scripts.generate_ruleset_vectors import VECTORS_PATH
+from backend.scripts.generate_ruleset_vectors import (
+    VECTOR_SEGMENT,
+    VECTOR_SEGMENT_MEMBERS,
+    VECTORS_PATH,
+)
 
 pytestmark = pytest.mark.integration
 
@@ -485,8 +495,34 @@ class TestVectorsThroughTheRoutes:
                     targeting_rules=spec["targeting_rules"],
                 )
             )
+        # The segment the segment flags name, stored with the members the
+        # generator's stubbed resolver gives (#440), so the routes answer
+        # them from the database as the vectors expect. The unknown one is
+        # left absent.
+        db_session.query(Segment).filter(
+            Segment.id == uuid.UUID(VECTOR_SEGMENT)
+        ).delete(synchronize_session=False)
+        db_session.add(
+            Segment(
+                id=uuid.UUID(VECTOR_SEGMENT),
+                name="Vector segment",
+                kind=SegmentKind.ID_LIST.value,
+                status=SegmentStatus.ACTIVE,
+                owner_id=developer.id,
+            )
+        )
+        db_session.flush()
+        for member in VECTOR_SEGMENT_MEMBERS[VECTOR_SEGMENT]:
+            db_session.add(
+                SegmentMember(segment_id=uuid.UUID(VECTOR_SEGMENT), member_id=member)
+            )
         db_session.commit()
-        return vectors
+        yield vectors
+        db_session.rollback()
+        db_session.query(Segment).filter(
+            Segment.id == uuid.UUID(VECTOR_SEGMENT)
+        ).delete(synchronize_session=False)
+        db_session.commit()
 
     def test_the_served_entries_are_the_vectors_entries(
         self, client, stored_corpus, scoped_key

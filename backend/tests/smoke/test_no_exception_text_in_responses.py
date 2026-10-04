@@ -445,7 +445,9 @@ VALUES_OMITTED = "keeps only type, loc and msg of each error, never the input"
 DOMAIN = "a domain exception whose message the module wrote"
 SEGMENT_CHANGE_REFUSED = (
     "SegmentChangeRefused: the audience service's fixed sentence and status "
-    "(kind, archived, the member cap with counts); never an id or request value"
+    "(kind, archived, the member cap with counts), or the segment_in_use "
+    "detail (the referencing flags' and experiments' ids, keys and names, "
+    "which the caller may read); never a request value"
 )
 
 ALLOWED: Dict[Tuple[str, str, str], Tuple[int, str]] = {
@@ -591,6 +593,10 @@ ALLOWED: Dict[Tuple[str, str, str], Tuple[int, str]] = {
         SERVICE_VALUEERROR,
     ),
     (f"{E}/segments.py", "update_segment", "SegmentChangeRefused"): (
+        1,
+        SEGMENT_CHANGE_REFUSED,
+    ),
+    (f"{E}/segments.py", "delete_segment", "SegmentChangeRefused"): (
         1,
         SEGMENT_CHANGE_REFUSED,
     ),
