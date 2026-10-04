@@ -364,7 +364,12 @@ class TestAnalyzePairEndpoint:
             "totals_b": [{str(a.variants[0].id): 1}, boom],
         }.get(failing, [{str(a.variants[0].id): 1}, {str(b.variants[0].id): 1}])
         user_pair = (str(a.variants[0].id), str(b.variants[0].id))
-        shared = boom if failing == "shared" else {"u1": user_pair}
+        # Only the converters case needs a shared user to reach its read; with
+        # none, a swallowed read elsewhere would answer a consistent 200.
+        shared = {
+            "shared": boom,
+            "converters": {"u1": user_pair},
+        }.get(failing, {})
         converters = boom if failing == "converters" else set()
         with (
             patch.object(
