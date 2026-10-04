@@ -37,10 +37,14 @@ pytestmark = [pytest.mark.integration]
 REVISION = "8fd44fb483a2"
 PREVIOUS_CORE_HEAD = "b8c9d0e1f2a3"
 #: The core head of this tree: ``upgrade heads`` runs on past this revision to
-#: ``1ab99332f0ba`` (``events.created_at`` in UTC), through ``271f03a31742``,
-#: ``d12cbd384bbe`` and ``a89544fb1075``; a database built by ``create_all``
-#: already carries all four, so they add nothing here.
-CORE_HEAD = "1ab99332f0ba"
+#: ``d29a479daafe`` (holdout population), through ``271f03a31742``,
+#: ``d12cbd384bbe``, ``a89544fb1075`` and ``1ab99332f0ba``; a database built by
+#: ``create_all`` already carries what they build, so they add nothing here.
+CORE_HEAD = "d29a479daafe"
+#: Tables that a later core revision's downgrade drops: a downgrade from the
+#: head to this test's target unapplies those revisions too.  ``d29a479daafe``
+#: (#445) drops ``holdout_population``.
+LATER_DOWNGRADE_TABLES = {"holdout_population"}
 #: The modules revision the previous full release (0.10.0) recorded, and the
 #: branch's head in this one.  This release also carries
 #: ``modules_0002_warehouse_analysis`` (#312), so a full database at the
@@ -270,4 +274,4 @@ def test_downgrade_removes_the_two_tables_and_nothing_else(
     assert down.returncode == 0, down.stderr[-3000:]
 
     assert _rows(test_db, scratch_schema) == PREVIOUS_CORE_ROWS
-    assert _tables(test_db, scratch_schema) == before - TABLES
+    assert _tables(test_db, scratch_schema) == before - TABLES - LATER_DOWNGRADE_TABLES

@@ -108,7 +108,11 @@ class TestUpdateHoldout:
         mock_db.commit.assert_called_once()
 
     def test_updates_holdout_percentage(self, service, mock_db):
+        # Never active: the percentage can still change (#445).
         mock_holdout = MagicMock(spec=GlobalHoldout)
+        mock_holdout.is_active = False
+        mock_holdout.activated_at = None
+        mock_holdout.deactivated_at = None
         mock_db.query.return_value.filter.return_value.first.return_value = mock_holdout
         service.update_holdout(uuid4(), holdout_percentage=15)
         assert mock_holdout.holdout_percentage == 15
@@ -129,12 +133,21 @@ class TestActivateHoldout:
     def test_activating_deactivates_others(self, service, mock_db):
         """Activating a holdout should deactivate all other active holdouts first."""
         mock_holdout = MagicMock(spec=GlobalHoldout)
+        mock_holdout.is_active = False
+        mock_holdout.activated_at = None
+        mock_holdout.deactivated_at = None
+        mock_holdout.hash_salt = "holdout:unit"
+        other = MagicMock(spec=GlobalHoldout)
+        other.is_active = True
         mock_db.query.return_value.filter.return_value.first.return_value = mock_holdout
+        mock_db.query.return_value.filter.return_value.all.return_value = [other]
 
         service.activate_holdout(uuid4())
 
-        # _deactivate_all is called internally which does query().filter().update()
+        assert other.is_active is False
+        assert other.deactivated_at is not None
         assert mock_holdout.is_active is True
+        assert mock_holdout.activated_at == other.deactivated_at
         mock_db.flush.assert_called()
         mock_db.commit.assert_called()
 
@@ -147,9 +160,12 @@ class TestActivateHoldout:
 class TestDeactivateHoldout:
     def test_deactivates_holdout(self, service, mock_db):
         mock_holdout = MagicMock(spec=GlobalHoldout)
+        mock_holdout.is_active = True
+        mock_holdout.deactivated_at = None
         mock_db.query.return_value.filter.return_value.first.return_value = mock_holdout
         service.deactivate_holdout(uuid4())
         assert mock_holdout.is_active is False
+        assert mock_holdout.deactivated_at is not None
         mock_db.commit.assert_called()
 
     def test_deactivate_returns_none_when_not_found(self, service, mock_db):
@@ -171,26 +187,30 @@ class TestIsUserInHoldout:
         assert pct == 0
         assert bucket == 0
 
-    @patch.object(GlobalHoldoutService, "_get_holdout_bucket")
+    @patch("backend.app.services.global_holdout_service.holdout_bucket")
     def test_user_in_holdout(self, mock_bucket, service, mock_db):
         """User with bucket < holdout_percentage should be in holdout."""
         mock_holdout = MagicMock(spec=GlobalHoldout)
         mock_holdout.holdout_percentage = 10
         mock_holdout.is_active = True
+        mock_holdout.hash_salt = "holdout:own"
         mock_db.query.return_value.filter.return_value.first.return_value = mock_holdout
 
         mock_bucket.return_value = 5  # 5 < 10 => in holdout
         is_in, pct, bucket = service.is_user_in_holdout("user_123")
+        # The holdout's own salt, not the legacy constant (#445).
+        mock_bucket.assert_called_once_with("user_123", "holdout:own")
         assert is_in is True
         assert pct == 10
         assert bucket == 5
 
-    @patch.object(GlobalHoldoutService, "_get_holdout_bucket")
+    @patch("backend.app.services.global_holdout_service.holdout_bucket")
     def test_user_not_in_holdout(self, mock_bucket, service, mock_db):
         """User with bucket >= holdout_percentage should NOT be in holdout."""
         mock_holdout = MagicMock(spec=GlobalHoldout)
         mock_holdout.holdout_percentage = 10
         mock_holdout.is_active = True
+        mock_holdout.hash_salt = "holdout:own"
         mock_db.query.return_value.filter.return_value.first.return_value = mock_holdout
 
         mock_bucket.return_value = 50  # 50 >= 10 => not in holdout
@@ -279,3 +299,66 @@ class TestCountHoldouts:
         mock_db.query.return_value.count.return_value = 3
         result = service.count_holdouts()
         assert result == 3
+
+
+class TestSaltIndependence:
+    """Each holdout's own salt makes its membership independent of the last
+    one's (#445): with one shared salt the next holdout would hold out the
+    same users again."""
+
+    def test_two_holdouts_overlap_as_independent_draws(self):
+        from backend.app.models.global_holdout import new_holdout_salt
+        from backend.app.services.global_holdout_service import holdout_bucket
+
+        first, second = new_holdout_salt(), new_holdout_salt()
+        users = [f"independence_{i}" for i in range(20000)]
+        in_first = {u for u in users if holdout_bucket(u, first) < 20}
+        in_second = {u for u in users if holdout_bucket(u, second) < 20}
+
+        # Independent draws at 20% each overlap on about 4% of users
+        # (sd 0.14 points at n=20000); one shared salt would overlap on 20%.
+        overlap = len(in_first & in_second) / len(users)
+        assert 0.034 < overlap < 0.046, overlap
+
+    def test_new_salts_are_distinct_and_never_the_legacy_one(self):
+        from backend.app.models.global_holdout import (
+            LEGACY_HOLDOUT_SALT,
+            new_holdout_salt,
+        )
+
+        salts = {new_holdout_salt() for _ in range(1000)}
+        assert len(salts) == 1000
+        assert LEGACY_HOLDOUT_SALT not in salts
+
+
+class TestMeasurable:
+    """A legacy-salt holdout is never measurable, whatever ``activated_at``
+    says (PE C1): its buckets are every earlier holdout's buckets."""
+
+    def test_legacy_salt_is_never_measurable(self):
+        from datetime import datetime
+
+        from backend.app.models.global_holdout import LEGACY_HOLDOUT_SALT
+
+        stamped = datetime(2026, 10, 1)
+        assert not GlobalHoldout(
+            hash_salt=LEGACY_HOLDOUT_SALT, activated_at=stamped
+        ).is_measurable
+        assert not GlobalHoldout(hash_salt="holdout:x", activated_at=None).is_measurable
+        assert GlobalHoldout(hash_salt="holdout:x", activated_at=stamped).is_measurable
+
+    def test_activation_never_stamps_a_legacy_row(self, service, mock_db):
+        from backend.app.models.global_holdout import LEGACY_HOLDOUT_SALT
+
+        holdout = MagicMock(spec=GlobalHoldout)
+        holdout.is_active = False
+        holdout.activated_at = None
+        holdout.deactivated_at = None
+        holdout.hash_salt = LEGACY_HOLDOUT_SALT
+        mock_db.query.return_value.filter.return_value.first.return_value = holdout
+        mock_db.query.return_value.filter.return_value.all.return_value = []
+
+        service.activate_holdout(uuid4())
+
+        assert holdout.is_active is True
+        assert holdout.activated_at is None

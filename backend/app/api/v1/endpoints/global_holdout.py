@@ -9,6 +9,11 @@ Routes:
     GET    /api/v1/holdout/all        — list all holdouts (ADMIN)
     POST   /api/v1/holdout            — create holdout (ADMIN)
     PUT    /api/v1/holdout/{id}       — update holdout (ADMIN)
+
+Activating a holdout (``is_active: true`` on POST or PUT) deactivates the
+active one.  Refused: a different ``holdout_percentage`` once the holdout has
+been active (422), restarting an ended holdout (422), and an activation that
+races another one (409).
     GET    /api/v1/holdout/check/{uid} — check if user is in holdout
 """
 
@@ -29,7 +34,12 @@ from backend.app.schemas.global_holdout import (
     GlobalHoldoutUpdate,
     HoldoutCheckResponse,
 )
-from backend.app.services.global_holdout_service import GlobalHoldoutService
+from backend.app.services.global_holdout_service import (
+    GlobalHoldoutService,
+    HoldoutActivationConflict,
+    HoldoutEnded,
+    HoldoutPercentageLocked,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -57,6 +67,15 @@ def _require_admin(user: User) -> None:
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Admin permissions required for this action",
         )
+
+
+def _refusal(error: Exception) -> HTTPException:
+    """The HTTP answer for a lifecycle refusal raised by the service."""
+    if isinstance(error, HoldoutActivationConflict):
+        return HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error))
+    return HTTPException(
+        status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(error)
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -120,7 +139,12 @@ def list_all_holdouts(
     response_model=GlobalHoldoutResponse,
     status_code=status.HTTP_201_CREATED,
     summary="Create a global holdout",
-    description="Create a new global holdout configuration. Requires ADMIN role.",
+    description=(
+        "Create a new global holdout configuration. Requires ADMIN role. "
+        "With is_active true it becomes the active holdout and the one that "
+        "was active is deactivated; 409 when another activation happened at "
+        "the same time."
+    ),
     tags=["Global Holdout"],
 )
 def create_holdout(
@@ -131,13 +155,16 @@ def create_holdout(
     """Create a new global holdout."""
     _require_admin(current_user)
     service = GlobalHoldoutService(db)
-    holdout = service.create_holdout(
-        name=data.name,
-        description=data.description,
-        holdout_percentage=data.holdout_percentage,
-        is_active=data.is_active,
-        owner_id=current_user.id,
-    )
+    try:
+        holdout = service.create_holdout(
+            name=data.name,
+            description=data.description,
+            holdout_percentage=data.holdout_percentage,
+            is_active=data.is_active,
+            owner_id=current_user.id,
+        )
+    except HoldoutActivationConflict as error:
+        raise _refusal(error)
     return GlobalHoldoutResponse.model_validate(holdout)
 
 
@@ -150,7 +177,13 @@ def create_holdout(
     "/{holdout_id}",
     response_model=GlobalHoldoutResponse,
     summary="Update a global holdout",
-    description="Update a global holdout configuration. Requires ADMIN role.",
+    description=(
+        "Update a global holdout configuration. Requires ADMIN role. "
+        "is_active true deactivates the active holdout. Refused with 422: a "
+        "different holdout_percentage once the holdout has been active (the "
+        "same value is accepted), and is_active true on a holdout that has "
+        "ended. 409 when another activation happened at the same time."
+    ),
     tags=["Global Holdout"],
 )
 def update_holdout(
@@ -162,13 +195,20 @@ def update_holdout(
     """Update a holdout configuration."""
     _require_admin(current_user)
     service = GlobalHoldoutService(db)
-    holdout = service.update_holdout(
-        holdout_id=holdout_id,
-        name=data.name,
-        description=data.description,
-        holdout_percentage=data.holdout_percentage,
-        is_active=data.is_active,
-    )
+    try:
+        holdout = service.update_holdout(
+            holdout_id=holdout_id,
+            name=data.name,
+            description=data.description,
+            holdout_percentage=data.holdout_percentage,
+            is_active=data.is_active,
+        )
+    except (
+        HoldoutPercentageLocked,
+        HoldoutEnded,
+        HoldoutActivationConflict,
+    ) as error:
+        raise _refusal(error)
     if not holdout:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

@@ -1,25 +1,110 @@
 """
-Global Holdout Service for managing user holdout groups (EP-022).
+Global Holdout Service for managing user holdout groups (EP-022, #445).
 
-Reserves a fixed percentage of users from all experiments to provide a clean
-baseline for measuring the cumulative effect of running experiments.
+Keeps a fixed percentage of new users out of every experiment, so they can be
+compared with everyone else first seen while the holdout was active.
+
+The lifecycle has one path for activation, used by ``POST`` and ``PUT``
+alike:
+
+* activating stamps ``activated_at`` (never on a legacy-salt row) and
+  deactivates every *other* active holdout, stamping their ``deactivated_at``;
+  activating the holdout that is already active changes nothing;
+* deactivating stamps ``deactivated_at``.  An ended holdout cannot restart
+  (``HoldoutEnded``);
+* the percentage cannot change once the holdout has been active
+  (``HoldoutPercentageLocked``); re-sending the same value is accepted;
+* two activations racing each other: the database's one-active index refuses
+  the second (``HoldoutActivationConflict``).
+
+Membership is one function, ``holdout_bucket(user_id, salt)``, used by
+``/holdout/check`` and ``AssignmentService.assign_user`` alike, with the
+holdout's own ``hash_salt``.
 """
 
 import hashlib
 import logging
 import struct
+from datetime import datetime, timezone
 from typing import List, Optional, Tuple
 from uuid import UUID
 
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from backend.app.models.global_holdout import GlobalHoldout
+from backend.app.models.global_holdout import (
+    LEGACY_HOLDOUT_SALT,
+    ONE_ACTIVE_INDEX,
+    GlobalHoldout,
+)
 
 logger = logging.getLogger(__name__)
 
-# Fixed salt for holdout hashing — ensures holdout bucket is independent of
-# experiment-specific hashing
-HOLDOUT_SALT = "global_holdout_v1"
+#: The salt every holdout used before #445, and the one the static, DB-free
+#: helpers still use.  A holdout's own ``hash_salt`` decides its buckets.
+HOLDOUT_SALT = LEGACY_HOLDOUT_SALT
+
+#: Passed for ``holdout`` to mean "look the active holdout up".
+_LOOK_UP = object()
+
+PERCENTAGE_LOCKED_DETAIL = (
+    "holdout_percentage cannot change once a holdout has been active: it would "
+    "move users between the holdout and the rest and mix the two groups. "
+    "Create a new holdout instead."
+)
+ENDED_DETAIL = "A holdout that has ended cannot restart. Create a new holdout."
+ACTIVATION_CONFLICT_DETAIL = "Another holdout was activated at the same time; retry."
+
+
+class HoldoutPercentageLocked(ValueError):
+    """The percentage of a holdout that has been active cannot change."""
+
+    def __init__(self) -> None:
+        super().__init__(PERCENTAGE_LOCKED_DETAIL)
+
+
+class HoldoutEnded(ValueError):
+    """A holdout that has been deactivated cannot be activated again."""
+
+    def __init__(self) -> None:
+        super().__init__(ENDED_DETAIL)
+
+
+class HoldoutActivationConflict(Exception):
+    """Another holdout became active concurrently (the one-active index refused)."""
+
+    def __init__(self) -> None:
+        super().__init__(ACTIVATION_CONFLICT_DETAIL)
+
+
+def holdout_bucket(user_id: str, salt: str) -> int:
+    """The user's holdout bucket, 0-99, under ``salt``.
+
+    ``md5("<user_id>:<salt>")``, first four bytes little-endian, modulo 100:
+    with the legacy salt this is exactly the bucket every pre-#445 holdout
+    used.
+    """
+    combined = f"{user_id}:{salt}".encode("utf-8")
+    hash_bytes = hashlib.md5(combined, usedforsecurity=False).digest()[:4]
+    hash_int = struct.unpack("<I", hash_bytes)[0]
+    return hash_int % 100
+
+
+def _utcnow() -> datetime:
+    """Naive UTC, like ``BaseModel.created_at``."""
+    return datetime.now(timezone.utc).replace(tzinfo=None)
+
+
+def _has_been_active(holdout: GlobalHoldout) -> bool:
+    return (
+        bool(holdout.is_active)
+        or holdout.activated_at is not None
+        or holdout.deactivated_at is not None
+    )
+
+
+def _is_one_active_violation(error: IntegrityError) -> bool:
+    return ONE_ACTIVE_INDEX in str(getattr(error, "orig", error))
 
 
 class GlobalHoldoutService:
@@ -41,17 +126,34 @@ class GlobalHoldoutService:
         holdout_percentage: int = 10,
         is_active: bool = False,
         owner_id: Optional[UUID] = None,
+        hash_salt: Optional[str] = None,
     ) -> GlobalHoldout:
-        """Create a new global holdout configuration."""
+        """Create a new global holdout; ``is_active=True`` activates it.
+
+        Activation goes through the same path as ``update_holdout``: the
+        other active holdout is deactivated and this one's ``activated_at``
+        is stamped.  ``hash_salt`` is left out everywhere but the demo seed,
+        which fixes its holdout's salt so its documented device ids stay in or
+        out across re-seeds; the model's default gives every other holdout a
+        fresh one.  The legacy salt is refused: a holdout with it is never
+        measurable.
+        """
+        if hash_salt == LEGACY_HOLDOUT_SALT:
+            raise ValueError("a new holdout cannot use the legacy salt")
         holdout = GlobalHoldout(
             name=name,
             description=description,
             holdout_percentage=holdout_percentage,
-            is_active=is_active,
+            is_active=False,
             owner_id=owner_id,
         )
+        if hash_salt is not None:
+            holdout.hash_salt = hash_salt
         self.db.add(holdout)
-        self.db.commit()
+        if is_active:
+            self.db.flush()
+            self._activate(holdout)
+        self._commit()
         self.db.refresh(holdout)
         return holdout
 
@@ -62,7 +164,7 @@ class GlobalHoldoutService:
         )
 
     def get_active_holdout(self) -> Optional[GlobalHoldout]:
-        """Get the currently active global holdout (at most one should be active)."""
+        """Get the active global holdout (the database allows at most one)."""
         return (
             self.db.query(GlobalHoldout).filter(GlobalHoldout.is_active == True).first()
         )
@@ -83,10 +185,27 @@ class GlobalHoldoutService:
         holdout_percentage: Optional[int] = None,
         is_active: Optional[bool] = None,
     ) -> Optional[GlobalHoldout]:
-        """Update a holdout configuration."""
+        """Update a holdout configuration.
+
+        Raises ``HoldoutPercentageLocked`` for a different percentage on a
+        holdout that has been active, ``HoldoutEnded`` for ``is_active=True``
+        on one that has ended, and ``HoldoutActivationConflict`` when another
+        holdout became active concurrently.  Nothing is changed when any of
+        them is raised.
+        """
         holdout = self.get_holdout(holdout_id)
         if not holdout:
             return None
+
+        # Every refusal is decided before anything changes.
+        if (
+            holdout_percentage is not None
+            and holdout_percentage != holdout.holdout_percentage
+            and _has_been_active(holdout)
+        ):
+            raise HoldoutPercentageLocked()
+        if is_active and not holdout.is_active and holdout.deactivated_at is not None:
+            raise HoldoutEnded()
 
         if name is not None:
             holdout.name = name
@@ -94,50 +213,52 @@ class GlobalHoldoutService:
             holdout.description = description
         if holdout_percentage is not None:
             holdout.holdout_percentage = holdout_percentage
-        if is_active is not None:
-            # If activating, deactivate any other active holdout first
-            if is_active:
-                self._deactivate_all()
-            holdout.is_active = is_active
+        if is_active is True:
+            self._activate(holdout)
+        elif is_active is False:
+            self._deactivate(holdout)
 
-        self.db.commit()
+        self._commit()
         self.db.refresh(holdout)
         return holdout
 
     def activate_holdout(self, holdout_id: UUID) -> Optional[GlobalHoldout]:
-        """Activate a holdout (deactivates any currently active holdout)."""
+        """Activate a holdout (deactivates any other active holdout)."""
         return self.update_holdout(holdout_id, is_active=True)
 
     def deactivate_holdout(self, holdout_id: UUID) -> Optional[GlobalHoldout]:
-        """Deactivate a holdout."""
+        """Deactivate a holdout; it has then ended and cannot restart."""
         return self.update_holdout(holdout_id, is_active=False)
 
     # ------------------------------------------------------------------
     # User Holdout Check
     # ------------------------------------------------------------------
 
-    def is_user_in_holdout(self, user_id: str) -> Tuple[bool, int, int]:
+    def is_user_in_holdout(
+        self, user_id: str, holdout=_LOOK_UP
+    ) -> Tuple[bool, int, int]:
         """
         Check if a user is in the global holdout.
 
-        Algorithm:
-        1. Hash (user_id, HOLDOUT_SALT) with fixed salt → bucket 0-99
-        2. Return bucket < holdout_percentage
+        ``holdout`` is the active holdout when the caller has already loaded
+        it (``None`` for "none is active"); left out, it is looked up.  The
+        bucket uses that holdout's own ``hash_salt``.
 
         Returns:
             Tuple of (is_in_holdout, holdout_percentage, bucket)
         """
-        holdout = self.get_active_holdout()
+        if holdout is _LOOK_UP:
+            holdout = self.get_active_holdout()
         if not holdout:
             return (False, 0, 0)
 
-        bucket = self._get_holdout_bucket(user_id)
+        bucket = holdout_bucket(user_id, holdout.hash_salt)
         is_in = bucket < holdout.holdout_percentage
         return (is_in, holdout.holdout_percentage, bucket)
 
     @staticmethod
     def is_user_in_holdout_static(
-        user_id: str, holdout_percentage: int
+        user_id: str, holdout_percentage: int, salt: str = HOLDOUT_SALT
     ) -> Tuple[bool, int]:
         """
         Static version for Lambda use — no DB dependency.
@@ -145,28 +266,66 @@ class GlobalHoldoutService:
         Returns:
             Tuple of (is_in_holdout, bucket)
         """
-        bucket = GlobalHoldoutService._get_holdout_bucket_static(user_id)
+        bucket = holdout_bucket(user_id, salt)
         return (bucket < holdout_percentage, bucket)
 
     @staticmethod
     def _get_holdout_bucket_static(user_id: str) -> int:
-        """Get holdout bucket for a user (0-99). Static version."""
-        combined = f"{user_id}:{HOLDOUT_SALT}".encode("utf-8")
-        hash_bytes = hashlib.md5(combined, usedforsecurity=False).digest()[:4]
-        hash_int = struct.unpack("<I", hash_bytes)[0]
-        return hash_int % 100
-
-    def _get_holdout_bucket(self, user_id: str) -> int:
-        """Get holdout bucket for a user (0-99)."""
-        return self._get_holdout_bucket_static(user_id)
+        """Holdout bucket (0-99) under the legacy salt. Static version."""
+        return holdout_bucket(user_id, HOLDOUT_SALT)
 
     # ------------------------------------------------------------------
     # Internal
     # ------------------------------------------------------------------
 
-    def _deactivate_all(self) -> None:
-        """Deactivate all currently active holdouts."""
-        self.db.query(GlobalHoldout).filter(GlobalHoldout.is_active == True).update(
-            {"is_active": False}
+    def _activate(self, holdout: GlobalHoldout) -> None:
+        """Make ``holdout`` the active one.
+
+        Already active: nothing changes, timestamps included.  Otherwise every
+        other active holdout is deactivated (and stamped) first, then this one
+        is activated; ``activated_at`` is stamped only on a non-legacy row that
+        has none, so a legacy-salt holdout never becomes measurable.
+        """
+        if holdout.is_active:
+            return
+        now = _utcnow()
+        others = (
+            self.db.query(GlobalHoldout)
+            .filter(GlobalHoldout.is_active == True, GlobalHoldout.id != holdout.id)
+            .all()
         )
-        self.db.flush()
+        for other in others:
+            other.is_active = False
+            other.deactivated_at = now
+        # The others are written before this row turns active, so the
+        # one-active index sees at most one active row at every statement.
+        self._flush()
+        holdout.is_active = True
+        if holdout.hash_salt != LEGACY_HOLDOUT_SALT and holdout.activated_at is None:
+            holdout.activated_at = now
+        self._flush()
+
+    def _deactivate(self, holdout: GlobalHoldout) -> None:
+        """End an active holdout; a holdout that is not active is left as it is."""
+        if not holdout.is_active:
+            return
+        holdout.is_active = False
+        holdout.deactivated_at = _utcnow()
+
+    def _flush(self) -> None:
+        try:
+            self.db.flush()
+        except IntegrityError as error:
+            self.db.rollback()
+            if _is_one_active_violation(error):
+                raise HoldoutActivationConflict() from error
+            raise
+
+    def _commit(self) -> None:
+        try:
+            self.db.commit()
+        except IntegrityError as error:
+            self.db.rollback()
+            if _is_one_active_violation(error):
+                raise HoldoutActivationConflict() from error
+            raise

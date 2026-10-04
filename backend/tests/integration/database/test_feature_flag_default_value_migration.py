@@ -47,8 +47,14 @@ pytestmark = [pytest.mark.integration]
 REVISION = "a89544fb1075"
 PREVIOUS_CORE_HEAD = "d12cbd384bbe"
 #: The core head of this tree, which ``upgrade heads`` runs on to: the next
-#: revision, ``1ab99332f0ba`` (``events.created_at`` in UTC), adds no DDL.
-CORE_HEAD = "1ab99332f0ba"
+#: revision, ``1ab99332f0ba`` (``events.created_at`` in UTC), adds no DDL, and
+#: ``d29a479daafe`` (holdout population) finds its objects already built by
+#: ``create_all`` and adds none.
+CORE_HEAD = "d29a479daafe"
+#: Tables that a later core revision's downgrade drops: a downgrade from the
+#: head to this test's target unapplies those revisions too.  ``d29a479daafe``
+#: (#445) drops ``holdout_population``.
+LATER_DOWNGRADE_TABLES = {"holdout_population"}
 #: The modules branch's head, in the previous release and in this one alike.
 MODULES_HEAD = "modules_0002_warehouse_analysis"
 
@@ -365,4 +371,7 @@ def test_downgrade_removes_the_column_and_nothing_else(
         for c in inspect(test_db).get_columns("feature_flags", schema=scratch_schema)
     }
     assert after == columns - {COLUMN}
-    assert set(inspect(test_db).get_table_names(schema=scratch_schema)) == tables
+    assert (
+        set(inspect(test_db).get_table_names(schema=scratch_schema))
+        == tables - LATER_DOWNGRADE_TABLES
+    )

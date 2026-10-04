@@ -8,21 +8,30 @@ real test database.  Every assertion is scoped to rows created by the test
 not truncated between tests.
 """
 
+import datetime as dt
 import json
 import uuid
+from contextlib import contextmanager
 
 import pytest
+from sqlalchemy import event as sa_event
+from sqlalchemy import text, update
+from sqlalchemy.orm import Session
 
 from backend.app.models.assignment import Assignment
 from backend.app.models.bandit_state import BanditState
 from backend.app.models.event import Event
 from backend.app.models.experiment import ExperimentStatus, ExperimentType, Variant
 from backend.app.models.global_holdout import GlobalHoldout
+from backend.app.models.holdout_population import HoldoutPopulation
 from backend.app.models.mutual_exclusion_group import (
     MutualExclusionGroup,
     MutualExclusionGroupStatus,
 )
-from backend.app.services.global_holdout_service import GlobalHoldoutService
+from backend.app.services.global_holdout_service import (
+    GlobalHoldoutService,
+    holdout_bucket,
+)
 
 
 def _cleanup_experiment_rows(db_session, experiment) -> None:
@@ -523,13 +532,17 @@ DASHBOARD_US_ONLY_RULES = {
 }
 
 
-def _users_by_holdout_membership(count_in: int, count_out: int):
-    """Fresh user ids split by the deterministic holdout bucket."""
+def _users_by_holdout_membership(holdout, count_in: int, count_out: int):
+    """Fresh user ids split by ``holdout``'s own bucket (its ``hash_salt``).
+
+    Each holdout buckets with its own salt since #445, so the split is the
+    holdout's, not the legacy constant's.
+    """
     inside, outside = [], []
     while len(inside) < count_in or len(outside) < count_out:
         user_id = _user()
-        bucket = GlobalHoldoutService._get_holdout_bucket_static(user_id)
-        if bucket < HOLDOUT_PERCENTAGE:
+        bucket = holdout_bucket(user_id, holdout.hash_salt)
+        if bucket < holdout.holdout_percentage:
             if len(inside) < count_in:
                 inside.append(user_id)
         elif len(outside) < count_out:
@@ -679,7 +692,7 @@ class TestAssignEligibility:
     def test_holdout_users_get_control_and_are_not_recorded(
         self, admin_client, active_experiment, active_holdout, db_session
     ):
-        inside, outside = _users_by_holdout_membership(10, 10)
+        inside, outside = _users_by_holdout_membership(active_holdout, 10, 10)
 
         for user_id in inside:
             resp = admin_client.post(
@@ -715,7 +728,7 @@ class TestAssignEligibility:
         self, admin_client, active_experiment, active_holdout
     ):
         """Every user the holdout hashes inside the holdout is refused (not a sample)."""
-        inside, _ = _users_by_holdout_membership(40, 0)
+        inside, _ = _users_by_holdout_membership(active_holdout, 40, 0)
         reasons = {
             admin_client.post(
                 "/api/v1/tracking/assign",
@@ -883,7 +896,7 @@ class TestAssignEligibility:
         """A stored Assignment row wins even if the user is now in the holdout,
         excluded by the group and fails targeting."""
         group, (exp_a, exp_b) = meg_experiments
-        (user_id,), _ = _users_by_holdout_membership(1, 0)
+        (user_id,), _ = _users_by_holdout_membership(active_holdout, 1, 0)
 
         # Put the targeted experiment into the group as well so all three
         # gates apply to it; the link is removed in ``finally`` before the
@@ -897,7 +910,7 @@ class TestAssignEligibility:
             )
 
             # Sanity: a *new* user with the same profile is refused (holdout wins).
-            (fresh,), _ = _users_by_holdout_membership(1, 0)
+            (fresh,), _ = _users_by_holdout_membership(active_holdout, 1, 0)
             _assert_unassigned(
                 admin_client.post(
                     "/api/v1/tracking/assign",
@@ -940,7 +953,7 @@ class TestAssignEligibility:
         db_session.commit()
         try:
             # In the holdout: reason is holdout regardless of group/targeting.
-            (held,), _ = _users_by_holdout_membership(1, 0)
+            (held,), _ = _users_by_holdout_membership(active_holdout, 1, 0)
             _assert_unassigned(
                 admin_client.post(
                     "/api/v1/tracking/assign",
@@ -957,7 +970,7 @@ class TestAssignEligibility:
             # Outside the holdout, with a DE context (fails targeting on exp_a):
             # users routed to exp_b by the group report mutual_exclusion on
             # exp_a, users routed to exp_a report targeting.
-            _, outside = _users_by_holdout_membership(0, 40)
+            _, outside = _users_by_holdout_membership(active_holdout, 0, 40)
             seen = set()
             for user_id in outside:
                 resp = admin_client.post(
@@ -979,3 +992,313 @@ class TestAssignEligibility:
             db_session.rollback()
             exp_a.targeting_rules = None
             db_session.commit()
+
+
+# ---------------------------------------------------------------------------
+# Holdout population: who a measurable holdout covered (#445)
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def measurable_holdout(db_session):
+    """An active holdout created and activated through the service, so it has
+    its own salt and ``activated_at``; any other active holdout is parked with
+    a plain UPDATE (nothing stamps it ended) and restored afterwards."""
+    parked = [
+        row.id
+        for row in db_session.query(GlobalHoldout).filter(GlobalHoldout.is_active)
+    ]
+    db_session.execute(
+        update(GlobalHoldout)
+        .where(GlobalHoldout.id.in_(parked))
+        .values(is_active=False)
+    )
+    db_session.commit()
+    holdout = GlobalHoldoutService(db_session).create_holdout(
+        name=f"population-holdout-{uuid.uuid4().hex[:8]}",
+        holdout_percentage=HOLDOUT_PERCENTAGE,
+        is_active=True,
+    )
+    assert holdout.is_measurable
+    yield holdout
+    db_session.rollback()
+    # holdout_population rows go with it (ON DELETE CASCADE).
+    db_session.query(GlobalHoldout).filter(GlobalHoldout.id == holdout.id).delete()
+    db_session.execute(
+        update(GlobalHoldout).where(GlobalHoldout.id.in_(parked)).values(is_active=True)
+    )
+    db_session.commit()
+
+
+def _population(db_session, holdout) -> dict:
+    """``{user_id: (in_holdout, first_seen_at)}``, read in a SEPARATE session,
+    so only committed rows count."""
+    with Session(bind=db_session.get_bind()) as fresh:
+        fresh.execute(text("SET search_path TO test_experimentation"))
+        rows = (
+            fresh.query(HoldoutPopulation)
+            .filter(HoldoutPopulation.holdout_id == holdout.id)
+            .all()
+        )
+        return {r.user_id: (r.in_holdout, r.first_seen_at) for r in rows}
+
+
+def _assign(client, experiment, user_id, context=None):
+    body = {"experiment_key": experiment.key, "user_id": user_id}
+    if context is not None:
+        body["context"] = context
+    resp = client.post("/api/v1/tracking/assign", json=body)
+    assert resp.status_code == 200, resp.text
+    return resp.json()
+
+
+class TestHoldoutPopulation:
+    @pytest.mark.regression
+    def test_a2_holdout_rows_are_exactly_the_users_answered_holdout(
+        self,
+        admin_client,
+        active_experiment,
+        targeted_experiment,
+        meg_experiments,
+        measurable_holdout,
+        db_session,
+    ):
+        """Every caller is recorded once, in their arm: held out, assigned,
+        refused by targeting or by mutual exclusion, and repeat callers."""
+        _, (exp_a, _) = meg_experiments
+        users = [_user() for _ in range(120)]
+        held = set()
+        for user_id in users:
+            for experiment in (active_experiment, targeted_experiment, exp_a):
+                answer = _assign(admin_client, experiment, user_id, {"country": "DE"})
+                if answer["reason"] == "holdout":
+                    held.add(user_id)
+        # Repeat callers add nothing.
+        for user_id in users[:30]:
+            _assign(admin_client, active_experiment, user_id, {"country": "DE"})
+
+        population = _population(db_session, measurable_holdout)
+
+        assert set(population) == set(users)
+        assert {u for u, (inside, _) in population.items() if inside} == held
+        assert 0 < len(held) < len(users)
+
+    @pytest.mark.regression
+    def test_c4_check_and_assign_agree_on_1000_ids(
+        self, admin_client, active_experiment, measurable_holdout
+    ):
+        """``/holdout/check`` and ``/tracking/assign`` bucket with the same
+        function and the holdout's own salt."""
+        disagree = []
+        held = 0
+        for _ in range(1000):
+            user_id = _user()
+            check = admin_client.get(f"/api/v1/holdout/check/{user_id}")
+            assert check.status_code == 200, check.text
+            in_check = check.json()["is_in_holdout"]
+            in_assign = _assign(admin_client, active_experiment, user_id)["reason"] == (
+                "holdout"
+            )
+            held += in_assign
+            if in_check != in_assign:
+                disagree.append(user_id)
+        assert disagree == []
+        # About 20% of 1000; far outside this band means a wrong bucket.
+        assert 130 < held < 270, held
+
+    def test_a5_a_sticky_user_is_not_written(
+        self,
+        admin_client,
+        active_experiment,
+        measurable_holdout,
+        make_assignment,
+        db_session,
+    ):
+        """An assignment row made after activation with no population row --
+        what an older task during a blue/green overlap leaves -- is answered
+        from the row and writes nothing: only the new-user path records."""
+        _, (user_id,) = _users_by_holdout_membership(measurable_holdout, 0, 1)
+        make_assignment(
+            experiment=active_experiment,
+            variant=_variant_by_name(active_experiment, "treatment"),
+            user_id=user_id,
+        )
+
+        answer = _assign(admin_client, active_experiment, user_id)
+
+        assert answer["assigned"] is True
+        assert user_id not in _population(db_session, measurable_holdout)
+
+    def test_a3_an_earlier_assignment_predates_the_first_seen_time(
+        self,
+        admin_client,
+        active_experiment,
+        targeted_experiment,
+        make_assignment,
+        db_session,
+        measurable_holdout,
+    ):
+        """The C8 fixture: a user assigned to one experiment before they are
+        first seen is recorded when they reach another experiment's new-user
+        path, with ``first_seen_at`` after that assignment.  The results
+        query (#445 PR2) excludes such a user from both arms; here the rows
+        it needs are pinned."""
+        _, (user_id,) = _users_by_holdout_membership(measurable_holdout, 0, 1)
+        earlier = make_assignment(
+            experiment=active_experiment,
+            variant=_variant_by_name(active_experiment, "control"),
+            user_id=user_id,
+        )
+
+        _assign(admin_client, targeted_experiment, user_id, {"country": "US"})
+
+        in_holdout, first_seen_at = _population(db_session, measurable_holdout)[user_id]
+        assert in_holdout is False
+        assert first_seen_at.endswith("+00:00")
+        assert dt.datetime.fromisoformat(first_seen_at) > earlier.created_at.replace(
+            tzinfo=dt.timezone.utc
+        )
+
+    def test_a_holdout_that_is_not_measurable_records_nobody(
+        self, admin_client, active_experiment, active_holdout, db_session
+    ):
+        """``active_holdout`` is written straight through the ORM: its own
+        salt, but no ``activated_at`` -- like the holdout active at the
+        upgrade, it holds users out and records nobody."""
+        assert not active_holdout.is_measurable
+        inside, outside = _users_by_holdout_membership(active_holdout, 3, 3)
+        for user_id in inside + outside:
+            _assign(admin_client, active_experiment, user_id)
+
+        assert _population(db_session, active_holdout) == {}
+
+
+# ---------------------------------------------------------------------------
+# A7 / PE C5: statements per /tracking/assign call, under expire_on_commit=True
+# ---------------------------------------------------------------------------
+
+
+@contextmanager
+def _statements(engine):
+    seen = []
+
+    def _before(conn, cursor, statement, parameters, context, executemany):
+        seen.append(statement)
+
+    sa_event.listen(engine, "before_cursor_execute", _before)
+    try:
+        yield seen
+    finally:
+        sa_event.remove(engine, "before_cursor_execute", _before)
+
+
+def _population_inserts(statements) -> int:
+    return sum(
+        st.lstrip().upper().startswith("INSERT INTO") and "holdout_population" in st
+        for st in statements
+    )
+
+
+class TestAssignStatementCounts:
+    """Pinned through the HTTP route, whose per-request session is a plain
+    ``sessionmaker`` (``expire_on_commit=True``, as ``SessionLocal``), so a
+    commit in the middle of the path shows up as reloads.  COMMIT is not a
+    cursor statement and is not counted."""
+
+    def _count(self, client, db_session, experiment, user_id):
+        with _statements(db_session.get_bind()) as seen:
+            answer = _assign(client, experiment, user_id)
+        return answer, seen
+
+    @pytest.mark.regression
+    def test_statement_counts_with_a_measurable_holdout(
+        self, admin_client, active_experiment, measurable_holdout, db_session
+    ):
+        (held,), (fresh,) = _users_by_holdout_membership(measurable_holdout, 1, 1)
+
+        held_answer, held_statements = self._count(
+            admin_client, db_session, active_experiment, held
+        )
+        new_answer, new_statements = self._count(
+            admin_client, db_session, active_experiment, fresh
+        )
+        sticky_answer, sticky_statements = self._count(
+            admin_client, db_session, active_experiment, fresh
+        )
+
+        assert held_answer["reason"] == "holdout"
+        assert new_answer["reason"] == "assigned"
+        assert sticky_answer["reason"] == "assigned"
+        counts = {
+            "held out": len(held_statements),
+            "new": len(new_statements),
+            "sticky": len(sticky_statements),
+        }
+        inserts = {
+            "held out": _population_inserts(held_statements),
+            "new": _population_inserts(new_statements),
+            "sticky": _population_inserts(sticky_statements),
+        }
+        print("counts", counts, "population inserts", inserts)
+        assert inserts == {"held out": 1, "new": 1, "sticky": 0}
+        assert counts == HOLDOUT_COUNTS, (counts, _brief(held_statements))
+
+    @pytest.mark.regression
+    def test_statement_counts_with_no_active_holdout(
+        self, admin_client, active_experiment, db_session
+    ):
+        parked = [
+            row.id
+            for row in db_session.query(GlobalHoldout).filter(GlobalHoldout.is_active)
+        ]
+        db_session.execute(
+            update(GlobalHoldout)
+            .where(GlobalHoldout.id.in_(parked))
+            .values(is_active=False)
+        )
+        db_session.commit()
+        try:
+            fresh = _user()
+            new_answer, new_statements = self._count(
+                admin_client, db_session, active_experiment, fresh
+            )
+            sticky_answer, sticky_statements = self._count(
+                admin_client, db_session, active_experiment, fresh
+            )
+        finally:
+            db_session.execute(
+                update(GlobalHoldout)
+                .where(GlobalHoldout.id.in_(parked))
+                .values(is_active=True)
+            )
+            db_session.commit()
+
+        counts = {"new": len(new_statements), "sticky": len(sticky_statements)}
+        print("counts", counts)
+        assert new_answer["reason"] == sticky_answer["reason"] == "assigned"
+        assert _population_inserts(new_statements + sticky_statements) == 0
+        assert counts == NO_HOLDOUT_COUNTS, (counts, _brief(new_statements))
+
+
+#: Measured through the route.  On the parent commit (no population): held
+#: out 5, new 13, sticky 10, with or without a holdout.  Now, with a
+#: measurable holdout: new +1 (the INSERT, committed with the assignment);
+#: held out +3 (the INSERT, then the one commit at the end of the path
+#: expires the experiment, and the route's read of ``experiment.variants``
+#: reloads it and its variants -- the assigned path has always paid that);
+#: sticky +0.  With no holdout, or one that is not measurable, nothing moves.
+#: A commit moved before ``check_eligibility`` adds two more to "held out".
+HOLDOUT_COUNTS = {"held out": 8, "new": 14, "sticky": 10}
+NO_HOLDOUT_COUNTS = {"new": 13, "sticky": 10}
+
+
+def _brief(statements) -> list:
+    """Each statement's verb and table, for a readable failure."""
+    out = []
+    for st in statements:
+        words = st.split()
+        table = next(
+            (w for w in words if w.startswith("test_experimentation.")), words[-1]
+        )
+        out.append(f"{words[0]} {table.split('.')[1] if '.' in table else table}")
+    return out

@@ -202,7 +202,7 @@ python -m alembic -c backend/app/db/alembic.ini downgrade <core revision id>
 
 **Not `modules@base`.** `modules_0001_rbac` is a child of the core revision
 `a7b8c9d0e1f2`, not an alembic base, and with a single tree root alembic cannot
-filter a downgrade by branch label: `downgrade modules@base` resolves to **32
+filter a downgrade by branch label: `downgrade modules@base` resolves to **33
 revisions** — the whole core chain to base — and drops every table in the
 schema.
 
@@ -342,6 +342,51 @@ On AWS these are two runs of the Database Migration workflow: direction
 step back the modules branch instead, and that downgrade drops the warehouse
 tables `modules_0002_warehouse_analysis` created. The Database Migration
 workflow refuses `-1`.
+
+**On a release that also carries `d29a479daafe`, this recipe deletes holdout
+data.** `downgrade a89544fb1075` then also unapplies `d29a479daafe`, whose
+downgrade drops the table `holdout_population` with every row in it and three
+`global_holdouts` columns (see the next section). Run the re-run before
+upgrading to that release; after it, run it only if `holdout_population` is
+empty or you accept losing what it recorded.
+
+### `d29a479daafe` records who each global holdout covers
+
+This revision adds `activated_at`, `deactivated_at` and `hash_salt` to
+`global_holdouts`, a partial unique index that allows at most one active
+holdout, and the table `holdout_population`, which records each user first seen
+while a holdout is active and whether the holdout kept them out.
+
+**It deactivates all but one active holdout.** Before the index is created,
+every active holdout except the most recently updated one is deactivated and
+stamped as ended; an ended holdout cannot be activated again. The kept row may
+not be the one the previous release was enforcing. The migration prints the
+ids it deactivated:
+
+```text
+d29a479daafe: deactivated 1 global holdout(s) to keep one active: 7d1e2f30-1a2b-4c3d-8e9f-0a1b2c3d4e5f
+```
+
+Before upgrading, this read-only query lists the active holdouts; with more
+than one row, the first is the one kept:
+
+```sql
+-- List the active holdouts, the kept one first
+SELECT id, name, is_active, updated_at FROM experimentation.global_holdouts
+ WHERE is_active ORDER BY updated_at DESC, id;
+```
+
+**The holdout active at the upgrade is never measurable.** It keeps the salt
+every holdout used before (so users stay in or out of it exactly as before),
+and who it kept out before the upgrade was never recorded. To measure, deactivate
+it and create a new holdout.
+
+**The downgrade deletes the recorded memberships.** `d29a479daafe`'s downgrade
+drops `holdout_population` with all its rows, the index, and the three columns;
+nothing can rebuild the table. The deactivations are not reverted. Rolling back
+across this revision while a holdout is active also invalidates that holdout:
+the older release buckets users with the old salt and records nobody, so after
+upgrading again deactivate it and create a new one.
 
 Roll back to a specific revision:
 
@@ -611,7 +656,9 @@ What this means for you:
   [`1ab99332f0ba`](#1ab99332f0ba-rewrites-stored-event-times-to-utc) rewrites
   stored event times to UTC: a rollback runs against those rows unchanged, but
   the offsets clients sent come back only from a restore to a time before it
-  ran.
+  ran. [`d29a479daafe`](#d29a479daafe-records-who-each-global-holdout-covers)
+  is backward-compatible for a rollback, but undoing it drops
+  `holdout_population` and its rows.
 - **Docker Compose and the Helm chart are deliberately unchanged.** Compose runs
   one API container, which is the only writer and keeps `RUN_MIGRATIONS=true`.
   The chart already keeps the bootstrap out of the serving container: it runs

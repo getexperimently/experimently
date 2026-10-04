@@ -3,10 +3,12 @@
 # backend/app/services/assignment_service.py
 import json
 import logging
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple, Union
 from uuid import UUID
 
 from sqlalchemy import and_, desc, func
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session, joinedload
 
 from backend.app.core.consistent_hash import bucket_of
@@ -18,6 +20,8 @@ from backend.app.core.targeting_adapter import (
 )
 from backend.app.models.assignment import Assignment
 from backend.app.models.experiment import Experiment, ExperimentStatus, Variant
+from backend.app.models.global_holdout import GlobalHoldout
+from backend.app.models.holdout_population import HoldoutPopulation
 from backend.app.schemas.targeting_rule import TargetingRules
 from backend.app.services.event_service import EventService
 from backend.app.services.global_holdout_service import GlobalHoldoutService
@@ -205,13 +209,30 @@ class AssignmentService:
 
             return assignment_dict
 
+        # A new user.  The active holdout is loaded once.  When it is
+        # measurable the user is recorded in its population whatever the
+        # answer below is (held out, assigned or refused): every user seen
+        # goes in their arm.  The INSERT is executed, not committed: the
+        # assigned path commits it with the assignment, the ineligible paths
+        # once, after building their result (#445).
+        holdout = self.global_holdout_service.get_active_holdout()
+        holdout_check = self.global_holdout_service.is_user_in_holdout(
+            user_id, holdout=holdout
+        )
+        recorded = self._record_holdout_population(holdout, user_id, holdout_check[0])
+
         # Eligibility gate for new users: holdout -> mutual exclusion -> targeting
-        eligibility = self.check_eligibility(user_id, experiment, context)
+        eligibility = self.check_eligibility(
+            user_id, experiment, context, holdout_check=holdout_check
+        )
         if not eligibility["eligible"]:
             logger.debug(
                 f"Not eligible for experiment {experiment_id}: {eligibility['reason']}"
             )
-            return self._ineligible_result(user_id, experiment, eligibility)
+            result = self._ineligible_result(user_id, experiment, eligibility)
+            if recorded:
+                self.db.commit()
+            return result
 
         # Determine variant assignment
         if override_variant_id:
@@ -259,11 +280,39 @@ class AssignmentService:
     # Eligibility (global holdout, mutual exclusion, targeting)
     # ------------------------------------------------------------------
 
+    def _record_holdout_population(
+        self, holdout: Optional[GlobalHoldout], user_id: str, in_holdout: bool
+    ) -> bool:
+        """Record ``user_id`` in a measurable holdout's population; True if run.
+
+        ``INSERT ... ON CONFLICT DO NOTHING``, executed in the caller's
+        transaction and NOT committed here: a commit mid-path would expire
+        the loaded experiment and holdout and cost reloads under the
+        production session.  A failed write propagates, like a failed
+        assignment insert: a silently lost row would shrink one arm.
+        Nothing runs when no holdout is active, or the active one is not
+        measurable (legacy salt or no ``activated_at``).
+        """
+        if holdout is None or not holdout.is_measurable:
+            return False
+        self.db.execute(
+            pg_insert(HoldoutPopulation)
+            .values(
+                holdout_id=holdout.id,
+                user_id=user_id,
+                in_holdout=bool(in_holdout),
+                first_seen_at=datetime.now(timezone.utc),
+            )
+            .on_conflict_do_nothing(index_elements=["holdout_id", "user_id"])
+        )
+        return True
+
     def check_eligibility(
         self,
         user_id: str,
         experiment: Experiment,
         context: Optional[Dict[str, Any]] = None,
+        holdout_check: Optional[Tuple[bool, int, int]] = None,
     ) -> Dict[str, Any]:
         """
         Decide whether a *new* user may be assigned to ``experiment``.
@@ -281,17 +330,18 @@ class AssignmentService:
            does not match them (reason ``targeting``).
 
         Sticky assignments are handled by ``assign_user`` before this runs.
+        ``holdout_check`` is ``GlobalHoldoutService.is_user_in_holdout``'s
+        answer when the caller already has it (``assign_user`` does, from the
+        holdout it loaded once); left out, it is computed here.
 
         Returns:
             ``{"eligible": bool, "reason": str, "detail": Optional[str]}``
             (``reason`` is ``assigned`` when eligible).
         """
         # 1. Global holdout
-        (
-            in_holdout,
-            holdout_percentage,
-            bucket,
-        ) = self.global_holdout_service.is_user_in_holdout(user_id)
+        if holdout_check is None:
+            holdout_check = self.global_holdout_service.is_user_in_holdout(user_id)
+        in_holdout, holdout_percentage, bucket = holdout_check
         if in_holdout:
             return {
                 "eligible": False,

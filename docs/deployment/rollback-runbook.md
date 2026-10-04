@@ -765,10 +765,12 @@ The current revision is printed by the Database Migration workflow's
 2. Fill in the required inputs:
    - **Environment:** `$ENV` (`staging` or `prod`)
    - **Direction:** `downgrade`
-   - **Target:** the revision id to end at. To undo the migration a release added, open that migration file (`backend/app/db/migrations/versions/` for core, `modules/backend/app/db/migrations/versions/` for a module, which exists only in a full-profile image) and use its `down_revision`, e.g. `a89544fb1075`. Not `-1`: a full install has two heads, and the workflow refuses relative steps, `head` and `base`. A core id at or below `a7b8c9d0e1f2` also unapplies the modules branch.
+   - **Target:** the revision id to end at. To undo the migration a release added, open that migration file (`backend/app/db/migrations/versions/` for core, `modules/backend/app/db/migrations/versions/` for a module, which exists only in a full-profile image) and use its `down_revision`, e.g. `a89544fb1075`. That example target also unapplies `d29a479daafe`, whose downgrade drops the table `holdout_population` with every recorded holdout membership (nothing rebuilds it) and three `global_holdouts` columns: when that table has rows, a downgrade across `d29a479daafe` needs the Engineering Lead's approval at the moment it runs. Not `-1`: a full install has two heads, and the workflow refuses relative steps, `head` and `base`. A core id at or below `a7b8c9d0e1f2` also unapplies the modules branch.
 3. Click **Run workflow**
 
 Once the downgrade has completed, roll the API back (Method 1). Not before: after the API is rolled back, the workflow can no longer read this migration.
+
+Rolling back across `d29a479daafe` while a global holdout is active invalidates that holdout's measurement: the older release buckets users with the old salt and records nobody. After the next upgrade, deactivate that holdout and create a new one (`PUT /api/v1/holdout/{id}` with `is_active: false`, then `POST /api/v1/holdout`).
 
 ### Step 3: Emergency — Point-in-time restore to a new cluster
 

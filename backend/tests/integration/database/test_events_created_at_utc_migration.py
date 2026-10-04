@@ -89,7 +89,11 @@ WAREHOUSE_TABLES = {
     "warehouse_analysis_runs",
 }
 
-ROWS = {CORE: {REVISION}, FULL: {REVISION, MODULES_HEAD}}
+#: The core head of this tree, which ``upgrade heads`` runs on to past this
+#: revision: ``d29a479daafe`` (#445).
+CORE_HEAD = "d29a479daafe"
+
+ROWS = {CORE: {CORE_HEAD}, FULL: {CORE_HEAD, MODULES_HEAD}}
 PARENT_ROWS = {CORE: {PARENT}, FULL: {PARENT, MODULES_HEAD}}
 RELEASED_ROWS = {CORE: {RELEASED}, FULL: {RELEASED, MODULES_HEAD}}
 
