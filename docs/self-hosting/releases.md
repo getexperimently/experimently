@@ -193,6 +193,24 @@ with no registry account yet is listed as `unwired` in
 publishing nothing; `backend/tests/smoke/test_sdk_release_wiring.py` fails if
 an SDK in the tree is missing from that list altogether.
 
+A PyPI release (`sdk/python`, `sdk/openfeature-python`) runs in two jobs:
+
+- **test and build for PyPI** installs the SDK, runs its tests, builds the
+  wheel and sdist, runs `twine check`, and uploads `dist/` with a digest of
+  the files. It cannot request an OIDC token.
+- **publish to PyPI** is the only job that can, and the `sdk-release`
+  environment's approval is asked for when it starts, after the tests and
+  checks above have passed. It installs nothing. It requires every
+  downloaded file to be a wheel or sdist with the tag's project name and
+  version, nothing else to be present, and the digest to match, and then
+  uploads those files.
+
+Write a Python version in its PEP 440 spelling (`1.0.0rc1`, not
+`1.0.0-rc.1`), in the manifest and the tag alike; the build job refuses any
+other spelling. If the publish job fails after approval, use **Re-run failed
+jobs**, not **Re-run all jobs**. Re-run failed jobs is meant to reuse the
+files the build job checked (not yet seen on a real release).
+
 Publish `sdk/js` before `sdk/openfeature`; the provider's release refuses until
 the matching `@getexperimently/js-sdk` is on npm. The provider's source depends
 on `file:../js` so that its tests run against the JS SDK in the same tree; the
