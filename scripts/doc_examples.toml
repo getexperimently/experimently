@@ -216,7 +216,7 @@ expects = 1
 path = "CONTRIBUTING.md"
 environment = "bare"
 exec = 0
-skip = 9
+skip = 10
 expects = 0
 
 [[document]]

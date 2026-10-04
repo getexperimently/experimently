@@ -199,6 +199,33 @@ workflows when those two are installed (`brew install hadolint actionlint`).
 pin in `backend/requirements/runtime.txt` needs `make lock` afterwards: the API
 image installs the hashed lock, not the loose pins.
 
+### If the credential scan fails
+
+The `Container Security Scan` job scans `backend/`, `modules/` and the four
+images it builds for credentials. When a scan finds one, the failed step prints
+each finding's path, rule, severity and line, and the job summary lists the
+same rows. Nothing else from the file is printed, and the full report stays on
+the runner: it is not uploaded as an artifact.
+
+Open the file at that line in your own checkout. The rule says what kind of
+value matched. Paths under `/app/backend/` and `/app/modules/backend/` in an
+API image are `backend/` and `modules/backend/` in the tree. A dashboard image
+path under `/usr/share/nginx/html/` is build output; to see which file it came
+from, build and scan the image locally:
+
+```{.bash skip reason="toolchain: needs trivy 0.74.0 and Docker"}
+trivy fs --scanners secret --severity HIGH,CRITICAL backend/
+docker build -f frontend/Dockerfile --build-arg EXPERIMENTLY_PROFILE=core -t experimently-web:scan-core .
+trivy image --scanners secret experimently-web:scan-core
+```
+
+There is no ignore file. If a test fixture matches a rule, build the value at
+test time or use one the rule does not match. The rule ids are listed in
+trivy's [built-in rules](https://github.com/aquasecurity/trivy/blob/v0.74.0/pkg/fanal/secret/builtin-rules.go).
+
+If the value is a real credential, revoke and replace it first. Removing it in
+a later commit does not take it out of the branch's history.
+
 ### Documentation
 
 The shell examples in the documentation are run in CI as written. A page you add or

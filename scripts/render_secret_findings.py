@@ -23,9 +23,15 @@ It fails closed: a report it cannot read is never "no findings". The workflow
 keeps trivy's own exit status as well (``status=$?`` ... ``exit "$status"``),
 so a crash in trivy fails the step even when this script is satisfied.
 
+``.github/workflows/security-scan.yml`` uses it the same way for the scans
+that run on pull requests, pushes and the weekly schedule, with ``--stage ci``:
+the same rows, worded for a scan where nothing is being pushed.
+``--stage release`` is the default and its wording is unchanged.
+
 Usage::
 
     render_secret_findings.py REPORT.json --label "experimently:core-1.2.3 (image)"
+    render_secret_findings.py REPORT.json --stage ci --label "backend/ (source tree)"
 """
 
 from __future__ import annotations
@@ -38,6 +44,22 @@ from pathlib import Path
 
 #: The only per-finding fields that are ever printed.
 FIELDS = ("Target", "RuleID", "Severity", "StartLine")
+
+#: The wording around the rows, per stage. ``release`` scans an image before
+#: it is pushed; ``ci`` scans a tree or an image on a pull request, a push to
+#: main or the weekly schedule, where nothing is being published.
+COPY = {
+    "release": {
+        "heading": "**Credential scan: {n} finding(s) in {label}** (trivy {version}, secret scanner). Not pushed.",
+        "error": "::error title=Credential found in image::{label} was not pushed: {n} finding(s). See the job summary.",
+        "clean": "Credential scan: no findings in {label} (trivy {version}, secret scanner), scanned before push.",
+    },
+    "ci": {
+        "heading": "**Credential scan: {n} finding(s) in {label}** (trivy {version}, secret scanner). Remove the value from the file at that line.",
+        "error": "::error title=Credential pattern found::{label}: {n} finding(s). The job summary lists path, rule, severity and line; the matched text is not printed.",
+        "clean": "Credential scan: no findings in {label} (trivy {version}, secret scanner).",
+    },
+}
 
 #: Every printed value is cut to this many characters. A path is the longest
 #: thing printed; nothing legitimate is longer.
@@ -115,7 +137,14 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--label", required=True, help="what was scanned, for the summary"
     )
+    parser.add_argument(
+        "--stage",
+        choices=sorted(COPY),
+        default="release",
+        help="which wording to print around the rows (default: release)",
+    )
     args = parser.parse_args(argv)
+    copy = COPY[args.stage]
 
     label = _clean(args.label)
     report = load_report(args.report)
@@ -127,7 +156,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"{len(rows)} finding(s) in {label} (trivy {version}, secret scanner):")
         print("\t".join(FIELDS))
         summary.append(
-            f"**Credential scan: {len(rows)} finding(s) in {label}** (trivy {version}, secret scanner). Not pushed."
+            copy["heading"].format(n=len(rows), label=label, version=version)
         )
         summary.append("")
         summary.append("| " + " | ".join(FIELDS) + " |")
@@ -137,12 +166,9 @@ def main(argv: list[str] | None = None) -> int:
             summary.append(
                 "| " + " | ".join(cell.replace("|", "\\|") for cell in row) + " |"
             )
-        print(
-            f"::error title=Credential found in image::{label} was not pushed: "
-            f"{len(rows)} finding(s). See the job summary."
-        )
+        print(copy["error"].format(n=len(rows), label=label))
     else:
-        line = f"Credential scan: no findings in {label} (trivy {version}, secret scanner), scanned before push."
+        line = copy["clean"].format(label=label, version=version)
         print(line)
         summary.append(line)
 

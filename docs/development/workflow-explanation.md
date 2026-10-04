@@ -31,7 +31,7 @@ gh api repos/<owner>/<repo>/branches/main/protection --jq '.required_status_chec
 | lint | `lint.yml` | ruff, import-linter, REUSE, lock check, eslint, tsc, hadolint, actionlint |
 | regression-guard | `regression-guard.yml` | a pull request labelled `bug` must change a test file |
 | conventional-title † | `conventional-title.yml` | the pull request title must be a conventional commit, because it becomes the squash subject release-please parses (#167) |
-| Security Scan Summary | `security-scan.yml` | Bandit, npm audit, Semgrep (`p/python`, `p/security-audit`, `p/secrets`, `p/owasp-top-ten`), Gitleaks, Trivy on the four built images (API and dashboard, core and full) |
+| Security Scan Summary | `security-scan.yml` | Bandit, npm audit, Semgrep (`p/python`, `p/security-audit`, `p/secrets`, `p/owasp-top-ten`), Gitleaks, Trivy on the four built images (API and dashboard, core and full), and a Trivy credential scan of `backend/`, `modules/` and those images that prints only path, rule, severity and line |
 | Release Gate Summary | `release-gate.yml` | backend gate (unit + smoke), frontend gate (test + build), security gate (Bandit + Gitleaks) |
 | CDK Stack Tests (Python) | `infrastructure-tests.yml` | `infrastructure/tests`, including a real `cdk synth` of both profiles (`TestTheAppActuallySynthesises`) |
 
