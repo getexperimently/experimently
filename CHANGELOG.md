@@ -10,6 +10,20 @@ longer applies and release-please can generate this file directly. Until it
 does, entries below 0.2.2 are hand-written and the links in them are the
 reason why.
 
+## [0.20.0](https://github.com/getexperimently/experimently/compare/v0.19.0...v0.20.0) (2026-10-04)
+
+
+### ⚠ BREAKING CHANGES
+
+* **holdout:** the stable `PUT /api/v1/holdout/{holdout_id}` now refuses, with 422, a `holdout_percentage` different from the stored one once the holdout has been active (the same value is still accepted). It also refuses, with 422, `is_active: true` on a holdout that has been deactivated. `POST /api/v1/holdout` with `is_active: true` now deactivates the holdout that was active. A concurrent activation that the database's one-active index refuses answers 409. Accepted pre-launch under D30 and D48, on the T80 precedent (T126).
+
+### Features
+
+* **audit:** every core route that changes something records it in the audit log ([#846](https://github.com/getexperimently/experimently/issues/846)) ([9ea0248](https://github.com/getexperimently/experimently/commit/9ea0248d34ec5a67662ad192b4896f6c9602e457))
+* **holdout:** record who each holdout covers, and fix its percentage once it is active ([#844](https://github.com/getexperimently/experimently/issues/844)) ([1ea1874](https://github.com/getexperimently/experimently/commit/1ea1874a270d34bc3e3f3bae9368672e9fc337ad))
+* **tracking:** accept events that name no experiment or flag, as pre-experiment history ([#850](https://github.com/getexperimently/experimently/issues/850)) ([a308702](https://github.com/getexperimently/experimently/commit/a3087026e6fd955b3399a839517418d625c72f4b))
+* **tracking:** assign up to 1,000 users to an experiment in one call ([#849](https://github.com/getexperimently/experimently/issues/849)) ([1c76c0d](https://github.com/getexperimently/experimently/commit/1c76c0d785c3dbfa2dab8f6426a5e7af176f1158))
+
 ## [0.19.0](https://github.com/getexperimently/experimently/compare/v0.18.0...v0.19.0) (2026-10-04)
 
 

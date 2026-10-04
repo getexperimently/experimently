@@ -46,13 +46,17 @@ from backend.app.models.experiment import (
     Variant,
 )
 from backend.app.models.global_holdout import GlobalHoldout
+from backend.app.models.holdout_population import HoldoutPopulation
 from backend.app.models.mutual_exclusion_group import (
     MutualExclusionGroup,
     MutualExclusionGroupStatus,
 )
 from backend.app.models.user import User, UserRole
 from backend.app.services.assignment_service import AssignmentService
-from backend.app.services.global_holdout_service import GlobalHoldoutService
+from backend.app.services.global_holdout_service import (
+    GlobalHoldoutService,
+    holdout_bucket,
+)
 
 pytestmark = pytest.mark.integration
 
@@ -303,11 +307,11 @@ def everything(db_session, make_experiment):
         )
         sticky = [f"sticky-{uuid.uuid4().hex[:10]}" for _ in range(10)]
         # Outside the holdout, which is checked first: these users meet the
-        # mutual exclusion check.
+        # mutual exclusion check.  The holdout buckets with its own salt.
         held = []
         while len(held) < 10:
             user_id = f"held-{uuid.uuid4().hex[:10]}"
-            bucket = GlobalHoldoutService._get_holdout_bucket_static(user_id)
+            bucket = holdout_bucket(user_id, holdout.hash_salt)
             if bucket >= HOLDOUT_PERCENTAGE:
                 held.append(user_id)
         for i, user_id in enumerate(sticky):
@@ -611,6 +615,82 @@ class TestDatabaseWork:
         sticky_one, sticky_eleven = count(one), count(eleven)
         assert (new_eleven - new_one) == 10 * 7, (new_one, new_eleven)
         assert (sticky_eleven - sticky_one) == 10 * 4, (sticky_one, sticky_eleven)
+
+
+# ---------------------------------------------------------------------------
+# Holdout population (#445): the batch records what the single route records
+# ---------------------------------------------------------------------------
+
+
+def _population(session_factory, holdout_id) -> Dict[str, bool]:
+    session = session_factory()
+    try:
+        rows = (
+            session.query(HoldoutPopulation.user_id, HoldoutPopulation.in_holdout)
+            .filter(HoldoutPopulation.holdout_id == holdout_id)
+            .all()
+        )
+        return dict(rows)
+    finally:
+        session.close()
+
+
+class TestHoldoutPopulation:
+    def test_a_batch_records_the_population_the_single_route_records(
+        self, client, headers, plain_experiment, db_session, session_factory
+    ):
+        """With an active, measurable holdout, a batch writes the same
+        ``holdout_population`` rows as one single call per user."""
+        holdout = GlobalHoldoutService(db_session).create_holdout(
+            name=f"batch-population-{uuid.uuid4().hex[:8]}",
+            holdout_percentage=HOLDOUT_PERCENTAGE,
+            is_active=True,
+        )
+        assert holdout.is_measurable
+        holdout_id = holdout.id
+        try:
+            user_ids = _users(80)
+            single = {}
+            for user_id in user_ids:
+                resp = client.post(
+                    SINGLE_URL,
+                    json={"experiment_key": plain_experiment.key, "user_id": user_id},
+                    headers=headers,
+                )
+                assert resp.status_code == 200, resp.text
+                single[user_id] = resp.json()["reason"]
+            single_population = _population(session_factory, holdout_id)
+
+            _reset_to(session_factory, plain_experiment, [])
+            session = session_factory()
+            try:
+                session.query(HoldoutPopulation).filter(
+                    HoldoutPopulation.holdout_id == holdout_id
+                ).delete()
+                session.commit()
+            finally:
+                session.close()
+
+            batch = _answers(
+                client.post(
+                    URL, json=_body(plain_experiment, user_ids), headers=headers
+                )
+            )
+            batch_population = _population(session_factory, holdout_id)
+
+            assert set(single_population) == set(user_ids)
+            held = {u for u, reason in single.items() if reason == "holdout"}
+            assert 0 < len(held) < len(user_ids)
+            assert {u for u, inside in single_population.items() if inside} == held
+            assert batch_population == single_population
+            assert {u for u, (_v, _a, r) in batch.items() if r == "holdout"} == held
+        finally:
+            db_session.rollback()
+            # holdout_population rows go with it (ON DELETE CASCADE).
+            db_session.query(GlobalHoldout).filter(
+                GlobalHoldout.id == holdout_id
+            ).delete()
+            db_session.commit()
 
 
 # ---------------------------------------------------------------------------

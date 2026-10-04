@@ -171,7 +171,7 @@ Every request carries `X-API-Key`, `Content-Type: application/json` and `Accept:
 | `Track` with a key | `POST /api/v1/tracking/track` | `{event_type, event_name, user_id, experiment_key?, feature_flag_key?, value?, metadata?, timestamp?}` | ignored |
 | `Track` without keys, `TrackBatch` | `POST /api/v1/tracking/batch` | `{events: [<track body>, …]}` (max 100 per request) | ignored |
 
-Errors: 401 bad key, 404 experiment/flag unknown or not ACTIVE, 422 event without any key, 429
+Errors: 401 bad key, 404 experiment/flag unknown or not ACTIVE, 422 invalid event, 429
 rate limited (`Retry-After`). These paths share the backend's per-IP `SDK_RATE_LIMIT_PER_MINUTE`
 ceiling (default 6000).
 

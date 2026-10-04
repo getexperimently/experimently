@@ -220,9 +220,10 @@ defmodule Experimently.Client do
   into requests of at most #{@batch_limit} events). Runs in the calling process.
 
   Each event is a map (atom or string keys) with `event_name` and `user_id`
-  (required) and at least one of `experiment_key` / `feature_flag_key` (the
-  server rejects key-less events). Optional: `properties` (sent as
-  `metadata`), `value`, `event_type`, `timestamp`.
+  (required). Optional: `experiment_key`, `feature_flag_key`, `properties`
+  (sent as `metadata`), `value`, `event_type`, `timestamp`. An event with no
+  key is stored as history and counts in no experiment's results; tag
+  outcome events.
 
   Returns `{:ok, %BatchResult{}}` with the server's counts (malformed events
   are counted as failures locally without being sent), or `{:error, reason}`

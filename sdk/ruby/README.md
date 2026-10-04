@@ -88,9 +88,10 @@ Missing `base_url`/`api_key` raise `ArgumentError` from `Client.new`.
 `attributes` on `get_assignment` are sent as the assignment `context` (targeting rules); on
 `evaluate_flag` they are accepted for symmetry only — the evaluate endpoint takes just `user_id`.
 `track`: `properties` → `metadata`, `event_type` defaults to `event_name`, `timestamp` (`Time` or
-ISO-8601 string) defaults to now (UTC). `track_batch` events are Hashes with `event_name`, `user_id`
-and at least one of `experiment_key`/`feature_flag_key` (the server rejects key-less entries with
-422); malformed Hashes are counted as failures without being sent.
+ISO-8601 string) defaults to now (UTC). `track_batch` events are Hashes with `event_name` and
+`user_id` plus optional `experiment_key`/`feature_flag_key`; malformed Hashes are counted as
+failures without being sent. An event with no key is stored as history and counts in no
+experiment's results; tag outcome events.
 
 ## Caching and failure behaviour
 

@@ -22,8 +22,12 @@ from pydantic_core import InitErrorDetails, PydanticCustomError
 from backend.app.schemas.storable_text import StorableTextModel
 
 
-class EventBase(BaseModel):
-    """Base model for event data."""
+class EventFields(BaseModel):
+    """The fields of an event, with no rule about which keys it names.
+
+    ``EventBase`` adds the rule that an event names an experiment or a flag;
+    ``UntaggedEventCreate`` and ``EventResponse`` do not carry it (#217).
+    """
 
     event_name: str = Field(..., min_length=1, max_length=100)
     event_type: str = Field("custom", min_length=1, max_length=100)
@@ -55,6 +59,10 @@ class EventBase(BaseModel):
                 raise ValueError(f"must be a JSON object: {exc}") from exc
         return v
 
+
+class EventBase(EventFields):
+    """Base model for event data."""
+
     @model_validator(mode="after")
     def validate_experiment_or_feature_flag(self) -> "EventBase":
         """Validate that either experiment_id or feature_flag_id is provided."""
@@ -67,7 +75,17 @@ class EventCreate(StorableTextModel, EventBase):
     """Model for creating a new event."""
 
 
-class EventResponse(EventBase):
+class UntaggedEventCreate(StorableTextModel, EventFields):
+    """An event that names no experiment and no flag (#217).
+
+    ``/tracking/track`` and ``/tracking/batch`` build this one when the
+    request gives neither key. The event is stored as history and counts in
+    no experiment's results. Every other caller builds ``EventCreate``, which
+    still refuses an event with neither id.
+    """
+
+
+class EventResponse(EventFields):
     """Model for event responses."""
 
     id: str
@@ -384,13 +402,8 @@ class EventRequest(StorableTextModel):
     metadata: Optional[Dict[str, Any]] = None
     timestamp: Optional[datetime] = None
 
-    @model_validator(mode="after")
-    def validate_experiment_or_feature_flag(self) -> "EventRequest":
-        if not self.experiment_key and not self.feature_flag_key:
-            raise ValueError(
-                "Either experiment_key or feature_flag_key must be provided"
-            )
-        return self
+    # Both keys are optional (#217). With neither, the endpoint stores the
+    # event as history; a key that is given but not found answers 404.
 
     model_config = ConfigDict(
         json_schema_extra={

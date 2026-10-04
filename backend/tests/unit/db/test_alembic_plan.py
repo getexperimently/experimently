@@ -45,9 +45,11 @@ CORE_VERSIONS = REPO_ROOT / "backend" / "app" / "db" / "migrations" / "versions"
 
 pytestmark = pytest.mark.unit
 
-#: The core chain's head: each experiment's stored correction method and
-#: confidence level (#580).
-CORE_HEAD = "806901fb7735"
+#: The core chain's head: holdout population and one active holdout (#445).
+CORE_HEAD = "d29a479daafe"
+#: Each experiment's stored correction method and confidence level (#580), the
+#: revision before it.
+CORRECTION = "806901fb7735"
 #: ``events.created_at`` rewritten to UTC (#579), the revision before it.
 EVENTS_UTC = "1ab99332f0ba"
 #: ``feature_flags.default_value`` (#94), the revision before that.
@@ -110,6 +112,7 @@ CORE_PLAN = [
     EMAIL_LOWER,
     DEFAULT_VALUE,
     EVENTS_UTC,
+    CORRECTION,
     CORE_HEAD,
 ]
 
@@ -118,7 +121,7 @@ CORE_PLAN = [
 #: whole reason the edge exists, and before the core marker and everything the
 #: core chain adds after it.
 FULL_PLAN = [
-    *CORE_PLAN[:-7],
+    *CORE_PLAN[:-8],
     *MODULES_BRANCH_PLAN,
     CORE_MARKER,
     SDK_COUNTERS,
@@ -126,6 +129,7 @@ FULL_PLAN = [
     EMAIL_LOWER,
     DEFAULT_VALUE,
     EVENTS_UTC,
+    CORRECTION,
     CORE_HEAD,
 ]
 
@@ -246,8 +250,8 @@ def test_unapplying_the_branch_is_one_revision_and_modules_at_base_is_all_of_the
     assert _downgrade_plan(script, UNAPPLY_WHOLE_MODULES_BRANCH) == list(
         reversed(MODULES_BRANCH_PLAN)
     )
-    # 33: the 31 core revisions (through 806901fb7735, #580) and the branch's 2.
-    assert len(_downgrade_plan(script, "modules@base")) == len(FULL_PLAN) == 33
+    # 34: the 32 core revisions (through d29a479daafe, #445) and the branch's 2.
+    assert len(_downgrade_plan(script, "modules@base")) == len(FULL_PLAN) == 34
 
 
 #: A command line, not a mention of one: the three documents all warn about

@@ -158,7 +158,8 @@ INVENTORY = {
     ("POST", f"{V1}/wizard/drafts/{{draft_id}}/submit"): Audited(A.EXPERIMENT_CREATE),
     ("POST", f"{V1}/wizard/validate"): DRAFT,
     # --- holdouts ------------------------------------------------------------
-    ("POST", f"{V1}/holdout"): Audited(A.HOLDOUT_CREATE),
+    # is_active true also ends the active holdout: one deactivate for it.
+    ("POST", f"{V1}/holdout"): Audited(A.HOLDOUT_CREATE, A.HOLDOUT_DEACTIVATE),
     ("PUT", f"{V1}/holdout/{{holdout_id}}"): Audited(
         A.HOLDOUT_UPDATE, A.HOLDOUT_ACTIVATE, A.HOLDOUT_DEACTIVATE
     ),

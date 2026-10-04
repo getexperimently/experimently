@@ -70,7 +70,7 @@ Every request carries `X-API-Key`, `Content-Type: application/json`, `Accept: ap
 | `provider.client.track` with a key | `POST /api/v1/tracking/track` | ignored |
 | `provider.client.track` without a key, `trackBatch` | `POST /api/v1/tracking/batch` `{events: [...]}` (≤ 100) | `{success_count, failure_count, errors}` |
 
-Errors: 401 bad key, 404 flag/experiment not ACTIVE (never cached), 422 track without a key, 429 rate limited.
+Errors: 401 bad key, 404 flag/experiment not ACTIVE (never cached), 422 invalid event, 429 rate limited.
 
 ## Contract smoke
 

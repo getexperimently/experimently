@@ -154,9 +154,12 @@ Keep `traffic.py` running in a terminal throughout so the numbers move.
 7. **Payments — audit trail** (`streampulse_upsell_modal`). *Go Premium* → classic vs value modal →
    *Subscribe*. Dashboard → Admin → Audit log: the seed wrote create/start entries for this
    experiment; every later change is logged too.
-8. **Global holdout**. Type a custom device id such as `sp-holdout-15` (bucket 1 of the fixed-salt
-   hash) and *Apply device*: every experiment reads `in global holdout streampulse-holdout (control
+8. **Global holdout**. Type a custom device id such as `sp-holdout-15` (bucket 1 under the demo
+   holdout's salt) and *Apply device*: every experiment reads `in global holdout streampulse-holdout (control
    shown)` and no exposure is recorded. The preset ids are chosen to be outside the holdout.
+   The API records each device first seen while the holdout is active; the seed writes no such
+   records, so a comparison of held-out devices with the rest needs real traffic first (the
+   simulator, or devices you apply) and starts from the moment the holdout was activated.
 
 Which variant a preset lands in depends on the seeded experiment ids (assignment hashing is
 per-experiment), so it can differ after `--reset`; the holdout bucket does not.

@@ -36,8 +36,9 @@ export const TIER_OPTIONS: Tier[] = ['free', 'premium'];
 
 /*
  * Preset ids are deliberately outside the 2 % global holdout (the holdout bucket
- * is a fixed-salt hash of the user id, so this is stable across re-seeds). To
- * show the holdout, type a custom id such as `sp-holdout-15` in the Device panel.
+ * is a hash of the user id with the holdout's salt, which the seed fixes for the
+ * demo holdout, so this is stable across re-seeds). To show the holdout, type a
+ * custom id such as `sp-holdout-15` in the Device panel.
  */
 export const DEVICE_PRESETS: DevicePreset[] = [
   {

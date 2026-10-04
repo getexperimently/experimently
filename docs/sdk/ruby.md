@@ -109,9 +109,10 @@ client = Experimently::Client.new(
 `attributes` on `get_assignment` become the assignment `context` (targeting rules); on
 `evaluate_flag` they are accepted for API symmetry only. For `track`: `properties` → `metadata`,
 `event_type` defaults to `event_name`, `timestamp` (`Time` or ISO-8601 string) defaults to now
-(UTC). `track_batch` takes Hashes (symbol or string keys) with `event_name`, `user_id` and at least
-one of `experiment_key`/`feature_flag_key` plus optional `properties`, `value`, `event_type`,
-`timestamp`; malformed entries are reported in `errors` without being sent.
+(UTC). `track_batch` takes Hashes (symbol or string keys) with `event_name` and `user_id` plus
+optional `experiment_key`, `feature_flag_key`, `properties`, `value`, `event_type`, `timestamp`;
+malformed entries are reported in `errors` without being sent. An event with no key is stored as
+history and counts in no experiment's results; tag outcome events.
 
 ```ruby
 result = client.track_batch([
@@ -215,7 +216,7 @@ Every request carries `X-API-Key`, `Content-Type: application/json` and `Accept:
 | `track` with a key | `POST /api/v1/tracking/track` | `{event_type, event_name, user_id, experiment_key?, feature_flag_key?, value?, metadata?, timestamp}` | ignored |
 | `track` without keys, `track_batch` | `POST /api/v1/tracking/batch` | `{events: [<track body>, …]}` (max 100 per request) | `{success_count, failure_count, errors}` (`track_batch` only) |
 
-Errors: 401 bad key, 404 experiment/flag unknown or not ACTIVE, 422 event without any key, 429
+Errors: 401 bad key, 404 experiment/flag unknown or not ACTIVE, 422 invalid event, 429
 rate limited (`Retry-After`). These paths share the backend's per-IP `SDK_RATE_LIMIT_PER_MINUTE`
 ceiling (default 6000).
 

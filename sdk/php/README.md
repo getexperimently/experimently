@@ -114,8 +114,9 @@ Never throws; returns `true` when every request succeeded.
 ### `trackBatch(array $events): BatchResult`
 
 `POST /api/v1/tracking/batch` in chunks of at most 100 events. Each event is an array with
-`event_name` and `user_id` plus at least one of `experiment_key` / `feature_flag_key` (the server
-rejects key-less events); optional `properties`, `value`, `event_type`, `timestamp`. Malformed
+`event_name` and `user_id`; optional `experiment_key`, `feature_flag_key`, `properties`, `value`,
+`event_type`, `timestamp`. An event with no key is stored as history and counts in no experiment's
+results; tag outcome events. Malformed
 events are counted as failures without being sent. Returns a `BatchResult` (`successCount`,
 `failureCount`, `errors`, `isOk()`). Never throws.
 

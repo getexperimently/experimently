@@ -17,12 +17,12 @@ No other SDK buckets locally, and experiments are always assigned by the server.
 | Assign a user to an experiment (sticky) | `POST /api/v1/tracking/assign` | `{experiment_key, user_id, context?}` | `{experiment_key, user_id, variant_id, variant_name, is_control, configuration, assigned, reason}` |
 | Evaluate a flag | `GET /api/v1/feature-flags/evaluate/{flag_key}?user_id=…&context=<url-encoded JSON, optional>` | — | `{key, enabled, config, reason}` |
 | All flags for a user | `GET /api/v1/feature-flags/user/{user_id}` | — | `{flag_key: boolean, …}` |
-| Track one event | `POST /api/v1/tracking/track` | `{event_type, event_name?, user_id, experiment_key? \| feature_flag_key?, value?, metadata?, timestamp?}` | stored event |
+| Track one event | `POST /api/v1/tracking/track` | `{event_type, event_name?, user_id, experiment_key?, feature_flag_key?, value?, metadata?, timestamp?}` | stored event |
 | Track up to 100 events | `POST /api/v1/tracking/batch` | `{events: [...]}` | `{success_count, failure_count, errors}` |
 | A user's assignments | `GET /api/v1/tracking/assignments/{user_id}` | — | list |
 
 Each entry of the batch response's `errors` is `{index, event_type, user_id, error}`. `error` says
-why the item was refused (for example, neither key was found), or reads
+why the item was refused (for example, a key that was given was not found), or reads
 `Could not store this event (request ID: <id>).` when the server failed to store it; quote that ID
 when you report the failure.
 

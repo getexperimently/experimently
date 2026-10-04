@@ -251,19 +251,13 @@ class TestTrackingValidation:
         assert event.value == 49.99
         assert event.metadata["product_id"] == "prod-456"
 
-    def test_event_experiment_or_feature_flag_required(self):
-        """Test that either experiment_key or feature_flag_key is required."""
-        # Create data with neither experiment_key nor feature_flag_key
-        invalid_data = {"event_type": "purchase", "user_id": "user-123", "value": 49.99}
+    def test_event_keys_are_optional(self):
+        """Neither key is required (#217): the endpoint stores such an event as
+        history, and answers 404 for a key that is given and not found."""
+        event = EventRequest(event_type="purchase", user_id="user-123", value=49.99)
 
-        # This should raise a validation error
-        with pytest.raises(ValidationError) as excinfo:
-            EventRequest(**invalid_data)
-
-        # Check that the error message mentions the requirement
-        assert "Either experiment_key or feature_flag_key must be provided" in str(
-            excinfo.value
-        )
+        assert event.experiment_key is None
+        assert event.feature_flag_key is None
 
 
 class TestFeatureFlagValidation:
