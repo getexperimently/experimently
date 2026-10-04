@@ -153,26 +153,84 @@ def test_a_value_the_check_cannot_read_is_listed(monkeypatch):
     assert found.line() == "feature_flag\tid\tk\ttargeting_rules\tcould not be checked"
 
 
-def test_the_feature_flags_table_is_read(monkeypatch):
+def test_the_feature_flags_and_segments_tables_are_read(monkeypatch):
     seen = []
+    rows = {
+        "feature_flags": [("row", "key", {"country": ["US"]})],
+        "segments": [
+            ("seg", "Legacy", {"operator": "and", "conditions": []}),
+            ("ok", "Fine", _dash(US)),
+        ],
+    }
 
     class Result:
+        def __init__(self, table):
+            self.table = table
+
         def all(self):
-            return [("row", "key", {"country": ["US"]})]
+            return rows[self.table]
 
     class Connection:
         def execute(self, statement):
             seen.append(str(statement))
-            return Result()
+            table = "segments" if '"segments"' in str(statement) else "feature_flags"
+            return Result(table)
 
     found = check.scan(Connection(), "exp")
     assert [f.line() for f in found] == [
-        "feature_flag\trow\tkey\ttargeting_rules\tunknown key"
+        "feature_flag\trow\tkey\ttargeting_rules\tunknown key",
+        "segment\tseg\tLegacy\trules\trules not valid: unknown key",
     ]
     assert seen == [
         'SELECT id, "key", "targeting_rules" FROM "exp"."feature_flags" '
-        'WHERE "targeting_rules" IS NOT NULL ORDER BY id'
+        'WHERE "targeting_rules" IS NOT NULL ORDER BY id',
+        'SELECT id, "name", "rules" FROM "exp"."segments" '
+        "WHERE \"status\" <> 'ARCHIVED' ORDER BY id",
     ]
+
+
+@pytest.mark.parametrize(
+    "rules, path, reason",
+    [
+        ({"operator": "and", "conditions": []}, "rules", "unknown key"),
+        ({"rules": []}, "rules", "unknown key"),
+        (None, "rules", "must be an object"),
+        (
+            {"groups": [{"conditions": [{**US, "operator": "eq"}]}]},
+            "groups[0].conditions[0].operator",
+            "unknown operator",
+        ),
+        ({"groups": []}, "groups", "at least one group is required"),
+        (
+            {"groups": [{"conditions": []}]},
+            "groups[0].conditions",
+            "at least one condition is required",
+        ),
+        ({"groups": "x"}, "groups", "must be a list"),
+    ],
+    ids=["legacy", "native", "null", "pe-eq", "pe-no-groups", "pe-empty", "pe-x"],
+)
+def test_a_segment_whose_rules_are_not_valid_has_a_line(rules, path, reason):
+    found = check.segment_finding_for("id", "Name", rules)
+    assert found.line() == f"segment\tid\tName\t{path}\trules not valid: {reason}"
+    assert not found.matches_no_user
+
+
+def test_a_valid_segment_has_no_line_and_a_name_stays_on_one_line():
+    assert check.segment_finding_for("id", "Name", _dash(US)) is None
+    found = check.segment_finding_for("id", "a\tb\n c", {"groups": []})
+    assert found.line().split("\t")[2] == "a b c"
+
+
+def test_a_segment_the_check_cannot_read_is_listed(monkeypatch):
+    def boom(_value):
+        raise RecursionError
+
+    monkeypatch.setattr(check, "validate_segment_rules", boom)
+    found = check.segment_finding_for("id", "n", {"groups": []})
+    assert (
+        found.line() == "segment\tid\tn\trules\trules not valid: could not be checked"
+    )
 
 
 @pytest.mark.regression

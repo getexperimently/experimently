@@ -1,7 +1,7 @@
 """
 Unit tests for AudienceService.
 
-Uses MagicMock for DB session and patches the rules engine evaluation.
+Uses MagicMock for DB session; membership runs the real flag engine.
 No real database required.
 """
 
@@ -22,7 +22,25 @@ from backend.app.schemas.segment import (
     SegmentStatus,
     SegmentUpdate,
 )
-from backend.app.services.audience_service import AudienceService
+from backend.app.services.audience_service import (
+    AudienceService,
+    SegmentRulesNotValid,
+)
+
+
+def _rules(*conditions, logical_operator="AND"):
+    """Segment rules in the targeting rule format (the dashboard shape)."""
+    return {
+        "logical_operator": logical_operator,
+        "groups": [{"logical_operator": "AND", "conditions": list(conditions)}],
+    }
+
+
+def _eq(attribute, value):
+    return {"attribute": attribute, "operator": "equals", "value": value}
+
+
+US_RULES = _rules(_eq("country", "US"))
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -41,12 +59,7 @@ def _make_mock_segment(
     seg.name = name
     seg.description = "Test description"
     seg.status = status
-    seg.rules = rules or {
-        "operator": "and",
-        "conditions": [
-            {"attribute": "country", "operator": "eq", "value": "US"},
-        ],
-    }
+    seg.rules = US_RULES if rules is None else rules
     seg.created_at = datetime(2025, 1, 1, 12, 0)
     seg.updated_at = datetime(2025, 1, 2, 12, 0)
     return seg
@@ -74,7 +87,7 @@ class TestCreateSegment:
         db = MagicMock()
         data = SegmentCreate(
             name="My Segment",
-            rules={"operator": "and", "conditions": []},
+            rules=US_RULES,
         )
         user_id = uuid.uuid4()
 
@@ -103,7 +116,7 @@ class TestCreateSegment:
         db.refresh.side_effect = lambda obj: None
         data = SegmentCreate(
             name="Status Segment",
-            rules={"operator": "and", "conditions": []},
+            rules=US_RULES,
         )
 
         AudienceService.create_segment(db, data)
@@ -115,12 +128,7 @@ class TestCreateSegment:
         """Segment rules are stored exactly as provided in SegmentCreate."""
         db = MagicMock()
         db.refresh.side_effect = lambda obj: None
-        rules = {
-            "operator": "or",
-            "conditions": [
-                {"attribute": "plan", "operator": "eq", "value": "premium"},
-            ],
-        }
+        rules = _rules(_eq("plan", "premium"), logical_operator="OR")
         data = SegmentCreate(name="Rules Segment", rules=rules)
 
         AudienceService.create_segment(db, data)
@@ -257,47 +265,29 @@ class TestDeleteSegment:
 class TestEvaluateMembership:
     def test_evaluate_membership_returns_true_when_rules_match(self):
         """evaluate_membership returns is_member=True when rules match."""
-        rules = {
-            "operator": "and",
-            "conditions": [
-                {"attribute": "country", "operator": "eq", "value": "US"},
-            ],
-        }
-        mock_seg = _make_mock_segment(rules=rules)
+        mock_seg = _make_mock_segment(rules=US_RULES)
         db = _make_mock_db(segment=mock_seg)
 
-        with patch(
-            "backend.app.services.audience_service.evaluate_rule_group",
-            return_value=True,
-        ):
-            result = AudienceService.evaluate_membership(
-                db, str(mock_seg.id), {"country": "US"}
-            )
+        result = AudienceService.evaluate_membership(
+            db, str(mock_seg.id), {"country": "US"}
+        )
 
         assert result.is_member is True
         assert result.segment_id == str(mock_seg.id)
         assert result.segment_name == mock_seg.name
+        assert result.matched_rules == ["country equals US"]
 
     def test_evaluate_membership_returns_false_when_rules_do_not_match(self):
         """evaluate_membership returns is_member=False when rules don't match."""
-        rules = {
-            "operator": "and",
-            "conditions": [
-                {"attribute": "country", "operator": "eq", "value": "US"},
-            ],
-        }
-        mock_seg = _make_mock_segment(rules=rules)
+        mock_seg = _make_mock_segment(rules=US_RULES)
         db = _make_mock_db(segment=mock_seg)
 
-        with patch(
-            "backend.app.services.audience_service.evaluate_rule_group",
-            return_value=False,
-        ):
-            result = AudienceService.evaluate_membership(
-                db, str(mock_seg.id), {"country": "CA"}
-            )
+        result = AudienceService.evaluate_membership(
+            db, str(mock_seg.id), {"country": "CA"}
+        )
 
         assert result.is_member is False
+        assert result.matched_rules == []
 
     def test_evaluate_membership_raises_value_error_for_non_existent_segment(self):
         """evaluate_membership raises ValueError when segment doesn't exist."""
@@ -308,37 +298,43 @@ class TestEvaluateMembership:
                 db, str(uuid.uuid4()), {"country": "US"}
             )
 
-    def test_evaluate_membership_returns_false_for_empty_rules(self):
-        """evaluate_membership returns is_member=False when segment has no rules."""
-        mock_seg = MagicMock(spec=Segment)
-        mock_seg.id = uuid.uuid4()
-        mock_seg.name = "Empty Rules Segment"
-        mock_seg.description = "No rules"
-        mock_seg.status = ModelSegmentStatus.ACTIVE
-        mock_seg.rules = {}  # Explicitly None/empty rules
-        mock_seg.created_at = datetime(2025, 1, 1, 12, 0)
-        mock_seg.updated_at = datetime(2025, 1, 2, 12, 0)
-
+    @pytest.mark.parametrize(
+        "rules",
+        [
+            {},
+            None,
+            {"operator": "and", "conditions": [_eq("country", "US")]},
+            {"groups": [{"conditions": [{**_eq("country", "US"), "operator": "eq"}]}]},
+            {"groups": []},
+            {"groups": [{"conditions": []}]},
+            {"groups": "x"},
+        ],
+        ids=["empty", "null", "legacy", "pe-eq", "pe-no-groups", "pe-empty", "pe-x"],
+    )
+    def test_stored_rules_that_are_not_valid_raise(self, rules):
+        """Stored rules that fail validation are never evaluated."""
+        mock_seg = _make_mock_segment(rules=rules)
+        mock_seg.rules = rules
         db = _make_mock_db(segment=mock_seg)
 
-        result = AudienceService.evaluate_membership(
-            db, str(mock_seg.id), {"country": "US"}
-        )
-
-        assert result.is_member is False
+        with pytest.raises(SegmentRulesNotValid):
+            AudienceService.evaluate_membership(db, str(mock_seg.id), {"country": "US"})
 
     def test_evaluate_membership_returns_instance_of_response(self):
         """evaluate_membership returns a SegmentMembershipResponse."""
         mock_seg = _make_mock_segment()
         db = _make_mock_db(segment=mock_seg)
 
-        with patch(
-            "backend.app.services.audience_service.evaluate_rule_group",
-            return_value=False,
-        ):
-            result = AudienceService.evaluate_membership(db, str(mock_seg.id), {})
+        result = AudienceService.evaluate_membership(db, str(mock_seg.id), {})
 
         assert isinstance(result, SegmentMembershipResponse)
+
+    def test_a_text_id_that_is_not_a_uuid_is_not_found_without_a_query(self):
+        db = MagicMock()
+
+        with pytest.raises(ValueError, match="not found"):
+            AudienceService.get_segment(db, "seg-1")
+        db.query.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
@@ -349,56 +345,39 @@ class TestEvaluateMembership:
 class TestBulkEvaluateMembership:
     def test_bulk_evaluate_returns_correct_memberships_dict(self):
         """bulk_evaluate_membership returns correct memberships for each segment."""
-        seg1 = _make_mock_segment(rules={"operator": "and", "conditions": []})
-        seg2 = _make_mock_segment(rules={"operator": "and", "conditions": []})
+        seg1 = _make_mock_segment(rules=US_RULES)
+        seg2 = _make_mock_segment(rules=_rules(_eq("country", "DE")))
         seg1_id = str(seg1.id)
         seg2_id = str(seg2.id)
 
         db = MagicMock()
 
-        def fake_query_chain(segment_id):
-            """Return different segments based on the segment_id filter."""
-            if str(segment_id) == seg1_id:
-                return seg1
-            if str(segment_id) == seg2_id:
-                return seg2
-            return None
-
-        # Patch get_segment to return segment objects directly
         with patch.object(
             AudienceService,
             "get_segment",
             side_effect=lambda db, sid: seg1 if sid == seg1_id else seg2,
         ):
-            with patch(
-                "backend.app.services.audience_service.evaluate_rule_group",
-                side_effect=[True, False],
-            ):
-                request = BulkSegmentMembershipRequest(
-                    user_context={"country": "US"},
-                    segment_ids=[seg1_id, seg2_id],
-                )
-                result = AudienceService.bulk_evaluate_membership(db, request)
+            request = BulkSegmentMembershipRequest(
+                user_context={"country": "US"},
+                segment_ids=[seg1_id, seg2_id],
+            )
+            result = AudienceService.bulk_evaluate_membership(db, request)
 
         assert result.memberships[seg1_id] is True
         assert result.memberships[seg2_id] is False
 
     def test_bulk_evaluate_records_evaluation_time_ms_greater_than_zero(self):
         """bulk_evaluate_membership records a positive evaluation_time_ms."""
-        seg = _make_mock_segment(rules={"operator": "and", "conditions": []})
+        seg = _make_mock_segment(rules=US_RULES)
         seg_id = str(seg.id)
         db = MagicMock()
 
         with patch.object(AudienceService, "get_segment", return_value=seg):
-            with patch(
-                "backend.app.services.audience_service.evaluate_rule_group",
-                return_value=True,
-            ):
-                request = BulkSegmentMembershipRequest(
-                    user_context={"country": "US"},
-                    segment_ids=[seg_id],
-                )
-                result = AudienceService.bulk_evaluate_membership(db, request)
+            request = BulkSegmentMembershipRequest(
+                user_context={"country": "US"},
+                segment_ids=[seg_id],
+            )
+            result = AudienceService.bulk_evaluate_membership(db, request)
 
         assert result.evaluation_time_ms >= 0.0
 
@@ -420,21 +399,34 @@ class TestBulkEvaluateMembership:
 
         assert result.memberships[missing_id] is False
 
+    def test_rules_not_valid_are_false_and_the_others_still_answer(self):
+        valid = _make_mock_segment(rules=US_RULES)
+        legacy = _make_mock_segment(rules={"operator": "and", "conditions": []})
+        db = MagicMock()
+        by_id = {str(valid.id): valid, str(legacy.id): legacy}
+
+        with patch.object(
+            AudienceService, "get_segment", side_effect=lambda db, sid: by_id[sid]
+        ):
+            request = BulkSegmentMembershipRequest(
+                user_context={"country": "US"},
+                segment_ids=[str(legacy.id), str(valid.id)],
+            )
+            result = AudienceService.bulk_evaluate_membership(db, request)
+
+        assert result.memberships == {str(legacy.id): False, str(valid.id): True}
+
     def test_bulk_evaluate_returns_bulk_response_instance(self):
         """bulk_evaluate_membership returns BulkSegmentMembershipResponse."""
-        seg = _make_mock_segment(rules={"operator": "and", "conditions": []})
+        seg = _make_mock_segment(rules=US_RULES)
         db = MagicMock()
 
         with patch.object(AudienceService, "get_segment", return_value=seg):
-            with patch(
-                "backend.app.services.audience_service.evaluate_rule_group",
-                return_value=True,
-            ):
-                request = BulkSegmentMembershipRequest(
-                    user_context={},
-                    segment_ids=[str(seg.id)],
-                )
-                result = AudienceService.bulk_evaluate_membership(db, request)
+            request = BulkSegmentMembershipRequest(
+                user_context={},
+                segment_ids=[str(seg.id)],
+            )
+            result = AudienceService.bulk_evaluate_membership(db, request)
 
         assert isinstance(result, BulkSegmentMembershipResponse)
 
@@ -474,40 +466,45 @@ class TestGetSegmentExperiments:
 
 
 class TestPreviewAudienceSize:
+    @staticmethod
+    def _db(contexts):
+        db = MagicMock()
+        chain = db.query.return_value.filter.return_value.limit.return_value
+        chain.all.return_value = [(c,) for c in contexts]
+        return db
+
     def test_preview_returns_dict_with_required_keys(self):
         """preview_audience_size returns AudiencePreviewResponse with required fields."""
-        db = MagicMock()
-        db.query.return_value.limit.return_value.all.return_value = []
-
-        rules = {"operator": "and", "conditions": []}
-        result = AudienceService.preview_audience_size(db, rules, sample_size=100)
+        result = AudienceService.preview_audience_size(
+            self._db([]), US_RULES, sample_size=100
+        )
 
         assert isinstance(result, AudiencePreviewResponse)
         assert hasattr(result, "estimated_percentage")
         assert hasattr(result, "sample_size")
         assert hasattr(result, "matched")
 
-    def test_preview_returns_zero_percentage_when_no_assignments(self):
-        """Returns 0% when no assignment records exist."""
-        db = MagicMock()
-        db.query.return_value.limit.return_value.all.return_value = []
+    def test_preview_returns_zero_of_zero_when_no_assignment_has_a_context(self):
+        """No context to evaluate: 0.0 of a sample of 0, never a share of rows."""
+        result = AudienceService.preview_audience_size(
+            self._db([]), US_RULES, sample_size=1000
+        )
 
-        rules = {"operator": "and", "conditions": []}
-        result = AudienceService.preview_audience_size(db, rules, sample_size=1000)
+        assert result.model_dump() == {
+            "estimated_percentage": 0.0,
+            "sample_size": 0,
+            "matched": 0,
+        }
 
-        assert result.estimated_percentage == 0.0
-        assert result.matched == 0
+    def test_only_rows_with_a_context_object_count(self):
+        contexts = [{"country": "US"}, {"user": {"country": "US"}}, {"country": "DE"}]
+        contexts += [{}, None, [], "US"]
+        result = AudienceService.preview_audience_size(
+            self._db(contexts), US_RULES, sample_size=500
+        )
 
-    def test_preview_sample_size_reflects_actual_assignments_sampled(self):
-        """sample_size in response reflects the number of assignments evaluated."""
-        db = MagicMock()
-        # simulate no Assignment model available → falls back to 0
-        with patch(
-            "backend.app.services.audience_service.evaluate_rule_group",
-            return_value=True,
-        ):
-            rules = {"operator": "and", "conditions": []}
-            result = AudienceService.preview_audience_size(db, rules, sample_size=500)
-
-        # Without assignments, sample_size defaults to 0
-        assert result.sample_size == 0
+        assert result.model_dump() == {
+            "estimated_percentage": 66.67,
+            "sample_size": 3,
+            "matched": 2,
+        }

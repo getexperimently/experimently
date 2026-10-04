@@ -6,9 +6,38 @@ used in the P3-C: Audience Segmentation API.
 """
 
 from enum import Enum
-from typing import Optional
+from typing import Any, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+from backend.app.core.targeting_adapter import (
+    TargetingRulesError,
+    validate_segment_rules,
+)
+
+#: The description of a segment's ``rules`` in the OpenAPI document.
+SEGMENT_RULES_DESCRIPTION = (
+    "Targeting rules in the format flag and experiment targeting use: "
+    '{"logical_operator": "AND"|"OR"|"NOT" (optional), "groups": '
+    '[{"logical_operator"?, "conditions": [{"attribute", "operator", "value"}]}]}, '
+    "with operators such as equals, in, regex and semver_gte. At least one group, "
+    "each with at least one condition; at most 20 groups, 50 conditions, 10 regex "
+    "conditions and 1,000 list values. Any other shape is refused with 422."
+)
+
+
+def _checked_segment_rules(value: Any) -> Any:
+    """Refuse segment rules membership would not evaluate as written (#440).
+
+    The value is returned as given, never rewritten. The message is fixed
+    text naming a place and a reason, never the submitted rules (see
+    ``validate_segment_rules``).
+    """
+    try:
+        validate_segment_rules(value)
+    except TargetingRulesError as err:
+        raise ValueError(str(err)) from None
+    return value
 
 
 class SegmentStatus(str, Enum):
@@ -24,11 +53,7 @@ class SegmentCreate(BaseModel):
 
     name: str = Field(..., min_length=2, max_length=128)
     description: Optional[str] = Field(None, max_length=512)
-    rules: dict = Field(
-        ...,
-        description="Targeting rules JSON matching rules_engine format. "
-        'Format: {"conditions": [...], "logical_operator": "AND"|"OR"}',
-    )
+    rules: dict = Field(..., description=SEGMENT_RULES_DESCRIPTION)
 
     model_config = ConfigDict(
         json_schema_extra={
@@ -36,15 +61,33 @@ class SegmentCreate(BaseModel):
                 "name": "US Premium Users",
                 "description": "Premium subscribers in the United States",
                 "rules": {
-                    "operator": "and",
-                    "conditions": [
-                        {"attribute": "country", "operator": "eq", "value": "US"},
-                        {"attribute": "plan", "operator": "eq", "value": "premium"},
+                    "logical_operator": "AND",
+                    "groups": [
+                        {
+                            "logical_operator": "AND",
+                            "conditions": [
+                                {
+                                    "attribute": "country",
+                                    "operator": "equals",
+                                    "value": "US",
+                                },
+                                {
+                                    "attribute": "plan",
+                                    "operator": "equals",
+                                    "value": "premium",
+                                },
+                            ],
+                        }
                     ],
                 },
             }
         }
     )
+
+    @field_validator("rules", mode="before")
+    @classmethod
+    def checked_rules(cls, value: Any) -> Any:
+        return _checked_segment_rules(value)
 
 
 class SegmentUpdate(BaseModel):
@@ -52,7 +95,11 @@ class SegmentUpdate(BaseModel):
 
     name: Optional[str] = Field(None, min_length=2, max_length=128)
     description: Optional[str] = None
-    rules: Optional[dict] = None
+    rules: Optional[dict] = Field(
+        None,
+        description=SEGMENT_RULES_DESCRIPTION
+        + " Leave it out to keep the stored rules.",
+    )
     status: Optional[SegmentStatus] = None
 
     model_config = ConfigDict(
@@ -63,6 +110,13 @@ class SegmentUpdate(BaseModel):
             }
         }
     )
+
+    @field_validator("rules", mode="before")
+    @classmethod
+    def checked_rules(cls, value: Any) -> Any:
+        if value is None:
+            return None
+        return _checked_segment_rules(value)
 
 
 class SegmentResponse(BaseModel):
@@ -109,7 +163,12 @@ class SegmentMembershipResponse(BaseModel):
     segment_id: str
     segment_name: str
     is_member: bool
-    matched_rules: list[str] = []  # which conditions matched
+    matched_rules: list[str] = Field(
+        default=[],
+        description="Each condition, in any group, that the context satisfies "
+        'on its own, as "<attribute> <operator> <value>". Empty when the user '
+        "is not a member.",
+    )
 
     model_config = ConfigDict(
         json_schema_extra={
@@ -117,7 +176,7 @@ class SegmentMembershipResponse(BaseModel):
                 "segment_id": "abc123",
                 "segment_name": "US Premium Users",
                 "is_member": True,
-                "matched_rules": ["country eq US", "plan eq premium"],
+                "matched_rules": ["country equals US", "plan equals premium"],
             }
         }
     )

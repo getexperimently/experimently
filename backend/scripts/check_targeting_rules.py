@@ -1,5 +1,5 @@
 """
-List stored feature-flag targeting rules that a create or an update now refuses.
+List stored targeting rules that a create or an update now refuses.
 
 Run after upgrading to the release in which flag targeting rules are validated
 when saved (#535)::
@@ -23,6 +23,18 @@ rules as a whole has the path ``targeting_rules``. Two kinds of line:
   rule matches no user (#733); the line says so, with the path of the first
   such condition. Every other legacy row gets the API's list refusal.
 
+Segments get the same treatment (#440). Segment rules use the targeting
+rule format and are checked when saved; a segment stored before that whose
+rules fail the check is left as it is, and is never evaluated:
+``POST /api/v1/segments/{id}/evaluate`` answers 409 and bulk-evaluate answers
+``false`` for it. Each such segment that is not archived gets a line, with
+its name in place of a key and a reason starting ``rules not valid``::
+
+    segment  9a1e...  Enterprise  rules  rules not valid: unknown key
+
+A problem that belongs to a segment's rules as a whole has the path ``rules``.
+Rewrite the rules with ``PUT /api/v1/segments/{id}``.
+
 Connection settings are the ``POSTGRES_*`` environment variables that
 ``backend.app.db.bootstrap`` reads. Exit status: 0 whether or not anything is
 listed (the report is advisory); 2 when the database cannot be read.
@@ -38,10 +50,18 @@ from typing import Any, Iterable, Iterator, List, Optional, Sequence, Tuple
 from backend.app.core.targeting_adapter import (
     TargetingRulesError,
     validate_flag_targeting,
+    validate_segment_rules,
 )
 from backend.app.services.feature_flag_service import _LEGACY_OPERATORS
 
 ENTITY = "feature_flag"
+SEGMENT_ENTITY = "segment"
+
+#: The path printed for a problem that belongs to a segment's rules as a whole.
+WHOLE_SEGMENT_RULES_PATH = "rules"
+
+#: Every segment reason starts with this: such a segment is never evaluated.
+SEGMENT_RULES_NOT_VALID = "rules not valid"
 
 #: The path printed for a problem that belongs to the rules as a whole.
 WHOLE_RULES_PATH = "targeting_rules"
@@ -62,9 +82,10 @@ class Finding:
     key: str
     path: str
     reason: str
+    entity: str = ENTITY
 
     def line(self) -> str:
-        return "\t".join((ENTITY, self.row_id, self.key, self.path, self.reason))
+        return "\t".join((self.entity, self.row_id, self.key, self.path, self.reason))
 
     @property
     def matches_no_user(self) -> bool:
@@ -116,6 +137,45 @@ def findings_for(rows: Iterable[Tuple[Any, Any, Any]]) -> Iterator[Finding]:
             yield found
 
 
+def _one_line(text: Any) -> str:
+    """A segment name is free text: keep the report one line per finding."""
+    return " ".join(str(text or "").split())
+
+
+def segment_finding_for(row_id: Any, name: Any, rules: Any) -> Optional[Finding]:
+    """The line for one stored segment, or ``None`` when its rules are valid."""
+    row_id, name = str(row_id), _one_line(name)
+    try:
+        validate_segment_rules(rules)
+    except TargetingRulesError as err:
+        reason = f"{SEGMENT_RULES_NOT_VALID}: {err.code}"
+        path = err.path or WHOLE_SEGMENT_RULES_PATH
+        return Finding(row_id, name, path, reason, SEGMENT_ENTITY)
+    except Exception:
+        reason = f"{SEGMENT_RULES_NOT_VALID}: {NOT_CHECKED}"
+        return Finding(row_id, name, WHOLE_SEGMENT_RULES_PATH, reason, SEGMENT_ENTITY)
+    return None
+
+
+def segment_findings_for(rows: Iterable[Tuple[Any, Any, Any]]) -> Iterator[Finding]:
+    """Findings for ``(id, name, rules)`` segment rows."""
+    for row_id, name, rules in rows:
+        found = segment_finding_for(row_id, name, rules)
+        if found is not None:
+            yield found
+
+
+def read_segment_rows(connection: Any, schema: str) -> List[Tuple[Any, Any, Any]]:
+    """Every segment that is not archived, rules ``NULL`` included."""
+    from sqlalchemy import text
+
+    statement = text(
+        f'SELECT id, "name", "rules" FROM "{schema}"."segments" '
+        "WHERE \"status\" <> 'ARCHIVED' ORDER BY id"
+    )
+    return [tuple(row) for row in connection.execute(statement).all()]
+
+
 def read_rows(connection: Any, schema: str) -> List[Tuple[Any, Any, Any]]:
     from sqlalchemy import text
 
@@ -128,7 +188,9 @@ def read_rows(connection: Any, schema: str) -> List[Tuple[Any, Any, Any]]:
 
 def scan(connection: Any, schema: str) -> List[Finding]:
     """Every finding in the database behind ``connection`` (read-only)."""
-    return list(findings_for(read_rows(connection, schema)))
+    return list(findings_for(read_rows(connection, schema))) + list(
+        segment_findings_for(read_segment_rows(connection, schema))
+    )
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
@@ -136,7 +198,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         prog="python -m backend.scripts.check_targeting_rules",
         description=(
             "List stored feature-flag targeting rules that a create or an "
-            "update now refuses."
+            "update now refuses, and segments whose rules are not valid."
         ),
     )
     parser.parse_args(argv)
@@ -172,11 +234,13 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
     for finding in found:
         print(finding.line())
-    no_match = sum(1 for f in found if f.matches_no_user)
+    flags = [f for f in found if f.entity == ENTITY]
+    segments = len(found) - len(flags)
+    no_match = sum(1 for f in flags if f.matches_no_user)
     print(
-        f"{len(found)} flag(s) listed: {len(found) - no_match} with rules the API "
-        f"now refuses, {no_match} with a legacy rule that matches no user "
-        f"(schema {schema!r}).",
+        f"{len(flags)} flag(s) listed: {len(flags) - no_match} with rules the API "
+        f"now refuses, {no_match} with a legacy rule that matches no user; "
+        f"{segments} segment(s) listed with rules not valid (schema {schema!r}).",
         file=sys.stderr,
     )
     return 0

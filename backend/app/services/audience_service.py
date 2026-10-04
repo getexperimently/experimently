@@ -8,17 +8,29 @@ Provides business logic for:
 - Linking segments to experiments/feature flags
 - Estimating audience size via rule preview
 
-Uses the existing rules engine (evaluate_rule_group) internally.
+Segment rules use the targeting rule format (the dashboard shape) and are
+checked by ``validate_segment_rules`` when saved. Membership is decided by the
+flag engine (``match_targeting_rule``) on the expanded context
+(``expand_context``), so a segment's rules mean what the same rules mean on a
+feature flag.
 """
 
 import logging
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
+from uuid import UUID
 
 from sqlalchemy.orm import Session
 
 from backend.app.core.pattern_match import PatternUnevaluable, report_unevaluable
-from backend.app.core.rules_engine import evaluate_rule_group
+from backend.app.core.rules_engine import evaluate_condition
+from backend.app.core.targeting_adapter import (
+    TargetingRulesError,
+    convert_dashboard_condition,
+    expand_context,
+    match_targeting_rule,
+    validate_segment_rules,
+)
 from backend.app.models.experiment import Experiment
 from backend.app.models.feature_flag import FeatureFlag
 from backend.app.models.segment import Segment
@@ -33,78 +45,66 @@ from backend.app.schemas.segment import (
     SegmentStatus,
     SegmentUpdate,
 )
-from backend.app.schemas.targeting_rule import (
-    Condition,
-    LogicalOperator,
-    RuleGroup,
-)
+from backend.app.schemas.targeting_rule import TargetingRules
 
 logger = logging.getLogger(__name__)
 
 
-def _build_rule_group(rules: Dict[str, Any]) -> RuleGroup:
-    """
-    Convert a plain rules dict into a RuleGroup object usable by the rules engine.
+class SegmentRulesNotValid(Exception):
+    """A stored segment's rules fail :func:`validate_segment_rules`.
 
-    Expected input format::
-
-        {
-            "operator": "and" | "or",   # optional, defaults to "and"
-            "conditions": [
-                {"attribute": "country", "operator": "eq", "value": "US"},
-                ...
-            ],
-            "groups": [...]              # optional nested groups
-        }
+    Rows written before segment rules were checked on save (the legacy
+    ``{"operator", "conditions"}`` shape, or an empty or typo'd group) are
+    left as they are. They are never evaluated: ``evaluate`` answers 409 and
+    bulk-evaluate reports ``false`` for them. Deliberately not a
+    ``ValueError``, which the routes answer as 404.
     """
-    operator_raw = rules.get("operator", "and").lower()
+
+    def __init__(self, segment_id: Any) -> None:
+        self.segment_id = str(segment_id)
+        super().__init__("segment rules not valid")
+
+
+def stored_segment_rules(segment: Segment) -> TargetingRules:
+    """The rules membership evaluates for ``segment``.
+
+    Raises:
+        SegmentRulesNotValid: when the stored rules fail validation.
+    """
     try:
-        operator = LogicalOperator(operator_raw)
-    except ValueError:
-        operator = LogicalOperator.AND
-
-    conditions: List[Condition] = []
-    for cond in rules.get("conditions", []):
-        try:
-            conditions.append(Condition(**cond))
-        except Exception as exc:
-            logger.warning("Skipping invalid condition %s: %s", cond, exc)
-
-    nested_groups: List[RuleGroup] = []
-    for grp in rules.get("groups", []):
-        try:
-            nested_groups.append(_build_rule_group(grp))
-        except Exception as exc:
-            logger.warning("Skipping invalid nested group %s: %s", grp, exc)
-
-    return RuleGroup(operator=operator, conditions=conditions, groups=nested_groups)
+        return validate_segment_rules(segment.rules)
+    except TargetingRulesError:
+        raise SegmentRulesNotValid(segment.id) from None
 
 
-def _collect_matched_rules(
-    rules: Dict[str, Any], user_context: Dict[str, Any]
-) -> List[str]:
+def _is_member(rules: TargetingRules, context: Dict[str, Any]) -> bool:
+    """Membership: the flag engine on the expanded context.
+
+    ``context`` must already be expanded (:func:`expand_context`).
+    :class:`PatternUnevaluable` propagates.
     """
-    Return human-readable descriptions of the conditions that matched.
+    return match_targeting_rule(rules, context) is not None
 
-    Only considers top-level conditions in the rules dict for simplicity.
+
+def _collect_matched_rules(raw_rules: Any, context: Dict[str, Any]) -> List[str]:
+    """
+    Label each condition, in any group, that ``context`` satisfies on its own.
+
+    ``raw_rules`` are stored rules that passed :func:`validate_segment_rules`;
+    ``context`` is already expanded. Labels read ``"<attribute> <operator>
+    <value>"`` in the stored (dashboard) terms.
     """
     matched: List[str] = []
-    for cond in rules.get("conditions", []):
-        attribute = cond.get("attribute", "")
-        operator = cond.get("operator", "")
-        value = cond.get("value", "")
-
-        # Build label regardless; check match separately via the engine
-        label = f"{attribute} {operator} {value}"
-        try:
-            condition_obj = Condition(**cond)
-            from backend.app.core.rules_engine import evaluate_condition
-
-            if evaluate_condition(condition_obj, user_context):
-                matched.append(label)
-        except Exception:
-            pass  # Silently skip unparseable conditions in matched_rules
-
+    for group in raw_rules.get("groups") or []:
+        for condition in group.get("conditions") or []:
+            try:
+                if evaluate_condition(convert_dashboard_condition(condition), context):
+                    matched.append(
+                        f"{condition.get('attribute', '')} "
+                        f"{condition.get('operator', '')} {condition.get('value', '')}"
+                    )
+            except PatternUnevaluable:
+                continue
     return matched
 
 
@@ -204,13 +204,15 @@ class AudienceService:
         return query.offset(offset).limit(limit).all()
 
     @staticmethod
-    def get_segment(db: Session, segment_id: str) -> Segment:
+    def get_segment(db: Session, segment_id: Union[UUID, str]) -> Segment:
         """
         Retrieve a segment by ID.
 
         Args:
             db: SQLAlchemy session.
-            segment_id: UUID string of the segment.
+            segment_id: UUID of the segment. Text that is not a UUID (bulk
+                evaluate takes ids as text) is answered as not found, without
+                a query.
 
         Returns:
             The Segment ORM object.
@@ -218,13 +220,20 @@ class AudienceService:
         Raises:
             ValueError: If no segment with the given ID exists.
         """
+        if not isinstance(segment_id, UUID):
+            try:
+                segment_id = UUID(str(segment_id))
+            except ValueError:
+                raise ValueError("Segment not found") from None
         segment = db.query(Segment).filter(Segment.id == segment_id).first()
         if segment is None:
             raise ValueError(f"Segment '{segment_id}' not found")
         return segment
 
     @staticmethod
-    def update_segment(db: Session, segment_id: str, data: SegmentUpdate) -> Segment:
+    def update_segment(
+        db: Session, segment_id: Union[UUID, str], data: SegmentUpdate
+    ) -> Segment:
         """
         Update fields on an existing segment.
 
@@ -256,7 +265,7 @@ class AudienceService:
         return segment
 
     @staticmethod
-    def delete_segment(db: Session, segment_id: str) -> None:
+    def delete_segment(db: Session, segment_id: Union[UUID, str]) -> None:
         """
         Soft-delete a segment by setting its status to ARCHIVED.
 
@@ -275,17 +284,20 @@ class AudienceService:
     @staticmethod
     def evaluate_membership(
         db: Session,
-        segment_id: str,
+        segment_id: Union[UUID, str],
         user_context: Dict[str, Any],
     ) -> SegmentMembershipResponse:
         """
         Evaluate if a user context matches a segment's targeting rules.
 
-        Uses ``rules_engine.evaluate_rule_group`` with the segment's stored rules.
+        The stored rules are checked with ``validate_segment_rules`` and
+        evaluated with ``match_targeting_rule`` on ``expand_context(user_context)``,
+        exactly as a feature flag evaluates the same rules. A pattern
+        condition that cannot be evaluated makes the user not a member.
 
         Args:
             db: SQLAlchemy session.
-            segment_id: UUID string of the segment to evaluate against.
+            segment_id: UUID of the segment to evaluate against.
             user_context: Dict of user attributes (e.g. country, plan, age).
 
         Returns:
@@ -293,27 +305,22 @@ class AudienceService:
 
         Raises:
             ValueError: If the segment does not exist.
+            SegmentRulesNotValid: If the stored rules fail validation.
         """
         segment = AudienceService.get_segment(db, segment_id)
+        rules = stored_segment_rules(segment)
+        context = expand_context(user_context)
 
-        rules = segment.rules or {}
         is_member = False
         matched_rules: List[str] = []
-
-        if rules:
-            try:
-                rule_group = _build_rule_group(rules)
-                is_member = evaluate_rule_group(rule_group, user_context)
-                if is_member:
-                    matched_rules = _collect_matched_rules(rules, user_context)
-            except PatternUnevaluable as exc:
-                # A pattern condition could not be evaluated: not a member.
-                report_unevaluable(exc, f"segment:{segment_id}")
-                is_member = False
-                matched_rules = []
-            except Exception as exc:
-                logger.error("Error evaluating segment %s rules: %s", segment_id, exc)
-                is_member = False
+        try:
+            is_member = _is_member(rules, context)
+        except PatternUnevaluable as exc:
+            # A pattern condition could not be evaluated: not a member.
+            report_unevaluable(exc, f"segment:{segment.id}")
+            is_member = False
+        if is_member:
+            matched_rules = _collect_matched_rules(segment.rules, context)
 
         return SegmentMembershipResponse(
             segment_id=str(segment.id),
@@ -349,6 +356,9 @@ class AudienceService:
             except ValueError:
                 # Segment not found — treat as non-member
                 memberships[segment_id] = False
+            except SegmentRulesNotValid:
+                # Stored rules that fail validation are never evaluated.
+                memberships[segment_id] = False
             except Exception as exc:
                 logger.error("Error evaluating segment %s in bulk: %s", segment_id, exc)
                 memberships[segment_id] = False
@@ -364,7 +374,7 @@ class AudienceService:
     @staticmethod
     def get_segment_experiments(
         db: Session,
-        segment_id: str,
+        segment_id: Union[UUID, str],
     ) -> SegmentExperimentResponse:
         """
         Find all experiments and feature flags that reference this segment in their
@@ -384,7 +394,7 @@ class AudienceService:
             ValueError: If the segment does not exist.
         """
         # Verify segment exists first
-        AudienceService.get_segment(db, segment_id)
+        segment_id = str(AudienceService.get_segment(db, segment_id).id)
 
         experiments_data: List[Dict[str, Any]] = []
         feature_flags_data: List[Dict[str, Any]] = []
@@ -450,58 +460,45 @@ class AudienceService:
         sample_size: int = 1000,
     ) -> AudiencePreviewResponse:
         """
-        Estimate the audience size that would match the given rules.
+        Estimate the share of users the given rules would match.
 
-        Evaluates the rules dict against a sample of user contexts drawn from
-        recent assignment records.  When no assignments exist (e.g. test env)
-        falls back to returning 0 matched out of the requested sample_size.
+        Samples at most ``sample_size`` assignments that carry a context and
+        evaluates the rules against each context, as membership does. Only
+        those rows count: ``sample_size`` in the answer is how many there
+        were, and with none the answer is ``0.0`` of ``0``, not a percentage
+        of rows that could not be evaluated.
 
         Args:
             db: SQLAlchemy session.
-            rules: Targeting rules dict (same format as SegmentCreate.rules).
-            sample_size: Maximum number of user contexts to sample.
+            rules: Rules that passed ``validate_segment_rules`` (the
+                ``SegmentCreate`` body).
+            sample_size: Maximum number of assignments to sample.
 
         Returns:
             AudiencePreviewResponse with estimated_percentage, sample_size, and matched.
         """
+        from backend.app.models.assignment import Assignment
+
+        engine_rules = validate_segment_rules(rules)
+        rows = (
+            db.query(Assignment.context)
+            .filter(Assignment.context.isnot(None))
+            .limit(sample_size)
+            .all()
+        )
 
         matched = 0
         actual_sample = 0
-
-        try:
-            rule_group = _build_rule_group(rules)
-
-            # Try to pull recent user contexts from assignments
+        for (context,) in rows:
+            if not isinstance(context, dict) or not context:
+                continue
+            actual_sample += 1
             try:
-                from backend.app.models.assignment import Assignment
-
-                assignments = db.query(Assignment).limit(sample_size).all()
-                actual_sample = len(assignments)
-
-                for assignment in assignments:
-                    user_context: Dict[str, Any] = {}
-
-                    # Assignment may have context stored in JSONB
-                    if hasattr(assignment, "context") and assignment.context:
-                        user_context = assignment.context
-                    elif hasattr(assignment, "user_id"):
-                        user_context = {"user_id": str(assignment.user_id)}
-
-                    try:
-                        if evaluate_rule_group(rule_group, user_context):
-                            matched += 1
-                    except PatternUnevaluable:
-                        # Not counted, like any user the rules do not match.
-                        pass
-                    except Exception:
-                        pass
-
-            except Exception as exc:
-                logger.debug("Could not sample from assignments: %s", exc)
-                actual_sample = 0
-
-        except Exception as exc:
-            logger.error("Error in preview_audience_size: %s", exc)
+                if _is_member(engine_rules, expand_context(context)):
+                    matched += 1
+            except PatternUnevaluable:
+                # Not counted, like any user the rules do not match.
+                pass
 
         estimated_percentage = (
             (matched / actual_sample * 100.0) if actual_sample > 0 else 0.0

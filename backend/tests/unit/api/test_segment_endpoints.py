@@ -13,6 +13,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from backend.app.api import deps
+from backend.app.api.v1.endpoints.segments import SEGMENT_RULES_NOT_VALID
 from backend.app.main import app
 from backend.app.models.segment import Segment
 from backend.app.models.segment import SegmentStatus as ModelSegmentStatus
@@ -24,6 +25,7 @@ from backend.app.schemas.segment import (
     SegmentMembershipResponse,
     SegmentStatus,
 )
+from backend.app.services.audience_service import SegmentRulesNotValid
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -52,13 +54,23 @@ def _make_segment(
     seg.name = name
     seg.description = "Test description"
     seg.status = status
-    seg.rules = rules or {"operator": "and", "conditions": []}
+    seg.rules = rules or VALID_RULES
     seg.created_at = datetime(2025, 1, 1, 12, 0)
     seg.updated_at = datetime(2025, 1, 2, 12, 0)
     return seg
 
 
-VALID_RULES = {"operator": "and", "conditions": []}
+VALID_RULES = {
+    "logical_operator": "AND",
+    "groups": [
+        {
+            "logical_operator": "AND",
+            "conditions": [
+                {"attribute": "country", "operator": "equals", "value": "US"}
+            ],
+        }
+    ],
+}
 
 
 class TestListSegments:
@@ -333,7 +345,7 @@ class TestEvaluateSegmentMembership:
             segment_id=seg_id,
             segment_name="Test Segment",
             is_member=True,
-            matched_rules=["country eq US"],
+            matched_rules=["country equals US"],
         )
 
         app.dependency_overrides[deps.get_current_active_user] = lambda: mock_user
@@ -373,6 +385,28 @@ class TestEvaluateSegmentMembership:
             )
 
         assert response.status_code == 404
+
+    def test_evaluate_returns_409_when_stored_rules_are_not_valid(self):
+        """A segment stored before rules were checked answers 409, fixed text."""
+        mock_user = _make_user()
+        mock_db = MagicMock()
+
+        app.dependency_overrides[deps.get_current_active_user] = lambda: mock_user
+        app.dependency_overrides[deps.get_db] = lambda: mock_db
+
+        with patch(
+            "backend.app.api.v1.endpoints.segments.AudienceService.evaluate_membership",
+            side_effect=SegmentRulesNotValid("x"),
+        ):
+            client = TestClient(app)
+            response = client.post(
+                f"/api/v1/segments/{uuid.uuid4()}/evaluate",
+                json={"user_context": {"country": "US"}},
+            )
+
+        assert response.status_code == 409
+        assert response.json() == {"detail": SEGMENT_RULES_NOT_VALID}
+        assert "rules not valid" in SEGMENT_RULES_NOT_VALID
 
 
 class TestBulkEvaluate:

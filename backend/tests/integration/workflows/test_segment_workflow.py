@@ -10,8 +10,8 @@ These tests exercise the complete audience segment lifecycle:
   6. Archive (soft-delete) the segment
   7. Verify archived segment does not appear in the 'active' filtered list
 
-Segments use the rules_engine format:
-  {"operator": "and", "conditions": [{"attribute": ..., "operator": ..., "value": ...}]}
+Segments use the targeting rule format (#440):
+  {"logical_operator": "AND", "groups": [{"conditions": [{"attribute", "operator", "value"}]}]}
 """
 
 import uuid
@@ -34,10 +34,15 @@ def _segment_key() -> str:
 def _premium_us_rules() -> dict:
     """Rules that match US premium users."""
     return {
-        "operator": "and",
-        "conditions": [
-            {"attribute": "country", "operator": "eq", "value": "US"},
-            {"attribute": "plan", "operator": "eq", "value": "premium"},
+        "logical_operator": "AND",
+        "groups": [
+            {
+                "logical_operator": "AND",
+                "conditions": [
+                    {"attribute": "country", "operator": "equals", "value": "US"},
+                    {"attribute": "plan", "operator": "equals", "value": "premium"},
+                ],
+            }
         ],
     }
 
@@ -45,9 +50,17 @@ def _premium_us_rules() -> dict:
 def _age_over_18_rules() -> dict:
     """Rules that match users who are over 18."""
     return {
-        "operator": "and",
-        "conditions": [
-            {"attribute": "age", "operator": "gte", "value": 18},
+        "logical_operator": "AND",
+        "groups": [
+            {
+                "conditions": [
+                    {
+                        "attribute": "age",
+                        "operator": "greater_than_or_equal",
+                        "value": 18,
+                    },
+                ]
+            }
         ],
     }
 

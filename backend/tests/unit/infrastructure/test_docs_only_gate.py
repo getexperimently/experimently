@@ -129,6 +129,9 @@ NOT_DOCS_TESTS = {
     "backend/tests/unit/api/test_segment_preview_limits.py": "docs/api only",
     # Reads only docs/api/openapi-v1.stable.json (same reason as above).
     "backend/tests/unit/api/test_user_response_email_schema.py": "docs/api only",
+    # Reads only docs/api/openapi-v1.stable.json and docs/api/stability.md
+    # (same reason as above).
+    "backend/tests/smoke/test_segment_routes_in_snapshot.py": "docs/api only",
     # Reads the `json` extra-files in release-please-config.json: the two
     # docs/api/ snapshots and frontend/src/tests/fixtures/openapi.json. None
     # of those, nor the config, is docs-only (same reason as above).

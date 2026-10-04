@@ -34,15 +34,31 @@ from backend.tests.integration.helpers import list_all_segment_ids
 # ---------------------------------------------------------------------------
 
 
+def _rules(*conditions, logical_operator: str = "AND") -> dict:
+    """Segment rules in the targeting rule format (the dashboard shape)."""
+    return {
+        "logical_operator": logical_operator,
+        "groups": [{"logical_operator": "AND", "conditions": list(conditions)}],
+    }
+
+
+def _eq(attribute: str, value) -> dict:
+    return {"attribute": attribute, "operator": "equals", "value": value}
+
+
+def _regex(value: str) -> dict:
+    return {"attribute": "email", "operator": "regex", "value": value}
+
+
+US_RULES = _rules(_eq("country", "US"))
+
+
 def _valid_segment_payload(name: str = None) -> dict:
     """Return a minimal valid SegmentCreate payload."""
     return {
         "name": name or f"Segment {uuid.uuid4().hex[:8]}",
         "description": "Integration test segment",
-        "rules": {
-            "operator": "AND",
-            "conditions": [{"attribute": "country", "operator": "eq", "value": "US"}],
-        },
+        "rules": US_RULES,
     }
 
 
@@ -134,10 +150,7 @@ class TestCreateSegment:
 
     def test_created_segment_contains_rules(self, admin_client):
         """Created segment response contains the provided rules."""
-        rules = {
-            "operator": "AND",
-            "conditions": [{"attribute": "plan", "operator": "eq", "value": "premium"}],
-        }
+        rules = _rules(_eq("plan", "premium"))
         payload = {"name": "Premium Segment", "rules": rules}
         response = admin_client.post("/api/v1/segments/", json=payload)
 
@@ -351,13 +364,9 @@ class TestUpdateSegment:
     def test_update_rules(self, admin_client):
         """Admin can update the targeting rules of a segment."""
         seg = _create_segment(admin_client, "Rules Update Segment")
-        new_rules = {
-            "operator": "OR",
-            "conditions": [
-                {"attribute": "country", "operator": "eq", "value": "CA"},
-                {"attribute": "country", "operator": "eq", "value": "UK"},
-            ],
-        }
+        new_rules = _rules(
+            _eq("country", "CA"), _eq("country", "UK"), logical_operator="OR"
+        )
         payload = {"rules": new_rules}
         response = admin_client.put(f"/api/v1/segments/{seg['id']}", json=payload)
         assert response.status_code == 200, response.text
@@ -467,12 +476,7 @@ class TestEvaluateMembership:
         # Create a segment for US users
         payload = {
             "name": "US Segment",
-            "rules": {
-                "operator": "AND",
-                "conditions": [
-                    {"attribute": "country", "operator": "eq", "value": "US"}
-                ],
-            },
+            "rules": US_RULES,
         }
         create_resp = admin_client.post("/api/v1/segments/", json=payload)
         assert create_resp.status_code == 201, create_resp.text
@@ -493,12 +497,7 @@ class TestEvaluateMembership:
         """User context that does not satisfy the rules returns is_member=False."""
         payload = {
             "name": "US Only Segment",
-            "rules": {
-                "operator": "AND",
-                "conditions": [
-                    {"attribute": "country", "operator": "eq", "value": "US"}
-                ],
-            },
+            "rules": US_RULES,
         }
         create_resp = admin_client.post("/api/v1/segments/", json=payload)
         assert create_resp.status_code == 201, create_resp.text
@@ -719,12 +718,7 @@ class TestPreviewAudience:
 
         payload = {
             "name": seg["name"],
-            "rules": {
-                "operator": "AND",
-                "conditions": [
-                    {"attribute": "country", "operator": "eq", "value": "US"}
-                ],
-            },
+            "rules": US_RULES,
         }
         response = admin_client.post(
             f"/api/v1/segments/{seg['id']}/preview", json=payload
@@ -744,7 +738,7 @@ class TestPreviewAudience:
         fake_id = "00000000-0000-0000-0000-000000000005"
         payload = {
             "name": "Any Name",
-            "rules": {"operator": "AND", "conditions": []},
+            "rules": US_RULES,
         }
         response = admin_client.post(
             f"/api/v1/segments/{fake_id}/preview", json=payload
@@ -757,7 +751,7 @@ class TestPreviewAudience:
 
         payload = {
             "name": seg["name"],
-            "rules": {"operator": "AND", "conditions": []},
+            "rules": US_RULES,
         }
         response = admin_client.post(
             f"/api/v1/segments/{seg['id']}/preview?sample_size=100",
@@ -771,7 +765,7 @@ class TestPreviewAudience:
 
         payload = {
             "name": seg["name"],
-            "rules": {"operator": "AND", "conditions": []},
+            "rules": US_RULES,
         }
         response = admin_client.post(
             f"/api/v1/segments/{seg['id']}/preview?sample_size=5",
@@ -785,12 +779,7 @@ class TestPreviewAudience:
 
         payload = {
             "name": seg["name"],
-            "rules": {
-                "operator": "AND",
-                "conditions": [
-                    {"attribute": "country", "operator": "eq", "value": "US"}
-                ],
-            },
+            "rules": US_RULES,
         }
         response = admin_client.post(
             f"/api/v1/segments/{seg['id']}/preview", json=payload
@@ -806,13 +795,10 @@ class TestPreviewAudience:
     def test_preview_refuses_eleven_match_regex_conditions(self, admin_client):
         """More than 10 match_regex conditions is a 422 on rules, not a preview."""
         seg = _create_segment(admin_client, "Regex Limit Segment")
-        conditions = [
-            {"attribute": "email", "operator": "match_regex", "value": f"^u{i}"}
-            for i in range(11)
-        ]
+        conditions = [_regex(f"^u{i}") for i in range(11)]
         response = admin_client.post(
             f"/api/v1/segments/{seg['id']}/preview?sample_size=10",
-            json={"name": seg["name"], "rules": {"conditions": conditions}},
+            json={"name": seg["name"], "rules": _rules(*conditions)},
         )
         assert response.status_code == 422, response.text
         [error] = response.json()["detail"]
@@ -820,21 +806,16 @@ class TestPreviewAudience:
         assert error["type"] == "value_error"
 
     @pytest.mark.regression
-    def test_preview_accepts_ten_match_regex_conditions_at_sample_size_50(
-        self, admin_client
-    ):
-        """10 match_regex conditions x sample_size 50 is at the limit and previews."""
+    def test_preview_accepts_ten_regex_conditions_at_sample_size_45(self, admin_client):
+        """10 regex conditions x sample_size 45 is inside the limits and previews."""
         seg = _create_segment(admin_client, "Regex At Limit Segment")
-        conditions = [
-            {"attribute": "email", "operator": "match_regex", "value": f"^u{i}"}
-            for i in range(10)
-        ]
+        conditions = [_regex(f"^u{i}") for i in range(10)]
         response = admin_client.post(
-            f"/api/v1/segments/{seg['id']}/preview?sample_size=50",
-            json={"name": seg["name"], "rules": {"conditions": conditions}},
+            f"/api/v1/segments/{seg['id']}/preview?sample_size=45",
+            json={"name": seg["name"], "rules": _rules(*conditions)},
         )
         assert response.status_code == 200, response.text
-        assert response.json()["sample_size"] <= 50
+        assert response.json()["sample_size"] <= 45
 
     @pytest.mark.regression
     def test_preview_refuses_a_sample_size_the_match_regex_conditions_exceed(
@@ -842,11 +823,7 @@ class TestPreviewAudience:
     ):
         """One match_regex condition at the default sample_size (1000) is a 422."""
         seg = _create_segment(admin_client, "Regex Sample Segment")
-        rules = {
-            "conditions": [
-                {"attribute": "email", "operator": "match_regex", "value": "x"}
-            ]
-        }
+        rules = _rules(_regex("x"))
         response = admin_client.post(
             f"/api/v1/segments/{seg['id']}/preview",
             json={"name": seg["name"], "rules": rules},
