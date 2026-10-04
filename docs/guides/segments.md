@@ -80,17 +80,18 @@ It prints `{"added":1,"already_members":1,"member_count":4}`.
 
 A segment holds at most 1,000,000 IDs. Send a longer file in chunks of 10,000, one request
 at a time, and stop at the first error. This writes 25,000 IDs, one per line, to a file in a
-scratch directory, sends them in three chunks and prints each answer:
+scratch directory, sends them in three chunks and prints each answer. Each body is piped to
+`curl` (`--data-binary @-`): 10,000 IDs are too long for one command-line argument on Linux.
 
 ```{.bash exec timeout=300}
 cd "$(mktemp -d)"
 seq -f 'cust-%06g' 1 25000 > customers.txt
 split -l 10000 customers.txt chunk-
 for chunk in chunk-*; do
-  RESPONSE=$(curl -s -f -X POST localhost:8000/api/v1/segments/$SEGMENT/members \
+  RESPONSE=$(jq -R . "$chunk" | jq -s '{add: .}' | curl -s -f -X POST localhost:8000/api/v1/segments/$SEGMENT/members \
     -H "Authorization: Bearer $TOKEN" \
     -H 'content-type: application/json' \
-    -d "$(jq -R . "$chunk" | jq -s '{add: .}')") || break
+    --data-binary @-) || break
   jq -c . <<<"$RESPONSE"
 done
 ```
