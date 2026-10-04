@@ -7,8 +7,9 @@ audit trail of all system actions.
 """
 
 import logging
-from datetime import datetime
-from typing import Optional
+from dataclasses import dataclass
+from datetime import datetime, timezone
+from typing import Iterator, Literal, Optional
 from uuid import UUID
 
 from fastapi import (
@@ -19,19 +20,22 @@ from fastapi import (
     Query,
     status,
 )
+from fastapi.responses import StreamingResponse
 from pydantic import ValidationError
+from sqlalchemy import desc
 from sqlalchemy.orm import Session
 
 from backend.app.api import deps
 from backend.app.core.logger import unexpected_failure
 from backend.app.core.permissions import can_read_all_audit_logs
-from backend.app.models.audit_log import ActionType, EntityType
+from backend.app.models.audit_log import ActionType, AuditLog, EntityType
 from backend.app.models.user import User
 from backend.app.schemas.audit_log import (
     AuditLogListResponse,
     AuditLogResponse,
     AuditStatsResponse,
 )
+from backend.app.services import audit_export
 from backend.app.services.audit_service import AuditService
 
 logger = logging.getLogger(__name__)
@@ -94,6 +98,75 @@ router = APIRouter(
 )
 
 
+@dataclass(frozen=True)
+class AuditLogFilters:
+    """The filters a list or an export applies, after the access rule."""
+
+    user_id: Optional[UUID]
+    entity_type: Optional[EntityType]
+    entity_id: Optional[UUID]
+    action_type: Optional[ActionType]
+    from_date: Optional[datetime]
+    to_date: Optional[datetime]
+
+
+def resolve_audit_log_filters(
+    current_user: User,
+    *,
+    user_id: Optional[UUID],
+    entity_type: Optional[str],
+    entity_id: Optional[UUID],
+    action_type: Optional[str],
+    from_date: Optional[datetime],
+    to_date: Optional[datetime],
+) -> AuditLogFilters:
+    """Apply the access rule to a list or export request, and check its filters.
+
+    Superusers, ADMIN and ANALYST see every entry. DEVELOPER and VIEWER see
+    only their own: ``user_id`` is replaced by their own id, whatever was
+    asked. An unknown ``entity_type`` or ``action_type``, or a ``to_date``
+    that is not after ``from_date``, answers 400.
+    """
+    # ADMIN and ANALYST read all entries; DEVELOPER and VIEWER read their own.
+    if not can_read_all_audit_logs(current_user):
+        user_id = current_user.id
+
+    entity_type_enum = None
+    if entity_type:
+        try:
+            entity_type_enum = EntityType(entity_type)
+        except ValueError:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=INVALID_ENTITY_TYPE,
+            )
+
+    action_type_enum = None
+    if action_type:
+        try:
+            action_type_enum = ActionType(action_type)
+        except ValueError:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=INVALID_ACTION_TYPE,
+            )
+
+    if from_date and to_date and to_date <= from_date:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="to_date must be after from_date",
+        )
+
+    return AuditLogFilters(
+        user_id=user_id,
+        entity_type=entity_type_enum,
+        entity_id=entity_id,
+        action_type=action_type_enum,
+        from_date=from_date,
+        to_date=to_date,
+    )
+
+
 @router.get(
     "/",
     response_model=AuditLogListResponse,
@@ -134,48 +207,26 @@ async def list_audit_logs(
     see only their own entries; a `user_id` filter naming anyone else is
     replaced by their own id.
     """
-    # ADMIN and ANALYST read all entries; DEVELOPER and VIEWER read their own.
-    if not can_read_all_audit_logs(current_user):
-        user_id = current_user.id
-
-    # Validate and convert enum parameters
-    entity_type_enum = None
-    if entity_type:
-        try:
-            entity_type_enum = EntityType(entity_type)
-        except ValueError:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=INVALID_ENTITY_TYPE,
-            )
-
-    action_type_enum = None
-    if action_type:
-        try:
-            action_type_enum = ActionType(action_type)
-        except ValueError:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=INVALID_ACTION_TYPE,
-            )
-
-    # Validate date range
-    if from_date and to_date and to_date <= from_date:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="to_date must be after from_date",
-        )
+    filters = resolve_audit_log_filters(
+        current_user,
+        user_id=user_id,
+        entity_type=entity_type,
+        entity_id=entity_id,
+        action_type=action_type,
+        from_date=from_date,
+        to_date=to_date,
+    )
 
     try:
         # Get audit logs
         audit_logs, total_count = AuditService.get_audit_logs(
             db=db,
-            user_id=user_id,
-            entity_type=entity_type_enum,
-            entity_id=entity_id,
-            action_type=action_type_enum,
-            from_date=from_date,
-            to_date=to_date,
+            user_id=filters.user_id,
+            entity_type=filters.entity_type,
+            entity_id=filters.entity_id,
+            action_type=filters.action_type,
+            from_date=filters.from_date,
+            to_date=filters.to_date,
             page=page,
             limit=limit,
         )
@@ -212,6 +263,151 @@ async def list_audit_logs(
         raise unexpected_failure(
             e, "Audit log list", AUDIT_LIST_FAILED, db=db, logger=logger
         )
+
+
+AUDIT_EXPORT_FAILED = "Failed to export audit logs"
+
+
+def export_cap_message(count: int) -> str:
+    """The 422 detail for an export that matches more than the cap."""
+    return (
+        f"{count} entries match these filters; an export holds at most "
+        f"{audit_export.EXPORT_MAX_ROWS}. Narrow from_date and to_date, or filter "
+        "by action_type or entity_type."
+    )
+
+
+def _stream_items(query, fmt: str) -> Iterator[str]:
+    """The export body: every entry ``query`` returns, newest first."""
+    rows = query.order_by(desc(AuditLog.timestamp)).yield_per(
+        audit_export.EXPORT_BATCH_SIZE
+    )
+
+    def items():
+        try:
+            for row in rows:
+                yield audit_export.entry_item(row)
+        except Exception as e:
+            # The status line has gone: the body ends here, short of
+            # X-Total-Count. Only the exception type is logged.
+            logger.error("Audit log export stopped early (%s)", type(e).__name__)
+
+    if fmt == "csv":
+        return audit_export.csv_body(items())
+    return audit_export.json_body(items())
+
+
+@router.get(
+    "/export",
+    summary="Export audit logs as CSV or JSON",
+    response_class=StreamingResponse,
+    openapi_extra={"x-stability": "beta"},
+    responses={
+        200: {
+            "description": (
+                "Every entry the filters match, newest first, as a file. "
+                "X-Total-Count is the number of entries the file holds."
+            ),
+            "headers": {
+                "X-Total-Count": {
+                    "description": "Number of entries in the file",
+                    "schema": {"type": "integer"},
+                },
+                "Content-Disposition": {
+                    "description": "attachment; filename=audit-log-<UTC>.<format>",
+                    "schema": {"type": "string"},
+                },
+            },
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "array",
+                        "items": {"$ref": "#/components/schemas/AuditLogResponse"},
+                    }
+                },
+                "text/csv": {"schema": {"type": "string"}},
+            },
+        },
+        400: {
+            "description": "An unknown entity_type or action_type, or dates out of order"
+        },
+        422: {
+            "description": (
+                f"More than {audit_export.EXPORT_MAX_ROWS} entries match, or a "
+                "parameter is not valid"
+            )
+        },
+    },
+)
+def export_audit_logs(
+    *,
+    db: Session = Depends(deps.get_db),
+    current_user: User = Depends(deps.get_current_active_user),
+    export_format: Literal["json", "csv"] = Query(
+        "json", alias="format", description="File format: json or csv"
+    ),
+    user_id: Optional[UUID] = Query(None, description="Filter by user ID"),
+    entity_type: Optional[str] = Query(None, description="Filter by entity type"),
+    entity_id: Optional[UUID] = Query(None, description="Filter by entity ID"),
+    action_type: Optional[str] = Query(None, description="Filter by action type"),
+    from_date: Optional[datetime] = Query(
+        None, description="Entries at or after this time (ISO format)"
+    ),
+    to_date: Optional[datetime] = Query(
+        None, description="Entries at or before this time (ISO format)"
+    ),
+) -> StreamingResponse:
+    """
+    Download every audit entry the filters match, as CSV or JSON.
+
+    The filters, the access rule and the order (newest first) are the list
+    route's. Entries written after the request arrived are not included.
+    More than 50,000 matching entries answers 422; the file is never cut
+    short. `X-Total-Count` is the number of entries the file holds: compare
+    it with the entries you received. Exporting writes no audit entry.
+    """
+    requested_at = datetime.now(timezone.utc)
+    filters = resolve_audit_log_filters(
+        current_user,
+        user_id=user_id,
+        entity_type=entity_type,
+        entity_id=entity_id,
+        action_type=action_type,
+        from_date=from_date,
+        to_date=to_date,
+    )
+
+    try:
+        query = AuditService.filtered_query(
+            db,
+            user_id=filters.user_id,
+            entity_type=filters.entity_type,
+            entity_id=filters.entity_id,
+            action_type=filters.action_type,
+            from_date=filters.from_date,
+            to_date=filters.to_date,
+        ).filter(AuditLog.timestamp <= requested_at)
+        total = query.count()
+    except Exception as e:
+        raise unexpected_failure(
+            e, "Audit log export", AUDIT_EXPORT_FAILED, db=db, logger=logger
+        )
+
+    if total > audit_export.EXPORT_MAX_ROWS:
+        raise HTTPException(
+            status_code=422,
+            detail=export_cap_message(total),
+        )
+
+    filename = audit_export.export_filename(requested_at, export_format)
+    return StreamingResponse(
+        _stream_items(query, export_format),
+        media_type=audit_export.MEDIA_TYPES[export_format],
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            "X-Total-Count": str(total),
+        },
+    )
 
 
 @router.get(

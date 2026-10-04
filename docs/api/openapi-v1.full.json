@@ -17655,7 +17655,7 @@
   "info": {
     "description": "API for managing experiments and feature flags in test environment",
     "title": "Experimently",
-    "version": "0.20.0"
+    "version": "0.21.0"
   },
   "openapi": "3.1.0",
   "paths": {
@@ -18880,6 +18880,232 @@
           "Audit Logs",
           "Audit Logs"
         ]
+      }
+    },
+    "/api/v1/audit-logs/export": {
+      "get": {
+        "description": "Download every audit entry the filters match, as CSV or JSON.\n\nThe filters, the access rule and the order (newest first) are the list\nroute's. Entries written after the request arrived are not included.\nMore than 50,000 matching entries answers 422; the file is never cut\nshort. `X-Total-Count` is the number of entries the file holds: compare\nit with the entries you received. Exporting writes no audit entry.",
+        "operationId": "export_audit_logs_api_v1_audit_logs_export_get",
+        "parameters": [
+          {
+            "description": "File format: json or csv",
+            "in": "query",
+            "name": "format",
+            "required": false,
+            "schema": {
+              "default": "json",
+              "description": "File format: json or csv",
+              "enum": [
+                "json",
+                "csv"
+              ],
+              "title": "Format",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Filter by user ID",
+            "in": "query",
+            "name": "user_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by user ID",
+              "title": "User Id"
+            }
+          },
+          {
+            "description": "Filter by entity type",
+            "in": "query",
+            "name": "entity_type",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by entity type",
+              "title": "Entity Type"
+            }
+          },
+          {
+            "description": "Filter by entity ID",
+            "in": "query",
+            "name": "entity_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by entity ID",
+              "title": "Entity Id"
+            }
+          },
+          {
+            "description": "Filter by action type",
+            "in": "query",
+            "name": "action_type",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by action type",
+              "title": "Action Type"
+            }
+          },
+          {
+            "description": "Entries at or after this time (ISO format)",
+            "in": "query",
+            "name": "from_date",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Entries at or after this time (ISO format)",
+              "title": "From Date"
+            }
+          },
+          {
+            "description": "Entries at or before this time (ISO format)",
+            "in": "query",
+            "name": "to_date",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Entries at or before this time (ISO format)",
+              "title": "To Date"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/AuditLogResponse"
+                  },
+                  "type": "array"
+                }
+              },
+              "text/csv": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Every entry the filters match, newest first, as a file. X-Total-Count is the number of entries the file holds.",
+            "headers": {
+              "Content-Disposition": {
+                "description": "attachment; filename=audit-log-<UTC>.<format>",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-Total-Count": {
+                "description": "Number of entries in the file",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "An unknown entity_type or action_type, or dates out of order"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": {
+                    "message": "Could not validate credentials",
+                    "status_code": 401
+                  }
+                }
+              }
+            },
+            "description": "Authentication failed"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": {
+                    "message": "Not enough permissions",
+                    "status_code": 403
+                  }
+                }
+              }
+            },
+            "description": "Permission denied"
+          },
+          "422": {
+            "description": "More than 50000 entries match, or a parameter is not valid"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": {
+                    "message": "Internal server error",
+                    "status_code": 500
+                  }
+                }
+              }
+            },
+            "description": "Internal server error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Export audit logs as CSV or JSON",
+        "tags": [
+          "Audit Logs",
+          "Audit Logs"
+        ],
+        "x-stability": "beta"
       }
     },
     "/api/v1/audit-logs/stats": {

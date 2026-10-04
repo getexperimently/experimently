@@ -638,7 +638,8 @@ def test_a_revert_that_outlasts_a_read_is_named_while_the_wait_runs(runner):
 @pytest.mark.regression
 def test_a_group_still_busy_at_the_cap_creates_nothing_and_says_so(runner):
     """At GROUP_IDLE_POLLS (60 reads, about 5 minutes) with the group still
-    busy: labelled, nothing created, no new output, and the summary still
+    busy: labelled, nothing created, only the stop step's `stopped` and
+    `stop_wait` outputs (#759), and the summary still
     reads what the API is serving. Planted defect: no `exit 1` at the cap."""
     rules = [
         rule("deploy list-deployments", answers=[BAD_ID, CD_REVERT_ID]),
@@ -679,7 +680,12 @@ def test_a_group_still_busy_at_the_cap_creates_nothing_and_says_so(runner):
         "Do not dispatch Rollback again while any of them is active: a new "
         "Rollback refuses while CodeDeploy's revert is running."
     ), line
-    assert set(outputs["stop"]) == {"__outcome__"}, outputs["stop"]
+    # #759: what it stopped, and how its wait ended. Exactly these outputs.
+    assert outputs["stop"] == {
+        "stopped": BAD_ID,
+        "stop_wait": "timeout",
+        "__outcome__": "failure",
+    }, outputs["stop"]
     assert outputs["codedeploy"]["__outcome__"] == "skipped"
     headline = _headline(summary)
     expected = f"{SERVING_ON_TARGET} (its verify step: skipped); {DIFFERENT_RELEASES}"

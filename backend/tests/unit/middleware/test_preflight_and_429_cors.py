@@ -56,6 +56,9 @@ CORS_KWARGS = {
         "X-RateLimit-Limit",
         "X-RateLimit-Remaining",
         "X-RateLimit-Window",
+        # The audit log export's entry count, which the dashboard compares
+        # with the rows it received before it saves the file.
+        "X-Total-Count",
     ],
 }
 

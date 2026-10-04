@@ -1,0 +1,265 @@
+{
+  "_provenance": {
+    "source": "real account",
+    "real_run_id": "wl-snowflake-20261004T194134Z-155c1c4b",
+    "check": "sf_table_columns",
+    "request": {
+      "method": "GET",
+      "path": "/api/v2/statements/019c06a4-0000-df4f-0000-00100006589e"
+    },
+    "note": "Recorded on a real account by the warehouse_live check, then scrubbed: the account, user, database, schema, role and warehouse names, the statement handle, the request id and the creation time are replaced with this suite's placeholders. Everything else is as Snowflake answered."
+  },
+  "status": 200,
+  "body": {
+    "resultSetMetaData": {
+      "numRows": 4,
+      "format": "jsonv2",
+      "partitionInfo": [
+        {
+          "rowCount": 4,
+          "uncompressedSize": 714
+        }
+      ],
+      "rowType": [
+        {
+          "name": "table_name",
+          "database": "",
+          "schema": "",
+          "table": "",
+          "nullable": true,
+          "precision": null,
+          "scale": null,
+          "collation": null,
+          "byteLength": 16777216,
+          "length": 16777216,
+          "type": "text"
+        },
+        {
+          "name": "schema_name",
+          "database": "",
+          "schema": "",
+          "table": "",
+          "nullable": true,
+          "precision": null,
+          "scale": null,
+          "collation": null,
+          "byteLength": 16777216,
+          "length": 16777216,
+          "type": "text"
+        },
+        {
+          "name": "column_name",
+          "database": "",
+          "schema": "",
+          "table": "",
+          "nullable": true,
+          "precision": null,
+          "scale": null,
+          "collation": null,
+          "byteLength": 16777216,
+          "length": 16777216,
+          "type": "text"
+        },
+        {
+          "name": "data_type",
+          "database": "",
+          "schema": "",
+          "table": "",
+          "nullable": true,
+          "precision": null,
+          "scale": null,
+          "collation": null,
+          "byteLength": 16777216,
+          "length": 16777216,
+          "type": "text"
+        },
+        {
+          "name": "null?",
+          "database": "",
+          "schema": "",
+          "table": "",
+          "nullable": true,
+          "precision": null,
+          "scale": null,
+          "collation": null,
+          "byteLength": 16777216,
+          "length": 16777216,
+          "type": "text"
+        },
+        {
+          "name": "default",
+          "database": "",
+          "schema": "",
+          "table": "",
+          "nullable": true,
+          "precision": null,
+          "scale": null,
+          "collation": null,
+          "byteLength": 16777216,
+          "length": 16777216,
+          "type": "text"
+        },
+        {
+          "name": "kind",
+          "database": "",
+          "schema": "",
+          "table": "",
+          "nullable": true,
+          "precision": null,
+          "scale": null,
+          "collation": null,
+          "byteLength": 16777216,
+          "length": 16777216,
+          "type": "text"
+        },
+        {
+          "name": "expression",
+          "database": "",
+          "schema": "",
+          "table": "",
+          "nullable": true,
+          "precision": null,
+          "scale": null,
+          "collation": null,
+          "byteLength": 16777216,
+          "length": 16777216,
+          "type": "text"
+        },
+        {
+          "name": "comment",
+          "database": "",
+          "schema": "",
+          "table": "",
+          "nullable": true,
+          "precision": null,
+          "scale": null,
+          "collation": null,
+          "byteLength": 16777216,
+          "length": 16777216,
+          "type": "text"
+        },
+        {
+          "name": "database_name",
+          "database": "",
+          "schema": "",
+          "table": "",
+          "nullable": true,
+          "precision": null,
+          "scale": null,
+          "collation": null,
+          "byteLength": 16777216,
+          "length": 16777216,
+          "type": "text"
+        },
+        {
+          "name": "autoincrement",
+          "database": "",
+          "schema": "",
+          "table": "",
+          "nullable": true,
+          "precision": null,
+          "scale": null,
+          "collation": null,
+          "byteLength": 16777216,
+          "length": 16777216,
+          "type": "text"
+        },
+        {
+          "name": "schema_evolution_record",
+          "database": "",
+          "schema": "",
+          "table": "",
+          "nullable": true,
+          "precision": null,
+          "scale": null,
+          "collation": null,
+          "byteLength": 16777216,
+          "length": 16777216,
+          "type": "text"
+        },
+        {
+          "name": "write_default",
+          "database": "",
+          "schema": "",
+          "table": "",
+          "nullable": true,
+          "precision": null,
+          "scale": null,
+          "collation": null,
+          "byteLength": 16777216,
+          "length": 16777216,
+          "type": "text"
+        }
+      ]
+    },
+    "data": [
+      [
+        "EXPOSURES",
+        "PUBLIC",
+        "USER_ID",
+        "{\"type\":\"TEXT\",\"length\":16777216,\"byteLength\":67108864,\"nullable\":true,\"fixed\":false}",
+        "true",
+        "",
+        "COLUMN",
+        "",
+        "",
+        "ANALYTICS",
+        "",
+        null,
+        null
+      ],
+      [
+        "EXPOSURES",
+        "PUBLIC",
+        "EXPERIMENT_KEY",
+        "{\"type\":\"TEXT\",\"length\":16777216,\"byteLength\":67108864,\"nullable\":true,\"fixed\":false}",
+        "true",
+        "",
+        "COLUMN",
+        "",
+        "",
+        "ANALYTICS",
+        "",
+        null,
+        null
+      ],
+      [
+        "EXPOSURES",
+        "PUBLIC",
+        "VARIANT",
+        "{\"type\":\"TEXT\",\"length\":16777216,\"byteLength\":67108864,\"nullable\":true,\"fixed\":false}",
+        "true",
+        "",
+        "COLUMN",
+        "",
+        "",
+        "ANALYTICS",
+        "",
+        null,
+        null
+      ],
+      [
+        "EXPOSURES",
+        "PUBLIC",
+        "EXPOSED_AT",
+        "{\"type\":\"TIMESTAMP_NTZ\",\"precision\":0,\"scale\":9,\"nullable\":true}",
+        "true",
+        "",
+        "COLUMN",
+        "",
+        "",
+        "ANALYTICS",
+        "",
+        null,
+        null
+      ]
+    ],
+    "code": "090001",
+    "statementStatusUrl": "/api/v2/statements/019c06a4-0000-df4f-0000-00100006589e?requestId=00000000-0000-4000-8000-000000000000",
+    "requestId": "00000000-0000-4000-8000-000000000000",
+    "sqlState": "00000",
+    "statementHandle": "019c06a4-0000-df4f-0000-00100006589e",
+    "message": "Statement executed successfully.",
+    "createdOn": 1759000000000
+  }
+}

@@ -18,17 +18,18 @@ client (see [openfeature.md](openfeature.md)).
 
 ## Installation
 
-**Not yet published.** The `experimently` package is not on PyPI yet, so the first line below
-fails today. Install from a clone of this repository with the second line, or without a clone
-with `pip install "experimently @ git+https://github.com/getexperimently/experimently.git#subdirectory=sdk/python"`.
+The `experimently` package is on [PyPI](https://pypi.org/project/experimently/). 0.1.0 is a
+beta release.
 
 ```bash
-pip install experimently
-pip install -e sdk/python
+pip install experimently==0.1.0
 ```
 
-- `pip install experimently`: once published
-- `pip install -e sdk/python`: from this repository
+To work on the SDK itself, install it from the root of a clone of this repository instead:
+
+```bash
+pip install -e sdk/python
+```
 
 ---
 

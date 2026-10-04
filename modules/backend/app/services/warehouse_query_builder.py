@@ -143,6 +143,20 @@ def _identity(expr: str) -> str:
     return expr
 
 
+#: The values Snowflake's ``TO_CHAR(CURRENT_TIMESTAMP(), 'TZH:TZM')`` returns for a
+#: session in UTC.  Snowflake writes a zero offset as ``Z`` (recorded on a real
+#: account in run wl-snowflake-20261004T194134Z-155c1c4b); ``+00:00`` is the same
+#: offset in the format's numeric spelling.  Every other value is refused as
+#: ``timezone_not_utc``, including ``-00:00``, ``+0000``, ``UTC``, padded text and
+#: null.
+UTC_SESSION_OFFSETS: Final = frozenset({"Z", "+00:00"})
+
+
+def is_utc_session_offset(value: object) -> bool:
+    """True only for one of :data:`UTC_SESSION_OFFSETS`, compared exactly."""
+    return isinstance(value, str) and value in UTC_SESSION_OFFSETS
+
+
 SNOWFLAKE_SQL: Final = SqlDialect(
     name="snowflake",
     identifiers=SNOWFLAKE,

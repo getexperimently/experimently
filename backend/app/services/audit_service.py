@@ -570,6 +570,37 @@ class AuditService:
         return row.id
 
     @staticmethod
+    def filtered_query(
+        db: Session,
+        *,
+        user_id: Optional[UUID] = None,
+        entity_type: Optional[EntityType] = None,
+        entity_id: Optional[UUID] = None,
+        action_type: Optional[ActionType] = None,
+        from_date: Optional[datetime] = None,
+        to_date: Optional[datetime] = None,
+    ):
+        """The entries the list and the export return, unordered and unpaged.
+
+        Every filter is optional. Both dates are inclusive: ``from_date``
+        keeps entries at or after it, ``to_date`` entries at or before it.
+        """
+        query = db.query(AuditLog)
+        if user_id:
+            query = query.filter(AuditLog.user_id == user_id)
+        if entity_type:
+            query = query.filter(AuditLog.entity_type == entity_type.value)
+        if entity_id:
+            query = query.filter(AuditLog.entity_id == entity_id)
+        if action_type:
+            query = query.filter(AuditLog.action_type == action_type.value)
+        if from_date:
+            query = query.filter(AuditLog.timestamp >= from_date)
+        if to_date:
+            query = query.filter(AuditLog.timestamp <= to_date)
+        return query
+
+    @staticmethod
     def get_audit_logs(
         db: Session,
         user_id: Optional[UUID] = None,
@@ -606,26 +637,15 @@ class AuditService:
         if limit < 1 or limit > 1000:
             raise ValueError("Limit must be between 1 and 1000")
 
-        # Build query with filters
-        query = db.query(AuditLog)
-
-        if user_id:
-            query = query.filter(AuditLog.user_id == user_id)
-
-        if entity_type:
-            query = query.filter(AuditLog.entity_type == entity_type.value)
-
-        if entity_id:
-            query = query.filter(AuditLog.entity_id == entity_id)
-
-        if action_type:
-            query = query.filter(AuditLog.action_type == action_type.value)
-
-        if from_date:
-            query = query.filter(AuditLog.timestamp >= from_date)
-
-        if to_date:
-            query = query.filter(AuditLog.timestamp <= to_date)
+        query = AuditService.filtered_query(
+            db,
+            user_id=user_id,
+            entity_type=entity_type,
+            entity_id=entity_id,
+            action_type=action_type,
+            from_date=from_date,
+            to_date=to_date,
+        )
 
         # Get total count before pagination
         total_count = query.count()
