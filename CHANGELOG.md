@@ -10,6 +10,54 @@ longer applies and release-please can generate this file directly. Until it
 does, entries below 0.2.2 are hand-written and the links in them are the
 reason why.
 
+## [0.18.0](https://github.com/getexperimently/experimently/compare/v0.17.0...v0.18.0) (2026-10-04)
+
+
+### ⚠ BREAKING CHANGES
+
+* **etl:** POST /api/v1/etl/partitions/add answers 500 when Glue refuses to read the table or register the partitions, 404 "Glue table not found" when the configured table is not in the catalog, and 422 for a date that is not YYYY-MM-DD; it previously answered 201.
+* **api:** GET /api/v1/edge/bootstrap and GET /api/v1/openfeature/flags are removed and answer 404. Use GET /api/v1/sdk/ruleset (an API key with the sdk:ruleset scope) for server-side local evaluation, or GET /api/v1/feature-flags/evaluate/{flag_key}; experiments: POST /api/v1/tracking/assign.
+* **api:** feature-flag targeting rules refuse unknown keys at every level ([#747](https://github.com/getexperimently/experimently/issues/747))
+
+### Features
+
+* **api:** remove the deprecated edge bootstrap and OpenFeature flag listings ([#770](https://github.com/getexperimently/experimently/issues/770)) ([ca9c05a](https://github.com/getexperimently/experimently/commit/ca9c05a66b2b95466c12d6f5d55f6a16da8a92ba))
+* **deploy:** the API canary holds 10% of traffic for 15 minutes before the full shift ([#796](https://github.com/getexperimently/experimently/issues/796)) ([e7e85ad](https://github.com/getexperimently/experimently/commit/e7e85adbea687a94728f985b8b45a5a4e5b0a739))
+* **deploy:** warn when the deployment group's config differs from the stack's ([#806](https://github.com/getexperimently/experimently/issues/806)) ([74b2461](https://github.com/getexperimently/experimently/commit/74b24616c2157234083803656370e7fc9b1bb544))
+
+
+### Bug Fixes
+
+* **api:** feature-flag targeting rules refuse unknown keys at every level ([#747](https://github.com/getexperimently/experimently/issues/747)) ([6480426](https://github.com/getexperimently/experimently/commit/6480426f4104b4ed021c4d10343097789f5065d3))
+* **api:** the rate limiter goes back to Redis after an outage ([#813](https://github.com/getexperimently/experimently/issues/813)) ([134b108](https://github.com/getexperimently/experimently/commit/134b108439c9578b65efec72fe8b8e097ec2af8b))
+* **api:** user fields longer than their columns answer 422 ([#753](https://github.com/getexperimently/experimently/issues/753)) ([1c746ae](https://github.com/getexperimently/experimently/commit/1c746aeb2730a83709ad11bf0d749379ead86aa7))
+* **auth:** local sign-in matches the email address whatever its letter case ([#745](https://github.com/getexperimently/experimently/issues/745)) ([873529c](https://github.com/getexperimently/experimently/commit/873529c02cb194a4ea2718545d0a9aa87d9a2693))
+* **ci:** the chart upgrade test falls back to the previous release while the newest one's images are publishing ([#762](https://github.com/getexperimently/experimently/issues/762)) ([4bfc5a2](https://github.com/getexperimently/experimently/commit/4bfc5a28d2bd8b1b37adbddf6a67207185b38b6b))
+* **deploy:** a rollback's result reports what is serving when its own steps did not finish ([#766](https://github.com/getexperimently/experimently/issues/766)) ([2ed2e94](https://github.com/getexperimently/experimently/commit/2ed2e9464e5ae229f5577cdc8b4e434e9f079f9a))
+* **deploy:** after stopping a deployment, the rollback waits for CodeDeploy's own revert before creating its own ([#797](https://github.com/getexperimently/experimently/issues/797)) ([2fe9da1](https://github.com/getexperimently/experimently/commit/2fe9da1e0e725d867bef4d9e586ed3893c320032))
+* **deploy:** the CodeDeploy alarm override carries an alarm list ([#781](https://github.com/getexperimently/experimently/issues/781)) ([97343e7](https://github.com/getexperimently/experimently/commit/97343e70bd94b7112d5f51ccc004c57481afdbc8))
+* **deploy:** the deploy policy grants the tagging that a pre-migration snapshot needs ([#746](https://github.com/getexperimently/experimently/issues/746)) ([8b835fa](https://github.com/getexperimently/experimently/commit/8b835fa19ff2911325b68c91bddd0b00b2228d7c))
+* **deploy:** the migration workflow refuses relative and whole-graph targets ([#764](https://github.com/getexperimently/experimently/issues/764)) ([3b7655d](https://github.com/getexperimently/experimently/commit/3b7655d15b22e4d22b048308e479e0a56ef889a1))
+* **deps:** build-only CSS tooling is a dev dependency, so the production audit reads what ships ([#757](https://github.com/getexperimently/experimently/issues/757)) ([d997866](https://github.com/getexperimently/experimently/commit/d99786662606184e7fac2a8a19bbefa4c62b1db1))
+* **etl:** adding partitions reports a refused catalog write instead of answering 201 ([#769](https://github.com/getexperimently/experimently/issues/769)) ([7d565b8](https://github.com/getexperimently/experimently/commit/7d565b8ae64138891c7a363a4a2e7879af056b32))
+* **infra:** the deploy policy allows the CodeDeploy revision lookup a rollback needs ([#756](https://github.com/getexperimently/experimently/issues/756)) ([5b48b76](https://github.com/getexperimently/experimently/commit/5b48b7656bc83292f7d256e1ccbaf8d20cbe3659))
+* **infra:** the load balancer keeps its route to the API tasks when green is live ([76b14a8](https://github.com/getexperimently/experimently/commit/76b14a86a54138fa7e6d7f6e898f24c36d23cf0c))
+* **sdk:** the OpenFeature provider publishes with an npm range for the JS SDK ([#778](https://github.com/getexperimently/experimently/issues/778)) ([998e84b](https://github.com/getexperimently/experimently/commit/998e84b88fa6e95abb6f4630acb2a2b414996f3b))
+* **sdk:** the OpenFeature providers are versioned 0.1.0 like the SDKs they wrap ([#751](https://github.com/getexperimently/experimently/issues/751)) ([0789d9f](https://github.com/getexperimently/experimently/commit/0789d9f829c37e5569c90bf3f15eacd1c2a0217b))
+* **site:** the homepage and docs hub describe what ships today ([#771](https://github.com/getexperimently/experimently/issues/771)) ([ce3ab0c](https://github.com/getexperimently/experimently/commit/ce3ab0c9586a45ccd5fac5cca68deca9fdd57c95))
+
+
+### Documentation
+
+* **auth:** the user guide describes how a password is actually reset ([#765](https://github.com/getexperimently/experimently/issues/765)) ([fd522c4](https://github.com/getexperimently/experimently/commit/fd522c459e45fe233c397f6069842619c7127bd8))
+* **claude:** release, release-PR, rollback, mypy and URL notes match the repo ([#793](https://github.com/getexperimently/experimently/issues/793)) ([0d7a34c](https://github.com/getexperimently/experimently/commit/0d7a34c5a9258bc0209500b7858bd3e322abf3cd))
+* **deploy:** preview a stack deploy with the same pins, and stop if it touches an ingress or egress rule ([#804](https://github.com/getexperimently/experimently/issues/804)) ([7779b17](https://github.com/getexperimently/experimently/commit/7779b172df1b27864c15d2b2499df5afb52fb712))
+* **deploy:** secret rotation and the restore restart use CodeDeploy, which controls the API service ([#812](https://github.com/getexperimently/experimently/issues/812)) ([19ecfdb](https://github.com/getexperimently/experimently/commit/19ecfdbe564435ad9bd5664e7a5354a7fe42d887))
+* **deploy:** undo a migration before rolling the API back, and say there is no supported downgrade after ([#763](https://github.com/getexperimently/experimently/issues/763)) ([f13a7f3](https://github.com/getexperimently/experimently/commit/f13a7f3198c3f8073ac61209dbcf9d2d599b2475))
+* rollback and restore wording, the issue chooser link, and three statements match what runs ([#803](https://github.com/getexperimently/experimently/issues/803)) ([c75ec3a](https://github.com/getexperimently/experimently/commit/c75ec3a0a920b77589a2e2480719df89ffa0c683))
+* SDK versions, CI coverage, DCO, the API start command and the warehouse routes match the code ([#791](https://github.com/getexperimently/experimently/issues/791)) ([3f98293](https://github.com/getexperimently/experimently/commit/3f98293624f121abb4aacd246b1337fc63c0e833))
+* **self-hosting:** point the hostname at the load balancer after cdk deploy ([#752](https://github.com/getexperimently/experimently/issues/752)) ([fe38c48](https://github.com/getexperimently/experimently/commit/fe38c483c80d8d4c1c9206faa4344039110a69b4))
+
 ## [0.17.0](https://github.com/getexperimently/experimently/compare/v0.16.2...v0.17.0) (2026-10-02)
 
 
