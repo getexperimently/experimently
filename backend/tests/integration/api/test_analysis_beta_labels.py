@@ -193,9 +193,9 @@ def test_cuped_response_carries_the_tables_label(
     assert response.status_code == 200, response.text
     body = response.json()
     label = ANALYSIS_STATUS["cuped"]
-    assert body["analysis_status"] == label.status == "beta"
-    assert body["analysis_notice"] == label.notice
-    assert "/issues/217" in body["analysis_notice"]
+    # GA since #217: the covariate is each user's own history, so no notice.
+    assert body["analysis_status"] == label.status == "ga"
+    assert body["analysis_notice"] is None
 
 
 # ---------------------------------------------------------------------------

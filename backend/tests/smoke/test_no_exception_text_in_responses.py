@@ -522,7 +522,6 @@ ALLOWED: Dict[Tuple[str, str, str], Tuple[int, str]] = {
     (f"{E}/power_calculator.py", "compute_runtime", "ValueError"): (1, POWER),
     (f"{E}/power_calculator.py", "compute_sample_size", "ValueError"): (1, POWER),
     (f"{E}/power_calculator.py", "get_power_curve", "ValueError"): (1, POWER),
-    (f"{E}/results.py", "get_cuped_results", "ValueError"): (1, SERVICE_VALUEERROR),
     (f"{E}/rollout_schedules.py", "activate_rollout_schedule", "ValueError"): (
         1,
         SERVICE_VALUEERROR,

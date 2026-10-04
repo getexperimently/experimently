@@ -665,8 +665,8 @@ response.
   source's values.
 - Not affected: the breakdown (`?breakdown=`) uses the stored confidence
   level only as its base alpha, with its own Bonferroni correction over
-  segments; CUPED (a 95% interval) and sequential testing (its own `alpha`) do
-  not follow the stored level; the Bayesian results,
+  segments; sequential testing (its own `alpha`) does not follow the stored
+  level (CUPED does, and applies the stored correction); the Bayesian results,
   post-stratification, live results (a fixed, uncorrected 0.05), the AI
   interpretation, the power calculator (`GET
   /api/v1/experiments/analysis/sample-size`) and warehouse analysis runs are
@@ -2008,9 +2008,9 @@ See [CUPED Guide](cuped.md) for full documentation.
 ```
 GET /api/v1/results/{experiment_id}/cuped
 ```
-Returns CUPED-adjusted effect estimates and variance reduction percentage. Beta: the covariate is not yet a pre-experiment metric, so the reduction is close to 0 (#217).
+Returns, for each conversion metric and each treatment, the effect against the control adjusted for each user's own events before assignment, with the variance reduction and the share of users with history. History counts only if the server received it before the user was assigned.
 
-It takes no query parameters: the method comes from the experiment's `variance_reduction_config`.
+It takes no query parameters: the method comes from the experiment's `variance_reduction_config`, the interval from its stored `confidence_level` and `corrected_p_value` from its stored `correction_method`. A comparison that cannot be computed is listed with `unavailable_reason`.
 
 ---
 

@@ -132,4 +132,5 @@ async def rollback_feature_flag(
         percentage=percentage,
         reason=reason,
         executed_by_user_id=current_user.id,
+        actor=current_user,
     )

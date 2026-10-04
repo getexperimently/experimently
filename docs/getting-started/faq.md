@@ -62,7 +62,7 @@ The platform supports a range of statistical approaches:
 | Sequential testing (mSPRT) | Continuous monitoring with valid p-values at any sample size |
 | Always-valid confidence intervals | Confidence sequences that are valid at every look |
 | Alpha spending (O'Brien-Fleming, Pocock) | Not computed yet: the response's `alpha_spending` is empty; use the mSPRT, which is valid under continuous monitoring |
-| CUPED (beta) | Variance reduction; the covariate is not yet a pre-experiment metric, so it reduces almost no variance today (#217) |
+| CUPED | Variance reduction from each user's own events before assignment (API only) |
 | Bayesian (Beta-Binomial) | Posterior credible intervals, Bayes factors, probability of superiority, ROPE |
 | Multi-armed bandit | Thompson Sampling, UCB1, and Epsilon-Greedy adaptive traffic allocation |
 | Dimensional analysis | Segment-level breakdowns with Bonferroni correction and heterogeneous treatment effect detection |
@@ -125,11 +125,9 @@ Not yet. Warehouse analysis (beta, full profile) runs an experiment's analysis o
 
 ### How does CUPED variance reduction work?
 
-CUPED (Controlled-experiment Using Pre-Experiment Data) reduces result noise by adjusting each user's observed metric by a term proportional to their pre-experiment behavior. The adjustment is computed using an OLS regression coefficient (`theta`) estimated from the control group.
+CUPED (Controlled-experiment Using Pre-Experiment Data) reduces result noise by adjusting each conversion rate for whether users sent the metric's event in the days before they were assigned. The adjustment uses a regression slope (`theta`) pooled within the experiment's arms.
 
-With a covariate that predicts the outcome, lower variance means you reach statistical significance with fewer users, or detect smaller effects with the same sample size.
-
-**Beta:** `GET /api/v1/results/{experiment_id}/cuped` does not yet use a pre-experiment metric as the covariate, so in this release it removes almost no variance, and its responses say so in `analysis_status` ([#217](https://github.com/getexperimently/experimently/issues/217)). See [CUPED documentation](../api/cuped.md).
+When that history predicts the outcome, lower variance means you reach statistical significance with fewer users, or detect smaller effects with the same sample size. History counts only if the server received it before the user was assigned, so send it before you start the experiment. `GET /api/v1/results/{experiment_id}/cuped` reports it; see [CUPED documentation](../api/cuped.md).
 
 ---
 

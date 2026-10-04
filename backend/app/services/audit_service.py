@@ -97,10 +97,11 @@ AUDIT_NAME_ONLY_FIELDS: Dict[EntityType, Tuple[str, ...]] = {
     EntityType.SEGMENT: ("description", "rules"),
 }
 
-#: Every ``action_type`` something in this profile writes. The route inventory
-#: (``backend/tests/smoke/test_audit_inventory.py``) pins it to the union of
-#: its ``Audited`` sets, and the dashboard's list
-#: (``frontend/src/data/audit-action-types.json``) is compared with it.
+#: Every ``action_type`` something in this profile writes. The inventories in
+#: ``backend/tests/smoke/test_audit_inventory.py`` (routes and non-route
+#: sites) pin it to the union of their ``Audited`` sets, and the dashboard's
+#: list (``frontend/src/components/admin/audit/action-types.json``) is
+#: compared with it.
 WRITTEN_ACTION_TYPES: frozenset = frozenset(
     {
         ActionType.TOGGLE_ENABLE,
@@ -134,6 +135,7 @@ WRITTEN_ACTION_TYPES: frozenset = frozenset(
         ActionType.SEGMENT_CREATE,
         ActionType.SEGMENT_UPDATE,
         ActionType.SEGMENT_ARCHIVE,
+        ActionType.SAFETY_ROLLBACK,
     }
 )
 
@@ -160,6 +162,38 @@ class AuditActor:
             email=getattr(user, "email", None),
             username=getattr(user, "username", None),
         )
+
+
+# ---------------------------------------------------------------------------
+# System actors (#221): changes the platform makes on its own. Each has no
+# ``user_id`` and one reserved ``user_email``.
+# ---------------------------------------------------------------------------
+
+SYSTEM_EXPERIMENT_SCHEDULER = AuditActor(id=None, email="system:experiment-scheduler")
+SYSTEM_ROLLOUT_SCHEDULER = AuditActor(id=None, email="system:rollout-scheduler")
+SYSTEM_SAFETY_MONITOR = AuditActor(id=None, email="system:safety-monitor")
+SYSTEM_COGNITO_SYNC = AuditActor(id=None, email="system:cognito-sync")
+
+#: The reserved ``user_email`` values of the system actors.
+SYSTEM_ACTOR_EMAILS: frozenset = frozenset(
+    actor.email
+    for actor in (
+        SYSTEM_EXPERIMENT_SCHEDULER,
+        SYSTEM_ROLLOUT_SCHEDULER,
+        SYSTEM_SAFETY_MONITOR,
+        SYSTEM_COGNITO_SYNC,
+    )
+)
+
+
+def is_system_actor(user_id: Optional[UUID], user_email: Optional[str]) -> bool:
+    """Whether an entry was made by the platform on its own.
+
+    Both must hold: no ``user_id`` and a reserved ``user_email``. A deleted
+    user's entries also have no ``user_id`` (the key is set to NULL), but they
+    keep the user's own email, so they are never taken for automatic ones.
+    """
+    return user_id is None and user_email in SYSTEM_ACTOR_EMAILS
 
 
 def _plain(value: Any) -> Any:
@@ -394,6 +428,43 @@ class AuditService:
         return row.id
 
     @staticmethod
+    def record_in_savepoint(db: Session, **entry: Any) -> Optional[AuditLog]:
+        """Write one entry inside a savepoint of the caller's open transaction.
+
+        For a change the caller has made but not committed, when a failed
+        entry must not cost the change. Takes ``record``'s arguments.
+
+        The caller's pending changes are flushed first, outside the
+        savepoint: if that flush fails it is the caller's own failure and
+        is raised. The entry is then added and flushed in a savepoint. If
+        that fails, only the savepoint is rolled back, one ERROR line naming
+        the action, the entity and the exception type (no values, no
+        exception text) is logged, ``audit_write_failures_total`` goes up by
+        one and None is returned. The caller's transaction is left open with
+        its change in it; the caller commits it as before.
+
+        Never use ``record_after_commit`` inside an open transaction: it
+        rolls back the whole session when the entry fails.
+        """
+        db.flush()
+        savepoint = db.begin_nested()
+        try:
+            row = AuditService.record(db, **entry)
+            db.flush()
+            savepoint.commit()
+        except Exception as e:
+            try:
+                savepoint.rollback()
+            except Exception:
+                logger.warning("Rollback of a failed audit savepoint also failed")
+            AuditService._log_failure(
+                entry.get("action"), entry.get("entity_type"), entry.get("entity_id"), e
+            )
+            return None
+        AuditService._written(row.action_type, row.entity_type, row.entity_id)
+        return row
+
+    @staticmethod
     def _written(action: Any, entity_type: Any, entity_id: Any) -> None:
         # No values, no names: only what identifies the entry.
         logger.info(
@@ -411,6 +482,12 @@ class AuditService:
             db.rollback()
         except Exception:
             logger.warning("Rollback after a failed audit write also failed")
+        AuditService._log_failure(action, entity_type, entity_id, error)
+
+    @staticmethod
+    def _log_failure(
+        action: Any, entity_type: Any, entity_id: Any, error: Exception
+    ) -> None:
         audit_write_failures_total.inc()
         # Only the exception type is logged: its text can carry the row.
         logger.error(

@@ -19,6 +19,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from fastapi.testclient import TestClient
 
+from backend.app.api.v1.endpoints.results import ExperimentNotFound
 from backend.app.main import app
 from backend.app.models.user import User
 from backend.app.schemas.variance_reduction import (
@@ -130,10 +131,23 @@ class TestCupedApiEndpoint:
         unknown_id = str(uuid.uuid4())
         with patch(
             "backend.app.api.v1.endpoints.results.get_cuped_results_data",
-            side_effect=ValueError("Experiment not found"),
+            side_effect=ExperimentNotFound(),
         ):
             response = client.get(f"/api/v1/results/{unknown_id}/cuped")
         assert response.status_code == 404
+        assert response.json()["detail"] == "Experiment not found"
+
+    def test_a_value_error_is_a_500_not_a_404(self, client):
+        """#217: only the dedicated not-found exception answers 404; a
+        ValueError from the statistics (fromisoformat, a refusal) is a 500
+        with the fixed text, never a 404 that repeats its message."""
+        with patch(
+            "backend.app.api.v1.endpoints.results.get_cuped_results_data",
+            side_effect=ValueError("Invalid isoformat string: 'client text'"),
+        ):
+            response = client.get(f"/api/v1/results/{TEST_EXPERIMENT_ID}/cuped")
+        assert response.status_code == 500
+        assert "client text" not in response.text
 
     def test_cuped_endpoint_default_method_none(self, client):
         """When experiment has no variance_reduction_config, method defaults to none."""

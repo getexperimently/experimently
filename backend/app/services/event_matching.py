@@ -22,7 +22,8 @@ assigned users must use it (or, in raw SQL, ``CONVERTING_USERS_SQL``), so the
 numerator can never exceed the denominator.
 """
 
-from typing import Any, Iterable, List, Optional, Set, Tuple
+from datetime import datetime, timedelta, timezone
+from typing import Any, Dict, Iterable, List, Mapping, Optional, Set, Tuple
 
 from sqlalchemy import String, and_, any_, bindparam, func
 from sqlalchemy.dialects.postgresql import ARRAY
@@ -251,3 +252,101 @@ def converting_user_ids(
             db, experiment_id, variant_id, event_name
         )
     }
+
+
+#: How many user ids one covariate query binds as a single array.
+COVARIATE_LOOKUP_CHUNK = 50_000
+
+
+def _naive_utc(value: Any) -> datetime:
+    """A stored ``events.created_at`` string as a naive UTC ``datetime``.
+
+    A value with no offset is UTC already (``normalize_event_timestamp``'s
+    rule).  Raises ``ValueError`` (or ``TypeError``) for a value that cannot
+    be read: migration 1ab99332f0ba left such legacy values as they were.
+    """
+    moment = datetime.fromisoformat(str(value).strip())
+    if moment.tzinfo is not None:
+        moment = moment.astimezone(timezone.utc).replace(tzinfo=None)
+    return moment
+
+
+def covariate_user_ids(
+    db: Session,
+    assigned_at: Mapping[str, datetime],
+    event_name: str,
+    lookback_days: int,
+) -> Tuple[Set[str], int]:
+    """
+    The users with a pre-assignment event of ``event_name``, for CUPED (#217).
+
+    A user counts when at least one of their events matching
+    ``conversion_event_filter(event_name)``, with any tag or none:
+
+    * happened in ``[assigned_at - lookback_days, assigned_at)``: an event at
+      the moment of assignment is not history;
+    * and was stored by the server before ``assigned_at``
+      (``events.updated_at < assigned_at``): history sent after the user was
+      assigned is not read for that user.
+
+    ``assigned_at`` maps each user id to their assignment's ``created_at``.
+    Both it and ``events.updated_at`` are naive UTC (``timestamp without time
+    zone``, written from ``utcnow``), and they are compared in Python as they
+    are, never through an aware value or the database session's time zone.
+    Comparing a naive value with an aware one raises ``TypeError``.
+
+    One query per ``COVARIATE_LOOKUP_CHUNK`` users reads ``events`` alone (no
+    SQL join to ``assignments``, as ``_assigned_pairs`` explains), bounded by
+    the earliest window start and the latest assignment; each user's own
+    window is applied here.  The bounds are compared through
+    ``UTCTimestampString``, the format the column stores.
+
+    Returns:
+        The user ids, and how many matching rows were skipped because their
+        stored ``created_at`` could not be read.
+    """
+    if not assigned_at or not event_name:
+        return set(), 0
+    lookback = timedelta(days=lookback_days)
+    lower = min(assigned_at.values()) - lookback
+    upper = max(assigned_at.values())
+    users = list(assigned_at)
+    found: Set[str] = set()
+    skipped = 0
+    for i in range(0, len(users), COVARIATE_LOOKUP_CHUNK):
+        chunk = users[i : i + COVARIATE_LOOKUP_CHUNK]
+        rows = (
+            db.query(Event.user_id, Event.created_at, Event.updated_at)
+            .filter(
+                Event.user_id
+                == any_(bindparam("user_ids", chunk, type_=ARRAY(String))),
+                conversion_event_filter(event_name),
+                Event.created_at >= lower,
+                Event.created_at < upper,
+            )
+            .all()
+        )
+        for user_id, created_at, received_at in rows:
+            try:
+                happened = _naive_utc(created_at)
+            except (TypeError, ValueError):
+                skipped += 1
+                continue
+            user_id = str(user_id)
+            assigned = assigned_at[user_id]
+            if assigned - lookback <= happened < assigned and received_at < assigned:
+                found.add(user_id)
+    return found, skipped
+
+
+def assignment_times(db: Session, experiment_id: Any) -> Dict[str, Dict[str, datetime]]:
+    """Each variant's assigned users and their assignment times, in one query."""
+    by_variant: Dict[str, Dict[str, datetime]] = {}
+    rows = (
+        db.query(Assignment.variant_id, Assignment.user_id, Assignment.created_at)
+        .filter(Assignment.experiment_id == experiment_id)
+        .all()
+    )
+    for variant_id, user_id, created_at in rows:
+        by_variant.setdefault(str(variant_id), {})[str(user_id)] = created_at
+    return by_variant

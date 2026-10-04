@@ -154,8 +154,7 @@ describe('HomePage (/)', () => {
    * `sdk/` had outgrown, local bucketing that matched the server exactly (the
    * SDKs bucket nothing; the server decides), a benchmark that runs nightly
    * described as running locally, the AWS name used as a hyphenated
-   * adjective or a possessive noun, and CUPED offered as variance reduction
-   * when its covariate is not a pre-experiment metric (#217).
+   * adjective or a possessive noun.
    *
    * The fragments are concatenated, not joined with whitespace, so each entry
    * is exactly the regular expression it reads as once put together; they are
@@ -168,7 +167,6 @@ describe('HomePage (/)', () => {
     [['four', 'teen'], 'the SDK count drifted from sdk/; the list is derived now'],
     [['byte\\s+for', '\\s+byte'], 'the SDKs do not bucket locally'],
     [['asserted\\s+on\\s+every', '\\s+local\\s+run'], 'the benchmarks run nightly, not locally'],
-    [['CUPED\\s+variance', '\\s+reduction'], 'CUPED reduces almost no variance yet (#217); it is not a selling point'],
   ];
 
   it.each(retired)('no longer says %s (%s)', (parts) => {

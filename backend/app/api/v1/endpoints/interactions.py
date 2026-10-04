@@ -12,6 +12,7 @@ across the other experiment's arms (``InteractionPairResponse``).
 Access: ANALYST, DEVELOPER or ADMIN (VIEWER gets 403).
 """
 
+import logging
 from typing import Any
 from uuid import UUID
 
@@ -31,6 +32,8 @@ from backend.app.services.interaction_detection_service import (
     InteractionAnalysis,
     InteractionDetectionService,
 )
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -128,23 +131,35 @@ def scan_interactions(
 
     Requires DEVELOPER role or higher.
     """
-    _require_developer(current_user)
+    try:
+        _require_developer(current_user)
 
-    service = InteractionDetectionService()
-    analyses = service.scan_active_experiments(db)
-    active_ids = service._get_active_experiment_ids(db)
+        service = InteractionDetectionService()
+        analyses = service.scan_active_experiments(db)
+        active_ids = service._get_active_experiment_ids(db)
 
-    response_analyses = [_to_response(a) for a in analyses]
-    high_risk_count = sum(
-        1 for a in response_analyses if a.overall_risk == RiskLevel.HIGH
-    )
+        response_analyses = [_to_response(a) for a in analyses]
+        high_risk_count = sum(
+            1 for a in response_analyses if a.overall_risk == RiskLevel.HIGH
+        )
 
-    return ActiveInteractionScanResponse(
-        total_active_experiments=len(active_ids),
-        pairs_analyzed=len(response_analyses),
-        high_risk_pairs=high_risk_count,
-        analyses=response_analyses,
-    )
+        return ActiveInteractionScanResponse(
+            total_active_experiments=len(active_ids),
+            pairs_analyzed=len(response_analyses),
+            high_risk_pairs=high_risk_count,
+            analyses=response_analyses,
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        # A failed read is a 500, never "no active experiments" (#853).
+        raise unexpected_failure(
+            exc,
+            "Interaction scan",
+            "Could not scan the active experiments for interactions",
+            db=db,
+            logger=logger,
+        )
 
 
 @router.get(
@@ -197,4 +212,5 @@ def analyze_pair(
             "Interaction analysis",
             "Could not analyse the two experiments",
             db=db,
+            logger=logger,
         )

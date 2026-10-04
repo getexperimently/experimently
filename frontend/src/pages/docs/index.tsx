@@ -33,7 +33,7 @@ const sections = [
     links: [
       { label: 'Running Experiments', href: docsUrl('guides/user-guide'), desc: 'End-to-end experiment lifecycle' },
       { label: 'Statistical Methods', href: docsUrl('api/sequential-testing'), desc: 'Sequential testing with mSPRT' },
-      { label: 'CUPED (beta)', href: docsUrl('api/cuped'), desc: 'Not working yet: the covariate is not a pre-experiment metric, so it reduces almost no variance' },
+      { label: 'CUPED', href: docsUrl('api/cuped'), desc: "Variance reduction from each user's own pre-experiment events (API only)" },
       { label: 'Multi-Armed Bandits', href: docsUrl('api/multi-armed-bandit'), desc: 'Thompson Sampling, UCB1, Epsilon-Greedy' },
       { label: 'Split URL Testing', href: docsUrl('api/split-url'), desc: 'Full profile: send each variant to a different URL. The Lambda@Edge router is a construct you deploy yourself.' },
       { label: 'Mutual Exclusion Groups', href: docsUrl('api/mutual-exclusion-groups'), desc: 'Prevent cross-experiment contamination' },

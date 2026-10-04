@@ -59,7 +59,7 @@ and runs a traffic simulator against it so the dashboards fill up while you talk
 - On **/products** change nothing — explain the sort order is a **multi-armed bandit** (`shoplab_plp_sort`): Thompson Sampling
   moves traffic toward the algorithm with the best click rate. Click a product.
 - On the product page the **buy button** is one of four multivariate treatments (`shoplab_pdp_buy_button`). Add to cart.
-- **/checkout** is a 3-step vs one-page A/B test (configured for CUPED, which is beta, #217). Place the order → `purchase` with the order value.
+- **/checkout** is a 3-step vs one-page A/B test (configured for CUPED; its new visitors have no history, so it adjusts almost nothing). Place the order → `purchase` with the order value.
 - **/search** shows a gradual-rollout flag (`shoplab_new_search`, 10% → 50% → 100%) — press **New visitor** in the panel a
   few times to land in the 10% and see the "New search ✨" engine.
 - Switch to the dashboard (http://localhost:3100/experiments): open **shoplab_hero_banner** — results are moving because
@@ -163,8 +163,9 @@ See `demo/streampulse/README.md`.
 - The dashboard has no Bayesian or CUPED tab. The Bayesian analysis is in the API
   (`GET /api/v1/results/{id}/bayesian`, see `docs/api/bayesian.md`); show it from http://localhost:8000/api/v1/docs if
   the audience asks.
-  - Do not present CUPED as a variance reduction: it is beta, and its covariate is not yet a pre-experiment metric,
-    so it removes almost no variance (#217).
+  - CUPED is in the API too (`GET /api/v1/results/{id}/cuped`). On ShopLab's checkout it adjusts almost nothing,
+    because the simulator's visitors are new and have no history; the Quick Start's `checkout_button_color` has
+    history and shows the reduction (see `docs/api/cuped.md`).
 
 **Key talking points:**
 - Multiple statistical methods in one platform (frequentist + sequential in the dashboard, Bayesian in the API)
@@ -198,9 +199,13 @@ See `demo/streampulse/README.md`.
 - Navigate to `/admin/audit`
 - Show: each entry records who acted, what changed (old and new value) and when. No API edits or deletes an entry.
   These entries are not signed; do not describe them as signed or tamper-proof.
-- Show the log: what it records today is flag status changes (toggle, enable, disable, unarchive), bulk toggles
-  and an admin's changes to a user's role or active status
-  - "You can filter these entries by action, resource type and date. More event types are coming (#221)."
+- Show the log: it records creating, changing and deleting flags and experiments, turning flags on and off,
+  starting, pausing and completing experiments, rollout schedule changes, API keys, holdouts, mutual exclusion
+  groups, segments, creating and deleting users, changes to a user's role, superuser flag or active status,
+  signing in with a password, and safety rollbacks. Changes the platform makes on its own (scheduled starts and
+  ends, rollout stages, the safety monitor's rollbacks, a first Cognito sign-in and Cognito role sync) are
+  recorded too, by a named system actor such as `system:safety-monitor`
+  - "You can filter these entries by action, resource type and date."
 - Show compliance report export: `/api/v1/compliance/report` → downloads CSV/JSON
 
 **RBAC:**
@@ -218,7 +223,7 @@ See `demo/streampulse/README.md`.
   mocks; treat them as roadmap in demos until the P5 path tests are green.
 
 **Key talking points:**
-- Controls that support a SOC 2 / ISO 27001 program — an audit log of flag status and user role changes, and with the
+- Controls that support a SOC 2 / ISO 27001 program — an audit log of changes to flags, experiments, users and roles, and with the
   `compliance` module HMAC-SHA256 signed compliance events and report exports
 - RBAC with four built-in roles (custom roles: roadmap)
 - Full REST API + SDKs (Python, JavaScript, Java, React, Go)
@@ -232,7 +237,7 @@ See `demo/streampulse/README.md`.
 > Not today. Warehouse analysis is being rebuilt (#312).
 
 **"Is it SOC 2 compliant?"**
-> The platform is not certified and we do not claim it. What it gives you are controls that support your own program: an audit log of flag status changes, bulk toggles and admin changes to a user's role or active status in the core profile, where no API edits or deletes an entry, and with the `compliance` module HMAC-SHA256 signed audit events with exportable report packs. Your auditor decides what they satisfy.
+> The platform is not certified and we do not claim it. What it gives you are controls that support your own program: an audit log of changes to flags, experiments, API keys, users and roles, made by people or by the platform itself, in the core profile, where no API edits or deletes an entry, and with the `compliance` module HMAC-SHA256 signed audit events with exportable report packs. Your auditor decides what they satisfy.
 
 **"What about our tech stack?"**
 > We have SDKs for Python, JavaScript/TypeScript, Java (Spring Boot auto-configuration), and React (with hooks and SSR support). The REST API means you can integrate from anything.

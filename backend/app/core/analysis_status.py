@@ -47,16 +47,12 @@ class AnalysisLabel:
 
 
 #: Keyed by the analysis, not the route: ``interactions`` labels
-#: ``GET /interactions/{a}/{b}``, ``cuped`` labels ``GET /results/{id}/cuped`` and ``sequential`` labels
-#: ``GET /results/{id}/sequential``.
+#: ``GET /interactions/{a}/{b}``, ``cuped`` labels ``GET /results/{id}/cuped``
+#: and ``sequential`` labels ``GET /results/{id}/sequential``.
 ANALYSIS_STATUS: Dict[str, AnalysisLabel] = {
-    "cuped": AnalysisLabel(
-        BETA,
-        "Beta: the covariate is not yet a pre-experiment metric, so "
-        "variance_reduction_pct is close to 0 and the adjusted estimate is "
-        "close to the unadjusted one. "
-        f"{_ISSUES}/217",
-    ),
+    # #217: the covariate is each user's own events before assignment.  The
+    # route itself stays x-stability: beta (its response shape may change).
+    "cuped": AnalysisLabel(GA),
     "interactions": AnalysisLabel(
         BETA,
         "Beta: tests whether each treatment's lift, in percentage points, on its "

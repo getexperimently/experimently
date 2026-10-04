@@ -527,18 +527,16 @@ The platform uses **mSPRT** (mixture Sequential Probability Ratio Test). When `r
 
 ### CUPED — Reach Significance Faster
 
-**Beta: not yet a pre-experiment covariate.** The CUPED endpoint does not yet use a pre-experiment metric as the covariate, so in this release it removes almost no variance ([#217](https://github.com/getexperimently/experimently/issues/217)).
+CUPED reduces result noise by adjusting for each user's own events in the days before they were assigned; how much depends on how well that history predicts the outcome.
 
-CUPED reduces result noise by adjusting for each user's pre-experiment behavior; how much depends on how well that behavior predicts the outcome.
-
-**When to use it:** When you have historical metric data for your users (e.g., prior revenue, prior sessions). Works best when the covariate is strongly correlated with the outcome.
+**When to use it:** When your users sent the metric's event before the experiment (returning customers who bought before, say). Send that history to the tracking API with no experiment key, before you start the experiment: history the server receives after a user was assigned is ignored for that user.
 
 The dashboard has no CUPED tab; it is available through the API:
 ```text
 GET /api/v1/results/{experiment_id}/cuped
 ```
 
-See the [CUPED Guide](../api/cuped.md) for covariate selection guidance.
+See the [CUPED Guide](../api/cuped.md) for sending history and reading the result.
 
 ---
 
