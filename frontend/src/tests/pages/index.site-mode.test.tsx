@@ -45,6 +45,13 @@ describe('marketing build', () => {
     expect(screen.getAllByRole('link', { name: /power calculator/i }).length).toBeGreaterThan(0);
   });
 
+  it('shows a contact address and links the privacy page', () => {
+    const { container } = renderHome();
+    const mail = screen.getByRole('link', { name: 'hello@getexperimently.com' });
+    expect(mail).toHaveAttribute('href', 'mailto:hello@getexperimently.com');
+    expect(container.querySelector('a[href="/privacy"]')).toBeInTheDocument();
+  });
+
   it('still links the docs and the quick start, which need no backend', () => {
     const { container } = renderHome();
     expect(container.querySelector('a[href="/docs"]')).toBeInTheDocument();
