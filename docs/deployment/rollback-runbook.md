@@ -326,10 +326,15 @@ NOT `services[0].taskDefinition`: on a CODE_DEPLOY service that field is set by 
 watch -n 5 'aws ecs describe-services \
   --cluster "experimentation-$ENV" \
   --services experimentation-backend-$ENV \
-  --query "services[0].{Running:runningCount,Desired:desiredCount,Serving:taskSets[?status==\`PRIMARY\`].taskDefinition|[0]}"'
+  --output json \
+  --query "services[0].taskSets[?status==\`PRIMARY\`] | [0].{Serving:taskDefinition,Running:runningCount,Desired:computedDesiredCount,Pending:pendingCount}"'
 ```
 
-Running task count should stay at the desired count throughout. This is a
+`Running`, `Desired` and `Pending` are the PRIMARY task set's own counts:
+`Desired` is its `computedDesiredCount`. Do not read the service's
+`runningCount` instead: for the hour after a shift the replaced task set keeps
+running beside the new one, so the service counts both (staging showed 4
+running of 2 desired after a rollback that had worked). This is a
 **blue/green** deployment, not a rolling update: a second (green) task set is
 provisioned alongside the current one and traffic moves to it in one shift, so
 `Serving` changes from the old revision to the new one at once rather than
@@ -989,7 +994,10 @@ Complete every item before closing the incident. Do not declare the incident res
 - [ ] `GET /health` returns `{"status": "healthy"}` with HTTP 200
 - [ ] 5xx error rate returned to < 0.1% baseline
 - [ ] p99 API latency returned to < 500ms
-- [ ] ECS running task count equals desired count (2 in staging, 3 in prod)
+- [ ] The API's PRIMARY task set runs its desired count (2 in staging, 3 in
+      prod) with 0 pending, on the revision you rolled back to. Not the
+      service's running count: until the replaced task set is removed, an
+      hour after the shift, that counts both task sets
 - [ ] ECS deployment status is `PRIMARY` with a single active deployment
 - [ ] The dashboard's running count equals its desired count (1 in staging,
       2 in prod), on the revision you meant, `rolloutState` `COMPLETED`
@@ -1002,7 +1010,8 @@ curl -sf "https://app.<domain>/health" | python3 -m json.tool
 aws ecs describe-services \
   --cluster "experimentation-$ENV" \
   --services experimentation-backend-$ENV \
-  --query 'services[0].{Running:runningCount,Desired:desiredCount,Status:status}'
+  --output json \
+  --query "services[0].taskSets[?status=='PRIMARY'] | [0].{Serving:taskDefinition,Running:runningCount,Desired:computedDesiredCount,Pending:pendingCount}"
 aws ecs describe-services \
   --cluster "experimentation-$ENV" \
   --services experimentation-dashboard-$ENV \

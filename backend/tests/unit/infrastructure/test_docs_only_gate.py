@@ -108,7 +108,9 @@ DOCS_TESTS = (
     "backend/tests/unit/infrastructure/test_dashboard_image_docs.py",
     "backend/tests/unit/infrastructure/test_rollback_uses_codedeploy.py",
     # The deploy docs' anchors, runbook and checklist (B3a), and the generated
-    # IAM table in docs/deployment/iam-permissions.md; yaml and stdlib only.
+    # IAM table in docs/deployment/iam-permissions.md; yaml, stdlib, and
+    # jmespath for the API count commands (#816; installed with boto3 from
+    # backend/requirements.txt).
     "backend/tests/unit/infrastructure/test_deploy_docs.py",
     "backend/tests/unit/infrastructure/test_iam_actions.py",
     # Evaluates the rollback runbook's describe-task-definition --query with

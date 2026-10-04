@@ -272,7 +272,8 @@ ENV=staging
 aws ecs describe-services \
   --cluster "experimentation-$ENV" \
   --services "experimentation-backend-$ENV" \
-  --query "services[0].{Running:runningCount,Desired:desiredCount,Serving:taskSets[?status=='PRIMARY'].taskDefinition|[0]}"
+  --output json \
+  --query "services[0].taskSets[?status=='PRIMARY'] | [0].{Serving:taskDefinition,Running:runningCount,Desired:computedDesiredCount,Pending:pendingCount}"
 
 curl -sS -o /dev/null -w '%{http_code} %{content_type}\n' https://app.example.com/
 
@@ -422,7 +423,8 @@ Watch what is serving during a deployment: the PRIMARY task set moves, services[
 watch -n 5 "aws ecs describe-services \
   --cluster experimentation-$ENV \
   --services experimentation-backend-$ENV \
-  --query 'services[0].{Running:runningCount,Desired:desiredCount,Serving:taskSets[?status==\`PRIMARY\`].taskDefinition|[0]}'"
+  --output json \
+  --query 'services[0].taskSets[?status==\`PRIMARY\`] | [0].{Serving:taskDefinition,Running:runningCount,Desired:computedDesiredCount,Pending:pendingCount}'"
 ```
 
 Recent API errors:
