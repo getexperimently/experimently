@@ -29,8 +29,8 @@ Verified against a live backend: **yes (2026-09-11)** — via
 
 ### Installation
 
-**Not yet published.** Neither `@getexperimently/js-sdk` nor `@getexperimently/openfeature-provider`
-is on npm yet, so this fails today:
+**Not yet published.** `@getexperimently/openfeature-provider` is not on npm yet, so this fails
+today (`@getexperimently/js-sdk` and `@openfeature/server-sdk` are on npm):
 
 ```bash
 npm install @openfeature/server-sdk @getexperimently/js-sdk @getexperimently/openfeature-provider

@@ -336,7 +336,9 @@ def test_the_npm_job_pins_checks_and_publishes_the_checked_tarball() -> None:
 # #775: every npm SDK names this repository, so provenance can be attached
 # --------------------------------------------------------------------------
 
-REPOSITORY_URL = "https://github.com/getexperimently/experimently"
+# The form npm itself writes: `npm publish` rewrites any other form, with a warning
+# (it did for @getexperimently/js-sdk 0.1.0).
+REPOSITORY_URL = "git+https://github.com/getexperimently/experimently.git"
 
 
 def npm_sdks() -> list[str]:

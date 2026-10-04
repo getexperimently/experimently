@@ -96,7 +96,8 @@ def test_the_unpinned_provider_manifest_fails_the_tarball_check() -> None:
 def test_the_provider_declares_its_repository() -> None:
     data = json.loads((SDK_DIR / "openfeature" / "package.json").read_text())
     assert (
-        data["repository"]["url"] == "https://github.com/getexperimently/experimently"
+        data["repository"]["url"]
+        == "git+https://github.com/getexperimently/experimently.git"
     )
     assert data["repository"]["directory"] == "sdk/openfeature"
 

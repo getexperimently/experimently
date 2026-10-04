@@ -72,10 +72,11 @@ The platform supports a range of statistical approaches:
 
 ### What SDKs are available?
 
-The Python SDK is on PyPI (`pip install experimently`, 0.1.0, beta). **The others are not
-published yet:** none of them is on its registry, so installing them by name fails today. Each
-SDK's page ([JavaScript](../sdk/javascript.md), [Java](../sdk/java.md), [React](../sdk/react.md))
-says how to install it from this repository instead.
+The JavaScript SDK is on npm (`npm install @getexperimently/js-sdk`, 0.1.0, beta) and the
+Python SDK is on PyPI (`pip install experimently`, 0.1.0, beta). **The others are not published
+yet:** none of them is on its registry, so installing them by name fails today. Each SDK's page
+([Java](../sdk/java.md), [React](../sdk/react.md)) says how to install it from this repository
+instead.
 
 | SDK | Package |
 |-----|---------|
