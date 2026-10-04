@@ -6,16 +6,44 @@ in the experimentation platform. It provides a comprehensive audit trail for
 compliance, debugging, and analysis purposes.
 """
 
+import re
 from enum import Enum
+from typing import Any
 
 from sqlalchemy import Column, DateTime, ForeignKey, Index, String, Text, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.ext.declarative import declared_attr
-from sqlalchemy.orm import relationship
+from sqlalchemy.orm import relationship, validates
 
 from backend.app.core.database_config import get_schema_name
 
 from .base import Base, BaseModel
+
+#: Code points replaced by U+FFFD in audit text.
+_REPLACED_TEXT = re.compile("[\x00\ud800-\udfff]")
+
+#: Every String/Text column of ``AuditLog``. A test checks this against the
+#: table, so a new text column cannot be left out.
+AUDIT_TEXT_COLUMNS = (
+    "user_email",
+    "action_type",
+    "entity_type",
+    "entity_name",
+    "old_value",
+    "new_value",
+    "reason",
+)
+
+
+def normalise_audit_text(value: Any) -> Any:
+    """Audit text is normalised before it is stored.
+
+    A ``str`` comes back with each code point in ``_REPLACED_TEXT`` replaced
+    by U+FFFD; anything else (``None`` included) is returned as is.
+    """
+    if isinstance(value, str):
+        return _REPLACED_TEXT.sub("\ufffd", value)
+    return value
 
 
 class ActionType(str, Enum):
@@ -99,6 +127,11 @@ class AuditLog(Base, BaseModel):
 
     # Relationships
     user = relationship("User", back_populates="audit_logs")
+
+    @validates(*AUDIT_TEXT_COLUMNS)
+    def _normalise_text(self, key: str, value: Any) -> Any:
+        """Every writer sets these attributes, so every writer passes here."""
+        return normalise_audit_text(value)
 
     @declared_attr
     def __table_args__(cls):
