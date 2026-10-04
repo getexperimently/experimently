@@ -2,9 +2,9 @@
 Assignment and flag evaluation never log the user id, at any level (#269).
 
 Every per-request path in ``AssignmentService`` -- a new assignment, a sticky
-one, an ineligible user, targeting assignment, a targeting error, a bulk
-assignment that fails, a reassignment -- and the flag service's two error
-lines are driven with a distinctive user id. For each:
+one, an ineligible user, targeting assignment, a targeting error, a
+reassignment -- the batch assignment route's two failure lines (#441), and the
+flag service's two error lines are driven with a distinctive user id. For each:
 
 * no record, at any level, contains the user id;
 * the routine per-request lines are at DEBUG, not INFO;
@@ -203,17 +203,76 @@ def test_targeting_error_logs_the_type_not_the_text(logs, experiment):
     assert "ValueError" in logs.records[0][1]
 
 
-def test_bulk_assignment_error_logs_the_type_not_the_text(logs, experiment):
-    svc = _service(experiment)
-    svc.db.add.side_effect = RuntimeError(
-        f"(psycopg2) [parameters: {{'user_id': '{USER}'}}]"
+@pytest.fixture
+def route_logs(monkeypatch) -> Recorder:
+    """The batch route's logger, recorded: message with its args formatted,
+    and the traceback whenever ``exc_info`` is passed or ``exception`` used."""
+    from backend.app.api.v1.endpoints import tracking
+
+    recorder = Recorder()
+    monkeypatch.setattr(tracking, "logger", recorder.bind())
+    return recorder
+
+
+def _run_batch_failing_with(monkeypatch, exc):
+    """Drive POST /tracking/assign/batch to a failure raising *exc* for USER."""
+    from fastapi import HTTPException
+
+    from backend.app.api.v1.endpoints import tracking
+    from backend.app.schemas.tracking import AssignmentBatchRequest
+
+    exp = MagicMock(spec=Experiment)
+    exp.id = uuid4()
+    exp.key = "batch-269"
+    exp.optimization_type = "fixed"
+    exp.variants = [_variant("control", True), _variant("treatment", False)]
+    for variant in exp.variants:
+        variant.configuration = {}
+    db = MagicMock()
+    db.query.return_value.filter.return_value.first.return_value = exp
+
+    class FailingService:
+        def __init__(self, _db):
+            pass
+
+        def assign_user(self, **_kwargs):
+            raise exc
+
+    monkeypatch.setattr(tracking, "AssignmentService", FailingService)
+    request = AssignmentBatchRequest(
+        experiment_key=exp.key,
+        users=[{"user_id": "first-user"}, {"user_id": USER, "context": {"e": USER}}],
     )
-    with patch.object(svc, "_hash_user_to_variant", return_value=uuid4()):
-        result = svc.bulk_assign_users([USER], experiment.id)
-    assert result["errors"] == 1
-    _assert_clean(logs, routine=False)
-    errors = logs.at("error")
-    assert len(errors) == 1 and "RuntimeError" in errors[0][1], logs.records
+    with pytest.raises(HTTPException) as caught:
+        tracking.assign_users_to_experiment_batch(
+            request=request, db=db, api_key=MagicMock()
+        )
+    return caught.value
+
+
+@pytest.mark.parametrize(
+    "exc, status, level",
+    [
+        (
+            RuntimeError(f"(psycopg2) [parameters: {{'user_id': '{USER}'}}]"),
+            500,
+            "error",
+        ),
+        (ValueError(f"Override variant not valid for {USER}"), 409, "warning"),
+    ],
+    ids=["database-error", "value-error"],
+)
+def test_batch_route_failure_logs_the_class_not_the_text(
+    route_logs, monkeypatch, exc, status, level
+):
+    assert USER in str(exc)  # the probe: the text does carry it
+    error = _run_batch_failing_with(monkeypatch, exc)
+    assert error.status_code == status
+    assert USER not in str(error.detail)
+    assert route_logs.records, "nothing was captured: the recorder is not wired in"
+    assert route_logs.with_user() == [], route_logs.with_user()
+    assert [r[0] for r in route_logs.records] == [level], route_logs.records
+    assert type(exc).__name__ in route_logs.records[0][1]
 
 
 def test_reassignment(logs, experiment):

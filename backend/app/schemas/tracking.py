@@ -13,9 +13,11 @@ from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
+    ValidationError,
     field_validator,
     model_validator,
 )
+from pydantic_core import InitErrorDetails, PydanticCustomError
 
 from backend.app.schemas.storable_text import StorableTextModel
 
@@ -221,6 +223,147 @@ class VariantAssignmentResponse(BaseModel):
             }
         },
     )
+
+
+#: The most users one ``POST /api/v1/tracking/assign/batch`` request may carry.
+MAX_BATCH_ASSIGN_USERS = 1000
+
+#: The 422 message for a list longer than :data:`MAX_BATCH_ASSIGN_USERS`.
+BATCH_TOO_LONG_MESSAGE = "at most 1,000 users per request; split the list"
+
+#: The 422 message for a repeated ``user_id``; it names positions, never the id.
+BATCH_DUPLICATE_MESSAGE = (
+    "duplicate user_id; each user may appear once per request "
+    "(first seen at users[{first}])"
+)
+
+
+class BatchAssignmentUser(StorableTextModel):
+    """One user of ``POST /api/v1/tracking/assign/batch``."""
+
+    user_id: str = Field(
+        ..., min_length=1, max_length=255, description="User identifier"
+    )
+    context: Optional[Dict[str, Any]] = Field(
+        None,
+        description="This user's attributes, matched against the experiment's "
+        "targeting rules as on POST /api/v1/tracking/assign",
+    )
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class AssignmentBatchRequest(StorableTextModel):
+    """Assign up to 1,000 users to one ACTIVE experiment.
+
+    ``users`` holds 1 to 1,000 entries with distinct ``user_id`` values.
+    Unknown fields are refused, here and in each user, so a misspelt
+    ``context`` is a 422 rather than a user with no attributes.
+    """
+
+    experiment_key: str = Field(
+        ..., min_length=1, max_length=100, description="Experiment identifier"
+    )
+    users: List[BatchAssignmentUser] = Field(
+        ...,
+        min_length=1,
+        max_length=MAX_BATCH_ASSIGN_USERS,
+        description="1 to 1,000 users, each user_id once",
+    )
+
+    model_config = ConfigDict(
+        extra="forbid",
+        json_schema_extra={
+            "example": {
+                "experiment_key": "spring-email",
+                "users": [
+                    {"user_id": "cust-001", "context": {"country": "US"}},
+                    {"user_id": "cust-002", "context": {"country": "DE"}},
+                ],
+            }
+        },
+    )
+
+    @field_validator("users", mode="before")
+    @classmethod
+    def _at_most_the_cap(cls, value: Any) -> Any:
+        # Before the items are validated, so an oversized list is refused
+        # without building a model for every entry.
+        if isinstance(value, list) and len(value) > MAX_BATCH_ASSIGN_USERS:
+            raise PydanticCustomError("too_long", BATCH_TOO_LONG_MESSAGE)
+        return value
+
+    @field_validator("users", mode="after")
+    @classmethod
+    def _each_user_once(
+        cls, value: List[BatchAssignmentUser]
+    ) -> List[BatchAssignmentUser]:
+        first_seen: Dict[str, int] = {}
+        for index, user in enumerate(value):
+            first = first_seen.setdefault(user.user_id, index)
+            if first != index:
+                # The error's location is the repeated entry; ``input`` is
+                # dropped from every 422 body (validation_errors.py) and the
+                # message carries positions only.
+                raise ValidationError.from_exception_data(
+                    cls.__name__,
+                    [
+                        InitErrorDetails(
+                            type=PydanticCustomError(
+                                "duplicate_user_id",
+                                BATCH_DUPLICATE_MESSAGE,
+                                {"first": first},
+                            ),
+                            loc=(index, "user_id"),
+                            input=None,
+                        )
+                    ],
+                )
+        return value
+
+
+class BatchVariant(BaseModel):
+    """A variant of the experiment, keyed by its id in ``variants``."""
+
+    name: str
+    is_control: bool = False
+    configuration: Optional[Dict[str, Any]] = None
+
+
+class BatchAssignment(BaseModel):
+    """One user's answer, as ``POST /api/v1/tracking/assign`` would give it."""
+
+    user_id: str
+    variant_id: str = Field(
+        ..., description="A key of variants; the control when assigned is false"
+    )
+    assigned: bool = Field(
+        ..., description="False when the user was not enrolled; nothing was recorded"
+    )
+    reason: str = Field(
+        ..., description="assigned | holdout | mutual_exclusion | targeting"
+    )
+
+
+class BatchAssignmentCounts(BaseModel):
+    """How many users of the request ended with each ``reason``."""
+
+    assigned: int = 0
+    holdout: int = 0
+    mutual_exclusion: int = 0
+    targeting: int = 0
+
+
+class AssignmentBatchResponse(BaseModel):
+    """Response for ``POST /api/v1/tracking/assign/batch``.
+
+    ``assignments`` is in request order, one entry per user.
+    """
+
+    experiment_key: str
+    variants: Dict[str, BatchVariant]
+    assignments: List[BatchAssignment]
+    counts: BatchAssignmentCounts
 
 
 class EventRequest(StorableTextModel):

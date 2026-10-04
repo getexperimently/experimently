@@ -6,7 +6,7 @@ database (via the shared `db_session` / factory fixtures from
 backend/tests/integration/conftest.py) rather than mocking out the ORM
 layer. The goal is behavioural coverage of:
 
-    get_assignment, assign_user, get_user_assignments, bulk_assign_users,
+    get_assignment, assign_user, get_user_assignments,
     assign_user_with_targeting, _evaluate_experiment_targeting,
     get_targeting_performance_stats, clear_targeting_metrics, reassign_user,
     _hash_user_to_variant, delete_assignments_by_experiment
@@ -29,11 +29,6 @@ against explicitly in the relevant tests):
   `get_assignment` reflects the latest variant. An invalid forced
   `variant_id` still raises `ValueError` and leaves the existing row
   untouched.
-- `AssignmentService.bulk_assign_users` only increments `assigned` after
-  `track_exposure` succeeds. If exposure tracking raises, the pending
-  `Assignment` is expunged from the session before the exception is
-  re-raised and counted, so the failing user is counted in `errors` only
-  and no row is committed for them.
 """
 
 import json
@@ -346,115 +341,6 @@ class TestGetUserAssignments:
     def test_no_assignments_returns_empty_list(self, service):
         results = service.get_user_assignments(_uid("nobody-assignments"))
         assert results == []
-
-
-# ---------------------------------------------------------------------------
-# bulk_assign_users
-# ---------------------------------------------------------------------------
-
-
-class TestBulkAssignUsers:
-    def test_empty_user_list_returns_zero_counts(
-        self, service, make_experiment, make_variant
-    ):
-        exp, _ = _active_experiment(make_experiment, make_variant, "Bulk Empty")
-        result = service.bulk_assign_users([], exp.id)
-        assert result == {"assigned": 0, "skipped": 0, "errors": 0}
-
-    def test_experiment_not_found_raises(self, service):
-        with pytest.raises(ValueError, match="not found"):
-            service.bulk_assign_users([_uid("bulk-missing")], uuid4())
-
-    def test_inactive_experiment_raises(self, service, make_experiment, make_variant):
-        exp = make_experiment(name="Bulk Inactive", status=ExperimentStatus.DRAFT)
-        make_variant(
-            experiment=exp, name="Control", is_control=True, traffic_allocation=100
-        )
-
-        with pytest.raises(ValueError, match="Cannot assign users"):
-            service.bulk_assign_users([_uid("bulk-inactive")], exp.id)
-
-    def test_assigns_multiple_new_users(self, service, make_experiment, make_variant):
-        exp, _ = _active_experiment(make_experiment, make_variant, "Bulk New Users")
-        user_ids = [_uid(f"bulk-new-{i}") for i in range(4)]
-
-        result = service.bulk_assign_users(user_ids, exp.id, track_exposure=False)
-
-        assert result == {"assigned": 4, "skipped": 0, "errors": 0}
-        count = (
-            service.db.query(Assignment)
-            .filter(
-                Assignment.experiment_id == exp.id,
-                Assignment.user_id.in_(user_ids),
-            )
-            .count()
-        )
-        assert count == 4
-
-    def test_skips_users_with_existing_assignment(
-        self, service, make_experiment, make_variant, make_assignment
-    ):
-        exp, (control, _) = _active_experiment(
-            make_experiment, make_variant, "Bulk Skip Existing"
-        )
-        existing_user = _uid("bulk-existing")
-        make_assignment(experiment=exp, variant=control, user_id=existing_user)
-
-        new_users = [_uid(f"bulk-skip-new-{i}") for i in range(2)]
-        result = service.bulk_assign_users(
-            [existing_user] + new_users, exp.id, track_exposure=False
-        )
-
-        assert result == {"assigned": 2, "skipped": 1, "errors": 0}
-
-    def test_track_exposure_failure_counts_error_and_drops_assignment(
-        self, service, make_experiment, make_variant, monkeypatch
-    ):
-        """When exposure tracking raises for a user, that user is counted
-        in 'errors' only (not 'assigned'), and no Assignment row is
-        committed for them; unaffected users are still assigned normally."""
-        exp, _ = _active_experiment(
-            make_experiment, make_variant, "Bulk Exposure Error"
-        )
-        user_ids = [_uid(f"bulk-err-{i}") for i in range(3)]
-        flaky_user = user_ids[1]
-
-        def flaky_track_exposure(user_id, experiment_id, variant_id, properties=None):
-            if user_id == flaky_user:
-                raise RuntimeError("simulated exposure failure")
-            return {}
-
-        monkeypatch.setattr(
-            service.event_service, "track_exposure", flaky_track_exposure
-        )
-
-        result = service.bulk_assign_users(user_ids, exp.id, track_exposure=True)
-
-        assert result["errors"] == 1
-        assert result["assigned"] == 2
-        assert result["skipped"] == 0
-
-        # The flaky user has no committed row at all...
-        flaky_row = (
-            service.db.query(Assignment)
-            .filter(
-                Assignment.experiment_id == exp.id,
-                Assignment.user_id == flaky_user,
-            )
-            .first()
-        )
-        assert flaky_row is None
-
-        # ...while the other two users were assigned successfully.
-        ok_count = (
-            service.db.query(Assignment)
-            .filter(
-                Assignment.experiment_id == exp.id,
-                Assignment.user_id.in_([u for u in user_ids if u != flaky_user]),
-            )
-            .count()
-        )
-        assert ok_count == 2
 
 
 # ---------------------------------------------------------------------------

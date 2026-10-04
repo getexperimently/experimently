@@ -89,6 +89,7 @@ nav:
   - Multi-Armed Bandits: api/multi-armed-bandit.md
   - Split URL Testing: api/split-url.md
   - Mutual Exclusion Groups: api/mutual-exclusion-groups.md
+  - Assign a Customer List (beta): guides/assign-customer-list.md
   - Live Results Streaming: websocket-streaming.md
 - LLM / AI Model Evaluation:
   - Overview: llm-evaluation/overview.md
