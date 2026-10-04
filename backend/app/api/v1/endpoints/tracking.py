@@ -32,6 +32,7 @@ from backend.app.schemas.tracking import (
     EventCreate,
     EventRequest,
     EventResponse,
+    UntaggedEventCreate,
     VariantAssignmentResponse,
 )
 from backend.app.services.assignment_service import AssignmentService
@@ -53,6 +54,42 @@ def _invalid_event_detail(exc: ValidationError) -> str:
         }
     )
     return f"Invalid event: {', '.join(fields)} not valid"
+
+
+def _unknown_keys_detail(
+    experiment_key: Optional[str], feature_flag_key: Optional[str]
+) -> str:
+    """The 404 for a request that gave a key and none of its keys was found.
+
+    Names only the keys that were given, so it never prints ``None`` (#217).
+    """
+    if experiment_key and feature_flag_key:
+        return (
+            f"Neither experiment key '{experiment_key}' nor feature flag key "
+            f"'{feature_flag_key}' was found."
+        )
+    if experiment_key:
+        return (
+            f"No experiment has the key '{experiment_key}'. Leave experiment_key "
+            "out to record the event without an experiment."
+        )
+    return (
+        f"No feature flag has the key '{feature_flag_key}'. Leave feature_flag_key "
+        "out to record the event without a flag."
+    )
+
+
+def _event_model(
+    experiment_id: Any, feature_flag_id: Any
+) -> type[EventCreate] | type[UntaggedEventCreate]:
+    """The model ``/track`` and ``/batch`` build for one event.
+
+    ``EventCreate`` refuses an event with neither id, so an event whose
+    request named no key is built as ``UntaggedEventCreate`` (#217).
+    """
+    if experiment_id or feature_flag_id:
+        return EventCreate
+    return UntaggedEventCreate
 
 
 def _event_response(event: Event) -> EventResponse:
@@ -375,16 +412,21 @@ async def track_event(
         if feature_flag:
             feature_flag_id = feature_flag.id
 
-    # If neither found, return error
-    if not experiment_id and not feature_flag_id:
+    # A key that was given and not found answers 404. Only an absent key
+    # (missing, null or "") records the event with no experiment or flag, as
+    # history (#217); " " counts as given.
+    keys_given = bool(request.experiment_key) or bool(request.feature_flag_key)
+    if keys_given and not experiment_id and not feature_flag_id:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Neither experiment key '{request.experiment_key}' nor feature flag key '{request.feature_flag_key}' found",
+            detail=_unknown_keys_detail(
+                request.experiment_key, request.feature_flag_key
+            ),
         )
 
     try:
         # Create event data
-        event_data = EventCreate(
+        event_data = _event_model(experiment_id, feature_flag_id)(
             user_id=request.user_id,
             event_type=request.event_type,
             event_name=request.event_name or request.event_type,
@@ -397,7 +439,7 @@ async def track_event(
         )
 
         # Track the event
-        event = EventService(db).track_event(event_data)
+        event = EventService(db).track_event(event_data, allow_untagged=True)
         record_event_tracked(str(event_data.event_type))
         return _event_response(event)
     except ValidationError as e:
@@ -577,21 +619,28 @@ async def track_events_batch(
                 if feature_flag:
                     feature_flag_id = feature_flag.id
 
-            # Skip if neither found
-            if not experiment_id and not feature_flag_id:
+            # Skip if a key was given and none was found; an event that names
+            # no key is stored as history (#217).
+            keys_given = bool(event_request.experiment_key) or bool(
+                event_request.feature_flag_key
+            )
+            if keys_given and not experiment_id and not feature_flag_id:
                 failure_count += 1
                 errors.append(
                     {
                         "index": index,
                         "event_type": event_request.event_type,
                         "user_id": event_request.user_id,
-                        "error": f"Neither experiment key '{event_request.experiment_key}' nor feature flag key '{event_request.feature_flag_key}' found",
+                        "error": _unknown_keys_detail(
+                            event_request.experiment_key,
+                            event_request.feature_flag_key,
+                        ),
                     }
                 )
                 continue
 
             # Create event data
-            event_data = EventCreate(
+            event_data = _event_model(experiment_id, feature_flag_id)(
                 user_id=event_request.user_id,
                 event_type=event_request.event_type,
                 event_name=event_request.event_name or event_request.event_type,
@@ -604,7 +653,7 @@ async def track_events_batch(
             )
 
             # Track the event
-            event_service.track_event(event_data)
+            event_service.track_event(event_data, allow_untagged=True)
             record_event_tracked(str(event_data.event_type))
             success_count += 1
 

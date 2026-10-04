@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from backend.app.models.assignment import Assignment
 from backend.app.models.event import Event, EventType, normalize_event_timestamp
-from backend.app.schemas.tracking import EventCreate
+from backend.app.schemas.tracking import EventCreate, UntaggedEventCreate
 
 logger = logging.getLogger(__name__)
 
@@ -62,14 +62,21 @@ class EventService:
     # ------------------------------------------------------------------
 
     @staticmethod
-    def _as_dict(event_data: Union[EventCreate, Mapping[str, Any]]) -> Dict[str, Any]:
+    def _as_dict(
+        event_data: Union[EventCreate, UntaggedEventCreate, Mapping[str, Any]],
+    ) -> Dict[str, Any]:
         """Accept either a Pydantic model or a plain mapping."""
         if hasattr(event_data, "model_dump"):
             return event_data.model_dump()
         return dict(event_data)
 
     @classmethod
-    def build_event(cls, event_data: Union[EventCreate, Mapping[str, Any]]) -> Event:
+    def build_event(
+        cls,
+        event_data: Union[EventCreate, UntaggedEventCreate, Mapping[str, Any]],
+        *,
+        allow_untagged: bool = False,
+    ) -> Event:
         """
         Build an ``Event`` ORM object from schema-shaped or column-shaped data.
 
@@ -77,7 +84,11 @@ class EventService:
         onto the ORM columns (``created_at``, ``event_metadata``) and coerces
         identifiers to UUIDs.  Raises ``ValueError`` for missing ``user_id``,
         an invalid identifier, or when neither ``experiment_id`` nor
-        ``feature_flag_id`` is provided.
+        ``feature_flag_id`` is provided and ``allow_untagged`` is False.
+
+        ``allow_untagged`` is True only for ``/tracking/track`` and
+        ``/tracking/batch`` (#217): an event with neither id is stored as
+        history and counts in no experiment's results.
         """
         data = cls._as_dict(event_data)
 
@@ -87,7 +98,7 @@ class EventService:
 
         experiment_id = _to_uuid(data.get("experiment_id"))
         feature_flag_id = _to_uuid(data.get("feature_flag_id"))
-        if experiment_id is None and feature_flag_id is None:
+        if experiment_id is None and feature_flag_id is None and not allow_untagged:
             raise ValueError("Either experiment_id or feature_flag_id must be provided")
 
         metadata = next(
@@ -129,10 +140,18 @@ class EventService:
     # Writes
     # ------------------------------------------------------------------
 
-    def track_event(self, event_data: Union[EventCreate, Mapping[str, Any]]) -> Event:
-        """Persist a single event. Accepts an ``EventCreate`` or a mapping."""
+    def track_event(
+        self,
+        event_data: Union[EventCreate, UntaggedEventCreate, Mapping[str, Any]],
+        *,
+        allow_untagged: bool = False,
+    ) -> Event:
+        """Persist a single event. Accepts an ``EventCreate`` or a mapping.
+
+        ``allow_untagged`` is passed through to :meth:`build_event`.
+        """
         try:
-            event = self.build_event(event_data)
+            event = self.build_event(event_data, allow_untagged=allow_untagged)
             self.db.add(event)
             self.db.commit()
             self.db.refresh(event)
