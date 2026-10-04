@@ -34,6 +34,7 @@ from modules.backend.app.services.warehouse_query_builder import (
 )
 from modules.backend.app.services.warehouse_sufficient_stats import (
     parse_diagnostics_rows,
+    parse_float,
     parse_metric_rows,
 )
 from modules.backend.app.warehouse import egress
@@ -940,6 +941,130 @@ def test_table_reference_checked_before_anything_is_sent(key, table):
 def test_a_column_type_of_an_unexpected_shape_refused(key, data_type):
     status, body = recorded("result_show_columns")
     body["data"][0][3] = data_type
+    fake = NetworkFake(happy(status=[(status, body)]))
+    with pytest.raises(WarehouseError) as err:
+        adapter(key, fake).table_columns(
+            ("ANALYTICS", "PUBLIC", "EXPOSURES"), Deadline(30)
+        )
+    assert err.value.code is C.RESULT_INVALID
+
+
+# -- answers recorded on a real account (run wl-snowflake-20261004T194134Z-155c1c4b)
+
+
+#: What the live check's statements read back, as BuiltQuery previews.
+def _preview(sql: str) -> BuiltQuery:
+    return BuiltQuery(kind="preview", dialect="snowflake", sql=sql)
+
+
+@pytest.mark.regression
+def test_real_connection_test_reports_utc_as_z(key):
+    """A real UTC session reports its offset as ``Z``; the check accepts it.
+
+    The first real run failed every check with ``timezone_not_utc`` because
+    only ``+00:00`` was accepted.
+    """
+    fake = NetworkFake(happy(status=["real_connection_test"]))
+    check = adapter(key, fake).check_connection(Deadline(30))
+    assert (check.role, check.warehouse, check.session_offset) == (
+        "ANALYSIS_READER_ROLE",
+        "ANALYSIS_WH",
+        "Z",
+    )
+
+
+@pytest.mark.regression
+def test_real_timezone_probe_reads_back_in_utc(key):
+    fake = NetworkFake(happy(status=["real_timezone_probe"]))
+    result = adapter(key, fake).run_query(_preview("SELECT 1"), Deadline(30))
+    assert result.rows == ({"v": "2026-09-01 00:30:00 Z", "session_offset": "Z"},)
+
+
+@pytest.mark.regression
+def test_real_wire_probe_parses_to_exactly_the_binary64_sum(key):
+    """Snowflake's DECFLOAT text is a 38-digit exponent form, not the shortest form.
+
+    The product's parser reads it back as exactly ``0.1 + 0.2``.
+    """
+    fake = NetworkFake(happy(status=["real_wire_probe"]))
+    result = adapter(key, fake).run_query(_preview("SELECT 1"), Deadline(30))
+    (row,) = result.rows
+    assert row["v"] == "3.0000000000000004440892098500626161695e-1"
+    value, text = parse_float(row["v"], "v")
+    assert value == 0.1 + 0.2 == 0.30000000000000004
+    assert text == row["v"]
+
+
+@pytest.mark.regression
+def test_real_show_columns_is_read(key):
+    """Real ``SHOW COLUMNS`` output has a column named ``null?``.
+
+    The first real run refused the whole answer as ``result_invalid``, and so
+    every check that needs the table's columns errored.
+    """
+    fake = NetworkFake(happy(status=["real_show_columns"]))
+    columns = adapter(key, fake).table_columns(
+        ("ANALYTICS", "PUBLIC", "EXPOSURES"), Deadline(30)
+    )
+    assert columns == (
+        ("USER_ID", "TEXT"),
+        ("EXPERIMENT_KEY", "TEXT"),
+        ("VARIANT", "TEXT"),
+        ("EXPOSED_AT", "TIMESTAMP_NTZ"),
+    )
+    assert not of_kind(fake, "cancel")
+
+
+@pytest.mark.parametrize(
+    "offset",
+    [
+        "+01:00",
+        "-07:00",
+        "-00:00",
+        "+0000",
+        "+00",
+        "00:00",
+        "UTC",
+        "GMT",
+        "z",
+        "Z ",
+        " Z",
+        "ZZ",
+        "Z+00:00",
+        "+00:00 ",
+        "",
+        None,
+    ],
+)
+def test_real_connection_test_in_any_other_offset_refused(key, offset):
+    """Only the exact UTC spellings pass; anything else is ``timezone_not_utc``."""
+    status, body = recorded("real_connection_test")
+    body["data"][0][2] = offset
+    fake = NetworkFake(happy(status=[(status, body)]))
+    with pytest.raises(WarehouseError) as err:
+        adapter(key, fake).check_connection(Deadline(30))
+    assert err.value.code is C.TIMEZONE_NOT_UTC
+
+
+@pytest.mark.parametrize(
+    "name",
+    ["null??", "?null", "nu?ll", "null?x", "null!", "null ?", "N-1", "", "?"],
+)
+def test_real_show_columns_with_another_column_name_refused(key, name):
+    """A trailing ``?`` is the only addition to the identifier rule."""
+    status, body = recorded("real_show_columns")
+    body["resultSetMetaData"]["rowType"][4]["name"] = name
+    fake = NetworkFake(happy(status=[(status, body)]))
+    with pytest.raises(WarehouseError) as err:
+        adapter(key, fake).table_columns(
+            ("ANALYTICS", "PUBLIC", "EXPOSURES"), Deadline(30)
+        )
+    assert err.value.code is C.RESULT_INVALID
+
+
+def test_two_result_columns_differing_only_in_case_still_refused(key):
+    status, body = recorded("real_show_columns")
+    body["resultSetMetaData"]["rowType"][5]["name"] = "NULL?"
     fake = NetworkFake(happy(status=[(status, body)]))
     with pytest.raises(WarehouseError) as err:
         adapter(key, fake).table_columns(

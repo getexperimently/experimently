@@ -80,6 +80,7 @@ from modules.backend.app.services.warehouse_clients import WarehouseClient
 from modules.backend.app.services.warehouse_query_builder import (
     LABEL_MAX_CHARS,
     BuiltQuery,
+    is_utc_session_offset,
 )
 from modules.backend.app.services.warehouse_run_accounting import (
     daily_limit_reached,
@@ -88,7 +89,6 @@ from modules.backend.app.services.warehouse_run_accounting import (
     seconds_until_reset,
 )
 from modules.backend.app.services.warehouse_sufficient_stats import (
-    UTC_OFFSET,
     MetricSufficientStatistics,
     WarehouseResultRefused,
     parse_diagnostics_rows,
@@ -770,7 +770,7 @@ def parse_preview_rows(
     if not rows:
         raise WarehouseResultRefused("result_invalid", "a preview returns rows")
     if expect_session_offset and any(
-        row.get("session_offset") != UTC_OFFSET for row in rows
+        not is_utc_session_offset(row.get("session_offset")) for row in rows
     ):
         raise WarehouseResultRefused("timezone_not_utc", "session not in UTC")
     first = rows[0]
