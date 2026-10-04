@@ -364,7 +364,7 @@ carries `X-API-Key: <key>`, `Content-Type: application/json`, `Accept: applicati
 | Track up to 100 events (`track` without a key, `trackBatch`) | `POST /api/v1/tracking/batch` | `{"events":[<track body>...]}` | `{"success_count","failure_count","errors": list\|null}` |
 
 Errors: 401 bad key; 404 flag/experiment not ACTIVE or unknown (→ `FLAG_NOT_FOUND`, never
-cached); 422 track without any key; 429 rate limited (`Retry-After` header).
+cached); 422 invalid event; 429 rate limited (`Retry-After` header).
 
 Successful evaluations are cached per user + flag for the configured TTL (`cacheTtlMs` /
 `cache_ttl`, default 5 minutes) and reported with reason `CACHED`; failures are never cached.

@@ -249,8 +249,8 @@ For `evaluateFlag` and `getAssignment`:
 5. **Safe default** — `{ key, enabled: false, config: null }` / `null`. Failures are never cached.
 
 Every swallowed failure is passed to `config.onError(error, operation)`; HTTP failures are
-`ApiError` instances with a `status` field (401 bad key, 404 flag/experiment not ACTIVE, 422 track
-without a key, 429 rate limited).
+`ApiError` instances with a `status` field (401 bad key, 404 flag/experiment not ACTIVE, 422 invalid
+event, 429 rate limited).
 
 ### AsyncStorage layout
 
@@ -273,7 +273,7 @@ Every request carries `X-API-Key`, `Content-Type: application/json` and `Accept:
 | `track` with a key | `POST /api/v1/tracking/track` | `{"event_type","event_name","user_id","experiment_key"?,"feature_flag_key"?,"value"?,"metadata"?,"timestamp"?}` | stored event (ignored) |
 | `track` without a key, `trackBatch` | `POST /api/v1/tracking/batch` | `{"events":[<track body>...]}` (max 100) | `{"success_count","failure_count","errors"}` |
 
-Errors: 401 bad key; 404 experiment/flag not ACTIVE or unknown; 422 track without any key; 429
+Errors: 401 bad key; 404 experiment/flag not ACTIVE or unknown; 422 invalid event; 429
 rate limited (`Retry-After` header).
 
 ---

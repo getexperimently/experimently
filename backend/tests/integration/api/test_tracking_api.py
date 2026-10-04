@@ -359,11 +359,17 @@ class TestTrack:
         )
         assert resp.status_code == 404
 
-    def test_missing_keys_return_422(self, admin_client):
+    def test_missing_keys_store_the_event_as_history(self, admin_client, db_session):
+        # #217: an event with no key is stored with every id null (it used to
+        # answer 422). test_tracking_untagged_events.py covers the rest.
+        user_id = _user()
         resp = admin_client.post(
-            "/api/v1/tracking/track", json={"event_type": "click", "user_id": _user()}
+            "/api/v1/tracking/track", json={"event_type": "click", "user_id": user_id}
         )
-        assert resp.status_code == 422
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["experiment_id"] is None
+        db_session.query(Event).filter(Event.user_id == user_id).delete()
+        db_session.commit()
 
 
 class TestBatch:
@@ -401,7 +407,8 @@ class TestBatch:
         assert data["failure_count"] == 1
         assert data["errors"][0]["index"] == 1
         assert data["errors"][0]["error"] == (
-            f"Neither experiment key '{missing_key}' nor feature flag key 'None' found"
+            f"No experiment has the key '{missing_key}'. Leave experiment_key out "
+            "to record the event without an experiment."
         )
 
         stored = (
