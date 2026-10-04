@@ -43,6 +43,7 @@ from backend.app.core.permissions import (
     get_permission_error_message,
 )
 from backend.app.core.scheduler import experiment_scheduler
+from backend.app.models.audit_log import ActionType, EntityType
 from backend.app.models.compliance_audit_event import AuditAction, AuditOutcome
 from backend.app.models.experiment import Experiment, ExperimentStatus
 from backend.app.models.user import User, UserRole
@@ -56,6 +57,12 @@ from backend.app.schemas.experiment import (
 from backend.app.schemas.results import ExperimentResultsResponse
 from backend.app.services.analysis_service import AnalysisService
 from backend.app.services.audit_log_service import AuditLogService
+from backend.app.services.audit_service import (
+    AuditService,
+    audit_identity,
+    audit_snapshot,
+    record_experiment_change,
+)
 from backend.app.services.experiment_service import (
     AnalysisConfigError,
     ExperimentService,
@@ -433,6 +440,15 @@ async def create_experiment(
                 f"Compliance audit logging failed for experiment create: {_audit_err}"
             )
 
+        created_id = (
+            experiment.get("id")
+            if isinstance(experiment, dict)
+            else getattr(experiment, "id", None)
+        )
+        record_experiment_change(
+            db, current_user, ActionType.EXPERIMENT_CREATE, created_id
+        )
+
         await _invalidate_experiment_cache(cache_control, None)
 
         return ExperimentResponse.model_validate(experiment)
@@ -774,6 +790,7 @@ async def update_experiment(
             "status": _status_text(experiment.status),
             "targeting_rules": copy.deepcopy(experiment.targeting_rules),
         }
+        before_audit = audit_snapshot(EntityType.EXPERIMENT, experiment)
 
         # Create experiment service
         experiment_service = ExperimentService(db)
@@ -827,6 +844,10 @@ async def update_experiment(
             logger.warning(
                 f"Compliance audit logging failed for experiment update: {_audit_err}"
             )
+
+        record_experiment_change(
+            db, current_user, ActionType.EXPERIMENT_UPDATE, experiment_id, before_audit
+        )
 
         await _invalidate_experiment_cache(cache_control, experiment_id)
 
@@ -995,6 +1016,7 @@ async def delete_experiment(
         "owner_id": str(experiment.owner_id) if experiment.owner_id else None,
     }
     deleted_exp_id = str(experiment.id)
+    deleted_audit = audit_identity(audit_snapshot(EntityType.EXPERIMENT, experiment))
 
     # Delete experiment
     db.delete(experiment)
@@ -1019,6 +1041,16 @@ async def delete_experiment(
         logger.warning(
             f"Compliance audit logging failed for experiment delete: {_audit_err}"
         )
+
+    AuditService.record_after_commit(
+        db,
+        actor=current_user,
+        action=ActionType.EXPERIMENT_DELETE,
+        entity_type=EntityType.EXPERIMENT,
+        entity_id=experiment_id,
+        entity_name=deleted_audit["name"] or str(experiment_id),
+        before=deleted_audit,
+    )
 
     await _invalidate_experiment_cache(cache_control, experiment_id)
 
@@ -1105,8 +1137,14 @@ async def start_experiment(
                 detail="Experiment must have at least one metric defined",
             )
 
+        before_audit = audit_snapshot(EntityType.EXPERIMENT, experiment)
+
         # Start experiment
         started_experiment = experiment_service.start_experiment(experiment)
+
+        record_experiment_change(
+            db, current_user, ActionType.EXPERIMENT_START, experiment_id, before_audit
+        )
 
         await _invalidate_experiment_cache(cache_control, experiment_id)
 
@@ -1174,10 +1212,16 @@ async def pause_experiment(
                 detail=f"Cannot pause experiment with status: {experiment.status.value}",
             )
 
+        before_audit = audit_snapshot(EntityType.EXPERIMENT, experiment)
+
         # Update experiment status
         experiment.status = ExperimentStatus.PAUSED
         db.commit()
         db.refresh(experiment)
+
+        record_experiment_change(
+            db, current_user, ActionType.EXPERIMENT_PAUSE, experiment_id, before_audit
+        )
 
         await _invalidate_experiment_cache(cache_control, experiment_id)
 
@@ -1279,6 +1323,8 @@ async def update_experiment_schedule(
                 "time_zone": schedule.time_zone,
             }
 
+            before_audit = audit_snapshot(EntityType.EXPERIMENT, experiment)
+
             # Update the experiment
             updated_experiment = experiment_service.update_experiment_schedule(
                 experiment=experiment,
@@ -1288,6 +1334,15 @@ async def update_experiment_schedule(
 
         except ValueError as e:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+
+        record_experiment_change(
+            db,
+            current_user,
+            ActionType.EXPERIMENT_UPDATE,
+            experiment_id,
+            before_audit,
+            reason="schedule",
+        )
 
         await _invalidate_experiment_cache(cache_control, experiment_id)
 
@@ -1356,11 +1411,21 @@ async def complete_experiment(
                 detail=f"Cannot complete experiment with status: {experiment.status.value}",
             )
 
+        before_audit = audit_snapshot(EntityType.EXPERIMENT, experiment)
+
         # Update experiment status
         experiment.status = ExperimentStatus.COMPLETED
         experiment.end_date = datetime.now(timezone.utc)
         db.commit()
         db.refresh(experiment)
+
+        record_experiment_change(
+            db,
+            current_user,
+            ActionType.EXPERIMENT_COMPLETE,
+            experiment_id,
+            before_audit,
+        )
 
         await _invalidate_experiment_cache(cache_control, experiment_id)
 
@@ -1493,8 +1558,19 @@ async def archive_experiment(
         # Create experiment service
         experiment_service = ExperimentService(db)
 
+        before_audit = audit_snapshot(EntityType.EXPERIMENT, experiment)
+
         # Archive experiment
         experiment_service.archive_experiment(experiment)
+
+        record_experiment_change(
+            db,
+            current_user,
+            ActionType.EXPERIMENT_UPDATE,
+            experiment_id,
+            before_audit,
+            reason="archive",
+        )
 
         await _invalidate_experiment_cache(cache_control, experiment_id)
 
@@ -1580,6 +1656,19 @@ async def clone_experiment(
         # Clone experiment
         cloned_experiment = experiment_service.clone_experiment(
             experiment, current_user.id
+        )
+
+        cloned_id = (
+            cloned_experiment.get("id")
+            if isinstance(cloned_experiment, dict)
+            else getattr(cloned_experiment, "id", None)
+        )
+        record_experiment_change(
+            db,
+            current_user,
+            ActionType.EXPERIMENT_CREATE,
+            cloned_id,
+            reason=f"clone of {experiment_id}",
         )
 
         await _invalidate_experiment_cache(cache_control, None)
@@ -1832,11 +1921,21 @@ async def update_experiment_metadata(
         # Merge the new keys into the stored experiment_metadata JSONB column.
         # (`experiment.metadata` would be SQLAlchemy's table MetaData, which is
         # why this endpoint used to fail with a TypeError.)
+        before_audit = audit_snapshot(EntityType.EXPERIMENT, experiment)
         current_metadata = dict(experiment.experiment_metadata or {})
         current_metadata.update(metadata)
         experiment.experiment_metadata = current_metadata
         db.commit()
         db.refresh(experiment)
+
+        record_experiment_change(
+            db,
+            current_user,
+            ActionType.EXPERIMENT_UPDATE,
+            experiment_id,
+            before_audit,
+            reason="metadata",
+        )
         updated_experiment = experiment_service.to_response_dict(experiment)
 
         await _invalidate_experiment_cache(cache_control, experiment_id)

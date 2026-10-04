@@ -29,6 +29,9 @@ class GlobalHoldoutService:
 
     def __init__(self, db: Session):
         self.db = db
+        #: (id, name) of every holdout ``_deactivate_all`` turned off through
+        #: this service object, so the route can record each one.
+        self.implicitly_deactivated: List[Tuple[UUID, str]] = []
 
     # ------------------------------------------------------------------
     # CRUD
@@ -166,7 +169,7 @@ class GlobalHoldoutService:
 
     def _deactivate_all(self) -> None:
         """Deactivate all currently active holdouts."""
-        self.db.query(GlobalHoldout).filter(GlobalHoldout.is_active == True).update(
-            {"is_active": False}
-        )
+        active = self.db.query(GlobalHoldout).filter(GlobalHoldout.is_active == True)
+        self.implicitly_deactivated.extend((h.id, h.name) for h in active.all())
+        active.update({"is_active": False})
         self.db.flush()

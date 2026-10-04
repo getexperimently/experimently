@@ -36,12 +36,18 @@ from backend.app.core.permissions import (
     get_permission_error_message,
 )
 from backend.app.models.api_key import APIKey
+from backend.app.models.audit_log import ActionType, EntityType
 from backend.app.models.user import User
 from backend.app.schemas.api_key import (
     KEY_PREFIX_LENGTH,
     APIKeyCreate,
     APIKeyCreated,
     APIKeyRead,
+)
+from backend.app.services.audit_service import (
+    AuditService,
+    audit_identity,
+    audit_snapshot,
 )
 
 router = APIRouter()
@@ -138,7 +144,7 @@ def create_api_key(
         scopes=scopes,
         expires_at=body.expires_at,
     )
-    return APIKeyCreated(
+    created = APIKeyCreated(
         id=api_key.id,
         name=api_key.name,
         key=plaintext,
@@ -146,6 +152,18 @@ def create_api_key(
         created_at=api_key.created_at,
         expires_at=api_key.expires_at,
     )
+    # The key is committed; a failed audit write does not undo it. The entry
+    # holds no part of the key or its hash (``key`` is not an audit field).
+    AuditService.record_after_commit(
+        db,
+        actor=current_user,
+        action=ActionType.API_KEY_CREATE,
+        entity_type=EntityType.API_KEY,
+        entity_id=api_key.id,
+        entity_name=api_key.name,
+        after=audit_identity(audit_snapshot(EntityType.API_KEY, api_key)),
+    )
+    return created
 
 
 @router.delete("/{key_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -167,6 +185,16 @@ def delete_api_key(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=get_permission_error_message(ResourceType.API_KEY, Action.DELETE),
         )
+    revoked = audit_identity(audit_snapshot(EntityType.API_KEY, api_key))
     db.delete(api_key)
     db.commit()
+    AuditService.record_after_commit(
+        db,
+        actor=current_user,
+        action=ActionType.API_KEY_REVOKE,
+        entity_type=EntityType.API_KEY,
+        entity_id=key_id,
+        entity_name=revoked["name"] or str(key_id),
+        before=revoked,
+    )
     return Response(status_code=status.HTTP_204_NO_CONTENT)

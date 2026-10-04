@@ -23,7 +23,7 @@ from backend.app.core.permissions import (
     can_act_on_feature_flag,
     can_read_all_audit_logs,
 )
-from backend.app.models.audit_log import ActionType
+from backend.app.models.audit_log import ActionType, EntityType
 from backend.app.models.feature_flag import (
     ARCHIVED_FLAG_DETAIL,
     ArchivedFlagError,
@@ -38,7 +38,7 @@ from backend.app.schemas.advanced_toggle import (
     DetailedAuditLogResponse,
     FlagChangeHistoryResponse,
 )
-from backend.app.services.audit_service import AuditService
+from backend.app.services.audit_service import AuditActor, AuditService
 from backend.app.services.feature_flag_service import FlagVerb, transition
 
 logger = logging.getLogger(__name__)
@@ -77,6 +77,9 @@ async def bulk_toggle_flags(
     """
     results = []
     audit_log_ids = []
+    # (flag id, name, action, old status, new status) of each flag changed, to
+    # be recorded once the changes are committed.
+    changed = []
 
     for flag_id_str in request.flag_ids:
         try:
@@ -140,21 +143,7 @@ async def bulk_toggle_flags(
             if new_status != old_status:
                 flag.status = new_status
             db.flush()
-
-            # Log to audit (one entry per flag)
-            log_id = await AuditService.log_toggle_operation(
-                db=db,
-                user_id=current_user.id,
-                user_email=current_user.email,
-                username=current_user.username,
-                action_type=action_type.value,
-                entity_id=flag.id,
-                entity_name=flag.name,
-                old_value=old_status,
-                new_value=new_status,
-                reason=request.reason,
-            )
-            audit_log_ids.append(str(log_id))
+            changed.append((flag.id, flag.name, action_type, old_status, new_status))
 
             results.append(
                 BulkToggleResult(
@@ -188,6 +177,25 @@ async def bulk_toggle_flags(
     except Exception as e:
         logger.error("Failed to commit bulk toggle transaction (%s)", type(e).__name__)
         db.rollback()
+        changed = []
+
+    # One entry per flag, after the changes are committed. A failed audit
+    # write is logged and does not undo the change it describes.
+    actor = AuditActor.of(current_user)
+    for flag_id, flag_name, action_type, old_status, new_status in changed:
+        log_id = AuditService.record_after_commit(
+            db,
+            actor=actor,
+            action=action_type,
+            entity_type=EntityType.FEATURE_FLAG,
+            entity_id=flag_id,
+            entity_name=flag_name,
+            before=old_status,
+            after=new_status,
+            reason=request.reason,
+        )
+        if log_id is not None:
+            audit_log_ids.append(str(log_id))
 
     succeeded = sum(1 for r in results if r.success)
     return BulkToggleResponse(

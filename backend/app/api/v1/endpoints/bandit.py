@@ -24,6 +24,7 @@ from backend.app.api import deps
 from backend.app.core.bandit_scheduler import BanditScheduler
 from backend.app.core.permissions import Action, ResourceType, check_permission
 from backend.app.core.stats_engine import ENGINE_VERSION
+from backend.app.models.audit_log import ActionType, EntityType
 from backend.app.models.bandit_state import BanditState
 from backend.app.models.experiment import Experiment
 from backend.app.models.user import User, UserRole
@@ -32,6 +33,10 @@ from backend.app.schemas.bandit import (
     BanditUpdateRequest,
     BanditVariantWeight,
     OptimizationType,
+)
+from backend.app.services.audit_service import (
+    audit_snapshot,
+    record_experiment_change,
 )
 
 logger = logging.getLogger(__name__)
@@ -253,6 +258,8 @@ def override_bandit_weights(
         for vid, weight in body.weights.items()
     }
 
+    before_audit = audit_snapshot(EntityType.EXPERIMENT, experiment)
+
     # Upsert BanditState
     bandit_state: Optional[BanditState] = (
         db.query(BanditState).filter(BanditState.experiment_id == experiment_id).first()
@@ -285,6 +292,15 @@ def override_bandit_weights(
 
     db.commit()
     db.refresh(bandit_state)
+
+    record_experiment_change(
+        db,
+        current_user,
+        ActionType.EXPERIMENT_UPDATE,
+        experiment_id,
+        before_audit,
+        reason="bandit weights",
+    )
 
     scheduler = BanditScheduler(db=db)
     return _build_status_response(experiment, bandit_state, scheduler)

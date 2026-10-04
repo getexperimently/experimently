@@ -56,7 +56,12 @@ from backend.app.schemas.feature_flag import (
 )
 from backend.app.schemas.storable_text import storable_text_param
 from backend.app.services.audit_log_service import AuditLogService
-from backend.app.services.audit_service import AuditService
+from backend.app.services.audit_service import (
+    AuditService,
+    audit_changes,
+    audit_identity,
+    audit_snapshot,
+)
 from backend.app.services.feature_flag_service import (
     FeatureFlagService,
     FlagStatusReadOnly,
@@ -372,6 +377,17 @@ async def create_feature_flag(
             f"Compliance audit logging failed for feature_flag create: {audit_error}"
         )
 
+    # The flag is committed above; a failed audit write does not undo it.
+    AuditService.record_after_commit(
+        db,
+        actor=current_user,
+        action=ActionType.FEATURE_FLAG_CREATE,
+        entity_type=EntityType.FEATURE_FLAG,
+        entity_id=created.id,
+        entity_name=created.name,
+        after=audit_identity(audit_snapshot(EntityType.FEATURE_FLAG, feature_flag)),
+    )
+
     return created
 
 
@@ -515,6 +531,7 @@ async def update_feature_flag(
         "status": str(flag.status),
         "rollout_percentage": flag.rollout_percentage,
     }
+    before_audit = audit_snapshot(EntityType.FEATURE_FLAG, flag)
 
     # Update feature flag
     try:
@@ -559,6 +576,20 @@ async def update_feature_flag(
         logger.warning(
             f"Compliance audit logging failed for feature_flag update: {audit_error}"
         )
+
+    old_value, new_value = audit_changes(
+        before_audit, audit_snapshot(EntityType.FEATURE_FLAG, updated_row)
+    )
+    AuditService.record_after_commit(
+        db,
+        actor=current_user,
+        action=ActionType.FEATURE_FLAG_UPDATE,
+        entity_type=EntityType.FEATURE_FLAG,
+        entity_id=flag_id,
+        entity_name=updated_flag.name,
+        before=old_value,
+        after=new_value,
+    )
 
     return updated_flag
 
@@ -647,6 +678,8 @@ async def delete_feature_flag(
         "status": str(flag.status),
     }
     deleted_flag_id = str(flag.id)
+    deleted_audit = audit_identity(audit_snapshot(EntityType.FEATURE_FLAG, flag))
+    deleted_flag_name = flag.name
 
     # Create feature flag service
     feature_flag_service = FeatureFlagService(db)
@@ -673,6 +706,16 @@ async def delete_feature_flag(
         logger.warning(
             f"Compliance audit logging failed for feature_flag delete: {audit_error}"
         )
+
+    AuditService.record_after_commit(
+        db,
+        actor=current_user,
+        action=ActionType.FEATURE_FLAG_DELETE,
+        entity_type=EntityType.FEATURE_FLAG,
+        entity_id=flag_id,
+        entity_name=deleted_flag_name,
+        before=deleted_audit,
+    )
 
     # Return 204 No Content
     return Response(status_code=status.HTTP_204_NO_CONTENT)
@@ -729,11 +772,27 @@ async def activate_feature_flag(
     if flag_status_name(flag.status) == new_status.value:
         return FeatureFlagRead.model_validate(flag)
 
+    before_audit = audit_snapshot(EntityType.FEATURE_FLAG, flag)
+
     # Create feature flag service
     feature_flag_service = FeatureFlagService(db)
 
     # Activate feature flag
     activated_flag = feature_flag_service.activate_feature_flag(flag)
+
+    old_value, new_value = audit_changes(
+        before_audit, audit_snapshot(EntityType.FEATURE_FLAG, flag)
+    )
+    AuditService.record_after_commit(
+        db,
+        actor=current_user,
+        action=ActionType.FEATURE_FLAG_ACTIVATE,
+        entity_type=EntityType.FEATURE_FLAG,
+        entity_id=flag_id,
+        entity_name=before_audit["name"],
+        before=old_value,
+        after=new_value,
+    )
 
     return activated_flag
 
@@ -781,11 +840,27 @@ async def deactivate_feature_flag(
     if flag_status_name(flag.status) == transition(flag.status, FlagVerb.OFF).value:
         return FeatureFlagRead.model_validate(flag)
 
+    before_audit = audit_snapshot(EntityType.FEATURE_FLAG, flag)
+
     # Create feature flag service
     feature_flag_service = FeatureFlagService(db)
 
     # Deactivate feature flag
     deactivated_flag = feature_flag_service.deactivate_feature_flag(flag)
+
+    old_value, new_value = audit_changes(
+        before_audit, audit_snapshot(EntityType.FEATURE_FLAG, flag)
+    )
+    AuditService.record_after_commit(
+        db,
+        actor=current_user,
+        action=ActionType.FEATURE_FLAG_DEACTIVATE,
+        entity_type=EntityType.FEATURE_FLAG,
+        entity_id=flag_id,
+        entity_name=before_audit["name"],
+        before=old_value,
+        after=new_value,
+    )
 
     return deactivated_flag
 

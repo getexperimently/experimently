@@ -485,6 +485,10 @@ curl -X POST "http://localhost:8000/api/v1/users/" \
   superuser access, 403 "Not enough permissions". Nothing is written either
   way. The wait is at most 5 seconds; a request that would wait longer answers
   500 and writes nothing.
+- **Audit log**: a change to `is_superuser` is recorded as `role_assign`, with
+  the role and superuser flag before and after, and a change to `is_active` as
+  `user_deactivate` or `user_activate`, in the same transaction as the change.
+  If the entry cannot be written, nothing is saved.
 - **Response**: 200 OK, the user as in Get User
 - **Errors**: 400 "You can't remove your own superuser access. Ask another
   administrator to do it." when a superuser's request would turn off their own
@@ -869,6 +873,10 @@ public `key`. They share the per-IP `SDK_RATE_LIMIT_PER_MINUTE` ceiling (default
   superuser access, 403 "Not enough permissions". Nothing is written either
   way. The wait is at most 5 seconds; a request that would wait longer answers
   500 and writes nothing.
+- **Audit log**: a change to `is_superuser` is recorded as `role_assign`, with
+  the role and superuser flag before and after, and a change to `is_active` as
+  `user_deactivate` or `user_activate`, in the same transaction as the change.
+  If the entry cannot be written, nothing is saved.
 - **Response**: 200 OK, the user
 - **Errors**: 400 "You can't remove your own superuser access. Ask another
   administrator to do it." when the request would turn off your own
@@ -926,8 +934,10 @@ public `key`. They share the per-IP `SDK_RATE_LIMIT_PER_MINUTE` ceiling (default
     the request changes `role`. Changing `is_active` is still accepted there.
   - 422 for a body that is empty, has an unknown key, a `null`, or a role
     outside the four above.
-- Every change is recorded in the audit log as `user_update`, with the role
-  and active status before and after.
+- Every change is recorded in the audit log, in the same transaction as the
+  change: a role change as `role_assign`, with the role and superuser flag
+  before and after, and an active-status change as `user_deactivate` or
+  `user_activate`. If the entry cannot be written, nothing is saved.
 
 ### Delete User (Admin)
 - **Endpoint**: `DELETE /api/v1/admin/users/{user_id}`

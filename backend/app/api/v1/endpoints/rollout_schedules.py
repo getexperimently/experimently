@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 from backend.app.api import deps
 from backend.app.core.logging import get_logger
 from backend.app.core.permissions import Action, can_act_on_feature_flag
+from backend.app.models.audit_log import ActionType, EntityType
 from backend.app.models.feature_flag import FeatureFlag
 from backend.app.models.rollout_schedule import (
     RolloutSchedule,
@@ -30,6 +31,11 @@ from backend.app.schemas.rollout_schedule import (
     RolloutStageResponse,
     RolloutStageUpdate,
 )
+from backend.app.services.audit_service import (
+    AuditService,
+    audit_changes,
+    audit_snapshot,
+)
 from backend.app.services.rollout_service import RolloutService
 
 logger = get_logger(__name__)
@@ -44,7 +50,7 @@ def _require_update_on_flag(
     flag_id: Optional[UUID] = None,
     schedule_id: Optional[UUID] = None,
     stage_id: Optional[UUID] = None,
-) -> None:
+) -> FeatureFlag:
     """Refuse unless *user* may change the feature flag this request would move.
 
     A schedule changes its flag's rollout percentage, so every change to a
@@ -82,6 +88,30 @@ def _require_update_on_flag(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Not enough permissions to change this feature flag's rollout",
         )
+    return flag
+
+
+def _record_rollout(
+    db: Session, user: User, flag_id: UUID, before: dict, verb: str
+) -> None:
+    """The audit entry for a committed schedule or stage change: a
+    ``feature_flag_update`` on the schedule's flag, with the reason
+    "rollout schedule <verb>". It fails open: the change stands.
+    """
+    flag = db.query(FeatureFlag).filter(FeatureFlag.id == flag_id).first()
+    after = audit_snapshot(EntityType.FEATURE_FLAG, flag) if flag else before
+    old_value, new_value = audit_changes(before, after)
+    AuditService.record_after_commit(
+        db,
+        actor=user,
+        action=ActionType.FEATURE_FLAG_UPDATE,
+        entity_type=EntityType.FEATURE_FLAG,
+        entity_id=flag_id,
+        entity_name=after.get("name") or str(flag_id),
+        before=old_value,
+        after=new_value,
+        reason=f"rollout schedule {verb}",
+    )
 
 
 @router.post(
@@ -102,11 +132,13 @@ def create_rollout_schedule(
     This endpoint allows users to create a gradual rollout schedule for a feature flag.
     A schedule consists of multiple stages with defined criteria for progression.
     """
-    _require_update_on_flag(db, current_user, flag_id=data.feature_flag_id)
+    flag = _require_update_on_flag(db, current_user, flag_id=data.feature_flag_id)
+    before = audit_snapshot(EntityType.FEATURE_FLAG, flag)
     try:
         schedule = RolloutService.create_rollout_schedule(
             db=db, data=data, owner_id=current_user.id
         )
+        _record_rollout(db, current_user, flag.id, before, "created")
         return schedule
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
@@ -209,7 +241,8 @@ def update_rollout_schedule(
     This endpoint allows updating the properties of a rollout schedule,
     including its stages and status transitions.
     """
-    _require_update_on_flag(db, current_user, schedule_id=schedule_id)
+    flag = _require_update_on_flag(db, current_user, schedule_id=schedule_id)
+    before = audit_snapshot(EntityType.FEATURE_FLAG, flag)
     try:
         schedule = RolloutService.update_rollout_schedule(
             db=db, schedule_id=schedule_id, data=data
@@ -220,6 +253,7 @@ def update_rollout_schedule(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"Rollout schedule not found with ID: {schedule_id}",
             )
+        _record_rollout(db, current_user, flag.id, before, "updated")
 
         return schedule
     except ValueError as e:
@@ -249,7 +283,8 @@ def delete_rollout_schedule(
     This endpoint allows deletion of a rollout schedule. Active schedules
     cannot be deleted and must be paused or cancelled first.
     """
-    _require_update_on_flag(db, current_user, schedule_id=schedule_id)
+    flag = _require_update_on_flag(db, current_user, schedule_id=schedule_id)
+    before = audit_snapshot(EntityType.FEATURE_FLAG, flag)
     try:
         success = RolloutService.delete_rollout_schedule(db=db, schedule_id=schedule_id)
 
@@ -258,6 +293,7 @@ def delete_rollout_schedule(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"Rollout schedule not found with ID: {schedule_id}",
             )
+        _record_rollout(db, current_user, flag.id, before, "deleted")
 
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
@@ -286,7 +322,8 @@ def activate_rollout_schedule(
     This endpoint transitions a schedule from DRAFT or PAUSED to ACTIVE status,
     which enables its automatic processing by the scheduler.
     """
-    _require_update_on_flag(db, current_user, schedule_id=schedule_id)
+    flag = _require_update_on_flag(db, current_user, schedule_id=schedule_id)
+    before = audit_snapshot(EntityType.FEATURE_FLAG, flag)
     try:
         schedule = RolloutService.activate_rollout_schedule(
             db=db, schedule_id=schedule_id
@@ -297,6 +334,7 @@ def activate_rollout_schedule(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"Rollout schedule not found with ID: {schedule_id}",
             )
+        _record_rollout(db, current_user, flag.id, before, "activated")
 
         return schedule
     except ValueError as e:
@@ -326,7 +364,8 @@ def pause_rollout_schedule(
     This endpoint transitions a schedule from ACTIVE to PAUSED status,
     which temporarily suspends its processing by the scheduler.
     """
-    _require_update_on_flag(db, current_user, schedule_id=schedule_id)
+    flag = _require_update_on_flag(db, current_user, schedule_id=schedule_id)
+    before = audit_snapshot(EntityType.FEATURE_FLAG, flag)
     try:
         schedule = RolloutService.pause_rollout_schedule(db=db, schedule_id=schedule_id)
 
@@ -335,6 +374,7 @@ def pause_rollout_schedule(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"Rollout schedule not found with ID: {schedule_id}",
             )
+        _record_rollout(db, current_user, flag.id, before, "paused")
 
         return schedule
     except ValueError as e:
@@ -364,7 +404,8 @@ def cancel_rollout_schedule(
     This endpoint transitions a schedule to CANCELLED status,
     which permanently stops its processing by the scheduler.
     """
-    _require_update_on_flag(db, current_user, schedule_id=schedule_id)
+    flag = _require_update_on_flag(db, current_user, schedule_id=schedule_id)
+    before = audit_snapshot(EntityType.FEATURE_FLAG, flag)
     try:
         schedule = RolloutService.cancel_rollout_schedule(
             db=db, schedule_id=schedule_id
@@ -375,6 +416,7 @@ def cancel_rollout_schedule(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"Rollout schedule not found with ID: {schedule_id}",
             )
+        _record_rollout(db, current_user, flag.id, before, "cancelled")
 
         return schedule
     except ValueError as e:
@@ -406,7 +448,8 @@ def add_rollout_stage(
     This endpoint allows adding a new stage to an existing rollout schedule.
     The stage defines a target percentage and criteria for activation.
     """
-    _require_update_on_flag(db, current_user, schedule_id=schedule_id)
+    flag = _require_update_on_flag(db, current_user, schedule_id=schedule_id)
+    before = audit_snapshot(EntityType.FEATURE_FLAG, flag)
     try:
         stage = RolloutService.add_rollout_stage(
             db=db, schedule_id=schedule_id, data=data
@@ -417,6 +460,7 @@ def add_rollout_stage(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"Rollout schedule not found with ID: {schedule_id}",
             )
+        _record_rollout(db, current_user, flag.id, before, "stage added")
 
         return stage
     except ValueError as e:
@@ -447,7 +491,8 @@ def update_rollout_stage(
     This endpoint allows updating the properties of a rollout stage,
     including its target percentage and trigger criteria.
     """
-    _require_update_on_flag(db, current_user, stage_id=stage_id)
+    flag = _require_update_on_flag(db, current_user, stage_id=stage_id)
+    before = audit_snapshot(EntityType.FEATURE_FLAG, flag)
     try:
         stage = RolloutService.update_rollout_stage(db=db, stage_id=stage_id, data=data)
 
@@ -456,6 +501,7 @@ def update_rollout_stage(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"Rollout stage not found with ID: {stage_id}",
             )
+        _record_rollout(db, current_user, flag.id, before, "stage updated")
 
         return stage
     except ValueError as e:
@@ -485,7 +531,8 @@ def delete_rollout_stage(
     This endpoint allows deletion of a pending rollout stage.
     Stages that are already in progress or completed cannot be deleted.
     """
-    _require_update_on_flag(db, current_user, stage_id=stage_id)
+    flag = _require_update_on_flag(db, current_user, stage_id=stage_id)
+    before = audit_snapshot(EntityType.FEATURE_FLAG, flag)
     try:
         success = RolloutService.delete_rollout_stage(db=db, stage_id=stage_id)
 
@@ -494,6 +541,7 @@ def delete_rollout_stage(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"Rollout stage not found with ID: {stage_id}",
             )
+        _record_rollout(db, current_user, flag.id, before, "stage deleted")
 
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
@@ -522,7 +570,8 @@ def manually_advance_stage(
     This endpoint allows manually triggering a stage transition
     for stages with manual trigger types.
     """
-    _require_update_on_flag(db, current_user, stage_id=stage_id)
+    flag = _require_update_on_flag(db, current_user, stage_id=stage_id)
+    before = audit_snapshot(EntityType.FEATURE_FLAG, flag)
     try:
         stage = RolloutService.manually_advance_stage(db=db, stage_id=stage_id)
 
@@ -531,6 +580,7 @@ def manually_advance_stage(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"Rollout stage not found with ID: {stage_id}",
             )
+        _record_rollout(db, current_user, flag.id, before, "stage advanced")
 
         return stage
     except ValueError as e:
