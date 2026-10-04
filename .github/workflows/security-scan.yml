@@ -293,22 +293,60 @@ jobs:
       # `backend/requirements.txt` keeps its vulnerability coverage through
       # `scripts/audit_dependencies.py` + pip-audit, which is the gate that
       # can express "accepted, test-only, review by <date>".
-      - name: Scan the backend tree for secrets
+      #
+      # Every credential scan below writes trivy's JSON report to a file under
+      # $RUNNER_TEMP and prints only path, rule, severity and line
+      # (scripts/render_secret_findings.py, `--stage ci`), the way release.yml
+      # does. The report is never printed, converted or uploaded. trivy's own
+      # exit status wins over the renderer's, and a missing report fails.
+      # backend/tests/unit/infrastructure/test_security_scan_output.py runs
+      # these scripts against a fake trivy.
+      - name: Scan the backend tree for credentials
         run: |
-          "$TRIVY" fs --skip-version-check --scanners secret --severity HIGH,CRITICAL --exit-code 1 --format table backend/
+          set -euo pipefail
+          report="$RUNNER_TEMP/secrets-backend.json"
+          rm -f "$report"
+          status=0
+          "$TRIVY" fs --skip-version-check --scanners secret --severity HIGH,CRITICAL --exit-code 1 --format json --output "$report" backend/ || status=$?
+          render=0
+          python3 "$GITHUB_WORKSPACE/scripts/render_secret_findings.py" "$report" --stage ci --label "backend/ (source tree)" || render=$?
+          if [ "$status" -ne 0 ]; then exit "$status"; fi
+          exit "$render"
         continue-on-error: false
 
       # `modules/requirements.txt` is a shipped closure's input and the
       # shipped tier has no exceptions by design, so there is no mechanism to
-      # conflict with -- both scanners run here. Absent in a core checkout,
-      # which is why the backend scan above is unconditional: a gate that can
-      # scan nothing at all is the vacuous gate this comment set out to avoid.
-      - name: Scan the module requirements for vulnerabilities and secrets
+      # conflict with -- both scanners run here, one step each. Absent in a
+      # core checkout, which is why the backend scan above is unconditional: a
+      # gate that can scan nothing at all is the vacuous gate this comment set
+      # out to avoid.
+      - name: Scan the module tree for credentials
         run: |
+          set -euo pipefail
           if [ -d modules ]; then
-            "$TRIVY" fs --skip-version-check --severity HIGH,CRITICAL --exit-code 1 --format table modules/
+            report="$RUNNER_TEMP/secrets-modules.json"
+            rm -f "$report"
+            status=0
+            "$TRIVY" fs --skip-version-check --scanners secret --severity HIGH,CRITICAL --exit-code 1 --format json --output "$report" modules/ || status=$?
+            render=0
+            python3 "$GITHUB_WORKSPACE/scripts/render_secret_findings.py" "$report" --stage ci --label "modules/ (source tree)" || render=$?
+            if [ "$status" -ne 0 ]; then exit "$status"; fi
+            exit "$render"
           else
-            echo "core checkout: no modules/ to scan"
+            printf 'core checkout: no modules/ to scan\n'
+          fi
+        continue-on-error: false
+
+      # The advisory table names package names, versions and paths only
+      # (measured with trivy 0.74.0), so it stays in the log, where the
+      # advisory id is what a contributor needs to fix the dependency.
+      - name: Scan the module requirements for known advisories
+        run: |
+          set -euo pipefail
+          if [ -d modules ]; then
+            "$TRIVY" fs --skip-version-check --scanners vuln --severity HIGH,CRITICAL --exit-code 1 --format table modules/
+          else
+            printf 'core checkout: no modules/ to scan\n'
           fi
         continue-on-error: false
 
@@ -399,18 +437,47 @@ jobs:
             type=gha,scope=web
           cache-to: type=gha,scope=web-full,mode=max
 
+      # Two steps over the same four images, one per scanner. `--image-src
+      # docker` reads the tag from the local daemon only: a tag the builds
+      # above did not produce fails deterministically, with no network
+      # dependency, instead of being looked up in a registry.
+      #
+      # The loop is a plain `for`, not a pipe into `while read`: a pipe runs
+      # the loop in a subshell and `failed=1` would be lost with it. Each
+      # image gets its own report, removed first, so a scan that writes none
+      # fails in the renderer rather than reading the previous image's.
+      - name: Scan the built images for credentials
+        run: |
+          set -euo pipefail
+          failed=0
+          n=0
+          for image in experimently-api:scan-core experimently-api:scan-full \
+                       experimently-web:scan-core experimently-web:scan-full; do
+            n=$((n + 1))
+            report="$RUNNER_TEMP/secrets-image-$n.json"
+            rm -f "$report"
+            status=0
+            "$TRIVY" image --skip-version-check --image-src docker --scanners secret --severity HIGH,CRITICAL --exit-code 1 \
+              --format json --output "$report" "$image" || status=$?
+            render=0
+            python3 "$GITHUB_WORKSPACE/scripts/render_secret_findings.py" "$report" --stage ci --label "$image (image)" || render=$?
+            if [ "$status" -ne 0 ] || [ "$render" -ne 0 ]; then failed=1; fi
+          done
+          exit "$failed"
+
       # One policy for all four images, the API's: HIGH/CRITICAL with a fix
-      # available fails the job.
-      - name: Scan the built images
+      # available fails the job. The table names package names, versions and
+      # paths only (measured with trivy 0.74.0).
+      - name: Scan the built images for known advisories
         run: |
           set -euo pipefail
           failed=0
           for image in experimently-api:scan-core experimently-api:scan-full \
                        experimently-web:scan-core experimently-web:scan-full; do
-            echo "::group::trivy image ($image)"
-            "$TRIVY" image --skip-version-check --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 \
+            printf '::group::%s (advisories)\n' "$image"
+            "$TRIVY" image --skip-version-check --image-src docker --scanners vuln --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 \
               --format table "$image" || failed=1
-            echo "::endgroup::"
+            printf '::endgroup::\n'
           done
           exit "$failed"
 

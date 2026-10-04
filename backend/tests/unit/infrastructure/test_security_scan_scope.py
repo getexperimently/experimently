@@ -78,10 +78,12 @@ class TestEveryScannerSeesBothTrees:
         assert "if [ -d modules/backend/app ]" in script
 
     @pytest.mark.regression
-    def test_trivy_scans_the_modules_dependencies(self):
+    @pytest.mark.parametrize("kind", ["modules-vuln", "modules-secret"])
+    def test_trivy_scans_the_modules_dependencies(self, kind):
         """The full image installs modules/requirements.txt on top of the core
-        closure, and that file was in no HIGH/CRITICAL gate."""
-        (scan,) = _commands_of(_workflow(), "modules-fs")
+        closure, and that file was in no HIGH/CRITICAL gate. Both scanners run
+        over modules/, one step each."""
+        (scan,) = _commands_of(_workflow(), kind)
         assert (
             scan.argv[-1] == "modules/" and _flags(scan.argv)[0]["--exit-code"] == "1"
         )
@@ -211,23 +213,40 @@ class TestEveryPublishedImageIsScanned:
         )
 
     @pytest.mark.regression
-    def test_trivy_scans_every_image_the_job_builds(self):
-        """The image step's own loop names every built tag: a tag assembled at
-        run time (`...:scan-$target`) cannot be checked here, and a tag that
-        appears only in log text does not count."""
+    @pytest.mark.parametrize("kind", ["image-vuln", "image-secret"])
+    def test_trivy_scans_every_image_the_job_builds(self, kind):
+        """Each image step's OWN loop names every built tag: a tag assembled at
+        run time (`...:scan-$target`) cannot be checked here, a tag that
+        appears only in log text does not count, and a tag in the other
+        scanner's loop does not count either."""
         built = _built_images(_workflow(), ["container-security"])
         assert len(set(built.values())) == len(built), built
-        (scan,) = _commands_of(_workflow(), "image")
+        (scan,) = _commands_of(_workflow(), kind)
         assert _image_loop(scan.run) == sorted(built.values()), (
-            "the image scan loop does not name exactly the tags the job builds"
+            f"the {kind} loop does not name exactly the tags the job builds"
         )
 
-    def test_the_image_scan_blocks(self):
-        """One policy for every image: HIGH/CRITICAL with a fix fails."""
-        (scan,) = _commands_of(_workflow(), "image")
-        assert scan.tail == ["||", "failed=1"], scan.tail
-        assert 'exit "$failed"' in scan.run
-        assert not scan.step.get("continue-on-error"), "the image scan does not block"
+    def test_the_two_image_scans_are_separate_steps(self):
+        (vuln,) = _commands_of(_workflow(), "image-vuln")
+        (secret,) = _commands_of(_workflow(), "image-secret")
+        assert vuln.step is not secret.step
+
+    def test_the_image_scans_block(self):
+        """One policy for every image: HIGH/CRITICAL with a fix fails, and a
+        credential in any one of the four fails the step."""
+        (vuln,) = _commands_of(_workflow(), "image-vuln")
+        assert vuln.tail == ["||", "failed=1"], vuln.tail
+        (secret,) = _commands_of(_workflow(), "image-secret")
+        assert secret.tail == ["||", "status=$?"], secret.tail
+        assert (
+            'if [ "$status" -ne 0 ] || [ "$render" -ne 0 ]; then failed=1; fi'
+            in secret.run
+        )
+        for scan in (vuln, secret):
+            assert scan.run.rstrip().endswith('exit "$failed"'), scan.run
+            assert not scan.step.get("continue-on-error"), (
+                "the image scan does not block"
+            )
 
 
 # -- every trivy command, parsed (#772) -----------------------------------------
@@ -246,47 +265,42 @@ MODULES_GUARD = "[ -d modules ]"
 #: Flags that take no value, so the parser does not read the next token.
 BOOLEAN_FLAGS = {"--skip-version-check", "--ignore-unfixed"}
 
+#: The flags of every credential scan: the secret scanner alone, written as
+#: JSON to the step's report file, which the renderer reads.
+SECRET_FLAGS: Dict[str, Any] = {
+    "--skip-version-check": True,
+    "--scanners": "secret",
+    "--severity": "HIGH,CRITICAL",
+    "--exit-code": "1",
+    "--format": "json",
+    "--output": "$report",
+}
+
+#: The flags of every advisory scan: trivy's `vuln` scanner alone, as
+#: a table in the log.
+VULN_FLAGS: Dict[str, Any] = {
+    "--skip-version-check": True,
+    "--scanners": "vuln",
+    "--severity": "HIGH,CRITICAL",
+    "--exit-code": "1",
+    "--format": "table",
+}
+
 #: Each class of trivy command the workflow runs, with its exact flags, target
-#: and core-checkout guard. Scanners, severity, format and exit code are
-#: today's; ``--skip-version-check`` is the one flag the pinned binary adds.
+#: and core-checkout guard.
 EXPECTED: Dict[str, List[Tuple[Dict[str, Any], str, List[str]]]] = {
-    "backend-secret": [
-        (
-            {
-                "--skip-version-check": True,
-                "--scanners": "secret",
-                "--severity": "HIGH,CRITICAL",
-                "--exit-code": "1",
-                "--format": "table",
-            },
-            "backend/",
-            [],
-        )
+    "backend-secret": [(SECRET_FLAGS, "backend/", [])],
+    "modules-secret": [(SECRET_FLAGS, "modules/", [MODULES_GUARD])],
+    "modules-vuln": [(VULN_FLAGS, "modules/", [MODULES_GUARD])],
+    "image-secret": [
+        ({**SECRET_FLAGS, "--image-src": "docker"}, "$image", []),
     ],
-    "modules-fs": [
+    "image-vuln": [
         (
-            {
-                "--skip-version-check": True,
-                "--severity": "HIGH,CRITICAL",
-                "--exit-code": "1",
-                "--format": "table",
-            },
-            "modules/",
-            [MODULES_GUARD],
-        )
-    ],
-    "image": [
-        (
-            {
-                "--skip-version-check": True,
-                "--severity": "HIGH,CRITICAL",
-                "--ignore-unfixed": True,
-                "--exit-code": "1",
-                "--format": "table",
-            },
+            {**VULN_FLAGS, "--image-src": "docker", "--ignore-unfixed": True},
             "$image",
             [],
-        )
+        ),
     ],
     "sbom": [
         (
@@ -312,9 +326,6 @@ EXPECTED: Dict[str, List[Tuple[Dict[str, Any], str, List[str]]]] = {
 
 #: Every trivy command in the whole workflow, across every job.
 EXPECTED_COUNT = sum(len(v) for v in EXPECTED.values())
-
-#: The one place the bare word may appear in a scan script: log text.
-GROUP_LABEL = "::group::trivy image ("
 
 INSTALL_NAME = "Install trivy (pinned, checksum-verified)"
 
@@ -373,17 +384,18 @@ def _commands(workflow: Dict[str, Any]) -> List[Command]:
 def _classify(command: Command) -> Optional[str]:
     flags, positionals = _flags(command.argv)
     kind = command.argv[1] if len(command.argv) > 1 else None
+    scanners = flags.get("--scanners")
     if kind == "image":
-        return "image"
+        return {"secret": "image-secret", "vuln": "image-vuln"}.get(str(scanners))
     if kind != "fs":
         return None
     if flags.get("--format") == "cyclonedx":
         return "sbom"
-    if flags.get("--scanners") == "secret" and positionals == ["backend/"]:
-        return "backend-secret"
-    if "--scanners" not in flags and positionals == ["modules/"]:
-        return "modules-fs"
-    return None
+    return {
+        ("secret", "backend/"): "backend-secret",
+        ("secret", "modules/"): "modules-secret",
+        ("vuln", "modules/"): "modules-vuln",
+    }.get((str(scanners), positionals[0] if len(positionals) == 1 else ""))
 
 
 def _commands_of(workflow: Dict[str, Any], kind: str) -> List[Command]:
@@ -428,7 +440,9 @@ def check_scan_shape(workflow: Dict[str, Any]) -> List[str]:
         )
         if actual != sorted(expected, key=repr):
             problems.append(f"{kind}: expected {expected}, found {actual}")
-    for command in _commands_of(workflow, "image"):
+    for command in _commands_of(workflow, "image-vuln") + _commands_of(
+        workflow, "image-secret"
+    ):
         built = _built_images(workflow, [SCAN_JOB])
         try:
             loop = _image_loop(command.run)
@@ -462,7 +476,7 @@ def check_binary(workflow: Dict[str, Any]) -> List[str]:
             references += len(re.findall(r"\$\{?TRIVY\b\}?", run))
             if step.get("name") == INSTALL_NAME:
                 continue
-            bare = re.findall(r"\btrivy\b", run.replace(GROUP_LABEL, ""))
+            bare = re.findall(r"\btrivy\b", run)
             if bare:
                 problems.append(
                     f'{job_name}: {step.get("name")} names trivy outside "$TRIVY"'
@@ -502,6 +516,19 @@ def check_pins(workflow: Dict[str, Any], release: Dict[str, Any]) -> List[str]:
     return problems
 
 
+#: The backend credential scan, as the workflow spells it.
+BACKEND_SCAN = (
+    '"$TRIVY" fs --skip-version-check --scanners secret --severity HIGH,CRITICAL'
+    ' --exit-code 1 --format json --output "$report" backend/'
+)
+
+#: The end of the credential loop's tag list, which the advisory loop
+#: does not share.
+SECRET_LOOP_END = (
+    "experimently-web:scan-core experimently-web:scan-full; do\n"
+    "            n=$((n + 1))"
+)
+
 #: The install before #772, in outline: the apt package, no pins.
 APT_INSTALL = """\
 sudo apt-get install -y wget apt-transport-https gnupg lsb-release
@@ -512,7 +539,7 @@ sudo apt-get install -y trivy
 
 def _tampered(old: str, new: str) -> Dict[str, Any]:
     text = WORKFLOW.read_text()
-    assert old in text, f"tamper anchor not found: {old!r}"
+    assert text.count(old) == 1, f"tamper anchor not found once: {old!r}"
     return _workflow(text.replace(old, new))
 
 
@@ -538,8 +565,10 @@ class TestTrivyIsThePinnedBinary:
         counts = Counter(_classify(c) for c in _commands(_workflow()))
         assert counts == {
             "backend-secret": 1,
-            "modules-fs": 1,
-            "image": 1,
+            "modules-secret": 1,
+            "modules-vuln": 1,
+            "image-secret": 1,
+            "image-vuln": 1,
             "sbom": 2,
         }, counts
 
@@ -567,26 +596,28 @@ class TestTrivyIsThePinnedBinary:
                 "TRIVY_SHA256 is",
             ),
             (
-                '"$TRIVY" fs --skip-version-check --scanners secret',
-                "trivy fs --skip-version-check --scanners secret",
+                BACKEND_SCAN,
+                BACKEND_SCAN.replace('"$TRIVY"', "trivy"),
                 "binary",
                 'argv[0] is not "$TRIVY"',
             ),
             (
-                '"$TRIVY" fs --skip-version-check --scanners secret',
-                'status=0; "$TRIVY" fs --skip-version-check --scanners secret',
+                BACKEND_SCAN,
+                "status=0; " + BACKEND_SCAN,
                 "binary",
-                "4 trivy commands parsed",
+                "6 trivy commands parsed",
             ),
             (
                 "          fi\n\n      - name: Upload SBOM",
                 '          fi\n          x=$("$TRIVY" --version)\n\n      - name: Upload SBOM',
                 "binary",
-                "6 references to $TRIVY",
+                "8 references to $TRIVY",
             ),
             (
-                "experimently-api:scan-full \\\n",
-                "\\\n",
+                # One tag dropped from the credential loop only: the
+                # advisory loop still names all four.
+                SECRET_LOOP_END,
+                SECRET_LOOP_END.replace(" experimently-web:scan-full", ""),
                 "shape",
                 "image loop names",
             ),
@@ -594,13 +625,19 @@ class TestTrivyIsThePinnedBinary:
                 "--ignore-unfixed --exit-code 1",
                 "--exit-code 1",
                 "shape",
-                "image: expected",
+                "image-vuln: expected",
             ),
             (
-                "--scanners secret --severity HIGH,CRITICAL --exit-code 1 --format table",
-                "--scanners secret --exit-code 1 --format table",
+                BACKEND_SCAN,
+                BACKEND_SCAN.replace("--severity HIGH,CRITICAL ", ""),
                 "shape",
                 "backend-secret: expected",
+            ),
+            (
+                "--image-src docker --scanners secret",
+                "--scanners secret",
+                "shape",
+                "image-secret: expected",
             ),
         ],
     )
@@ -611,4 +648,239 @@ class TestTrivyIsThePinnedBinary:
             "binary": lambda: check_binary(workflow),
             "shape": lambda: check_scan_shape(workflow),
         }[check]()
+        assert any(expected in p for p in problems), problems
+
+
+# -- every credential report stays on the runner (#772) -------------------------
+#
+# Each credential scan writes trivy's JSON report to a file under $RUNNER_TEMP,
+# and the only thing that reads it is scripts/render_secret_findings.py, which
+# prints path, rule, severity and line. These checks hold that shape for every
+# trivy command in the workflow, whichever scanners it names.
+
+UPLOAD_ACTION = "actions/upload-artifact"
+
+#: The one way a report is read: the renderer, with the ci wording, keeping its
+#: own exit status.
+RENDER_CALL = re.compile(
+    r'^python3 "\$GITHUB_WORKSPACE/scripts/render_secret_findings\.py" '
+    r'"(?P<report>[^"]+)" --stage ci --label "[^"]+" \|\| render=\$\?$'
+)
+
+#: How a step ends: trivy's status first, then the renderer's; or, in a loop
+#: over images, either one marks the step failed.
+EXIT_PATTERNS = (
+    'if [ "$status" -ne 0 ]; then exit "$status"; fi\nexit "$render"',
+    'if [ "$status" -ne 0 ] || [ "$render" -ne 0 ]; then failed=1; fi',
+)
+
+#: Text in an upload path that could reach a report.
+UPLOAD_REFUSED = ("RUNNER_TEMP", "runner.temp", "_temp", "secrets-", "*", "?")
+
+
+def _scanners(flags: Dict[str, Any]) -> set:
+    """The scanners a command runs; trivy's default is vuln and secret."""
+    value = flags.get("--scanners")
+    return set(str(value).split(",")) if value else {"vuln", "secret"}
+
+
+def _resolve(run: str, value: str) -> str:
+    """*value*, or the one ``name="..."`` assignment it names in *run*."""
+    named = re.fullmatch(r"\$\{?(\w+)\}?", value)
+    if not named:
+        return value
+    assigned = re.findall(rf'^\s*{named.group(1)}="([^"]*)"\s*$', run, flags=re.M)
+    return assigned[0] if len(assigned) == 1 else ""
+
+
+def _stripped_lines(run: str) -> List[str]:
+    return [line.strip() for line in run.replace("\\\n", " ").splitlines()]
+
+
+def check_reports(workflow: Dict[str, Any]) -> List[str]:
+    """Every credential scan writes JSON under $RUNNER_TEMP, only the renderer
+    reads it, nothing uploads it, and no step of the scan job may fail
+    quietly."""
+    problems = []
+    for command in _commands(workflow):
+        flags, _ = _flags(command.argv)
+        if flags.get("--format") == "cyclonedx":
+            if "--scanners" in flags:
+                problems.append(f"{command}: an SBOM command names scanners")
+            continue
+        if "--scanners" not in flags:
+            problems.append(f"{command}: no --scanners, so trivy runs vuln and secret")
+        scanners = _scanners(flags)
+        if "secret" not in scanners:
+            continue
+        if scanners != {"secret"}:
+            problems.append(
+                f"{command}: the secret scanner shares a command with "
+                f"{sorted(scanners - {'secret'})}"
+            )
+        if flags.get("--format") != "json":
+            problems.append(
+                f"{command}: runs the secret scanner with --format "
+                f"{flags.get('--format')}"
+            )
+        output = str(flags.get("--output") or "")
+        path = _resolve(command.run, output)
+        if not path.startswith("$RUNNER_TEMP/"):
+            problems.append(
+                f"{command}: the report {output!r} ({path!r}) is not under $RUNNER_TEMP"
+            )
+        if command.tail != ["||", "status=$?"]:
+            problems.append(f"{command}: trivy's status is not kept")
+        lines = _stripped_lines(command.run)
+        rendered = [m.group("report") for m in map(RENDER_CALL.match, lines) if m]
+        if output not in rendered:
+            problems.append(f"{command}: the report is not rendered in the same step")
+        if f'rm -f "{output}"' not in lines or lines.index(
+            f'rm -f "{output}"'
+        ) > lines.index(command.line):
+            problems.append(f"{command}: the report is not removed before the scan")
+        uses = command.run.count(f'"{output}"')
+        if uses != 3:
+            problems.append(
+                f"{command}: the report is used {uses} times; only rm, --output "
+                "and the renderer may name it"
+            )
+        if not any(pattern in "\n".join(lines) for pattern in EXIT_PATTERNS):
+            problems.append(f"{command}: the step does not end on both statuses")
+    for job_name, job in workflow["jobs"].items():
+        for step in job.get("steps", []):
+            if UPLOAD_ACTION not in str(step.get("uses", "")):
+                continue
+            paths = str((step.get("with") or {}).get("path", "")).splitlines()
+            for path in filter(None, (p.strip() for p in paths)):
+                if any(s in path for s in UPLOAD_REFUSED) or path.startswith(
+                    ("/", "~", "..")
+                ):
+                    problems.append(f"{job_name}: {step.get('name')} uploads {path}")
+    for step in workflow["jobs"][SCAN_JOB]["steps"]:
+        if step.get("continue-on-error", False) not in (False, "false"):
+            problems.append(f"{SCAN_JOB}: {step.get('name')} has continue-on-error")
+    return problems
+
+
+#: The credential and advisory scans as #772 found them: one command per
+#: tree or image, both scanners, a table in the log.
+TABLE_SCANS = {
+    "Scan the backend tree for credentials": (
+        '"$TRIVY" fs --skip-version-check --scanners secret --severity HIGH,CRITICAL'
+        " --exit-code 1 --format table backend/\n"
+    ),
+    "Scan the module tree for credentials": (
+        "if [ -d modules ]; then\n"
+        '  "$TRIVY" fs --skip-version-check --severity HIGH,CRITICAL --exit-code 1'
+        " --format table modules/\n"
+        "fi\n"
+    ),
+    "Scan the built images for credentials": (
+        "set -euo pipefail\n"
+        "failed=0\n"
+        "for image in experimently-api:scan-core experimently-api:scan-full"
+        " experimently-web:scan-core experimently-web:scan-full; do\n"
+        '  "$TRIVY" image --skip-version-check --severity HIGH,CRITICAL'
+        ' --ignore-unfixed --exit-code 1 --format table "$image" || failed=1\n'
+        "done\n"
+        'exit "$failed"\n'
+    ),
+}
+
+
+class TestEveryCredentialReportStaysOnTheRunner:
+    def test_every_credential_report_stays_on_the_runner(self):
+        assert check_reports(_workflow()) == []
+
+    def test_the_check_sees_every_credential_scan(self):
+        """A positive control: three credential scans, each rendered."""
+        secret = [
+            c
+            for c in _commands(_workflow())
+            if "secret" in _scanners(_flags(c.argv)[0])
+            and _flags(c.argv)[0].get("--format") != "cyclonedx"
+        ]
+        assert len(secret) == 3, secret
+
+    @pytest.mark.regression
+    def test_the_table_scans_fail_the_check(self):
+        """The three scans as #772 found them, each a table in the log."""
+        workflow = _workflow()
+        for step in workflow["jobs"][SCAN_JOB]["steps"]:
+            if step.get("name") in TABLE_SCANS:
+                step["run"] = TABLE_SCANS[step["name"]]
+        problems = check_reports(workflow)
+        for target in ("backend/", "modules/", "$image"):
+            assert any(f"{target}" in p and "--format table" in p for p in problems), (
+                target,
+                problems,
+            )
+        assert any("no --scanners" in p for p in problems), problems
+
+    @pytest.mark.parametrize(
+        ("old", "new", "expected"),
+        [
+            (
+                '--format json --output "$report" backend/',
+                "--format table backend/",
+                "runs the secret scanner with --format table",
+            ),
+            (
+                '--label "backend/ (source tree)" || render=$?',
+                '--label "backend/ (source tree)" || render=$?\n          cat "$report"',
+                "the report is used 4 times",
+            ),
+            (
+                '--label "backend/ (source tree)" || render=$?',
+                "",
+                "is not rendered in the same step",
+            ),
+            (
+                'report="$RUNNER_TEMP/secrets-backend.json"',
+                'report="secrets-backend.json"',
+                "is not under $RUNNER_TEMP",
+            ),
+            (
+                'rm -f "$report"\n          status=0',
+                "status=0",
+                "is not removed before the scan",
+            ),
+            (
+                "backend/ || status=$?",
+                "backend/",
+                "trivy's status is not kept",
+            ),
+            (
+                'if [ "$status" -ne 0 ]; then exit "$status"; fi\n          exit "$render"\n'
+                "        continue-on-error: false\n\n      # `modules/",
+                'exit "$render"\n        continue-on-error: false\n\n      # `modules/',
+                "does not end on both statuses",
+            ),
+            (
+                "            sbom-modules.json\n",
+                "            sbom-modules.json\n"
+                "            ${{ runner.temp }}/secrets-backend.json\n",
+                "uploads ${{ runner.temp }}/secrets-backend.json",
+            ),
+            (
+                'exit "$render"\n        continue-on-error: false\n\n      # `modules/',
+                'exit "$render"\n        continue-on-error: true\n\n      # `modules/',
+                "has continue-on-error",
+            ),
+            (
+                "--image-src docker --scanners secret",
+                "--image-src docker --scanners vuln,secret",
+                "the secret scanner shares a command with ['vuln']",
+            ),
+            (
+                "--scanners vuln --severity HIGH,CRITICAL --exit-code 1"
+                " --format table modules/",
+                "--severity HIGH,CRITICAL --exit-code 1 --format table modules/",
+                "no --scanners",
+            ),
+        ],
+    )
+    def test_a_planted_defect_turns_the_check_red(self, old, new, expected):
+        problems = check_reports(_tampered(old, new))
         assert any(expected in p for p in problems), problems
