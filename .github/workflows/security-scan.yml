@@ -28,6 +28,13 @@ concurrency:
   group: security-scan-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
+# The trivy release the container scan job installs: the same two values as
+# release.yml's, which a test holds equal. No apt repository, no action: what
+# runs is the tarball with this sha256.
+env:
+  TRIVY_VERSION: '0.74.0'
+  TRIVY_SHA256: '2ae6fe3ee734b7fdf11335663e18c75ea12dccc76062f09f164a3b0f8be4371a'
+
 jobs:
   python-security:
     name: Python Security Scan
@@ -239,13 +246,22 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - name: Install Trivy
+      # release.yml's install step, copied verbatim (a test holds the two
+      # equal): the tarball named by TRIVY_VERSION, checked against
+      # TRIVY_SHA256 before it is unpacked. Every call below runs "$TRIVY".
+      - name: Install trivy (pinned, checksum-verified)
         run: |
-          sudo apt-get install -y wget apt-transport-https gnupg lsb-release
-          wget -qO - https://aquasecurity.github.io/trivy-repo/deb/public.key | gpg --dearmor | sudo tee /usr/share/keyrings/trivy.gpg > /dev/null
-          echo "deb [signed-by=/usr/share/keyrings/trivy.gpg] https://aquasecurity.github.io/trivy-repo/deb $(lsb_release -sc) main" | sudo tee /etc/apt/sources.list.d/trivy.list
-          sudo apt-get update
-          sudo apt-get install -y trivy
+          set -euo pipefail
+          bin="$RUNNER_TEMP/bin"
+          mkdir -p "$bin"
+          curl -fsSL -o "$RUNNER_TEMP/trivy.tgz" \
+            "https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}/trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz"
+          printf '%s  %s\n' "$TRIVY_SHA256" "$RUNNER_TEMP/trivy.tgz" | sha256sum -c -
+          tar -xzf "$RUNNER_TEMP/trivy.tgz" -C "$RUNNER_TEMP" trivy
+          install -m 0755 "$RUNNER_TEMP/trivy" "$bin/trivy"
+          "$bin/trivy" --version > "$RUNNER_TEMP/trivy-version.txt"
+          grep -Fx "Version: ${TRIVY_VERSION}" "$RUNNER_TEMP/trivy-version.txt"
+          printf 'TRIVY=%s\n' "$bin/trivy" >> "$GITHUB_ENV"
 
       # Two scans, because `trivy fs` runs two scanners and only one of them
       # had a problem. `--scanners` defaults to `vuln,secret`, and the
@@ -278,7 +294,8 @@ jobs:
       # `scripts/audit_dependencies.py` + pip-audit, which is the gate that
       # can express "accepted, test-only, review by <date>".
       - name: Scan the backend tree for secrets
-        run: trivy fs --scanners secret --severity HIGH,CRITICAL --exit-code 1 --format table backend/
+        run: |
+          "$TRIVY" fs --skip-version-check --scanners secret --severity HIGH,CRITICAL --exit-code 1 --format table backend/
         continue-on-error: false
 
       # `modules/requirements.txt` is a shipped closure's input and the
@@ -289,7 +306,7 @@ jobs:
       - name: Scan the module requirements for vulnerabilities and secrets
         run: |
           if [ -d modules ]; then
-            trivy fs --severity HIGH,CRITICAL --exit-code 1 --format table modules/
+            "$TRIVY" fs --skip-version-check --severity HIGH,CRITICAL --exit-code 1 --format table modules/
           else
             echo "core checkout: no modules/ to scan"
           fi
@@ -391,7 +408,7 @@ jobs:
           for image in experimently-api:scan-core experimently-api:scan-full \
                        experimently-web:scan-core experimently-web:scan-full; do
             echo "::group::trivy image ($image)"
-            trivy image --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 \
+            "$TRIVY" image --skip-version-check --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 \
               --format table "$image" || failed=1
             echo "::endgroup::"
           done
@@ -399,9 +416,9 @@ jobs:
 
       - name: Generate SBOM
         run: |
-          trivy fs --format cyclonedx --output sbom.json backend/
+          "$TRIVY" fs --skip-version-check --format cyclonedx --output sbom.json backend/
           if [ -d modules ]; then
-            trivy fs --format cyclonedx --output sbom-modules.json modules/
+            "$TRIVY" fs --skip-version-check --format cyclonedx --output sbom-modules.json modules/
           fi
 
       - name: Upload SBOM
