@@ -12,8 +12,8 @@
 # scripts/doc_examples.py), and each page's residual counts can only fall.
 
 [meta]
-documents = 35
-exec = 168
+documents = 36
+exec = 177
 universe = [
     ".github/pull_request_template.md",
     "CHANGELOG.md",
@@ -95,6 +95,7 @@ universe = [
     "docs/getting-started/python-virtual-env-setup.md",
     "docs/getting-started/quick-start.md",
     "docs/getting-started/vscode-settings.md",
+    "docs/guides/assign-customer-list.md",
     "docs/guides/experiment-wizard.md",
     "docs/guides/user-guide.md",
     "docs/hipaa/overview.md",
@@ -510,3 +511,10 @@ reason = "run on a kind cluster by the chart-kind workflow (scripts/chart_kind.s
 "sdk/react/README.md" = { comments = 0, unlabelled = 0, syntax = 0 }
 "sdk/ruby/README.md" = { comments = 0, unlabelled = 0, syntax = 0 }
 "tests/sdk-contract/README.md" = { comments = 0, unlabelled = 0, syntax = 0 }
+
+[[document]]
+path = "docs/guides/assign-customer-list.md"
+environment = "stack"
+exec = 9
+skip = 0
+expects = 11

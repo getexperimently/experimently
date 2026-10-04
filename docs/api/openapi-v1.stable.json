@@ -455,6 +455,86 @@
         "title": "AlphaSpendingBoundaryResponse",
         "type": "object"
       },
+      "AssignmentBatchRequest": {
+        "additionalProperties": false,
+        "description": "Assign up to 1,000 users to one ACTIVE experiment.\n\n``users`` holds 1 to 1,000 entries with distinct ``user_id`` values.\nUnknown fields are refused, here and in each user, so a misspelt\n``context`` is a 422 rather than a user with no attributes.",
+        "example": {
+          "experiment_key": "spring-email",
+          "users": [
+            {
+              "context": {
+                "country": "US"
+              },
+              "user_id": "cust-001"
+            },
+            {
+              "context": {
+                "country": "DE"
+              },
+              "user_id": "cust-002"
+            }
+          ]
+        },
+        "properties": {
+          "experiment_key": {
+            "description": "Experiment identifier",
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Experiment Key",
+            "type": "string"
+          },
+          "users": {
+            "description": "1 to 1,000 users, each user_id once",
+            "items": {
+              "$ref": "#/components/schemas/BatchAssignmentUser"
+            },
+            "maxItems": 1000,
+            "minItems": 1,
+            "title": "Users",
+            "type": "array"
+          }
+        },
+        "required": [
+          "experiment_key",
+          "users"
+        ],
+        "title": "AssignmentBatchRequest",
+        "type": "object"
+      },
+      "AssignmentBatchResponse": {
+        "description": "Response for ``POST /api/v1/tracking/assign/batch``.\n\n``assignments`` is in request order, one entry per user.",
+        "properties": {
+          "assignments": {
+            "items": {
+              "$ref": "#/components/schemas/BatchAssignment"
+            },
+            "title": "Assignments",
+            "type": "array"
+          },
+          "counts": {
+            "$ref": "#/components/schemas/BatchAssignmentCounts"
+          },
+          "experiment_key": {
+            "title": "Experiment Key",
+            "type": "string"
+          },
+          "variants": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/BatchVariant"
+            },
+            "title": "Variants",
+            "type": "object"
+          }
+        },
+        "required": [
+          "experiment_key",
+          "variants",
+          "assignments",
+          "counts"
+        ],
+        "title": "AssignmentBatchResponse",
+        "type": "object"
+      },
       "AssignmentRequest": {
         "description": "Model for requesting a variant assignment.",
         "example": {
@@ -959,6 +1039,127 @@
           "conversion_rate"
         ],
         "title": "BanditVariantWeight",
+        "type": "object"
+      },
+      "BatchAssignment": {
+        "description": "One user's answer, as ``POST /api/v1/tracking/assign`` would give it.",
+        "properties": {
+          "assigned": {
+            "description": "False when the user was not enrolled; nothing was recorded",
+            "title": "Assigned",
+            "type": "boolean"
+          },
+          "reason": {
+            "description": "assigned | holdout | mutual_exclusion | targeting",
+            "title": "Reason",
+            "type": "string"
+          },
+          "user_id": {
+            "title": "User Id",
+            "type": "string"
+          },
+          "variant_id": {
+            "description": "A key of variants; the control when assigned is false",
+            "title": "Variant Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "user_id",
+          "variant_id",
+          "assigned",
+          "reason"
+        ],
+        "title": "BatchAssignment",
+        "type": "object"
+      },
+      "BatchAssignmentCounts": {
+        "description": "How many users of the request ended with each ``reason``.",
+        "properties": {
+          "assigned": {
+            "default": 0,
+            "title": "Assigned",
+            "type": "integer"
+          },
+          "holdout": {
+            "default": 0,
+            "title": "Holdout",
+            "type": "integer"
+          },
+          "mutual_exclusion": {
+            "default": 0,
+            "title": "Mutual Exclusion",
+            "type": "integer"
+          },
+          "targeting": {
+            "default": 0,
+            "title": "Targeting",
+            "type": "integer"
+          }
+        },
+        "title": "BatchAssignmentCounts",
+        "type": "object"
+      },
+      "BatchAssignmentUser": {
+        "additionalProperties": false,
+        "description": "One user of ``POST /api/v1/tracking/assign/batch``.",
+        "properties": {
+          "context": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "This user's attributes, matched against the experiment's targeting rules as on POST /api/v1/tracking/assign",
+            "title": "Context"
+          },
+          "user_id": {
+            "description": "User identifier",
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "User Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "user_id"
+        ],
+        "title": "BatchAssignmentUser",
+        "type": "object"
+      },
+      "BatchVariant": {
+        "description": "A variant of the experiment, keyed by its id in ``variants``.",
+        "properties": {
+          "configuration": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Configuration"
+          },
+          "is_control": {
+            "default": false,
+            "title": "Is Control",
+            "type": "boolean"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "BatchVariant",
         "type": "object"
       },
       "BayesianConfig": {
@@ -24099,6 +24300,70 @@
         "tags": [
           "Tracking"
         ]
+      }
+    },
+    "/api/v1/tracking/assign/batch": {
+      "post": {
+        "description": "Assign up to 1,000 users to an ACTIVE experiment in one request.\n\nEach user gets what ``POST /api/v1/tracking/assign`` would give them, with\nthe bandit weights read at the start of the request: the same eligibility\nchecks for a new user (global holdout, mutual exclusion group, targeting\nrules against that user's ``context``) and the same sticky answer for a\nuser already assigned. Users are processed in request order and each new\nassignment is committed on its own, as N single calls would be.\n\nOnly assignments are recorded, never a view event: the user's first\n``POST /api/v1/tracking/assign`` records that they saw the experiment.\n\n**Authentication**: an API key with the ``sdk:ruleset`` scope, whose owner\ncan change feature flags and experiments (ADMIN, DEVELOPER or a superuser).\n\nA plain ``def``: FastAPI runs it in the thread pool, so a batch does not\nhold the event loop while it works through its users.",
+        "operationId": "assign_users_to_experiment_batch_api_v1_tracking_assign_batch_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AssignmentBatchRequest",
+                "description": "The experiment and its users"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AssignmentBatchResponse"
+                }
+              }
+            },
+            "description": "Each user's variant, in request order"
+          },
+          "401": {
+            "description": "No API key, or an unknown, expired or revoked one"
+          },
+          "403": {
+            "description": "The key lacks the sdk:ruleset scope, or its owner can no longer change feature flags or experiments"
+          },
+          "404": {
+            "description": "No ACTIVE experiment has that key; nobody is assigned"
+          },
+          "409": {
+            "description": "The experiment changed during the request; users earlier in the list may be assigned, and resending is safe"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "429": {
+            "description": "More than 60 requests a minute from this address"
+          }
+        },
+        "security": [
+          {
+            "APIKeyHeader": []
+          }
+        ],
+        "summary": "Assign a list of users to an experiment (beta)",
+        "tags": [
+          "Tracking"
+        ],
+        "x-stability": "beta"
       }
     },
     "/api/v1/tracking/assignments/{user_id}": {

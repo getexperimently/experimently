@@ -139,12 +139,13 @@ it securely. If you lose it, create a new key and delete the old one. See
 [API Key Management](../security/api-keys.md) for listing, deleting and rotating keys.
 
 The request also accepts an optional `"scopes"` list. The one scope that is enforced is
-`sdk:ruleset`, for server-side local evaluation: `GET /api/v1/sdk/ruleset` and
-`POST /api/v1/tracking/evaluations` (both beta) refuse a key without it, or whose owner
-can no longer change feature flags. Only users who can change feature flags (ADMIN,
-DEVELOPER, or a superuser) can create a key with it; anyone else gets `403` and no key is
-created. Every other endpoint that takes an API key accepts any active key, whatever its
-scopes; see [Scopes](../security/api-keys.md#scopes).
+`sdk:ruleset`, for server-side SDK use: `GET /api/v1/sdk/ruleset`,
+`POST /api/v1/tracking/evaluations` and `POST /api/v1/tracking/assign/batch` (all beta)
+refuse a key without it, or whose owner can no longer change feature flags or experiments.
+Only users who can change feature flags (ADMIN, DEVELOPER, or a superuser) can create a key
+with it; anyone else gets `403` and no key is created. Every other endpoint that takes an
+API key accepts any active key, whatever its scopes; see
+[Scopes](../security/api-keys.md#scopes).
 
 ### Using an API Key
 

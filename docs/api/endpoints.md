@@ -739,7 +739,8 @@ Each 400 carries the detail `This flag is archived. Unarchive it before turning 
 ## Tracking Endpoints
 
 All tracking endpoints use API-key authentication (`X-API-Key`) and address experiments and flags by their
-public `key`. They share the per-IP `SDK_RATE_LIMIT_PER_MINUTE` ceiling (default 6000/min).
+public `key`. They share the per-IP `SDK_RATE_LIMIT_PER_MINUTE` ceiling (default 6000/min), except
+`POST /api/v1/tracking/assign/batch`, which has its own limit of 60 requests a minute.
 
 ### Assign User to Experiment
 - **Endpoint**: `POST /api/v1/tracking/assign`
@@ -768,6 +769,70 @@ public `key`. They share the per-IP `SDK_RATE_LIMIT_PER_MINUTE` ceiling (default
   `assigned` is `false` when the user was not enrolled; `reason` is `assigned`, `holdout`,
   `mutual_exclusion` or `targeting`.
 - **Errors**: 404 when no ACTIVE experiment has that key
+
+### Assign a List of Users to an Experiment (beta)
+- **Endpoint**: `POST /api/v1/tracking/assign/batch`
+- **Description**: Assign up to 1,000 users to an ACTIVE experiment in one request. Each user gets
+  what `POST /api/v1/tracking/assign` would give them, with the bandit weights read at the start of
+  the request: the same eligibility checks for a new user (global holdout, mutual exclusion group,
+  targeting rules against that user's `context`) and the same sticky answer for a user already
+  assigned. Users are processed in the order sent, and each new assignment is saved on its own.
+  Only assignments are recorded: the user's first `POST /api/v1/tracking/assign` (from an SDK, when
+  they actually see the experiment) records the view. Assigned users count in the experiment's
+  results from the moment they are assigned, and for a bandit experiment they count as pulls.
+  See [Assign a customer list to an experiment](../guides/assign-customer-list.md).
+- **Headers**: `X-API-Key: {api_key}`, a key with the `sdk:ruleset` scope whose owner is an ADMIN,
+  a DEVELOPER or a superuser. That scope also lets the key download every feature flag's targeting
+  rules (`GET /api/v1/sdk/ruleset`), so keep the key on a server; see
+  [Scopes](../security/api-keys.md#scopes).
+- **Body**: `{"experiment_key": string, "users": [{"user_id": string, "context": object?}]}`
+  - `users`: 1 to 1,000 entries; each `user_id` 1 to 255 characters and different from every other
+    in the request.
+  - Unknown fields are refused, in the body and in each user.
+- **Response**: 200 OK
+  ```json
+  {
+    "experiment_key": "spring-email",
+    "variants": {
+      "7b0a1a2e-4c3d-4f5e-8a9b-0c1d2e3f4a5b": {"name": "control", "is_control": true, "configuration": {"subject": "Spring sale"}},
+      "c41f9e10-2b7a-4d8e-9f01-3a5b6c7d8e9f": {"name": "urgent", "is_control": false, "configuration": {"subject": "48 hours left"}}
+    },
+    "assignments": [
+      {"user_id": "cust-001", "variant_id": "c41f9e10-2b7a-4d8e-9f01-3a5b6c7d8e9f", "assigned": true, "reason": "assigned"},
+      {"user_id": "cust-002", "variant_id": "7b0a1a2e-4c3d-4f5e-8a9b-0c1d2e3f4a5b", "assigned": false, "reason": "holdout"}
+    ],
+    "counts": {"assigned": 1, "holdout": 1, "mutual_exclusion": 0, "targeting": 0}
+  }
+  ```
+  `assignments` is in request order, one entry per user. `assigned: false` means the user was not
+  enrolled and nothing was recorded for them; `variant_id` is then the control, the experience to
+  show them, and `reason` says why: `holdout` (the user is in the global holdout),
+  `mutual_exclusion` (the user is enrolled in, or hashed to, another experiment of the same mutual
+  exclusion group) or `targeting` (the user's `context` does not match the experiment's targeting
+  rules). `counts` always has all four keys.
+- **Errors**: see the table below. A 409 or a 500 may follow partial assignment: the users before the
+  failure are assigned. Send the same request again; that is safe, because assignments are sticky.
+  Any other 4xx assigns nobody.
+- **Rate limit**: 60 requests a minute per client address, counted separately from the other
+  tracking routes (60 × 1,000 = 60,000 users a minute). Over it the API answers 429 with
+  `Retry-After: 60`; wait that long before sending again.
+
+| Status | When | `detail` |
+|---|---|---|
+| 401 | no key | `API key missing` |
+| 401 | an unknown, expired or revoked key | `Invalid API Key` |
+| 403 | the key lacks the scope | `This API key does not have the 'sdk:ruleset' scope. Create a key with the 'sdk:ruleset' scope for server-side SDK use.` |
+| 403 | the key's owner is no longer an active ADMIN, DEVELOPER or superuser | `This key's owner can no longer change feature flags or experiments, so the key is refused for server-side SDK use.` |
+| 404 | no ACTIVE experiment has that key | `Active experiment with key 'spring-email' not found` |
+| 409 | the experiment was paused, completed or deleted (or its variants changed) during the request | `The experiment changed during the request. Users earlier in the list may already be assigned; resending the same request is safe.` |
+| 422 | `users` is empty | loc `["body","users"]`, msg `List should have at least 1 item after validation, not 0` |
+| 422 | more than 1,000 users | loc `["body","users"]`, msg `at most 1,000 users per request; split the list` |
+| 422 | a `user_id` appears twice | loc `["body","users",4,"user_id"]`, msg `duplicate user_id; each user may appear once per request (first seen at users[1])` |
+| 422 | a `user_id` empty or over 255 characters, an unknown field, or text the database cannot store | pydantic's message at the field's loc |
+| 429 | over 60 requests a minute | `Too Many Requests. Please slow down and retry after a moment.`, with `Retry-After` |
+| 500 | anything else | `Could not assign the users to the experiment (request ID: <id>).` |
+
+A 422 names positions and fields, never the ids that were sent.
 
 ### Track Event
 - **Endpoint**: `POST /api/v1/tracking/track`
@@ -1002,6 +1067,7 @@ followed by the request ID, never the error itself.
 | Route | `detail` |
 |---|---|
 | `POST /api/v1/tracking/assign` | `Could not assign the user to the experiment (request ID: <id>).` |
+| `POST /api/v1/tracking/assign/batch` | `Could not assign the users to the experiment (request ID: <id>).` |
 | `POST /api/v1/tracking/track`, `POST /api/v1/tracking/events` | `Could not store the event (request ID: <id>).` |
 | `POST /api/v1/tracking/errors` | `Could not store the error report (request ID: <id>).` |
 | `POST /api/v1/tracking/errors/batch` (the whole batch) | `Could not store the error reports (request ID: <id>).` |

@@ -1,5 +1,6 @@
 """
-Unit tests for ``_select_bandit_variant`` (tracking endpoint helper).
+Unit tests for ``backend/app/services/bandit_routing.py``: the bandit choice
+both tracking assignment routes use for new users.
 
 Pure-logic tests: no database, MagicMock experiments and bandit states.
 """
@@ -10,7 +11,11 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from backend.app.api.v1.endpoints.tracking import _bandit_weight, _select_bandit_variant
+from backend.app.services.bandit_routing import bandit_chooser
+from backend.app.services.bandit_routing import bandit_weight as _bandit_weight
+from backend.app.services.bandit_routing import (
+    select_bandit_variant as _select_bandit_variant,
+)
 
 
 def _experiment(optimization_type="thompson_sampling", n_variants=2):
@@ -156,3 +161,55 @@ class TestSelectBanditVariant:
 
     def test_experiment_none_returns_none(self):
         assert _select_bandit_variant(None, _state({"x": 1.0}), "user-1") is None
+
+
+class TestBanditChooser:
+    """``bandit_chooser`` answers as ``select_bandit_variant`` does, reading the
+    state once and holding plain values only."""
+
+    @staticmethod
+    def _db(state):
+        db = MagicMock()
+        db.query.return_value.filter.return_value.first.return_value = state
+        return db
+
+    def test_agrees_with_select_for_every_user(self):
+        exp = _experiment(n_variants=3)
+        a, b, c = exp.variants
+        state = _state({str(a.id): 0.1, str(b.id): {"weight": 0.6}, str(c.id): 0.3})
+        choose = bandit_chooser(self._db(state), exp)
+        for i in range(500):
+            assert choose(f"user-{i}") == _select_bandit_variant(
+                exp, state, f"user-{i}"
+            )
+
+    def test_reads_the_state_once(self):
+        exp = _experiment()
+        a, b = exp.variants
+        db = self._db(_state({str(a.id): 1.0, str(b.id): 1.0}))
+        choose = bandit_chooser(db, exp)
+        for i in range(50):
+            choose(f"user-{i}")
+        assert db.query.call_count == 1
+
+    def test_holds_plain_values_not_the_objects(self):
+        """Changing the ORM objects afterwards changes nothing: a commit that
+        expires them cannot make the chooser reload them."""
+        exp = _experiment()
+        a, b = exp.variants
+        state = _state({str(a.id): 0.0, str(b.id): 1.0})
+        choose = bandit_chooser(self._db(state), exp)
+        state.variant_weights = {str(a.id): 1.0, str(b.id): 0.0}
+        exp.variants = []
+        exp.id = uuid.uuid4()
+        assert all(choose(f"user-{i}") == b.id for i in range(50))
+
+    def test_fixed_allocation_reads_nothing(self):
+        exp = _experiment(optimization_type="fixed")
+        db = self._db(_state({str(exp.variants[0].id): 1.0}))
+        assert bandit_chooser(db, exp)("user-1") is None
+        assert db.query.call_count == 0
+
+    def test_no_state_means_default_hashing(self):
+        exp = _experiment()
+        assert bandit_chooser(self._db(None), exp)("user-1") is None
