@@ -12,6 +12,7 @@ The two beta routes say so in ``analysis_status``/``analysis_notice``.
 Access: DEVELOPER and above (VIEWER gets 403 on write-like analysis endpoints).
 """
 
+import logging
 from typing import Any, Type
 from uuid import UUID
 
@@ -19,6 +20,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from backend.app.api.deps import get_current_active_user, get_db
+from backend.app.core.logger import unexpected_failure
 from backend.app.models.user import User, UserRole
 from backend.app.schemas.interaction import (
     ActiveInteractionScanResponse,
@@ -31,6 +33,8 @@ from backend.app.services.interaction_detection_service import (
     InteractionAnalysis,
     InteractionDetectionService,
 )
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -150,23 +154,35 @@ def scan_interactions(
 
     Requires DEVELOPER role or higher.
     """
-    _require_developer(current_user)
+    try:
+        _require_developer(current_user)
 
-    service = InteractionDetectionService()
-    analyses = service.scan_active_experiments(db)
-    active_ids = service._get_active_experiment_ids(db)
+        service = InteractionDetectionService()
+        analyses = service.scan_active_experiments(db)
+        active_ids = service._get_active_experiment_ids(db)
 
-    response_analyses = [_to_response(a) for a in analyses]
-    high_risk_count = sum(
-        1 for a in response_analyses if a.overall_risk == RiskLevel.HIGH
-    )
+        response_analyses = [_to_response(a) for a in analyses]
+        high_risk_count = sum(
+            1 for a in response_analyses if a.overall_risk == RiskLevel.HIGH
+        )
 
-    return ActiveInteractionScanResponse(
-        total_active_experiments=len(active_ids),
-        pairs_analyzed=len(response_analyses),
-        high_risk_pairs=high_risk_count,
-        analyses=response_analyses,
-    )
+        return ActiveInteractionScanResponse(
+            total_active_experiments=len(active_ids),
+            pairs_analyzed=len(response_analyses),
+            high_risk_pairs=high_risk_count,
+            analyses=response_analyses,
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        # A failed read is a 500, never "no active experiments" (#853).
+        raise unexpected_failure(
+            exc,
+            "Interaction scan",
+            "Could not scan the active experiments for interactions",
+            db=db,
+            logger=logger,
+        )
 
 
 @router.get(
