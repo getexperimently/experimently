@@ -33,8 +33,8 @@ const PLATFORM_ONLY = [
   'login',
 ];
 
-// Kept deliberately: both work with no backend.
-const KEEP = ['docs', 'power-calculator'];
+// Kept deliberately: all three work with no backend.
+const KEEP = ['docs', 'power-calculator', 'privacy'];
 
 const outDir = resolve(process.argv[2] ?? 'out');
 

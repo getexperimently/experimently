@@ -25,6 +25,7 @@ jest.mock('next/router', () => ({ useRouter: () => ({ pathname:'/', asPath:'/', 
 import HomePage from '@/pages/index';
 import PowerCalculatorPage from '@/pages/power-calculator';
 import DocsPage from '@/pages/docs/index';
+import PrivacyPage from '@/pages/privacy';
 import { AppShell } from '@/components/AppShell';
 
 const mode = isMarketingSite as jest.Mock;
@@ -37,11 +38,12 @@ beforeEach(() => {
 });
 
 // The pages the marketing build actually ships, each as it is really wrapped:
-// the homepage is `bare`, the other two are `open` and so sit in the shell.
+// the homepage is `bare`, the others are `open` and so sit in the shell.
 const PAGES: Array<[string, () => React.ReactElement]> = [
   ['/', () => <HomePage />],
   ['/power-calculator', () => <AppShell><PowerCalculatorPage /></AppShell>],
   ['/docs', () => <AppShell><DocsPage /></AppShell>],
+  ['/privacy', () => <AppShell><PrivacyPage /></AppShell>],
 ];
 
 describe.each(PAGES)('%s on the marketing site', (name, make) => {
@@ -65,7 +67,7 @@ describe.each(PAGES)('%s on the marketing site', (name, make) => {
     const { container } = render(<AuthProvider>{make()}</AuthProvider>);
     await waitFor(() => expect(container.querySelector('a, h1, h2')).toBeInTheDocument());
 
-    const SERVED = new Set(['/', '/docs', '/power-calculator', '/favicon.svg']);
+    const SERVED = new Set(['/', '/docs', '/power-calculator', '/privacy', '/favicon.svg']);
     const external = (h: string) => /^[a-z][a-z0-9+.-]*:/i.test(h) || h.startsWith('//');
     const dead = Array.from(container.querySelectorAll('[href]'))
       .map((a) => a.getAttribute('href') ?? '')

@@ -211,10 +211,11 @@ describe('_app routeKind', () => {
     expect(routeKind('/sso/complete')).toBe('bare');
   });
 
-  it('keeps docs, the power calculator and error pages open', () => {
+  it('keeps docs, the power calculator, the privacy page and error pages open', () => {
     expect(routeKind('/docs')).toBe('open');
     expect(routeKind('/docs/[...slug]')).toBe('open');
     expect(routeKind('/power-calculator')).toBe('open');
+    expect(routeKind('/privacy')).toBe('open');
     expect(routeKind('/404')).toBe('open');
   });
 

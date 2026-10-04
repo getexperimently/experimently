@@ -5,7 +5,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { PageTitle } from '@/components/PageTitle';
 import { Wordmark } from '@/components/Wordmark';
 import { LOGIN_PATH } from '@/services/api';
-import { isMarketingSite } from '@/utils/site-mode';
+import { CONTACT_EMAIL, isMarketingSite } from '@/utils/site-mode';
 import { docsUrl } from '@/services/docs';
 
 export const HOME_AFTER_LOGIN = '/experiments';
@@ -193,7 +193,12 @@ docker compose up -d --wait`}</code>
 
         <footer className="border-t border-slate-200">
           <div className="mx-auto flex max-w-5xl flex-wrap items-center justify-between gap-4 px-6 py-8 text-sm text-slate-500">
-            <span>Apache-2.0. SDKs MIT.</span>
+            <span>
+              Apache-2.0. SDKs MIT. Contact:{' '}
+              <a href={`mailto:${CONTACT_EMAIL}`} className="text-slate-700 underline hover:text-slate-900">
+                {CONTACT_EMAIL}
+              </a>
+            </span>
             <nav className="flex gap-5">
               <Link href="/docs" className="hover:text-slate-900">
                 Docs
@@ -204,6 +209,9 @@ docker compose up -d --wait`}</code>
               >
                 Source
               </a>
+              <Link href="/privacy" className="hover:text-slate-900">
+                Privacy
+              </Link>
               {!marketing && (
                 <Link href={LOGIN_PATH} className="hover:text-slate-900">
                   Sign in

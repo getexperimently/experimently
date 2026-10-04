@@ -33,6 +33,9 @@ export type SiteMode = 'platform' | 'marketing';
 export const SITE_MODE: SiteMode =
   process.env.NEXT_PUBLIC_SITE_MODE === 'marketing' ? 'marketing' : 'platform';
 
+/** The public site's contact address, shown in the homepage footer and on /privacy. */
+export const CONTACT_EMAIL = 'hello@getexperimently.com';
+
 export const isMarketingSite = (): boolean => SITE_MODE === 'marketing';
 
 /**
