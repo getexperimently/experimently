@@ -207,13 +207,37 @@ A PyPI release (`sdk/python`, `sdk/openfeature-python`) runs in two jobs:
 
 Write a Python version in its PEP 440 spelling (`1.0.0rc1`, not
 `1.0.0-rc.1`), in the manifest and the tag alike; the build job refuses any
-other spelling. If the publish job fails after approval, use **Re-run failed
-jobs**, not **Re-run all jobs**. Re-run failed jobs is meant to reuse the
-files the build job checked (not yet seen on a real release).
+other spelling.
+
+An npm release (`sdk/js`, `sdk/edge`, `sdk/openfeature`, `sdk/react`,
+`sdk/react-native`) runs in two jobs the same way:
+
+- **test and build for npm** installs the SDK, runs its tests, builds and
+  packs it, checks the packed tarball, and uploads it with its file name and
+  sha256. It cannot request an OIDC token.
+- **publish to npm** is the only job that can, and the `sdk-release`
+  environment's approval is asked for when it starts, after the tests and
+  checks above have passed. It has no checkout and installs nothing. It
+  requires exactly the one tarball the build job recorded, with the same
+  sha256, and checks the package it uploads against the tag: the
+  `package.json` inside it must have the tag's name and version, and it
+  refuses a manifest that sets publish configuration.
+
+A prerelease — a version with a `-`, such as `1.0.0-rc.1` — publishes under
+the `next` dist-tag, so `npm install <package>` keeps resolving the last
+stable version and `npm install <package>@next` gets the prerelease. A stable
+version is published with no `--tag`, and npm gives it `latest`. Make a
+package's first npm publish a stable version: whether the registry also
+points `latest` at a first publish made under `next` is not something this
+workflow decides.
+
+If a publish job fails after approval, use **Re-run failed jobs**, not
+**Re-run all jobs**. Re-run failed jobs is meant to reuse the files the build
+job checked (not yet seen on a real release).
 
 Publish `sdk/js` before `sdk/openfeature`; the provider's release refuses until
 the matching `@getexperimently/js-sdk` is on npm. The provider's source depends
 on `file:../js` so that its tests run against the JS SDK in the same tree; the
-npm job rewrites that to `^<sdk/js version>` before packing, checks the
+npm build job rewrites that to `^<sdk/js version>` before packing, checks the
 `package.json` inside the packed tarball, installs the tarball in an empty
-directory, and publishes that same tarball.
+directory, and uploads that same tarball for the publish job.
