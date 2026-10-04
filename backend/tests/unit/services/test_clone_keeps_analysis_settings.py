@@ -60,6 +60,9 @@ def _settings() -> dict:
             "rope": [-0.01, 0.01],
             "credible_level": 0.9,
         },
+        # #580: neither is the default (benjamini_hochberg, 0.95).
+        "correction_method": "none",
+        "confidence_level": 0.90,
     }
 
 
@@ -101,6 +104,18 @@ def test_a_clone_keeps_every_analysis_setting():
     assert clone.status == ExperimentStatus.DRAFT
     # The fixture covers every setting the clone copies, so none is untested.
     assert set(settings) == set(CLONED_ANALYSIS_FIELDS)
+
+
+@pytest.mark.regression
+def test_a_clone_of_an_active_experiment_is_a_draft_with_its_correction_settings():
+    """#580: the settings lock once an experiment leaves draft, but a clone is a
+    draft, so it starts with the source's choices and can still change them."""
+    source = _source(correction_method="none", confidence_level=0.90)
+    source.status = ExperimentStatus.ACTIVE
+    clone = _clone(source)
+
+    assert clone.status == ExperimentStatus.DRAFT
+    assert (clone.correction_method, clone.confidence_level) == ("none", 0.90)
 
 
 @pytest.mark.regression
@@ -203,7 +218,7 @@ def test_every_analysis_column_is_copied():
         column.name
         for column in Experiment.__table__.columns
         if column.name.startswith(analysis_prefixes)
-        or column.name == "optimization_type"
+        or column.name in ("optimization_type", "correction_method", "confidence_level")
     } - {"bayesian_decision"}
 
     assert analysis - set(CLONED_ANALYSIS_FIELDS) == set()

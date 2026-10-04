@@ -23,6 +23,7 @@ from backend.app.schemas.bayesian import (
     BayesianResultsResponse,
     BayesianVariantResult,
 )
+from backend.app.services.analysis_settings import resolve_analysis_settings
 from backend.app.services.bayesian_service import DEFAULT_N_SAMPLES, BayesianService
 from backend.app.services.event_matching import (
     CONVERSION_SQL_PREDICATE,
@@ -73,8 +74,8 @@ class AnalysisService:
     def get_experiment_results(
         self,
         experiment_id: Union[str, UUID],
-        confidence_level: float = 0.95,
-        correction_method: str = "none",
+        confidence_level: Optional[float] = None,
+        correction_method: Optional[str] = None,
         include_bayesian: bool = True,
     ) -> Dict[str, Any]:
         """
@@ -83,10 +84,12 @@ class AnalysisService:
         Args:
             experiment_id: ID of the experiment
             confidence_level: level of every variant interval; ``1 -
-                confidence_level`` is the significance level.  The request's
-                ``confidence_level`` on ``/results``; experiments store none.
+                confidence_level`` is the significance level.  None (the
+                default) uses the experiment's stored level (#580).
             correction_method: ``none``, ``bonferroni`` or
-                ``benjamini_hochberg``
+                ``benjamini_hochberg``.  None (the default) uses the
+                experiment's stored method; the data export and the report
+                pass none, so they follow the stored setting.
             include_bayesian: Compute ``bayesian_results`` when the experiment
                 has Bayesian analysis enabled. The data export passes False: it
                 reads only the frequentist ``metrics`` and ``summary``, which
@@ -108,6 +111,10 @@ class AnalysisService:
 
         if not experiment:
             raise ValueError(f"Experiment {experiment_id} not found")
+
+        confidence_level, correction_method = resolve_analysis_settings(
+            experiment, confidence_level, correction_method
+        )
 
         # Calculate results for each metric (primary metric first)
         metric_definitions = self._ordered_metrics(experiment)

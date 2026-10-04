@@ -121,7 +121,13 @@ def mock_user() -> MagicMock:
 
 @pytest.fixture
 def mock_db():
-    return MagicMock()
+    db = MagicMock()
+    # The results route reads the experiment's stored analysis settings
+    # (#580); these tests were written for an uncorrected 0.95.
+    experiment = db.query.return_value.filter.return_value.first.return_value
+    experiment.correction_method = "none"
+    experiment.confidence_level = 0.95
+    return db
 
 
 @pytest.fixture

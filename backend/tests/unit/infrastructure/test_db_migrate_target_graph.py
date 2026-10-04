@@ -101,7 +101,9 @@ def test_the_branch_point_also_unapplies_the_modules_branch():
     """Backs the help text: "a core id at or below a7b8c9d0e1f2 also unapplies
     the modules branch"."""
     plan = _downgrade_plan(_script(), BRANCH_POINT)
-    assert len(plan) == 8, plan
+    # The seven core revisions above it (through 806901fb7735, #580) and the
+    # modules branch's two.
+    assert len(plan) == 9, plan
     assert [r for r in plan if r.startswith(MODULES_PREFIX)] == [
         "modules_0002_warehouse_analysis",
         "modules_0001_rbac",

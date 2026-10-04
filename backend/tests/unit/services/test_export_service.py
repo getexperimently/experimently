@@ -17,7 +17,13 @@ from backend.app.services.export_service import ExportService
 
 @pytest.fixture
 def mock_db():
-    return MagicMock()
+    db = MagicMock()
+    # The results computation reads the experiment's stored analysis
+    # settings (#580); a MagicMock's own attributes are not a method.
+    experiment = db.query.return_value.options.return_value.filter.return_value
+    experiment.first.return_value.correction_method = "benjamini_hochberg"
+    experiment.first.return_value.confidence_level = 0.95
+    return db
 
 
 @pytest.fixture
@@ -31,6 +37,8 @@ def mock_experiment():
     exp.end_date = None
     exp.created_at = datetime(2024, 1, 1, tzinfo=timezone.utc)
     exp.variants = []
+    exp.correction_method = "benjamini_hochberg"
+    exp.confidence_level = 0.95
     return exp
 
 
@@ -379,6 +387,8 @@ class TestDateFiltering:
         mock_db.query.return_value = chain
         chain.filter.return_value = chain
         chain.all.return_value = [mock_experiment]
+        chain.options.return_value = chain
+        chain.first.return_value = mock_experiment
 
         service = ExportService(mock_db)
         start = datetime(2024, 1, 1, tzinfo=timezone.utc)
@@ -394,6 +404,8 @@ class TestDateFiltering:
         mock_db.query.return_value = chain
         chain.filter.return_value = chain
         chain.all.return_value = [mock_experiment]
+        chain.options.return_value = chain
+        chain.first.return_value = mock_experiment
 
         service = ExportService(mock_db)
         end = datetime(2024, 12, 31, tzinfo=timezone.utc)
@@ -408,6 +420,8 @@ class TestDateFiltering:
         mock_db.query.return_value = chain
         chain.filter.return_value = chain
         chain.all.return_value = [mock_experiment]
+        chain.options.return_value = chain
+        chain.first.return_value = mock_experiment
 
         service = ExportService(mock_db)
         request = ExportRequest(format=ExportFormat.CSV)

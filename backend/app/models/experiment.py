@@ -19,6 +19,7 @@ from sqlalchemy import (
     String,
     Text,
     event,
+    text,
 )
 from sqlalchemy import (
     Enum as SQLAEnum,
@@ -60,6 +61,12 @@ class MetricType(enum.Enum):
     COUNT = "count"  # Event count
     DURATION = "duration"  # Time duration
     CUSTOM = "custom"  # Custom metric
+
+
+#: What an experiment stores when its creator names no correction method or
+#: confidence level (#580), and what the migration backfills.
+DEFAULT_CORRECTION_METHOD = "benjamini_hochberg"
+DEFAULT_CONFIDENCE_LEVEL = 0.95
 
 
 class Experiment(Base, BaseModel):
@@ -124,6 +131,24 @@ class Experiment(Base, BaseModel):
 
     # Issue #21: CUPED variance reduction configuration
     variance_reduction_config = Column(JSONB, nullable=True)
+
+    # #580: how the frequentist results judge this experiment. The results,
+    # the sample-size plan, the export and the report use these unless a
+    # request names its own. Both are locked once the experiment leaves draft.
+    # The server defaults are what the migration backfills, and what lets an
+    # older image that does not know the columns keep inserting experiments.
+    correction_method = Column(
+        String(32),
+        nullable=False,
+        default=DEFAULT_CORRECTION_METHOD,
+        server_default=text("'benjamini_hochberg'"),
+    )
+    confidence_level = Column(
+        Float,
+        nullable=False,
+        default=DEFAULT_CONFIDENCE_LEVEL,
+        server_default=text("0.95"),
+    )
 
     # EP-022: Mutual exclusion group membership
     mutual_exclusion_group_id = Column(
@@ -212,6 +237,15 @@ class Experiment(Base, BaseModel):
             CheckConstraint(
                 "resume_at IS NULL OR status = 'PAUSED'",
                 name="ck_experiments_resume_only_when_paused",
+            ),
+            # #580: the same names and SQL as migration 806901fb7735.
+            CheckConstraint(
+                "correction_method IN ('none', 'bonferroni', 'benjamini_hochberg')",
+                name="ck_experiments_correction_method",
+            ),
+            CheckConstraint(
+                "confidence_level >= 0.80 AND confidence_level <= 0.99",
+                name="ck_experiments_confidence_level",
             ),
             {"schema": schema_name},
         )

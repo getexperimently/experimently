@@ -24,6 +24,9 @@ def _experiment(**overrides) -> Experiment:
         "updated_at": now,
         "optimization_type": "fixed",
         "sequential_testing_enabled": False,
+        # NOT NULL with a server default: every stored row has both (#580).
+        "correction_method": "benjamini_hochberg",
+        "confidence_level": 0.95,
     }
     fields.update(overrides)
     return Experiment(**fields)
@@ -68,3 +71,17 @@ def test_an_unset_type_reads_as_fixed():
     response = ExperimentResponse(**data)
     assert response.optimization_type.value == "fixed"
     assert response.sequential_testing_enabled is False
+
+
+@pytest.mark.unit
+@pytest.mark.regression
+def test_the_stored_correction_settings_reach_the_response():
+    """#580: neither value is the response default, so a dict that left them
+    out would report Benjamini-Hochberg at 0.95 over a stored choice, and the
+    dashboard would send that back to the results."""
+    data = ExperimentService(MagicMock())._experiment_to_dict(
+        _experiment(correction_method="none", confidence_level=0.90)
+    )
+    response = ExperimentResponse(**data)
+    assert response.correction_method.value == "none"
+    assert response.confidence_level == 0.90

@@ -245,6 +245,12 @@ def _normalise_analysis_configs(
         elif isinstance(value, dict):
             data[field] = schema.model_validate(value).model_dump(mode="json")
 
+    # The correction method is stored as its value ('benjamini_hochberg'),
+    # never as an enum's repr (#580).
+    method = data.get("correction_method")
+    if method is not None:
+        data["correction_method"] = getattr(method, "value", method)
+
     if "bayesian_enabled" in data and data["bayesian_enabled"] is None:
         del data["bayesian_enabled"]
 
@@ -367,6 +373,9 @@ CLONED_ANALYSIS_FIELDS = (
     "variance_reduction_config",
     "bayesian_enabled",
     "bayesian_config",
+    # #580: a clone is a draft, so its own settings can still be changed.
+    "correction_method",
+    "confidence_level",
 )
 
 
@@ -1396,6 +1405,9 @@ class ExperimentService:
             "bayesian_enabled": bool(experiment.bayesian_enabled),
             "bayesian_config": experiment.bayesian_config,
             "bayesian_decision": experiment.bayesian_decision,
+            # #580: the stored analysis settings (see Issue #197 above).
+            "correction_method": experiment.correction_method,
+            "confidence_level": experiment.confidence_level,
         }
 
         # Add variants if loaded
