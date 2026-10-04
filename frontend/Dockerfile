@@ -8,8 +8,9 @@
 #
 # The build context is the REPOSITORY ROOT (like backend/Dockerfile): the
 # modules' dashboard code lives in modules/frontend/, next to frontend/, not
-# inside it. (The documentation is no longer rendered in-app -- the dashboard
-# links to the MkDocs site, so docs/ is not copied.)
+# inside it. (The documentation is no longer rendered in-app, so docs/ is not
+# copied. The dashboard's docs links go to the Markdown under docs/ on GitHub,
+# unless NEXT_PUBLIC_DOCS_URL below names a built MkDocs site.)
 #
 # EXPERIMENTLY_PROFILE selects what goes in:
 #   core (default)  never reads modules/frontend/ — a core checkout, which has
@@ -100,8 +101,10 @@ COPY --from=modules-tree /modules/frontend/ /app/modules/frontend/
 # absolute URL only when the dashboard is served from a different origin.
 ARG NEXT_PUBLIC_API_URL=""
 ENV NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
-# The documentation site the dashboard links to (frontend/src/services/docs.ts).
-# Empty means the published site; set it for a deployment that hosts its own.
+# Where the dashboard's docs links go (frontend/src/services/docs.ts). Empty,
+# the default here, means the Markdown under docs/ on GitHub's main branch. Set
+# it to the origin of a built MkDocs site (the published one, or one this
+# deployment hosts) to link there instead; only `npm run build:marketing` sets it.
 ARG NEXT_PUBLIC_DOCS_URL=""
 ENV NEXT_PUBLIC_DOCS_URL=${NEXT_PUBLIC_DOCS_URL}
 
