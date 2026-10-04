@@ -176,7 +176,11 @@ def _at_previous_release(engine, schema: str, rows: set[str]) -> None:
     """Turn a bootstrapped *schema* into what ``d29a479daafe`` left."""
     with engine.begin() as conn:
         conn.execute(text(f'DROP TABLE "{schema}".{TABLE}'))
-        conn.execute(text(f'ALTER TABLE "{schema}".segments DROP CONSTRAINT "{CHECK}"'))
+        # IF EXISTS: a model that lost the check must fail the parity test
+        # below, not this setup.
+        conn.execute(
+            text(f'ALTER TABLE "{schema}".segments DROP CONSTRAINT IF EXISTS "{CHECK}"')
+        )
         conn.execute(text(f'ALTER TABLE "{schema}".segments DROP COLUMN kind'))
         conn.execute(text(f'DELETE FROM "{schema}".alembic_version'))
         for revision in sorted(rows):
