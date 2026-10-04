@@ -1,9 +1,14 @@
 """
 Workspace models for EP-057: Team Workspaces.
 
-A workspace groups members and their workspace roles, with invites and
-workspace API keys. It does not limit access to experiments or feature
-flags, which is decided by the platform role.
+A workspace groups members and their workspace roles, with invites. It has
+no plan and no limits, issues no API keys, and does not limit access to
+experiments or feature flags, which is decided by the platform role.
+
+Retained, unused: ``WorkspacePlan``, ``Workspace.plan``, the ``max_*`` columns
+and ``WorkspaceAPIKey`` are kept only because databases built by the migration
+chain hold those columns and the ``workspace_api_keys`` table (see the comment
+on ``WorkspaceAPIKey``). Nothing reads or writes them.
 """
 
 import enum
@@ -32,7 +37,7 @@ from backend.app.models.base import Base, BaseModel
 
 
 class WorkspacePlan(str, enum.Enum):
-    """Workspace subscription plan."""
+    """Retained, unused: the type of the kept ``workspaces.plan`` column."""
 
     FREE = "free"
     PRO = "pro"
@@ -54,7 +59,7 @@ ROLE_HIERARCHY = ["VIEWER", "ANALYST", "DEVELOPER", "ADMIN", "OWNER"]
 
 
 class Workspace(Base, BaseModel):
-    """Workspace model — a team: its members, roles, invites and API keys."""
+    """Workspace model — a team: its members, roles and invites."""
 
     __tablename__ = "workspaces"
 
@@ -68,7 +73,8 @@ class Workspace(Base, BaseModel):
     )
     is_active = Column(Boolean, default=True, nullable=False)
 
-    # Per-plan resource limits
+    # Retained, unused: workspaces have no plan and no limits. The columns stay
+    # because chain-built databases hold them; nothing reads them.
     max_experiments = Column(Integer, default=10, nullable=False)
     max_feature_flags = Column(Integer, default=50, nullable=False)
     max_members = Column(Integer, default=5, nullable=False)
@@ -206,7 +212,21 @@ class WorkspaceInvite(Base, BaseModel):
 
 
 class WorkspaceAPIKey(Base, BaseModel):
-    """API key attached to a workspace (not a user), with a list of scopes."""
+    """Retained, unused: a row of the kept ``workspace_api_keys`` table.
+
+    Keys issued to a workspace were removed (#263): no route issues, lists,
+    rotates or revokes them, and no endpoint ever accepted one. The model and table stay
+    for two reasons only:
+
+    * databases built by the migration chain (core revision
+      ``ep057_workspaces``) hold the table, and the autogenerate filters and
+      the module table list expect a mapped model for it; dropping it would
+      be an irreversible migration that nothing needs;
+    * the existing rows must never be honoured by any future workspace-key
+      authentication. Their hashes and ``is_active`` values were written while
+      no endpoint accepted a workspace key, so a future feature must issue
+      fresh keys (and should delete or ignore these rows), never look them up.
+    """
 
     __tablename__ = "workspace_api_keys"
 

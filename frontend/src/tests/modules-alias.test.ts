@@ -399,7 +399,7 @@ describe('the @modules/* alias — one rule, every toolchain', () => {
       expect(missing).toEqual([]);
     });
 
-    it('carries a stub for each of the thirteen module routes', () => {
+    it('carries a stub for each of the twelve module routes', () => {
       expect(stubs).toEqual(
         expect.arrayContaining([
           'pages/admin/roles',
@@ -408,7 +408,6 @@ describe('the @modules/* alias — one rule, every toolchain', () => {
           'pages/workspaces/new',
           'pages/workspaces/[id]/index',
           'pages/workspaces/[id]/members',
-          'pages/workspaces/[id]/api-keys',
           'pages/workspaces/invites/[token]',
           'pages/warehouse/index',
           'pages/warehouse/connections/new',
@@ -441,7 +440,7 @@ describe('the @modules/* alias — one rule, every toolchain', () => {
       // not the one admin page a VIEWER can open.
       if (!fs.existsSync(MODULES_DIR)) return;
       const pages = sourceFiles(path.join(MODULES_DIR, 'pages'));
-      expect(pages).toHaveLength(13);
+      expect(pages).toHaveLength(12);
       for (const file of pages) {
         const source = fs.readFileSync(file, 'utf8');
         expect(source).toMatch(/withModule\(/);
@@ -454,7 +453,7 @@ describe('the @modules/* alias — one rule, every toolchain', () => {
       ).toMatch(/withAdminGuard\(/);
     });
 
-    it('leaves the thirteen page files in src/pages as one-line re-exports', () => {
+    it('leaves the twelve page files in src/pages as one-line re-exports', () => {
       const routes = [
         'admin/roles.tsx',
         'sso/complete.tsx',
@@ -462,7 +461,6 @@ describe('the @modules/* alias — one rule, every toolchain', () => {
         'workspaces/new.tsx',
         'workspaces/[id]/index.tsx',
         'workspaces/[id]/members.tsx',
-        'workspaces/[id]/api-keys.tsx',
         'workspaces/invites/[token].tsx',
         'warehouse/index.tsx',
         'warehouse/connections/new.tsx',
@@ -473,7 +471,7 @@ describe('the @modules/* alias — one rule, every toolchain', () => {
 
       // These page files are core (not in `modules-manifest.txt`): a core
       // build keeps them, and `@modules/pages/*` resolves them to the stubs.
-      // Either all thirteen are present or none are — a partial set means
+      // Either all twelve are present or none are — a partial set means
       // something deleted half a seam.
       const present = routes.filter((file) => fs.existsSync(file));
       expect([0, routes.length]).toContain(present.length);

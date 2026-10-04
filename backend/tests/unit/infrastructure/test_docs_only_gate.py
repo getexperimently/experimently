@@ -137,6 +137,9 @@ NOT_DOCS_TESTS = {
     "backend/tests/unit/api/test_wizard_docs_routes.py": "docs/api only",
     # Reads only docs/api/warehouse-analytics.md (same reason as above).
     "modules/backend/tests/unit/test_warehouse_docs_availability.py": "docs/api only",
+    # Reads only docs/api/openapi-v1.full.json (same reason as above), and
+    # imports the full application to compare it.
+    "modules/backend/tests/smoke/test_workspace_routes_contract.py": "docs/api only",
     # Runs the runbook SQL of docs/self-hosting/migrations.md against
     # PostgreSQL, which the docs-only lane does not have. It reads the page
     # through backend/tests/unit/docs/test_email_case_runbook.py, which is in

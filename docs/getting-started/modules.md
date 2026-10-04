@@ -184,7 +184,7 @@ imports a module.
 
 For the dashboard that means `modules/frontend/src/`, which mirrors
 `frontend/src/` (`pages/`, `components/`, `services/`, `contexts/`, `tests/`)
-and holds the seven module routes (`/admin/roles`, `/workspaces/**`), the
+and holds the six module routes (`/admin/roles`, `/workspaces/**`), the
 custom-roles components and the workspace service. The core tree reaches it
 only through the `@modules/*` alias, defined once in
 `frontend/modules-alias.js` and applied to webpack, jest and TypeScript alike:

@@ -6,12 +6,6 @@ import Link from 'next/link';
 import { useRouter } from 'next/router';
 import { Workspace, workspaceService } from '@modules/services/workspaces';
 
-const PLAN_BADGE: Record<Workspace['plan'], { label: string; className: string }> = {
-  free: { label: 'Free', className: 'bg-gray-100 text-gray-700' },
-  pro: { label: 'Pro', className: 'bg-blue-100 text-blue-700' },
-  enterprise: { label: 'Enterprise', className: 'bg-purple-100 text-purple-700' },
-};
-
 interface CreateModalProps {
   onClose: () => void;
   onCreated: (ws: Workspace) => void;
@@ -160,7 +154,6 @@ function CreateWorkspaceModal({ onClose, onCreated }: CreateModalProps) {
 }
 
 function WorkspaceCard({ workspace }: { workspace: Workspace }) {
-  const badge = PLAN_BADGE[workspace.plan] ?? PLAN_BADGE.free;
   return (
     <Link
       href={`/workspaces/${workspace.id}`}
@@ -173,11 +166,6 @@ function WorkspaceCard({ workspace }: { workspace: Workspace }) {
           </h3>
           <p className="text-xs text-slate-400 mt-0.5 font-mono">{workspace.slug}</p>
         </div>
-        <span
-          className={`ml-3 inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${badge.className}`}
-        >
-          {badge.label}
-        </span>
       </div>
 
       {workspace.description && (
@@ -191,14 +179,6 @@ function WorkspaceCard({ workspace }: { workspace: Workspace }) {
           </svg>
           {workspace.member_count ?? 0} member{workspace.member_count !== 1 ? 's' : ''}
         </span>
-        {workspace.experiment_count !== undefined && (
-          <span className="flex items-center gap-1">
-            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
-            </svg>
-            {workspace.experiment_count} experiments
-          </span>
-        )}
       </div>
     </Link>
   );

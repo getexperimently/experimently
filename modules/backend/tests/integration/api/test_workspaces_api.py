@@ -2,7 +2,8 @@
 Integration tests for the Workspaces REST API — EP-057.
 
 Tests the full HTTP request/response cycle for workspace CRUD,
-member management, invite lifecycle, and API key management.
+member management and the invite lifecycle, and that workspaces have no
+plan, no limits and no API-key routes (#263, #264).
 
 All tests use the shared integration conftest fixtures (admin_client,
 developer_client, etc.) so they exercise the real FastAPI app with
@@ -19,6 +20,18 @@ from backend.app.models.user import User, UserRole
 
 HASHED_PASSWORD = "$2b$12$EixZaYVK1fsbw1ZfbX3OXePaWxn96p36WQoeG6Lruj3vjPGga31lW"
 
+#: Response fields removed with plans, limits and workspace API keys.
+_REMOVED_FIELDS = (
+    "plan",
+    "max_experiments",
+    "max_feature_flags",
+    "max_members",
+    "max_api_keys",
+    "api_key_count",
+    "experiment_count",
+    "flag_count",
+)
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Helpers
@@ -32,7 +45,6 @@ def _create_workspace(client: TestClient, slug_suffix: str = "") -> dict:
         "name": f"Test Workspace {suffix}",
         "slug": f"ws-{suffix}",
         "description": "Integration test workspace",
-        "plan": "free",
     }
     resp = client.post("/api/v1/workspaces/", json=payload)
     assert resp.status_code == 201, f"Create workspace failed: {resp.text}"
@@ -53,15 +65,15 @@ class TestCreateWorkspace:
             "name": "Authenticated WS",
             "slug": f"auth-ws-{suffix}",
             "description": "Test",
-            "plan": "free",
         }
         resp = admin_client.post("/api/v1/workspaces/", json=payload)
         assert resp.status_code == 201, resp.text
         data = resp.json()
         assert data["name"] == "Authenticated WS"
         assert data["slug"] == f"auth-ws-{suffix}"
-        assert data["plan"] == "free"
         assert "id" in data
+        for gone in _REMOVED_FIELDS:
+            assert gone not in data, data
 
     def test_create_workspace_duplicate_slug_returns_409(self, admin_client):
         """Duplicate slug returns 409 Conflict."""
@@ -70,7 +82,6 @@ class TestCreateWorkspace:
             "name": "Duplicate",
             "slug": ws["slug"],
             "description": "",
-            "plan": "free",
         }
         resp = admin_client.post("/api/v1/workspaces/", json=payload)
         assert resp.status_code == 409, resp.text
@@ -81,7 +92,6 @@ class TestCreateWorkspace:
             "name": "Bad Slug",
             "slug": "UPPER_CASE",
             "description": "",
-            "plan": "free",
         }
         resp = admin_client.post("/api/v1/workspaces/", json=payload)
         assert resp.status_code == 422, resp.text
@@ -93,7 +103,6 @@ class TestCreateWorkspace:
             "name": "Dev WS",
             "slug": f"dev-ws-{suffix}",
             "description": "",
-            "plan": "free",
         }
         resp = developer_client.post("/api/v1/workspaces/", json=payload)
         assert resp.status_code == 201, resp.text
@@ -239,44 +248,6 @@ class TestWorkspaceMembers:
         )
         assert resp.status_code == 204, resp.text
 
-    def test_cannot_exceed_max_members(self, admin_client, db_session):
-        """Free plan allows max 5 members."""
-        ws = _create_workspace(admin_client, "-maxmem")
-        # Add 4 more members (owner is already #1)
-        for _ in range(4):
-            new_uid = uuid.uuid4()
-            suffix = new_uid.hex[:8]
-            extra_user = User(
-                username=f"extra_{suffix}",
-                email=f"extra_{suffix}@test.com",
-                hashed_password=HASHED_PASSWORD,
-                is_active=True,
-                role=UserRole.VIEWER,
-            )
-            db_session.add(extra_user)
-            db_session.commit()
-            db_session.refresh(extra_user)
-            admin_client.post(
-                f"/api/v1/workspaces/{ws['id']}/members",
-                json={"user_id": str(extra_user.id), "role": "VIEWER"},
-            )
-        # 6th member should fail
-        last_user = User(
-            username=f"last_{uuid.uuid4().hex[:8]}",
-            email=f"last_{uuid.uuid4().hex[:8]}@test.com",
-            hashed_password=HASHED_PASSWORD,
-            is_active=True,
-            role=UserRole.VIEWER,
-        )
-        db_session.add(last_user)
-        db_session.commit()
-        db_session.refresh(last_user)
-        resp = admin_client.post(
-            f"/api/v1/workspaces/{ws['id']}/members",
-            json={"user_id": str(last_user.id), "role": "VIEWER"},
-        )
-        assert resp.status_code == 422, resp.text
-
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Invites
@@ -322,7 +293,6 @@ class TestWorkspaceInvites:
             "name": f"WS B {suffix}",
             "slug": f"ws-b-{suffix}",
             "description": "",
-            "plan": "free",
         }
         # We use admin_client to create ws_b but we need a DIFFERENT workspace
         # where the current user is NOT already a member. Since we only have one
@@ -380,87 +350,7 @@ class TestWorkspaceInvites:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# API Keys
-# ─────────────────────────────────────────────────────────────────────────────
-
-
-@pytest.mark.integration
-class TestWorkspaceAPIKeys:
-    def test_create_api_key_returns_key_once(self, admin_client):
-        ws = _create_workspace(admin_client, "-apikey")
-        payload = {"name": "Test Key", "scopes": ["flags:read"]}
-        resp = admin_client.post(
-            f"/api/v1/workspaces/{ws['id']}/api-keys", json=payload
-        )
-        assert resp.status_code == 201, resp.text
-        data = resp.json()
-        assert "key" in data
-        assert data["key"].startswith("ep_live_")
-        assert "key_prefix" in data
-
-    def test_created_key_not_shown_again(self, admin_client):
-        """Listing keys does NOT show the plaintext key."""
-        ws = _create_workspace(admin_client, "-hidkey")
-        payload = {"name": "Hidden Key", "scopes": ["flags:read"]}
-        admin_client.post(f"/api/v1/workspaces/{ws['id']}/api-keys", json=payload)
-        list_resp = admin_client.get(f"/api/v1/workspaces/{ws['id']}/api-keys")
-        assert list_resp.status_code == 200, list_resp.text
-        for k in list_resp.json():
-            assert "key" not in k
-
-    def test_revoke_api_key(self, admin_client):
-        ws = _create_workspace(admin_client, "-revkey")
-        create_resp = admin_client.post(
-            f"/api/v1/workspaces/{ws['id']}/api-keys",
-            json={"name": "Revoke Me", "scopes": ["flags:read"]},
-        )
-        key_id = create_resp.json()["id"]
-        resp = admin_client.delete(f"/api/v1/workspaces/{ws['id']}/api-keys/{key_id}")
-        assert resp.status_code == 204, resp.text
-
-    def test_rotate_api_key(self, admin_client):
-        ws = _create_workspace(admin_client, "-rotkey")
-        create_resp = admin_client.post(
-            f"/api/v1/workspaces/{ws['id']}/api-keys",
-            json={"name": "Rotate Me", "scopes": ["flags:read"]},
-        )
-        old_key_data = create_resp.json()
-        resp = admin_client.post(
-            f"/api/v1/workspaces/{ws['id']}/api-keys/{old_key_data['id']}/rotate"
-        )
-        assert resp.status_code == 201, resp.text
-        new_data = resp.json()
-        assert new_data["key"] != old_key_data["key"]
-        assert new_data["id"] != old_key_data["id"]
-
-    def test_cannot_exceed_max_api_keys(self, admin_client):
-        """Free plan allows at most 3 active API keys."""
-        ws = _create_workspace(admin_client, "-maxkeys")
-        for i in range(3):
-            admin_client.post(
-                f"/api/v1/workspaces/{ws['id']}/api-keys",
-                json={"name": f"Key {i}", "scopes": ["flags:read"]},
-            )
-        resp = admin_client.post(
-            f"/api/v1/workspaces/{ws['id']}/api-keys",
-            json={"name": "Over limit", "scopes": ["flags:read"]},
-        )
-        assert resp.status_code == 422, resp.text
-
-    def test_list_api_keys_as_admin(self, admin_client):
-        ws = _create_workspace(admin_client, "-listkeys")
-        admin_client.post(
-            f"/api/v1/workspaces/{ws['id']}/api-keys",
-            json={"name": "List Key", "scopes": ["flags:read"]},
-        )
-        resp = admin_client.get(f"/api/v1/workspaces/{ws['id']}/api-keys")
-        assert resp.status_code == 200, resp.text
-        assert len(resp.json()) >= 1
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Role table: OWNER is granted, changed and removed only by an OWNER; key
-# operations act only on keys of the workspace in the path
+# Role table: OWNER is granted, changed and removed only by an OWNER
 # ─────────────────────────────────────────────────────────────────────────────
 
 
@@ -664,47 +554,166 @@ class TestOwnerRoleChanges:
         assert resp.status_code == 422, resp.text
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# No plan, no limits, no workspace API keys (#263, #264)
+# ─────────────────────────────────────────────────────────────────────────────
+
+
 @pytest.mark.integration
-class TestAPIKeyOperationsStayInTheirWorkspace:
+class TestWorkspaceAPIKeyRoutesAreGone:
+    """The four workspace API-key operations are removed: exactly 404.
+
+    Not 405, which is what a surviving route on the same path with another
+    method would answer.
+    """
+
+    def test_every_key_operation_is_404(self, as_user, ws_people):
+        owner = ws_people["owner"]
+        ws_id = _new_workspace(as_user, owner, "nokeys")
+        key_id = uuid.uuid4()
+        calls = [
+            ("GET", f"/api/v1/workspaces/{ws_id}/api-keys", None),
+            ("POST", f"/api/v1/workspaces/{ws_id}/api-keys", {"name": "prod"}),
+            ("DELETE", f"/api/v1/workspaces/{ws_id}/api-keys/{key_id}", None),
+            ("POST", f"/api/v1/workspaces/{ws_id}/api-keys/{key_id}/rotate", None),
+        ]
+        answers = [
+            (method, url, as_user(owner, method, url, json=body).status_code)
+            for method, url, body in calls
+        ]
+        assert [code for _, _, code in answers] == [404, 404, 404, 404], answers
+
+
+@pytest.mark.integration
+class TestPlanIsRefused:
+    """``plan`` is refused with 422, not silently ignored."""
+
     @staticmethod
-    def _setup(as_user, p: dict):
-        """``owner``'s workspace holds one key; ``outsider`` owns another workspace."""
-        home = _new_workspace(as_user, p["owner"], "home")
+    def _assert_plan_refused(resp) -> None:
+        assert resp.status_code == 422, resp.text
+        errors = resp.json()["detail"]
+        assert any(
+            e["loc"] == ["body", "plan"] and e["type"] == "extra_forbidden"
+            for e in errors
+        ), errors
+
+    def test_create_with_plan_is_422(self, as_user, ws_people):
+        suffix = uuid.uuid4().hex[:8]
         resp = as_user(
-            p["owner"],
+            ws_people["owner"],
             "POST",
-            f"/api/v1/workspaces/{home}/api-keys",
-            json={"name": "prod"},
+            "/api/v1/workspaces/",
+            json={
+                "name": f"Plan {suffix}",
+                "slug": f"plan-{suffix}",
+                "plan": "enterprise",
+            },
+        )
+        self._assert_plan_refused(resp)
+
+    def test_update_with_plan_is_422(self, as_user, ws_people, db_session):
+        from modules.backend.app.models.workspace import Workspace, WorkspacePlan
+
+        owner = ws_people["owner"]
+        ws_id = _new_workspace(as_user, owner, "planupd")
+        resp = as_user(
+            owner, "PUT", f"/api/v1/workspaces/{ws_id}", json={"plan": "enterprise"}
+        )
+        self._assert_plan_refused(resp)
+        # Nothing was written: the stored (retained, unused) column is unchanged.
+        row = db_session.query(Workspace).filter_by(id=uuid.UUID(ws_id)).one()
+        db_session.refresh(row)
+        assert row.plan == WorkspacePlan.FREE
+        # Name and description alone are still accepted.
+        resp = as_user(
+            owner,
+            "PUT",
+            f"/api/v1/workspaces/{ws_id}",
+            json={"name": "Renamed", "description": "d"},
+        )
+        assert resp.status_code == 200, resp.text
+
+
+@pytest.mark.integration
+class TestNoMemberLimit:
+    """A workspace stored with the old free-plan limit takes any number of members."""
+
+    @staticmethod
+    def _five_member_free_workspace(as_user, ws_people, db_session) -> str:
+        from modules.backend.app.models.workspace import Workspace, WorkspacePlan
+
+        owner = ws_people["owner"]
+        ws_id = _new_workspace(as_user, owner, "nolimit")
+        row = db_session.query(Workspace).filter_by(id=uuid.UUID(ws_id)).one()
+        row.plan = WorkspacePlan.FREE
+        row.max_members = 5
+        db_session.commit()
+        for i in range(4):  # the owner is member 1
+            user = _platform_user(db_session, f"ws_m{i}", UserRole.VIEWER)
+            resp = as_user(
+                owner,
+                "POST",
+                f"/api/v1/workspaces/{ws_id}/members",
+                json={"user_id": str(user.id), "role": "VIEWER"},
+            )
+            assert resp.status_code == 201, resp.text
+        return ws_id
+
+    @pytest.mark.regression
+    def test_sixth_member_is_added(self, as_user, ws_people, db_session):
+        ws_id = self._five_member_free_workspace(as_user, ws_people, db_session)
+        sixth = _platform_user(db_session, "ws_sixth", UserRole.VIEWER)
+        resp = as_user(
+            ws_people["owner"],
+            "POST",
+            f"/api/v1/workspaces/{ws_id}/members",
+            json={"user_id": str(sixth.id), "role": "VIEWER"},
         )
         assert resp.status_code == 201, resp.text
-        other = _new_workspace(as_user, p["outsider"], "other")
-        return home, resp.json()["id"], other
-
-    @staticmethod
-    def _keys(as_user, user: User, ws_id: str) -> list:
-        resp = as_user(user, "GET", f"/api/v1/workspaces/{ws_id}/api-keys")
-        assert resp.status_code == 200, resp.text
-        return [(k["id"], k["is_active"]) for k in resp.json()]
 
     @pytest.mark.regression
-    def test_rotate_through_another_workspace_is_404(self, as_user, ws_people):
-        p = ws_people
-        home, key_id, other = self._setup(as_user, p)
+    def test_sixth_member_accepts_an_invite(self, as_user, ws_people, db_session):
+        ws_id = self._five_member_free_workspace(as_user, ws_people, db_session)
+        invitee = ws_people["bystander"]
         resp = as_user(
-            p["outsider"],
+            ws_people["owner"],
             "POST",
-            f"/api/v1/workspaces/{other}/api-keys/{key_id}/rotate",
+            f"/api/v1/workspaces/{ws_id}/invites",
+            json={"email": invitee.email, "role": "VIEWER"},
         )
-        assert resp.status_code == 404, resp.text
-        assert self._keys(as_user, p["owner"], home) == [(key_id, True)]
-        assert self._keys(as_user, p["outsider"], other) == []
+        assert resp.status_code == 201, resp.text
+        token = resp.json()["token"]
+        resp = as_user(invitee, "POST", f"/api/v1/workspaces/invites/{token}/accept")
+        assert resp.status_code in (200, 201), resp.text
+        members = as_user(
+            ws_people["owner"], "GET", f"/api/v1/workspaces/{ws_id}/members"
+        ).json()
+        assert len(members) == 6, members
 
-    @pytest.mark.regression
-    def test_revoke_through_another_workspace_is_404(self, as_user, ws_people):
-        p = ws_people
-        home, key_id, other = self._setup(as_user, p)
-        resp = as_user(
-            p["outsider"], "DELETE", f"/api/v1/workspaces/{other}/api-keys/{key_id}"
-        )
-        assert resp.status_code == 404, resp.text
-        assert self._keys(as_user, p["owner"], home) == [(key_id, True)]
+
+@pytest.mark.integration
+class TestExistingRowsCarryNoPlan:
+    """Rows written with a plan and limits are listed and read without them."""
+
+    def test_list_and_get_omit_plan_and_limits(self, as_user, ws_people, db_session):
+        from modules.backend.app.models.workspace import Workspace, WorkspacePlan
+
+        owner = ws_people["owner"]
+        ws_id = _new_workspace(as_user, owner, "oldrow")
+        row = db_session.query(Workspace).filter_by(id=uuid.UUID(ws_id)).one()
+        row.plan = WorkspacePlan.ENTERPRISE
+        row.max_members = 999999
+        row.max_api_keys = 999999
+        db_session.commit()
+
+        listed = as_user(owner, "GET", "/api/v1/workspaces/")
+        assert listed.status_code == 200, listed.text
+        mine = [w for w in listed.json() if w["id"] == ws_id]
+        assert len(mine) == 1, listed.json()
+
+        detail = as_user(owner, "GET", f"/api/v1/workspaces/{ws_id}")
+        assert detail.status_code == 200, detail.text
+        assert detail.json()["member_count"] == 1
+        for body in (mine[0], detail.json()):
+            for gone in _REMOVED_FIELDS:
+                assert gone not in body, body
