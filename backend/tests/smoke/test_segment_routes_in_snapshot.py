@@ -2,10 +2,11 @@
 
 A route missing from ``docs/api/openapi-v1.stable.json`` is only a warning in
 ``test_openapi_snapshot.py``, so this pins the segment operations by name:
-all nine are present and stable, every ``{segment_id}`` is typed as a UUID,
-evaluate documents its 409 for stored rules that are not valid, and the
-request schemas describe the targeting rule format. ``docs/api/stability.md``
-lists the same operations in its table of changed stable operations.
+the nine stable ones and the two beta member routes are present, every
+``{segment_id}`` is typed as a UUID, evaluate documents its 409 for stored
+rules that are not valid, the request schemas describe the targeting rule
+format, and a segment carries its ``kind``. ``docs/api/stability.md`` lists the
+changed stable operations in its table of changed stable operations.
 """
 
 from __future__ import annotations
@@ -33,33 +34,78 @@ SEGMENT_OPERATIONS = {
     ("/api/v1/segments/{segment_id}/preview", "post"),
 }
 
+#: The id-list member routes (#440 PR B), beta.
+MEMBER_OPERATIONS = {
+    ("/api/v1/segments/{segment_id}/members", "post"),
+    ("/api/v1/segments/{segment_id}/members/remove", "post"),
+}
+
 
 @pytest.fixture(scope="module")
 def snapshot() -> dict:
     return json.loads(SNAPSHOT.read_text(encoding="utf-8"))
 
 
-def test_exactly_the_nine_segment_operations_are_stable(snapshot):
+def test_nine_segment_operations_are_stable_and_the_member_routes_beta(snapshot):
     found = {
         (path, method)
         for path, item in snapshot["paths"].items()
         if path.startswith("/api/v1/segments")
         for method in item
     }
-    assert found == SEGMENT_OPERATIONS
+    assert found == SEGMENT_OPERATIONS | MEMBER_OPERATIONS
     for path, method in SEGMENT_OPERATIONS:
         assert "x-stability" not in snapshot["paths"][path][method]
+    for path, method in MEMBER_OPERATIONS:
+        assert snapshot["paths"][path][method]["x-stability"] == "beta"
+
+
+def test_the_member_routes_document_their_answers(snapshot):
+    for path, method in MEMBER_OPERATIONS:
+        assert set(snapshot["paths"][path][method]["responses"]) == {
+            "200",
+            "404",
+            "409",
+            "422",
+        }
+    schemas = snapshot["components"]["schemas"]
+    assert set(schemas["SegmentMembersAddResponse"]["properties"]) == {
+        "added",
+        "already_members",
+        "member_count",
+    }
+    assert set(schemas["SegmentMembersRemoveResponse"]["properties"]) == {
+        "removed",
+        "not_members",
+        "member_count",
+    }
+    for name, field in (
+        ("SegmentMembersAdd", "add"),
+        ("SegmentMembersRemove", "remove"),
+    ):
+        assert schemas[name]["additionalProperties"] is False
+        ids = schemas[name]["properties"][field]
+        assert (ids["minItems"], ids["maxItems"]) == (1, 10_000)
+        assert (ids["items"]["minLength"], ids["items"]["maxLength"]) == (1, 255)
+
+
+def test_a_segment_carries_its_kind(snapshot):
+    schemas = snapshot["components"]["schemas"]
+    assert schemas["SegmentKind"]["enum"] == ["rules", "id_list"]
+    for name in ("SegmentCreate", "SegmentResponse"):
+        assert schemas[name]["properties"]["kind"]["$ref"].endswith("/SegmentKind")
+    assert "kind" not in schemas["SegmentUpdate"]["properties"]
 
 
 def test_every_segment_id_is_a_uuid(snapshot):
     typed = []
-    for path, method in sorted(SEGMENT_OPERATIONS):
+    for path, method in sorted(SEGMENT_OPERATIONS | MEMBER_OPERATIONS):
         for parameter in snapshot["paths"][path][method].get("parameters", []):
             if parameter["name"] == "segment_id":
                 assert parameter["in"] == "path"
                 assert parameter["schema"].get("format") == "uuid", (path, method)
                 typed.append((path, method))
-    assert len(typed) == 6
+    assert len(typed) == 8
 
 
 def test_evaluate_documents_the_409(snapshot):
@@ -89,3 +135,21 @@ def test_stability_md_lists_the_changed_segment_operations():
     assert row is not None, "docs/api/stability.md has no #440 row"
     for path, method in SEGMENT_OPERATIONS - {("/api/v1/segments", "get")}:
         assert path in row, path
+
+
+def test_stability_md_lists_the_kind_change():
+    """PR B's row: every stable operation that now carries or takes ``kind``."""
+    text = STABILITY.read_text(encoding="utf-8")
+    row = next(
+        (line for line in text.splitlines() if "| #440 (id lists) |" in line), None
+    )
+    assert row is not None, "docs/api/stability.md has no #440 kind row"
+    assert "`kind`" in row
+    for path in (
+        "/api/v1/segments",
+        "/api/v1/segments/{segment_id}",
+        "/api/v1/segments/{segment_id}/evaluate",
+        "/api/v1/segments/bulk-evaluate",
+        "/api/v1/segments/{segment_id}/preview",
+    ):
+        assert f"{path}`" in row, path
