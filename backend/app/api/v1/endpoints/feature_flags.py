@@ -842,12 +842,14 @@ async def unarchive_feature_flag(
     db.commit()
     db.refresh(flag)
 
-    # log_action does not raise: a failed audit write leaves the change in
-    # place, as on the other status routes.
+    # The change is committed above. log_action does not raise: if the audit
+    # write fails it rolls its own insert back and logs an ERROR, and the
+    # route still answers 200 with the change in place.
     await AuditService.log_action(
         db=db,
         user_id=current_user.id,
         user_email=current_user.email,
+        username=current_user.username,
         action_type=ActionType.FEATURE_FLAG_UPDATE,
         entity_type=EntityType.FEATURE_FLAG,
         entity_id=flag.id,
@@ -1151,6 +1153,7 @@ async def toggle_feature_flag(
                 db=db,
                 user_id=current_user.id,
                 user_email=current_user.email,
+                username=current_user.username,
                 action_type=action_type,
                 entity_type=EntityType.FEATURE_FLAG,
                 entity_id=flag.id,
@@ -1162,7 +1165,8 @@ async def toggle_feature_flag(
         except Exception as audit_error:
             # Log audit error but don't fail the toggle operation
             logger.warning(
-                f"Audit logging failed for toggle operation: {audit_error!s}"
+                "Audit logging failed for toggle operation (%s)",
+                type(audit_error).__name__,
             )
 
         return ToggleResponse(
@@ -1251,6 +1255,7 @@ async def enable_feature_flag(
             db=db,
             user_id=current_user.id,
             user_email=current_user.email,
+            username=current_user.username,
             action_type=ActionType.TOGGLE_ENABLE,
             entity_type=EntityType.FEATURE_FLAG,
             entity_id=flag.id,
@@ -1341,6 +1346,7 @@ async def disable_feature_flag(
             db=db,
             user_id=current_user.id,
             user_email=current_user.email,
+            username=current_user.username,
             action_type=ActionType.TOGGLE_DISABLE,
             entity_type=EntityType.FEATURE_FLAG,
             entity_id=flag.id,

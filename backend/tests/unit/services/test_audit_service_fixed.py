@@ -209,15 +209,12 @@ class TestAuditServiceLogging:
         db_session.commit()
         db_session.refresh(test_user)
 
-        with patch("asyncio.get_event_loop") as mock_get_loop:
-            mock_loop = Mock()
-            mock_get_loop.return_value = mock_loop
-
-            # Mock executor to raise an exception
-            mock_loop.run_in_executor = AsyncMock(
-                side_effect=Exception("Logging failed")
-            )
-
+        # The write itself raises
+        with patch.object(
+            AuditService,
+            "_create_audit_log_sync",
+            side_effect=Exception("Logging failed"),
+        ):
             # Should not raise exception, returns None on error
             result = await AuditService.log_action(
                 db=db_session,

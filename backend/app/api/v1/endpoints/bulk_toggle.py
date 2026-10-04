@@ -146,6 +146,7 @@ async def bulk_toggle_flags(
                 db=db,
                 user_id=current_user.id,
                 user_email=current_user.email,
+                username=current_user.username,
                 action_type=action_type.value,
                 entity_id=flag.id,
                 entity_name=flag.name,
@@ -166,13 +167,12 @@ async def bulk_toggle_flags(
             )
 
         except Exception as e:
-            # The full error goes to the log under this request's ID; the
-            # per-flag result carries a fixed sentence with that ID.
+            # Only the exception type goes to the log, under this request's
+            # ID; the per-flag result carries a fixed sentence with that ID.
             logger.error(
                 "Bulk toggle of flag %s failed (%s)",
                 flag_id_str,
                 type(e).__name__,
-                exc_info=e,
             )
             results.append(
                 BulkToggleResult(
@@ -186,7 +186,7 @@ async def bulk_toggle_flags(
     try:
         db.commit()
     except Exception as e:
-        logger.error(f"Failed to commit bulk toggle transaction: {e}")
+        logger.error("Failed to commit bulk toggle transaction (%s)", type(e).__name__)
         db.rollback()
 
     succeeded = sum(1 for r in results if r.success)

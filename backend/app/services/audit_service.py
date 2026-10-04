@@ -6,7 +6,6 @@ in the experimentation platform, creating a comprehensive audit trail
 for compliance, debugging, and analysis purposes.
 """
 
-import asyncio
 import json
 import logging
 from datetime import datetime, timezone
@@ -37,6 +36,13 @@ def _as_audit_text(value: Any) -> Optional[str]:
     return str(value)
 
 
+def actor_email(user_email: Optional[str], username: Optional[str] = None) -> str:
+    """The ``user_email`` an audit row records: the email, else the username,
+    else ``"system"``. The column is NOT NULL and some accounts have no email.
+    """
+    return user_email or username or "system"
+
+
 class AuditService:
     """Service for managing audit logs."""
 
@@ -51,6 +57,7 @@ class AuditService:
         old_value: str,
         new_value: str,
         reason: Optional[str] = None,
+        username: Optional[str] = None,
     ) -> UUID:
         """
         Log a feature flag toggle operation asynchronously.
@@ -65,12 +72,13 @@ class AuditService:
             old_value: Previous value/status
             new_value: New value/status
             reason: Optional reason for the action
+            username: Recorded instead when ``user_email`` is empty
 
         Returns:
             UUID: ID of the created audit log entry
 
         Raises:
-            Exception: If logging fails
+            Exception: If logging fails (after rolling the session back)
         """
         try:
             # Create audit log entry. old/new values are Text columns; callers
@@ -78,7 +86,7 @@ class AuditService:
             # normalise here instead of failing the whole toggle at INSERT time.
             audit_log = AuditLog(
                 user_id=user_id,
-                user_email=user_email,
+                user_email=actor_email(user_email, username),
                 action_type=action_type,
                 entity_type=EntityType.FEATURE_FLAG.value,
                 entity_id=entity_id,
@@ -101,8 +109,9 @@ class AuditService:
             return audit_log.id
 
         except Exception as e:
-            logger.error(f"Failed to create audit log: {e!s}")
             db.rollback()
+            # Only the exception type is logged.
+            logger.error("Failed to create audit log (%s)", type(e).__name__)
             raise
 
     @staticmethod
@@ -117,9 +126,16 @@ class AuditService:
         old_value: Optional[str] = None,
         new_value: Optional[str] = None,
         reason: Optional[str] = None,
-    ) -> UUID:
+        username: Optional[str] = None,
+    ) -> Optional[UUID]:
         """
-        Log any user action asynchronously.
+        Log any user action.
+
+        The caller commits its own change first: this writes and commits the
+        audit row on the same session. If that fails, the session is rolled
+        back, one ERROR line naming only the exception type is logged, and
+        None is returned, so the committed change stands and the session is
+        usable again.
 
         Args:
             db: Database session
@@ -132,22 +148,16 @@ class AuditService:
             old_value: Previous value/status (optional)
             new_value: New value/status (optional)
             reason: Optional reason for the action
+            username: Recorded instead when ``user_email`` is empty
 
         Returns:
-            UUID: ID of the created audit log entry
-
-        Raises:
-            Exception: If logging fails
+            The ID of the audit log entry, or None if it could not be written.
         """
         try:
-            # Run in background to avoid blocking the main operation
-            loop = asyncio.get_event_loop()
-            return await loop.run_in_executor(
-                None,
-                AuditService._create_audit_log_sync,
+            return AuditService._create_audit_log_sync(
                 db,
                 user_id,
-                user_email,
+                actor_email(user_email, username),
                 action_type,
                 entity_type,
                 entity_id,
@@ -156,10 +166,13 @@ class AuditService:
                 new_value,
                 reason,
             )
-
         except Exception as e:
-            logger.error(f"Failed to create audit log: {e!s}")
-            # Don't re-raise to avoid breaking the main operation
+            try:
+                db.rollback()
+            except Exception:
+                logger.warning("Rollback after a failed audit write also failed")
+            # Only the exception type is logged.
+            logger.error("Failed to create audit log (%s)", type(e).__name__)
             return None
 
     @staticmethod
@@ -175,7 +188,7 @@ class AuditService:
         new_value: Optional[str] = None,
         reason: Optional[str] = None,
     ) -> UUID:
-        """Synchronous audit log creation for use with executor."""
+        """Write and commit one audit row on ``db``."""
         audit_log = AuditLog(
             user_id=user_id,
             user_email=user_email,
