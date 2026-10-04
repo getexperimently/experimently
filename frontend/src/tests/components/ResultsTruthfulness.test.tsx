@@ -5,7 +5,7 @@
  * Each block pins one thing the page used to get wrong:
  *  - the badge, the row colour and the recommendation decide significance
  *    from the same p-value, and the p column says whether it is adjusted
- *    (the dashboard requests no correction, so it reads "unadjusted");
+ *    (only where a correction changed it: two or more treatments with a p);
  *  - the crown appears only on SHIP_VARIANT, and the reason is shown;
  *  - a non-finite or missing number reads "Not enough data to estimate";
  *  - a revenue/count/duration metric that the engine still analyses as a
@@ -33,6 +33,9 @@ import {
 } from '@/types/results';
 
 jest.mock('@/services/results');
+// The dashboard reads the experiment for its stored settings; automocked, the
+// read yields nothing and the dashboard asks for results without settings.
+jest.mock('@/services/experiments');
 jest.mock('@/hooks/useExperimentStream');
 
 const mockUseExperimentStream = streamHook.useExperimentStream as jest.MockedFunction<
@@ -82,6 +85,25 @@ function conversionMetric(treatment: Partial<VariantResult>): MetricResult {
         relative_improvement_pct: 20,
         statistical_test_used: 'fisher_exact',
         ...treatment,
+      }),
+    ],
+  };
+}
+
+/** Control and two treatments: two comparisons, so a correction changes the p-values. */
+function threeVariantMetric(b: Partial<VariantResult>, c: Partial<VariantResult>): MetricResult {
+  const base = conversionMetric(b);
+  return {
+    ...base,
+    variants: [
+      ...base.variants,
+      variant({
+        variant_id: 'var-c',
+        variant_name: 'Variant C',
+        mean: 0.11,
+        relative_improvement_pct: 10,
+        statistical_test_used: 'fisher_exact',
+        ...c,
       }),
     ],
   };
@@ -154,13 +176,13 @@ beforeEach(() => {
 });
 
 describe('one significance decision: a response with a correction uses the adjusted p', () => {
-  // Raw p 0.01 would pass at alpha 0.05; Bonferroni-adjusted 0.08 does not.
+  // Two comparisons. Raw p 0.01 would pass at alpha 0.05; the adjusted 0.08
+  // in the fixture does not.
   const metrics = [
-    conversionMetric({
-      p_value: 0.01,
-      adjusted_p_value: 0.08,
-      is_significant: false,
-    }),
+    threeVariantMetric(
+      { p_value: 0.01, adjusted_p_value: 0.08, is_significant: false },
+      { p_value: 0.04, adjusted_p_value: 0.08, is_significant: false }
+    ),
   ];
 
   it('shows the row as not significant and labels the adjusted value', () => {
@@ -179,12 +201,18 @@ describe('one significance decision: a response with a correction uses the adjus
       'Not Significant (adjusted p=0.080)'
     );
     expect(within(row).getByText('0.0800')).toBeInTheDocument();
-    expect(within(row).getByText(/adjusted \(Bonferroni\)/)).toBeInTheDocument();
-    // The raw value stays available, named as raw.
-    expect(within(row).getByText(/raw 0\.0100/)).toBeInTheDocument();
+    // The unadjusted value stays available, named as unadjusted (#580: not "raw").
+    expect(within(row).getByText('unadjusted 0.0100')).toBeInTheDocument();
+    expect(within(row).queryByText(/raw/)).not.toBeInTheDocument();
+    expect(screen.getByRole('columnheader', { name: /^adjusted p-value/i })).toBeInTheDocument();
+    // The footnote, not each cell, names the correction.
+    expect(screen.getByTestId('adjusted-p-footnote')).toHaveTextContent(
+      'Adjusted p-values account for comparing 2 variants with the control on each metric (Bonferroni). ' +
+        'A variant is significant when its adjusted p-value is below 0.05.'
+    );
   });
 
-  it('labels a Benjamini-Hochberg adjustment as BH', () => {
+  it('names a Benjamini-Hochberg adjustment in the footnote', () => {
     render(
       <MetricComparisonTable
         metrics={metrics}
@@ -192,14 +220,77 @@ describe('one significance decision: a response with a correction uses the adjus
         correctionMethod="benjamini_hochberg"
       />
     );
-    const row = screen.getByRole('row', { name: /variant b/i });
-    expect(within(row).getByText(/adjusted \(BH\)/)).toBeInTheDocument();
+    expect(screen.getByTestId('adjusted-p-footnote')).toHaveTextContent('(Benjamini-Hochberg)');
+  });
+
+  it('gives the threshold from the confidence level: 0.08 at 92%', () => {
+    render(
+      <MetricComparisonTable
+        metrics={metrics}
+        confidenceLevel={0.92}
+        correctionMethod="benjamini_hochberg"
+      />
+    );
+    expect(screen.getByTestId('adjusted-p-footnote')).toHaveTextContent(
+      'significant when its adjusted p-value is below 0.08.'
+    );
   });
 });
 
-describe('the dashboard request carries no correction: the p is labelled unadjusted', () => {
-  // ResultsService.getResults sends no correction_method, so /results answers
-  // with correction_method "none" and adjusted_p_value null.
+describe('one comparison per metric: the p-value is shown plainly (PE condition 13)', () => {
+  // Three variants, but Variant C has no p-value yet, so only one treatment
+  // is compared with the control and the correction changes nothing.
+  const metrics = [
+    threeVariantMetric(
+      { p_value: 0.03, adjusted_p_value: 0.03, is_significant: true },
+      { p_value: null, adjusted_p_value: null }
+    ),
+  ];
+
+  it('has no "Adjusted" header, label or footnote when k = 1', () => {
+    render(
+      <MetricComparisonTable
+        metrics={metrics}
+        confidenceLevel={0.95}
+        correctionMethod="benjamini_hochberg"
+      />
+    );
+    expect(screen.getByRole('columnheader', { name: /^p-value/i })).toBeInTheDocument();
+    expect(screen.queryByText(/adjusted/i)).not.toBeInTheDocument();
+    expect(screen.queryByTestId('adjusted-p-footnote')).not.toBeInTheDocument();
+    const row = screen.getByRole('row', { name: /variant b/i });
+    expect(within(row).getByText('0.0300')).toBeInTheDocument();
+    expect(within(row).getByRole('status')).toHaveTextContent('Significant (p=0.030)');
+  });
+
+  it('counts per metric: a k = 2 metric beside a k = 1 one gets the header and footnote', () => {
+    render(
+      <MetricComparisonTable
+        metrics={[
+          { ...metrics[0], metric_id: 'k1', metric_name: 'One comparison' },
+          {
+            ...threeVariantMetric(
+              { p_value: 0.02, adjusted_p_value: 0.04, is_significant: true },
+              { p_value: 0.04, adjusted_p_value: 0.04, is_significant: true }
+            ),
+            metric_id: 'k2',
+            metric_name: 'Two comparisons',
+            is_primary: false,
+          },
+        ]}
+        confidenceLevel={0.95}
+        correctionMethod="benjamini_hochberg"
+      />
+    );
+    expect(screen.getByRole('columnheader', { name: /^adjusted p-value/i })).toBeInTheDocument();
+    expect(screen.getByTestId('adjusted-p-footnote')).toHaveTextContent('comparing 2 variants');
+    expect(screen.getByText('unadjusted 0.0200')).toBeInTheDocument();
+  });
+});
+
+describe('no correction: the p is labelled unadjusted', () => {
+  // An experiment stored with correction_method "none": /results answers with
+  // correction_method "none" and adjusted_p_value null.
   it('labels the p-value "unadjusted" and decides from it', () => {
     render(
       <MetricComparisonTable
@@ -477,7 +568,10 @@ describe('accessibility (axe-core in jsdom; colour contrast is not computable he
       experiment({
         correction_method: 'bonferroni',
         metrics: [
-          conversionMetric({ p_value: 0.01, adjusted_p_value: 0.08 }),
+          threeVariantMetric(
+            { p_value: 0.01, adjusted_p_value: 0.08 },
+            { p_value: 0.04, adjusted_p_value: 0.08 }
+          ),
           { ...revenueMetric, is_primary: false },
         ],
       })

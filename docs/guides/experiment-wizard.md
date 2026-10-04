@@ -14,7 +14,7 @@ experiment in five steps:
 | 1. Type | A/B Test or Multivariate |
 | 2. Details | Name, key, description, hypothesis, and the metrics (each with its own name), one of them primary |
 | 3. Variants | The variants, their traffic split (it must add up to exactly 100%), which one is the control, and optional targeting rules |
-| 4. Estimate | Optional: how many users each variant needs, and roughly how many days that takes |
+| 4. Estimate | How results will be judged (the confidence level and the correction, saved with the experiment), then, optionally, how many users each variant needs and roughly how many days that takes |
 | 5. Review | Everything as it will be sent; **Create Experiment** creates it as a draft |
 
 - **Next** checks only the step you are on; **Back** never checks anything. The step
@@ -26,13 +26,20 @@ experiment in five steps:
   in it.
 - **Use the single-page form (advanced)** switches to every field on one page
   (`/experiments/new?advanced`); your answers carry over in both directions.
-- The **Estimate** step is advisory. It calls the sample-size endpoint shown
-  [below](#sample-size-guidance), treats the minimum detectable effect as a
-  *relative* change (5% of a 12% baseline is 12.6%, not 17%), and assumes users are
-  split evenly between the variants. Nothing you enter there is stored with the
-  experiment. With three or more variants it makes no correction for comparing
-  several variants against the control; the Power Calculator does, so its number is
-  higher.
+- The **Estimate** step starts with **How results will be judged**: the confidence
+  level (90%, 95% or 99%; default 95%) and the correction for several variants
+  (Benjamini-Hochberg by default, Bonferroni or None). Those two are saved with the
+  experiment as `confidence_level` and `correction_method`, and cannot be changed once
+  it leaves draft. The single-page form has them in a collapsed **Analysis settings**
+  section. The Review step shows them in its **Analysis** row.
+- The rest of the step, the estimate, is advisory and is not saved. It calls the
+  sample-size endpoint shown [below](#sample-size-guidance) at a significance of
+  1 − the confidence level, treats the minimum detectable effect as a *relative*
+  change (5% of a 12% baseline is 12.6%, not 17%), and assumes users are split evenly
+  between the variants. It makes no correction for comparing several variants with
+  the control, even when one is chosen above, so with three or more variants the
+  experiment needs more users than it says; the Power Calculator applies a Bonferroni
+  correction, so its number is higher.
 - Only ADMIN and DEVELOPER users (and superusers) can create experiments; anyone else
   sees a note saying so instead of the form.
 - If **Create Experiment** fails, you stay where you are with every answer kept, in

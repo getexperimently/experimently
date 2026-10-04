@@ -32,6 +32,7 @@ from sqlalchemy.orm import Session
 from backend.app.api import deps
 from backend.app.core.config import settings
 from backend.app.core.security import create_local_access_token, oauth2_scheme
+from backend.app.models.audit_log import ActionType, EntityType
 from backend.app.models.user import User
 from backend.app.schemas.auth import (
     ConfirmForgotPasswordRequest,
@@ -49,6 +50,7 @@ from backend.app.schemas.auth import (
     UserInfoResponse,
     UserMe,
 )
+from backend.app.services.audit_service import AuditService
 from backend.app.services.auth_service import (
     CognitoAuthService,
     CognitoTokenRefused,
@@ -163,12 +165,24 @@ def _issue_local_login(db: Session, email: str, password: str) -> LoginResponse:
         )
 
     token = create_local_access_token(user)
-    return LoginResponse(
+    response = LoginResponse(
         access_token=token,
         token_type="bearer",
         expires_in=settings.LOCAL_AUTH_TOKEN_TTL_MINUTES * 60,
         user=user_to_me(user),
     )
+    # After the sign-in has succeeded; a failed audit write does not refuse
+    # it. The entry records the provider only.
+    AuditService.record_after_commit(
+        db,
+        actor=user,
+        action=ActionType.USER_LOGIN,
+        entity_type=EntityType.USER,
+        entity_id=user.id,
+        entity_name=user.username or str(user.id),
+        after={"provider": "local"},
+    )
+    return response
 
 
 # ---------------------------------------------------------------------------

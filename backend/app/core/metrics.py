@@ -89,6 +89,13 @@ rate_limit_redis_fallbacks_total: Counter = Counter(
     "Times this process switched rate limiting from Redis to per-process counting",
 )
 
+# Audit entries that could not be written (backend.app.services.audit_service).
+# No labels: the action and the entity go to the ERROR line only.
+audit_write_failures_total: Counter = Counter(
+    "audit_write_failures_total",
+    "Audit log entries that could not be written",
+)
+
 active_experiments_gauge: Gauge = Gauge(
     "active_experiments_gauge",
     "Number of currently active experiments",

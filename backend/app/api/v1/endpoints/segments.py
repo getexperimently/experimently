@@ -29,6 +29,7 @@ from sqlalchemy.orm import Session
 from backend.app.api import deps
 from backend.app.core.permissions import Action, ResourceType, check_permission
 from backend.app.core.segment_preview_limits import preview_ruleset_violations
+from backend.app.models.audit_log import ActionType, EntityType
 from backend.app.models.user import User
 from backend.app.schemas.segment import (
     AudiencePreviewResponse,
@@ -46,6 +47,12 @@ from backend.app.services.audience_service import (
     AudienceService,
     SegmentRulesNotValid,
     _segment_to_response_dict,
+)
+from backend.app.services.audit_service import (
+    AuditService,
+    audit_changes,
+    audit_identity,
+    audit_snapshot,
 )
 
 logger = logging.getLogger(__name__)
@@ -129,7 +136,42 @@ def create_segment(
     """Create a new audience segment."""
     _require_permission(current_user, Action.CREATE)
     segment = AudienceService.create_segment(db, data, created_by_id=current_user.id)
-    return SegmentResponse(**_segment_to_response_dict(segment))
+    response = SegmentResponse(**_segment_to_response_dict(segment))
+    _record(
+        db,
+        current_user,
+        ActionType.SEGMENT_CREATE,
+        segment.id,
+        segment.name,
+        after=audit_identity(audit_snapshot(EntityType.SEGMENT, segment)),
+    )
+    return response
+
+
+def _record(db: Session, user: User, action: ActionType, segment_id, name, **values):
+    """The audit entry for a committed change to one segment (fails open).
+
+    Rules are recorded by name only (``changed_fields``), never their content.
+    """
+    AuditService.record_after_commit(
+        db,
+        actor=user,
+        action=action,
+        entity_type=EntityType.SEGMENT,
+        entity_id=segment_id,
+        entity_name=name or str(segment_id),
+        **values,
+    )
+
+
+def _segment_before(db: Session, segment_id: UUID):
+    """The segment's audit snapshot before a change, or 404."""
+    try:
+        return audit_snapshot(
+            EntityType.SEGMENT, AudienceService.get_segment(db, segment_id)
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc))
 
 
 # ---------------------------------------------------------------------------
@@ -204,11 +246,23 @@ def update_segment(
 ) -> SegmentResponse:
     """Update an existing segment."""
     _require_permission(current_user, Action.UPDATE)
+    before = _segment_before(db, segment_id)
     try:
         segment = AudienceService.update_segment(db, segment_id, data)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc))
-    return SegmentResponse(**_segment_to_response_dict(segment))
+    response = SegmentResponse(**_segment_to_response_dict(segment))
+    old, new = audit_changes(before, audit_snapshot(EntityType.SEGMENT, segment))
+    _record(
+        db,
+        current_user,
+        ActionType.SEGMENT_UPDATE,
+        segment_id,
+        response.name,
+        before=old,
+        after=new,
+    )
+    return response
 
 
 # ---------------------------------------------------------------------------
@@ -233,10 +287,22 @@ def delete_segment(
 ) -> None:
     """Archive (soft-delete) a segment."""
     _require_permission(current_user, Action.DELETE)
+    before = _segment_before(db, segment_id)
     try:
         AudienceService.delete_segment(db, segment_id)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc))
+    segment = AudienceService.get_segment(db, segment_id)
+    old, new = audit_changes(before, audit_snapshot(EntityType.SEGMENT, segment))
+    _record(
+        db,
+        current_user,
+        ActionType.SEGMENT_ARCHIVE,
+        segment_id,
+        before.get("name"),
+        before=old,
+        after=new,
+    )
 
 
 # ---------------------------------------------------------------------------

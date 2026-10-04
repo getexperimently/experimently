@@ -189,8 +189,8 @@ class VariantResult(BaseModel):
         ...,
         description=(
             "Two-sided confidence interval as (lower, upper).  "
-            "Its level is the confidence_level the request asked for "
-            "(default 0.95); experiments store no level of their own."
+            "Its level is the response's confidence_level: the one the "
+            "request sent, otherwise the experiment's stored level."
         ),
     )
     p_value: Optional[float] = Field(

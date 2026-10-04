@@ -10,6 +10,11 @@
 import { TargetingRules } from '@/types/targeting';
 import { createEmptyRules, validateRules } from '@/utils/targeting';
 import { ExperimentType, MetricType, CreateExperimentRequest } from '@/types/experiments';
+import { CorrectionMethod } from '@/types/results';
+import {
+  DEFAULT_CONFIDENCE_LEVEL,
+  DEFAULT_CORRECTION_METHOD,
+} from '@/components/results/shared/analysisSettings';
 
 export function generateKey(name: string): string {
   return name
@@ -44,6 +49,9 @@ export interface ExperimentFormState {
   rules: TargetingRules;
   variants: VariantFormData[];
   metrics: MetricFormData[];
+  /** How the results will be judged (#580); saved with the experiment. */
+  confidenceLevel: number;
+  correctionMethod: CorrectionMethod;
 }
 
 const DEFAULT_VARIANTS: VariantFormData[] = [
@@ -67,6 +75,8 @@ export function createInitialFormState(): ExperimentFormState {
     rules: createEmptyRules(),
     variants: DEFAULT_VARIANTS,
     metrics: DEFAULT_METRICS,
+    confidenceLevel: DEFAULT_CONFIDENCE_LEVEL,
+    correctionMethod: DEFAULT_CORRECTION_METHOD,
   };
 }
 
@@ -156,7 +166,8 @@ export type FormStep = (typeof FORM_STEPS)[number];
 /**
  * The first problem with the part of the form one step asks for, or null.
  *
- * `type` always has a valid value and `estimate` sends nothing, so neither can
+ * `type` always has a valid value, and so do the confidence level and the
+ * correction on `estimate` (the rest of that step is not sent), so neither can
  * fail; `review` is the whole-form check. Every message is one `validateForm`
  * can return, and the form is valid exactly when every step is.
  */
@@ -212,6 +223,8 @@ export function buildCreatePayload(state: ExperimentFormState): CreateExperiment
       metric_type: m.metric_type,
       is_primary: m.is_primary,
     })),
+    confidence_level: state.confidenceLevel,
+    correction_method: state.correctionMethod,
   };
   return payload;
 }
@@ -225,6 +238,8 @@ export type ExperimentFormAction =
   | { type: 'setHypothesis'; hypothesis: string }
   | { type: 'setType'; experimentType: ExperimentType }
   | { type: 'setRules'; rules: TargetingRules }
+  | { type: 'setConfidenceLevel'; confidenceLevel: number }
+  | { type: 'setCorrectionMethod'; correctionMethod: CorrectionMethod }
   | { type: 'addVariant' }
   | { type: 'removeVariant'; index: number }
   | {
@@ -260,6 +275,10 @@ export function experimentFormReducer(
       return { ...state, type: action.experimentType };
     case 'setRules':
       return { ...state, rules: action.rules };
+    case 'setConfidenceLevel':
+      return { ...state, confidenceLevel: action.confidenceLevel };
+    case 'setCorrectionMethod':
+      return { ...state, correctionMethod: action.correctionMethod };
 
     case 'addVariant':
       return {

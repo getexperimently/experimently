@@ -1,5 +1,5 @@
 import { test, expect } from "./fixtures/auth.fixture";
-import { ExperimentsPage } from "./pages/experiments.page";
+import { ESTIMATE_STEP_HEADING, ExperimentsPage } from "./pages/experiments.page";
 import { TOKEN_STORAGE_KEY } from "./env";
 
 /**
@@ -105,13 +105,16 @@ test.describe("Journey: experiment lifecycle", () => {
     // Enter in a text field on the first three steps is Next.
     await experiments.nameInput.press("Enter");
     await expect(experiments.stepHeading).toHaveText("Set up the versions users will see");
-    await experiments.nextStep("How many users will you need?");
+    await experiments.nextStep(ESTIMATE_STEP_HEADING);
 
     await experiments.estimateBaseline.fill("12");
     await experiments.estimateBaseline.press("Enter");
     await experiments.estimateMde.fill("5");
     await experiments.estimateMde.press("Enter");
-    await expect(experiments.stepHeading).toHaveText("How many users will you need?");
+    await expect(experiments.stepHeading).toHaveText(ESTIMATE_STEP_HEADING);
+    // The saved settings on the same step start at their defaults (#580).
+    await expect(adminPage.getByTestId("analysis-confidence")).toHaveValue("0.95");
+    await expect(adminPage.getByTestId("analysis-correction")).toHaveValue("benjamini_hochberg");
 
     await experiments.nextStep("Check and create");
     await experiments.stepHeading.press("Enter");
@@ -191,7 +194,7 @@ test.describe("Journey: experiment lifecycle", () => {
     // The key the previous test created.
     await experiments.keyInput.fill(EXPERIMENT_KEY);
     await experiments.nextStep("Set up the versions users will see");
-    await experiments.nextStep("How many users will you need?");
+    await experiments.nextStep(ESTIMATE_STEP_HEADING);
     await experiments.nextStep("Check and create");
 
     // Taken key: the API answers 409; the page says so in its own words.
@@ -210,7 +213,7 @@ test.describe("Journey: experiment lifecycle", () => {
     await expect(experiments.keyInput).toBeFocused();
     await experiments.keyInput.fill(`e2e_keeps_answers_${STAMP}`);
     await experiments.nextStep("Set up the versions users will see");
-    await experiments.nextStep("How many users will you need?");
+    await experiments.nextStep(ESTIMATE_STEP_HEADING);
     await experiments.nextStep("Check and create");
     await expect(experiments.formError).toHaveCount(0);
 

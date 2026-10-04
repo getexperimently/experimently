@@ -17,6 +17,7 @@ from sqlalchemy.orm import Session
 from backend.app.api import deps
 from backend.app.core.config import settings
 from backend.app.core.security import get_password_hash, unwrap_secret
+from backend.app.models.audit_log import ActionType, EntityType
 from backend.app.models.user import User, UserRole
 from backend.app.schemas.user import (
     PasswordChange,
@@ -25,6 +26,13 @@ from backend.app.schemas.user import (
     UserResponse,
     UserUpdate,
     check_password_strength,
+)
+from backend.app.services.audit_service import (
+    AuditActor,
+    AuditService,
+    audit_identity,
+    audit_snapshot,
+    role_value,
 )
 from backend.app.services.local_auth_service import (
     AccountLockedError,
@@ -385,6 +393,52 @@ def commit_user_write(
         raise
 
 
+def record_access_changes(
+    db: Session,
+    actor: Any,
+    user: User,
+    role_before: Dict[str, Any],
+    active_before: Optional[bool],
+) -> None:
+    """Add the audit entries for a change to a user's role, superuser flag or
+    active status, in the caller's transaction (both are kept or neither is).
+
+    ``role_before`` is ``role_value(user)`` and ``active_before`` the user's
+    ``is_active``, both read before the change. A changed role or superuser
+    flag adds one ``role_assign`` with ``{role, is_superuser}`` before and
+    after; a changed active status adds ``user_activate`` or
+    ``user_deactivate``. Nothing changed, nothing added.
+    """
+    name = user.username or str(user.id)
+    role_after = role_value(user)
+    if role_after != role_before:
+        AuditService.record(
+            db,
+            actor=actor,
+            action=ActionType.ROLE_ASSIGN,
+            entity_type=EntityType.USER,
+            entity_id=user.id,
+            entity_name=name,
+            before=role_before,
+            after=role_after,
+        )
+    if bool(user.is_active) != bool(active_before):
+        AuditService.record(
+            db,
+            actor=actor,
+            action=(
+                ActionType.USER_ACTIVATE
+                if user.is_active
+                else ActionType.USER_DEACTIVATE
+            ),
+            entity_type=EntityType.USER,
+            entity_id=user.id,
+            entity_name=name,
+            before={"is_active": bool(active_before)},
+            after={"is_active": bool(user.is_active)},
+        )
+
+
 def require_local_provider() -> None:
     """404 unless ``AUTH_PROVIDER`` is ``local``.
 
@@ -479,6 +533,18 @@ async def create_user(
     user = User(**user_data)
     db.add(user)
     commit_user_write(db, user_in.email, username=user_in.username)
+    db.refresh(user)
+
+    # The account is committed; a failed audit write does not undo it.
+    AuditService.record_after_commit(
+        db,
+        actor=current_user,
+        action=ActionType.USER_CREATE,
+        entity_type=EntityType.USER,
+        entity_id=user.id,
+        entity_name=user.username or str(user.id),
+        after=audit_identity(audit_snapshot(EntityType.USER, user)),
+    )
     db.refresh(user)
 
     role = getattr(user, "role", None)
@@ -781,11 +847,16 @@ async def update_user(
     if removes_an_active_superuser(user, update_data):
         require_still_active_superuser(db, current_user)
 
+    role_before, active_before = role_value(user), user.is_active
+
     # Update user attributes
     for field in update_data:
         if hasattr(user, field):
             setattr(user, field, update_data[field])
 
+    # The audit entries go in the same transaction as the change: both are
+    # written or neither is. No await between the lock above and the commit.
+    record_access_changes(db, current_user, user, role_before, active_before)
     commit_user_write(db, new_email, exclude_id=user.id, username=new_username)
     db.refresh(user)
 
@@ -863,5 +934,23 @@ async def delete_user(
     if user.is_superuser and user.is_active:
         require_still_active_superuser(db, current_user)
 
+    # Read before the delete: the deleted row may be the caller's own. An
+    # entry about deleting your own account has no user_id to point at.
+    actor = AuditActor.of(current_user)
+    if actor.id == user.id:
+        actor = AuditActor(id=None, email=actor.email, username=actor.username)
+    deleted = audit_identity(audit_snapshot(EntityType.USER, user))
+    deleted_id = user.id
+
     db.delete(user)
     db.commit()
+
+    AuditService.record_after_commit(
+        db,
+        actor=actor,
+        action=ActionType.USER_DELETE,
+        entity_type=EntityType.USER,
+        entity_id=deleted_id,
+        entity_name=deleted["username"] or str(deleted_id),
+        before=deleted,
+    )

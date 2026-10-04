@@ -26,6 +26,7 @@ from sqlalchemy.orm import Session
 
 from backend.app.api import deps
 from backend.app.core.permissions import Action, ResourceType, check_permission
+from backend.app.models.audit_log import ActionType, EntityType
 from backend.app.models.user import User
 from backend.app.schemas.global_holdout import (
     GlobalHoldoutCreate,
@@ -33,6 +34,12 @@ from backend.app.schemas.global_holdout import (
     GlobalHoldoutResponse,
     GlobalHoldoutUpdate,
     HoldoutCheckResponse,
+)
+from backend.app.services.audit_service import (
+    AuditService,
+    audit_changes,
+    audit_identity,
+    audit_snapshot,
 )
 from backend.app.services.global_holdout_service import (
     GlobalHoldoutService,
@@ -76,6 +83,37 @@ def _refusal(error: Exception) -> HTTPException:
     return HTTPException(
         status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(error)
     )
+
+
+def _record(db: Session, user: User, action: ActionType, holdout_id, name, **values):
+    AuditService.record_after_commit(
+        db,
+        actor=user,
+        action=action,
+        entity_type=EntityType.HOLDOUT,
+        entity_id=holdout_id,
+        entity_name=name,
+        **values,
+    )
+
+
+def _record_implicit_deactivations(
+    db: Session, user: User, service: GlobalHoldoutService, changed_id
+) -> None:
+    """One ``holdout_deactivate`` for each other holdout this request turned off."""
+    for holdout_id, name in service.implicitly_deactivated:
+        if holdout_id == changed_id:
+            continue
+        _record(
+            db,
+            user,
+            ActionType.HOLDOUT_DEACTIVATE,
+            holdout_id,
+            name,
+            before={"is_active": True},
+            after={"is_active": False},
+            reason="another holdout was activated",
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -165,7 +203,17 @@ def create_holdout(
         )
     except HoldoutActivationConflict as error:
         raise _refusal(error)
-    return GlobalHoldoutResponse.model_validate(holdout)
+    response = GlobalHoldoutResponse.model_validate(holdout)
+    _record(
+        db,
+        current_user,
+        ActionType.HOLDOUT_CREATE,
+        response.id,
+        response.name,
+        after=audit_identity(audit_snapshot(EntityType.HOLDOUT, holdout)),
+    )
+    _record_implicit_deactivations(db, current_user, service, response.id)
+    return response
 
 
 # ---------------------------------------------------------------------------
@@ -195,6 +243,8 @@ def update_holdout(
     """Update a holdout configuration."""
     _require_admin(current_user)
     service = GlobalHoldoutService(db)
+    existing = service.get_holdout(holdout_id)
+    before = audit_snapshot(EntityType.HOLDOUT, existing) if existing else None
     try:
         holdout = service.update_holdout(
             holdout_id=holdout_id,
@@ -214,7 +264,55 @@ def update_holdout(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Holdout {holdout_id} not found",
         )
-    return GlobalHoldoutResponse.model_validate(holdout)
+    response = GlobalHoldoutResponse.model_validate(holdout)
+    _record_holdout_update(db, current_user, before, holdout)
+    _record_implicit_deactivations(db, current_user, service, holdout_id)
+    return response
+
+
+def _record_holdout_update(db: Session, user: User, before, holdout) -> None:
+    """One entry per verb: activate or deactivate, and update for the rest.
+
+    ``holdout`` is the stored row after the change, ``before`` its snapshot
+    before it. Nothing allow-listed changed, nothing is recorded.
+    """
+    holdout_id, name = holdout.id, holdout.name
+    old, new = audit_changes(before or {}, audit_snapshot(EntityType.HOLDOUT, holdout))
+    old, new = old or {}, new or {}
+    if "is_active" in new:
+        _record(
+            db,
+            user,
+            ActionType.HOLDOUT_ACTIVATE
+            if new["is_active"]
+            else ActionType.HOLDOUT_DEACTIVATE,
+            holdout_id,
+            name,
+            before=_pop_lifecycle(old),
+            after=_pop_lifecycle(new),
+        )
+    if new:
+        _record(
+            db,
+            user,
+            ActionType.HOLDOUT_UPDATE,
+            holdout_id,
+            name,
+            before=old or None,
+            after=new,
+        )
+
+
+_LIFECYCLE_FIELDS = ("is_active", "activated_at", "deactivated_at")
+
+
+def _pop_lifecycle(values: dict) -> dict:
+    """``is_active`` and the timestamp that changed with it, taken out of ``values``.
+
+    Activating stamps ``activated_at`` and deactivating ``deactivated_at``;
+    they belong to the activate or deactivate entry, not to a second one.
+    """
+    return {field: values.pop(field) for field in _LIFECYCLE_FIELDS if field in values}
 
 
 # ---------------------------------------------------------------------------

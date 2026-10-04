@@ -1,18 +1,22 @@
 # Audit Logging & Bulk Toggle
 
-The audit log is an append-only record of who changed what. In this release it records
-**feature-flag status changes**: turning a flag on or off (one at a time or in bulk) and
-archiving it in bulk, and an administrator changing a user's role or active status with
-`PATCH /api/v1/admin/users/{user_id}`. Other actions, such as creating an experiment, logging in or
-assigning a role, are not written to it yet
-([#221](https://github.com/getexperimently/experimently/issues/221)). The Quick Start's
-demo data includes entries of those kinds, written by the seed script, not by the
-platform.
+The audit log is a record of who changed what. No API edits or deletes an entry. It
+records the changes people make through the API: creating, changing and deleting feature
+flags and experiments, turning flags on and off, starting, pausing and completing
+experiments, rollout schedule changes, API keys, holdouts, mutual exclusion groups,
+segments, creating and deleting users, changes to a user's role, superuser flag or active
+status, and signing in with a password. [Action Types](#action-types) lists every action
+and when it is written.
 
-Creating, changing and deleting a feature flag or an experiment is recorded in a separate
-table, the compliance audit trail, which `GET /api/v1/compliance/audit-events` lists in
-every profile; see [Compliance Audit Trail](compliance.md#what-is-recorded) for what it
-holds. Logging in and assigning a role are recorded in neither.
+Changes the platform makes on its own (the experiment scheduler, the rollout scheduler and
+the safety monitor) and signing in through Cognito or single sign-on are not written to it
+yet ([#221](https://github.com/getexperimently/experimently/issues/221)). The Quick
+Start's demo data includes entries written by the seed script, not by the platform.
+
+Creating, changing and deleting a feature flag or an experiment is also recorded in a
+separate table, the compliance audit trail, which `GET /api/v1/compliance/audit-events`
+lists in every profile; see [Compliance Audit Trail](compliance.md#what-is-recorded) for
+what it holds.
 
 Run the commands on this page in one terminal, in order, against the stack from the
 [Quick Start](../getting-started/quick-start.md). Each uses the shell variables set by the
@@ -110,7 +114,7 @@ Query the audit log with filters. The URL ends with a slash; without it the API 
 
 | Parameter | Type | Description |
 |-----------|------|-------------|
-| `entity_type` | string | `feature_flag`, `experiment`, `user`, `role`, `permission`, `safety_config`, `rollout_schedule` |
+| `entity_type` | string | `feature_flag`, `experiment`, `user`, `role`, `permission`, `safety_config`, `rollout_schedule`, `api_key`, `holdout`, `mutual_exclusion_group`, `segment` |
 | `entity_id` | UUID | Filter by specific entity ID |
 | `action_type` | string | Filter by action (see Action Types below) |
 | `user_id` | UUID | Filter by the user who performed the action |
@@ -169,8 +173,10 @@ curl -s localhost:8000/api/v1/audit-logs/entity/feature_flag/$DARK_ID \
   -H "Authorization: Bearer $TOKEN" | jq -r '.[].action_type'
 ```
 <!-- expect: toggle_disable -->
+<!-- expect: feature_flag_create -->
 
-It prints `toggle_disable`, the one entry for the dark-mode flag.
+It prints the two entries for the dark-mode flag, newest first: `toggle_disable`, then
+`feature_flag_create`.
 
 ---
 
@@ -192,20 +198,46 @@ It prints `2`. The whole response has the shape
 
 ## Action Types
 
-| Action Type | Written when |
-|-------------|--------------|
-| `toggle_enable` | A flag is turned on (`/toggle`, `/enable`, or bulk `enable`) |
-| `toggle_disable` | A flag is turned off (`/toggle`, `/disable`, or bulk `disable`) |
-| `feature_flag_update` | A flag is archived by bulk toggle, or unarchived (`/unarchive`) |
-| `user_update` | A superuser changes a user's role or active status (`PATCH /api/v1/admin/users/{user_id}`); `old_value` and `new_value` are JSON with `role` and `is_active` |
+Every action below is written by the route named, after the change is saved, with the
+signed-in user as the actor. An update records only the fields that changed, as
+`old_value` and `new_value` JSON; a create records the new entity's identifying fields in
+`new_value`, and a delete the old ones in `old_value`. Descriptions, hypotheses, targeting
+rules, segment rules, variants and metrics are never stored: when they change, their names
+are listed in `new_value.changed_fields`. No entry holds a password, a token, any part of
+an API key, or a request body.
 
-`ActionType` also defines `feature_flag_create`, `feature_flag_delete`, `feature_flag_activate`, `feature_flag_deactivate`,
-`experiment_create`, `experiment_update`, `experiment_delete`, `experiment_start`,
-`experiment_pause`, `experiment_complete`, `user_create`, `user_delete`,
-`user_login`, `user_logout`, `permission_grant`, `permission_revoke`, `role_assign`,
-`role_unassign`, `safety_rollback` and `safety_config_update`. You can filter on them, but
-nothing in this release writes them
-([#221](https://github.com/getexperimently/experimently/issues/221)).
+| Action Type | Entity | Written when |
+|-------------|--------|--------------|
+| `feature_flag_create` | `feature_flag` | `POST /feature-flags/` |
+| `feature_flag_update` | `feature_flag` | `PUT /feature-flags/{id}`; `/unarchive`; bulk `archive`; every change to one of the flag's rollout schedules or stages (`reason` is `rollout schedule <change>`, such as `rollout schedule activated`) |
+| `feature_flag_delete` | `feature_flag` | `DELETE /feature-flags/{id}` |
+| `feature_flag_activate`, `feature_flag_deactivate` | `feature_flag` | `/activate`, `/deactivate`, when the status changes |
+| `toggle_enable`, `toggle_disable` | `feature_flag` | A flag is turned on or off (`/toggle`, `/enable`, `/disable`, or bulk `enable`/`disable`); `old_value` and `new_value` are the status |
+| `experiment_create` | `experiment` | `POST /experiments/`, `/clone` (`reason` names the source), wizard submit |
+| `experiment_update` | `experiment` | `PUT /experiments/{id}`, `/schedule`, `/metadata`, `/archive`, `PUT /bandit/{id}/weights` (`reason` names the change, except for `PUT`) |
+| `experiment_delete` | `experiment` | `DELETE /experiments/{id}` |
+| `experiment_start`, `experiment_pause`, `experiment_complete` | `experiment` | `/start` (also a resume), `/pause`, `/complete` |
+| `api_key_create`, `api_key_revoke` | `api_key` | `POST /api-keys`, `DELETE /api-keys/{id}` |
+| `holdout_create` | `holdout` | `POST /holdout`. With `is_active: true` it turns the active holdout off, and that holdout gets its own `holdout_deactivate` |
+| `holdout_update`, `holdout_activate`, `holdout_deactivate` | `holdout` | `PUT /holdout/{id}`, one entry per kind of change. Activating a holdout turns any other active one off, and that holdout gets its own `holdout_deactivate`. An activate or deactivate entry also carries the `activated_at` or `deactivated_at` it set |
+| `mutual_exclusion_group_create`, `mutual_exclusion_group_update`, `mutual_exclusion_group_archive` | `mutual_exclusion_group` | Create, `PUT`, and `DELETE` (which archives). Adding or removing an experiment is an update with `{"experiment_id": ...}` and the `reason` `experiment added` or `experiment removed` |
+| `segment_create`, `segment_update`, `segment_archive` | `segment` | `POST /segments`, `PUT /segments/{id}`, `DELETE /segments/{id}` (which archives) |
+| `user_create`, `user_delete` | `user` | `POST /users/`; `DELETE /users/{id}` and `DELETE /admin/users/{id}`. Deleting your own account is recorded with no `user_id` |
+| `role_assign` | `user` | A superuser changes a user's role or superuser flag (`PATCH /admin/users/{id}`, `PUT /admin/users/{id}`, `PUT /users/{id}`); `old_value` and `new_value` are `{"role", "is_superuser"}` |
+| `user_activate`, `user_deactivate` | `user` | The same routes change a user's active status |
+| `user_login` | `user` | Signing in with a password (`POST /auth/login`, or `POST /auth/token` with `AUTH_PROVIDER=local`); `new_value` is `{"provider": "local"}` |
+
+User changes record the superuser flag. A change to a user's role, superuser flag or
+active status is saved together with its entry: if the entry cannot be written, the
+change is refused with a `500` and nothing is saved, and sending the same request again
+once the problem is fixed writes it once.
+
+`ActionType` also defines `user_update`, `user_logout`, `permission_grant`,
+`permission_revoke`, `role_unassign`, `safety_rollback` and `safety_config_update`. You
+can filter on them, but nothing in this release writes them
+([#221](https://github.com/getexperimently/experimently/issues/221)). Entries written by
+an earlier release for `PATCH /admin/users/{id}` are `user_update`, with the role and
+active status before and after.
 
 ---
 
@@ -249,11 +281,12 @@ curl -s localhost:8000/api/v1/feature-flags/$CHECKOUT_ID/history \
   | jq '{flag_key, total_changes, latest: .history[0] | {action_type, old_value, new_value, user_email}}'
 ```
 <!-- expect: "flag_key": "new-checkout" -->
-<!-- expect: "total_changes": 1 -->
+<!-- expect: "total_changes": 2 -->
 <!-- expect: "action_type": "toggle_disable" -->
 
-It prints `"total_changes": 1` and the bulk toggle's entry: `toggle_disable`, from
-`ACTIVE` to `INACTIVE`, by `admin@demo.com`.
+It prints `"total_changes": 2` (the flag's creation and the bulk toggle) and the latest
+entry, the bulk toggle's: `toggle_disable`, from `ACTIVE` to `INACTIVE`, by
+`admin@demo.com`.
 
 ---
 

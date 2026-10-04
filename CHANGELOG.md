@@ -10,6 +10,37 @@ longer applies and release-please can generate this file directly. Until it
 does, entries below 0.2.2 are hand-written and the links in them are the
 reason why.
 
+## [0.19.0](https://github.com/getexperimently/experimently/compare/v0.18.0...v0.19.0) (2026-10-04)
+
+
+### ⚠ BREAKING CHANGES
+
+* **experiments:** each experiment stores a `correction_method` and a `confidence_level`, and results for experiments with several treatments now use the stored correction: Benjamini-Hochberg at 0.95 unless an experiment is created with others. Existing experiments are backfilled to Benjamini-Hochberg at 0.95. `GET /results/{id}?correction_method=none` shows the earlier, uncorrected numbers. Both fields are locked once an experiment leaves draft, for every role. `adjusted_p_value` is now filled in (equal to `p_value`) for experiments with one treatment. The data export and the report follow the stored setting. CUPED and sequential testing do not follow the stored level.
+* **segments:** segment rules must use the targeting rule format (`{"logical_operator", "groups": [{"conditions": [...]}]}`). The old `{"operator", "conditions"}` segment format is refused with 422 on `POST /api/v1/segments`, `PUT /api/v1/segments/{id}` and preview, and `POST /api/v1/segments/{id}/evaluate` answers 409 for a segment stored in that format (bulk-evaluate answers `false`). `{segment_id}` path parameters must be UUIDs.
+* **workspaces:** the workspace API-key routes are removed and answer 404 (platform API keys are unchanged); workspace create and update refuse `plan` with 422, and workspace responses no longer carry plan limits or counts.
+
+### Features
+
+* **dashboard:** set and see each experiment's confidence level and correction ([#845](https://github.com/getexperimently/experimently/issues/845)) ([b7e4621](https://github.com/getexperimently/experimently/commit/b7e46216c299f0b56eaa398e4802b9b7db67a4c5))
+* **experiments:** each experiment stores its correction method and confidence level (Benjamini-Hochberg, 95% by default) ([#843](https://github.com/getexperimently/experimently/issues/843)) ([f4bd9ea](https://github.com/getexperimently/experimently/commit/f4bd9eac5d929aac821311b2c8966de1265b8b57))
+* **workspaces:** remove workspace API keys and plan limits ([#829](https://github.com/getexperimently/experimently/issues/829)) ([c3320b1](https://github.com/getexperimently/experimently/commit/c3320b18b22fd140ec6d192024f000a55cfb2196))
+
+
+### Bug Fixes
+
+* **audit:** flag status changes answer 200 and keep their audit entry when the audit write fails ([#841](https://github.com/getexperimently/experimently/issues/841)) ([2cc53d1](https://github.com/getexperimently/experimently/commit/2cc53d1257330a0d15cea019dd37b0216fbc15ee))
+* **deploy:** the rollback verify step reads the active task set's own counts ([#833](https://github.com/getexperimently/experimently/issues/833)) ([da74042](https://github.com/getexperimently/experimently/commit/da74042442ca5450e287816c24bd168feee7cf33))
+* **segments:** segment rules use the targeting rule format and are checked when saved ([#840](https://github.com/getexperimently/experimently/issues/840)) ([f86a004](https://github.com/getexperimently/experimently/commit/f86a004fdb861d1ae4a3924fa2d9c556fb5c6fee))
+* **site:** the marketing homepage shows a contact address, and a privacy page exists ([#824](https://github.com/getexperimently/experimently/issues/824)) ([7a371d9](https://github.com/getexperimently/experimently/commit/7a371d92fa0e89e0d0a384519b80ef6d5a3c0fd9))
+
+
+### Documentation
+
+* **api:** the 429 text and the assign response match what the API sends ([#832](https://github.com/getexperimently/experimently/issues/832)) ([f852d43](https://github.com/getexperimently/experimently/commit/f852d43db966133b1f57f7ae93ea0420a56bf057))
+* **demo:** the audit page claims only what it records ([#839](https://github.com/getexperimently/experimently/issues/839)) ([ee013fc](https://github.com/getexperimently/experimently/commit/ee013fc0210da31742352a2f13bafe755f8a5d24))
+* **deploy:** the API's running counts are the PRIMARY task set's own ([#842](https://github.com/getexperimently/experimently/issues/842)) ([136e3de](https://github.com/getexperimently/experimently/commit/136e3deb5c1151080b9475a53515a9395df6ad0d))
+* **holdout:** say what a global holdout does today ([#836](https://github.com/getexperimently/experimently/issues/836)) ([e21327f](https://github.com/getexperimently/experimently/commit/e21327f4ba47cd09861dd6f05a6772e084b53bd5))
+
 ## [0.18.0](https://github.com/getexperimently/experimently/compare/v0.17.0...v0.18.0) (2026-10-04)
 
 

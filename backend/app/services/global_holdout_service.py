@@ -114,6 +114,9 @@ class GlobalHoldoutService:
 
     def __init__(self, db: Session):
         self.db = db
+        #: (id, name) of every other holdout ``_activate`` turned off through
+        #: this service object, so the route can record each one.
+        self.implicitly_deactivated: List[Tuple[UUID, str]] = []
 
     # ------------------------------------------------------------------
     # CRUD
@@ -297,6 +300,7 @@ class GlobalHoldoutService:
         for other in others:
             other.is_active = False
             other.deactivated_at = now
+            self.implicitly_deactivated.append((other.id, other.name))
         # The others are written before this row turns active, so the
         # one-active index sees at most one active row at every statement.
         self._flush()

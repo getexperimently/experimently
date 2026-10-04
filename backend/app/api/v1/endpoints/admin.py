@@ -21,6 +21,7 @@ from backend.app.api.v1.endpoints.users import (
     changed_email,
     changed_username,
     commit_user_write,
+    record_access_changes,
     refuse_if_email_held,
     refuse_if_own_access_removed,
     refuse_if_username_held,
@@ -28,13 +29,19 @@ from backend.app.api.v1.endpoints.users import (
     require_still_active_superuser,
 )
 from backend.app.core.config import settings
-from backend.app.models.audit_log import ActionType, AuditLog, EntityType
+from backend.app.models.audit_log import ActionType, EntityType
 from backend.app.models.user import User, UserRole
 from backend.app.schemas.user import (
     AdminUserPatch,
     UserListResponse,
     UserResponse,
     UserUpdate,
+)
+from backend.app.services.audit_service import (
+    AuditService,
+    audit_identity,
+    audit_snapshot,
+    role_value,
 )
 
 router = APIRouter()
@@ -174,11 +181,16 @@ async def update_user(
     if removes_an_active_superuser(user, update_data):
         require_still_active_superuser(db, current_user)
 
+    role_before, active_before = role_value(user), user.is_active
+
     # Update user attributes
     for field in update_data:
         if hasattr(user, field):
             setattr(user, field, update_data[field])
 
+    # The audit entries go in the same transaction as the change: both are
+    # written or neither is. No await between the lock above and the commit.
+    record_access_changes(db, current_user, user, role_before, active_before)
     commit_user_write(db, new_email, exclude_id=user.id, username=new_username)
     db.refresh(user)
 
@@ -259,29 +271,17 @@ async def patch_user(
         # superuser is not (400 "Inactive user" / 403).
         require_still_active_superuser(db, current_user)
 
-    before = {"role": _role_name(user), "is_active": user.is_active}
+    role_before, active_before = role_value(user), user.is_active
     # Only these two columns, by name: nothing else in the request can reach
     # the row (the schema refuses any other key as well).
     if role_changes:
         user.role = UserRole[user_in.role]
     if active_changes:
         user.is_active = user_in.is_active
-    after = {"role": _role_name(user), "is_active": user.is_active}
 
-    # The audit row is part of the same transaction: both are written or
+    # The audit entries are part of the same transaction: both are written or
     # neither is. No await between the lock above and this commit.
-    db.add(
-        AuditLog(
-            user_id=current_user.id,
-            user_email=current_user.email or current_user.username,
-            action_type=ActionType.USER_UPDATE.value,
-            entity_type=EntityType.USER.value,
-            entity_id=user.id,
-            entity_name=user.username or str(user.id),
-            old_value=json.dumps(before),
-            new_value=json.dumps(after),
-        )
-    )
+    record_access_changes(db, current_user, user, role_before, active_before)
     db.commit()
     db.refresh(user)
 
@@ -319,9 +319,23 @@ async def delete_user(
     if user.is_superuser and user.is_active:
         require_still_active_superuser(db, current_user)
 
+    deleted = audit_identity(audit_snapshot(EntityType.USER, user))
+    deleted_id = user.id
+
     # Delete the user
     db.delete(user)
     db.commit()
+
+    # The delete is committed; a failed audit write does not undo it.
+    AuditService.record_after_commit(
+        db,
+        actor=current_user,
+        action=ActionType.USER_DELETE,
+        entity_type=EntityType.USER,
+        entity_id=deleted_id,
+        entity_name=deleted["username"] or str(deleted_id),
+        before=deleted,
+    )
 
 
 @router.get("/stats", response_model=Dict[str, Any])

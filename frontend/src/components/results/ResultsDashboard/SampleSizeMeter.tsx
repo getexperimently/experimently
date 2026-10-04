@@ -28,7 +28,7 @@ interface SampleSizeMeterProps {
 const POWER_OPTIONS = [0.8, 0.9, 0.95];
 const SIGNIFICANCE_OPTIONS = [0.05, 0.01, 0.1];
 const CORRECTION_LABELS: Record<CorrectionMethod, string> = {
-  none: 'None (as on the results)',
+  none: 'None',
   bonferroni: 'Bonferroni',
   benjamini_hochberg: 'Benjamini-Hochberg',
 };
@@ -200,6 +200,10 @@ export function SampleSizeMeter({
         : UNAVAILABLE_TEXT[unavailable_reason ?? 'no_control_data'];
   const entered = (key: keyof SampleSizeOverrides) =>
     overrides[key] !== undefined ? 'Entered by you.' : 'Default.';
+  // The confidence level and the correction come from the experiment's stored
+  // settings unless the user changed them here (#580).
+  const fromExperiment = (key: 'confidence_level' | 'correction_method') =>
+    overrides[key] !== undefined ? 'Entered by you.' : "From the experiment's settings.";
   const mdeSource =
     overrides.mde !== undefined
       ? 'Entered by you.'
@@ -328,7 +332,9 @@ export function SampleSizeMeter({
             >
               {sigOptions.map((s) => (
                 <option key={s} value={s}>
-                  {pct(s)}
+                  {SIGNIFICANCE_OPTIONS.some((o) => sameNumber(o, s))
+                    ? pct(s)
+                    : `${pct(s)} (this experiment's setting)`}
                 </option>
               ))}
             </select>
@@ -337,7 +343,7 @@ export function SampleSizeMeter({
               className="text-xs text-slate-600"
               data-testid="sample-size-significance-source"
             >
-              {entered('confidence_level')}
+              {fromExperiment('confidence_level')}
             </p>
           </div>
 
@@ -351,6 +357,7 @@ export function SampleSizeMeter({
                 value={correction}
                 onChange={(e) => setCorrection(e.target.value as CorrectionMethod)}
                 disabled={readOnly}
+                aria-describedby={id('correction-source')}
                 className="mt-1 rounded border border-slate-300 px-2 py-1 text-sm"
                 data-testid="sample-size-correction-input"
               >
@@ -360,6 +367,13 @@ export function SampleSizeMeter({
                   </option>
                 ))}
               </select>
+              <p
+                id={id('correction-source')}
+                className="text-xs text-slate-600"
+                data-testid="sample-size-correction-source"
+              >
+                {fromExperiment('correction_method')}
+              </p>
             </div>
           )}
         </div>
@@ -466,8 +480,10 @@ export function SampleSizeMeter({
         {comparisons >= 2 && (
           <p className="text-sm text-slate-600" data-testid="sample-size-correction-note">
             {correction_method === 'none'
-              ? `With ${variants} variants, this plan makes no correction for comparing several variants with the control, the same as the results. Choose a correction to plan each comparison at ${pct(significance / comparisons, 3)} significance.`
-              : `With ${variants} variants, each of the ${comparisons} comparisons with the control is planned at ${pct(alpha, 3)} significance (${CORRECTION_LABELS[correction_method]}).`}
+              ? `With ${variants} variants, this plan makes no correction for comparing several variants with the control${overrides.correction_method === undefined ? ': the experiment is set to no correction' : ''}. Choose a correction to plan each comparison at ${pct(significance / comparisons, 3)} significance.`
+              : overrides.correction_method === undefined
+                ? `With ${variants} variants, this plan uses the experiment's correction (${CORRECTION_LABELS[correction_method]}): each of the ${comparisons} comparisons with the control is planned at ${pct(alpha, 3)} significance.`
+                : `With ${variants} variants, each of the ${comparisons} comparisons with the control is planned at ${pct(alpha, 3)} significance (${CORRECTION_LABELS[correction_method]}).`}
           </p>
         )}
 

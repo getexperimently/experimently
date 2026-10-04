@@ -50,8 +50,17 @@ class TestBulkToggleRequest:
             BulkToggleRequest(
                 flag_ids=[str(uuid4())],
                 action=BulkToggleAction.ENABLE,
-                reason="x" * 501,  # Over 500 char limit
+                reason="x" * 1001,  # Over the 1,000 character limit
             )
+
+    def test_reason_of_1000_characters_is_accepted(self):
+        """The same limit as a single toggle's reason (#221)."""
+        req = BulkToggleRequest(
+            flag_ids=[str(uuid4())],
+            action=BulkToggleAction.ENABLE,
+            reason="x" * 1000,
+        )
+        assert len(req.reason) == 1000
 
     def test_invalid_action_raises_error(self):
         with pytest.raises(ValidationError):

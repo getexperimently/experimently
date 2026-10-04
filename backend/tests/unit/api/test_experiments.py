@@ -585,8 +585,9 @@ async def test_update_experiment(
                 cache_control=mock_cache_control,
             )
 
-            # Verify db query was called correctly
-            mock_db.query.assert_called_once()
+            # The experiment is read once for the change, and once more for
+            # its audit entry after the change commits.
+            assert mock_db.query.call_count == 2
 
             # Verify service was called correctly
             mock_experiment_service.update_experiment.assert_called_once()
@@ -674,8 +675,9 @@ async def test_start_experiment(
                 cache_control=mock_cache_control,
             )
 
-            # Verify db query was called correctly
-            mock_db.query.assert_called_once()
+            # The experiment is read once for the change, and once more for
+            # its audit entry after the change commits.
+            assert mock_db.query.call_count == 2
 
             # Verify service was called correctly
             mock_experiment_service.start_experiment.assert_called_once_with(

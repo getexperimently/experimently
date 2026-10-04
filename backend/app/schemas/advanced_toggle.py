@@ -28,7 +28,7 @@ class BulkToggleRequest(BaseModel):
     action: BulkToggleAction
     reason: Optional[str] = Field(
         None,
-        max_length=500,
+        max_length=1000,
         description="Reason for bulk operation (stored in audit log)",
     )
 

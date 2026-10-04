@@ -11,11 +11,16 @@ import {
   isFiniteNumber,
   rateDescription,
 } from '@/components/results/shared/resultFormat';
+import {
+  comparisonsOf,
+  correctionName,
+  formatAlpha,
+} from '@/components/results/shared/analysisSettings';
 
 interface MetricComparisonTableProps {
   metrics: MetricResult[];
   confidenceLevel: number;
-  /** The response's correction_method; names the adjusted p-values. */
+  /** The response's correction_method: the correction the p-values were adjusted with. */
   correctionMethod?: CorrectionMethod;
 }
 
@@ -51,32 +56,55 @@ function sortable(v: number | null | undefined): number {
   return isFiniteNumber(v) ? v : -Infinity;
 }
 
+/**
+ * Whether this row shows an adjusted p-value: a correction applies and the
+ * metric has two or more treatments with a p-value (#580). With one, the
+ * correction changes nothing, so the p-value is shown plainly.
+ */
+function showsAdjusted(
+  variant: VariantResult,
+  comparisons: number,
+  correctionMethod?: CorrectionMethod,
+): boolean {
+  return (
+    correctionLabel(correctionMethod) !== null &&
+    comparisons >= 2 &&
+    isFiniteNumber(variant.adjusted_p_value)
+  );
+}
+
 function PValueCell({
   variant,
+  comparisons,
   correctionMethod,
 }: {
   variant: VariantResult;
+  comparisons: number;
   correctionMethod?: CorrectionMethod;
 }) {
   if (variant.is_control) return <>—</>;
-  const correction = correctionLabel(correctionMethod);
-  const adjusted = variant.adjusted_p_value;
   const raw = variant.p_value;
 
-  if (correction && isFiniteNumber(adjusted)) {
+  if (showsAdjusted(variant, comparisons, correctionMethod)) {
     return (
       <span className="flex flex-col">
-        <span>{adjusted.toFixed(4)}</span>
-        <span className="text-xs text-slate-600">adjusted ({correction})</span>
+        <span>{(variant.adjusted_p_value as number).toFixed(4)}</span>
         {isFiniteNumber(raw) && (
-          <span className="text-xs text-slate-600">raw {raw.toFixed(4)}</span>
+          <span className="text-xs text-slate-600">unadjusted {raw.toFixed(4)}</span>
         )}
       </span>
     );
   }
+  if (correctionLabel(correctionMethod) !== null) {
+    // One comparison on this metric: the correction leaves the p-value as it
+    // is, so it is shown once, with no label. It is the value the badge uses.
+    const decisive = decisivePValue(variant);
+    if (!isFiniteNumber(decisive)) return <>{NOT_ENOUGH_DATA}</>;
+    return <>{decisive.toFixed(4)}</>;
+  }
   if (!isFiniteNumber(raw)) return <>{NOT_ENOUGH_DATA}</>;
-  // The dashboard requests no correction, so this is the usual case: the
-  // engine decided significance from the raw p, and the label says so.
+  // No correction: the engine decided significance from this p, and the
+  // label says it is not adjusted.
   return (
     <span className="flex flex-col">
       <span>{raw.toFixed(4)}</span>
@@ -85,14 +113,36 @@ function PValueCell({
   );
 }
 
-const COLUMNS: [SortKey, string][] = [
-  ['metric', 'Metric'],
-  ['variant', 'Variant'],
-  ['sample_size', 'Sample Size'],
-  ['mean', 'Value'],
-  ['improvement', 'Improvement'],
-  ['p_value', 'p-value'],
-];
+/**
+ * The footnote under a table of adjusted p-values. "k" is the number of
+ * treatments compared with the control on each metric that has two or more.
+ */
+export function adjustedFootnote(
+  ks: number[],
+  correctionMethod: CorrectionMethod,
+  confidenceLevel: number,
+): string {
+  const distinct = Array.from(new Set(ks)).sort((a, b) => a - b);
+  const k = distinct.length === 1 ? `${distinct[0]}` : `up to ${distinct[distinct.length - 1]}`;
+  return (
+    `Adjusted p-values account for comparing ${k} variants with the control on each metric ` +
+    `(${correctionName(correctionMethod)}). A variant is significant when its adjusted p-value ` +
+    `is below ${formatAlpha(confidenceLevel)}. Why is it higher than the unadjusted one? ` +
+    'Testing several variants at once raises the chance that one looks like a winner by luck; ' +
+    'the adjustment raises each p-value to keep that chance in check.'
+  );
+}
+
+function columns(adjusted: boolean): [SortKey, string][] {
+  return [
+    ['metric', 'Metric'],
+    ['variant', 'Variant'],
+    ['sample_size', 'Sample Size'],
+    ['mean', 'Value'],
+    ['improvement', 'Improvement'],
+    ['p_value', adjusted ? 'Adjusted p-value' : 'p-value'],
+  ];
+}
 
 interface FlatRow {
   metric: MetricResult;
@@ -116,6 +166,12 @@ export function MetricComparisonTable({
   }
 
   const correction = correctionLabel(correctionMethod);
+  // Treatments with a p-value, per metric: a correction changes a p-value
+  // only where there are two or more.
+  const comparisons = new Map(metrics.map((m) => [m.metric_id, comparisonsOf(m)]));
+  const correctedKs =
+    correction !== null ? metrics.map((m) => comparisonsOf(m)).filter((k) => k >= 2) : [];
+  const adjustedHeader = correctedKs.length > 0;
 
   const rows: FlatRow[] = metrics.flatMap((m) =>
     m.variants.map((v) => ({ metric: m, variant: v }))
@@ -176,7 +232,7 @@ export function MetricComparisonTable({
       <table className="min-w-full divide-y divide-slate-200 text-sm">
         <thead className="bg-slate-50">
           <tr>
-            {COLUMNS.map(([key, label]) => (
+            {columns(adjustedHeader).map(([key, label]) => (
               <th
                 key={key}
                 scope="col"
@@ -202,7 +258,8 @@ export function MetricComparisonTable({
           {ordered.map((row, i) => {
             const { metric, variant } = row;
             const decisive = decisivePValue(variant);
-            const adjustedShown = correction !== null && isFiniteNumber(variant.adjusted_p_value);
+            const k = comparisons.get(metric.metric_id) ?? 0;
+            const adjustedShown = showsAdjusted(variant, k, correctionMethod);
             return (
               <tr
                 key={`${metric.metric_id}-${variant.variant_id}`}
@@ -239,7 +296,7 @@ export function MetricComparisonTable({
                   {formatImprovement(variant.relative_improvement_pct, variant.is_control)}
                 </td>
                 <td className="px-4 py-3 text-slate-700">
-                  <PValueCell variant={variant} correctionMethod={correctionMethod} />
+                  <PValueCell variant={variant} comparisons={k} correctionMethod={correctionMethod} />
                 </td>
                 <td className="px-4 py-3">
                   <StatisticalBadge
@@ -254,6 +311,11 @@ export function MetricComparisonTable({
           })}
         </tbody>
       </table>
+      {adjustedHeader && correctionMethod && (
+        <p className="mt-3 text-xs text-slate-600" data-testid="adjusted-p-footnote">
+          {adjustedFootnote(correctedKs, correctionMethod, confidenceLevel)}
+        </p>
+      )}
     </div>
   );
 }
