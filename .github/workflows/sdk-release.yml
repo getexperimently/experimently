@@ -18,8 +18,9 @@
 #         owner + repository + workflow `sdk-release.yml` + environment `sdk-release`
 #   npm   Package settings -> Trusted publisher -> GitHub Actions, same three
 #
-# Until that is done a publish step fails with an authentication error, which
-# is the correct behaviour: nothing is published by a fallback nobody audited.
+# Until that is done, a publish is meant to stop at the registry's
+# authentication check: nothing is published by a fallback nobody audited.
+# That is intent, read from the npm and pypa sources; no run has shown it.
 # The founder owns this (tracked in P3.8, issue #140).
 #
 # `environment: sdk-release` is also where a human approval belongs. NOTE, as
@@ -28,13 +29,14 @@
 # repository configuration, not something this file can assert, so it is on the
 # P3.8 checklist beside the registry configuration above.
 #
-# PyPI releases are built and tested in `pypi-build`, which cannot request an
-# OIDC token, and published by `pypi`, which holds the token and the
-# environment, installs nothing, and checks the package it uploads against the
-# tag before uploading it. So the environment's approval for a PyPI release is
-# asked for after the tests and checks have passed. The npm job still installs,
-# tests and publishes in one job; it is split the same way separately.
-# backend/tests/smoke/test_sdk_release_wiring.py pins both shapes.
+# Each registry has two jobs. `pypi-build` and `npm-build` install, test and
+# build, and cannot request an OIDC token. `pypi` and `npm` hold the token and
+# the environment, install nothing, and check the package they upload against
+# the tag before uploading it. So the environment's approval is asked for
+# after the tests and checks have passed. An npm prerelease (a version with a
+# `-`, such as 1.0.0-rc.1) publishes under the `next` dist-tag; a stable
+# version gets `latest`. backend/tests/smoke/test_sdk_release_wiring.py pins
+# this shape.
 name: SDK Release
 
 on:
@@ -73,6 +75,7 @@ jobs:
       version: ${{ steps.parse.outputs.version }}
       ecosystem: ${{ steps.parse.outputs.ecosystem }}
       name: ${{ steps.parse.outputs.name }}
+      prerelease: ${{ steps.classify.outputs.prerelease }}
     steps:
       - uses: actions/checkout@v7
 
@@ -127,6 +130,25 @@ jobs:
             echo "name=$name"
           } >> "$GITHUB_OUTPUT"
           echo "releasing sdk/$sdk $version via $ecosystem"
+
+      # A prerelease is a version with a `-` once any `+build` metadata is
+      # removed: `1.0.0-rc.1` is one, `1.0.0` and `1.0.0+build.5` are not.
+      # Read from the version only, never the tag, whose SDK name can carry a
+      # hyphen of its own (sdk/react-native/v1.0.0). The npm publish job puts
+      # a prerelease under the `next` dist-tag.
+      - name: Classify the version
+        id: classify
+        env:
+          VERSION: ${{ steps.parse.outputs.version }}
+        run: |
+          set -euo pipefail
+          core="${VERSION%%+*}"
+          case "$core" in
+            *-*) prerelease=true ;;
+            *) prerelease=false ;;
+          esac
+          printf 'prerelease=%s\n' "$prerelease" >> "$GITHUB_OUTPUT"
+          printf '%s is a prerelease: %s\n' "$VERSION" "$prerelease"
 
   # ---------------------------------------------------------------------------
   # PyPI: sdk/python, sdk/openfeature-python
@@ -332,31 +354,36 @@ jobs:
 
   # ---------------------------------------------------------------------------
   # npm: sdk/js, sdk/edge, sdk/openfeature, sdk/react, sdk/react-native
+  #
+  # Two jobs, the same shape as PyPI. `npm-build` installs, tests, pins,
+  # packs and checks the tarball, and cannot request an OIDC token: its
+  # permissions are `contents: read` and nothing else. It uploads that one
+  # tarball and records its file name and sha256. `npm` holds the token and
+  # the `sdk-release` environment, has no checkout and installs nothing. It
+  # checks the tarball it downloaded against that digest and against the tag,
+  # and publishes it: a prerelease under the `next` dist-tag, a stable
+  # version with no `--tag`, so npm applies `latest` itself. The environment's
+  # approval is therefore asked for after the tests and checks have passed.
   # ---------------------------------------------------------------------------
-  npm:
-    name: publish to npm
+  npm-build:
+    name: test and build for npm
     needs: resolve
     if: needs.resolve.outputs.ecosystem == 'npm'
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    environment:
-      name: sdk-release
-      url: https://www.npmjs.com/package/${{ needs.resolve.outputs.name }}
     permissions:
       contents: read
-      id-token: write   # trusted publishing + provenance
+    outputs:
+      file: ${{ steps.record.outputs.file }}
+      digest: ${{ steps.record.outputs.digest }}
     steps:
       - uses: actions/checkout@v7
 
+      # Node 22 with the npm it bundles, as sdk-unit-tests.yml tests the SDKs.
+      # Nothing here publishes, so nothing here needs a newer npm.
       - uses: actions/setup-node@v7
         with:
           node-version: '22'
-          registry-url: https://registry.npmjs.org
-
-      # Trusted publishing and `npm publish --provenance` both need a recent
-      # npm; the one bundled with Node 22 is older than the OIDC support.
-      - name: Install a current npm
-        run: npm install --global npm@latest
 
       - name: Install, test and build
         working-directory: sdk/${{ needs.resolve.outputs.sdk }}
@@ -402,10 +429,10 @@ jobs:
             fi
           done < "$RUNNER_TEMP/rewrites.txt"
 
-      # What `npm publish` will upload: this exact tarball is published below.
-      # A package whose `files` list is missing ships its sources and tests, or
-      # -- worse -- ships no `dist` at all and installs as an empty module; the
-      # listing `npm pack` prints is where that shows.
+      # What `npm publish` will upload: this exact tarball is published by
+      # the `npm` job. A package whose `files` list is missing ships its
+      # sources and tests, or -- worse -- ships no `dist` at all and installs
+      # as an empty module; the listing `npm pack` prints is where that shows.
       - name: Pack
         id: pack
         working-directory: sdk/${{ needs.resolve.outputs.sdk }}
@@ -455,10 +482,177 @@ jobs:
           npm install --ignore-scripts --no-audit --no-fund "$TGZ" $peers
           npm ls --all
 
-      - name: Publish
+      # The file name and the sha256 of the tarball's bytes. The publish job
+      # recomputes the sha256 over what it downloaded and compares it with
+      # this job's output.
+      - name: Record the tarball
+        id: record
         env:
           TGZ: ${{ steps.pack.outputs.tgz }}
-        run: npm publish "$TGZ" --provenance --access public
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import hashlib, os, pathlib
+
+          tgz = pathlib.Path(os.environ["TGZ"])
+          digest = hashlib.sha256(tgz.read_bytes()).hexdigest()
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as out:
+              out.write(f"file={tgz.name}\ndigest={digest}\n")
+          print(f"{digest}  {tgz.name}")
+          PY
+
+      - name: Upload the checked tarball
+        uses: actions/upload-artifact@v7
+        with:
+          name: npm-tarball
+          path: ${{ steps.pack.outputs.tgz }}
+          if-no-files-found: error
+          overwrite: false
+
+  npm:
+    name: publish to npm
+    needs: [resolve, npm-build]
+    if: needs.resolve.outputs.ecosystem == 'npm'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment:
+      name: sdk-release
+      url: https://www.npmjs.com/package/${{ needs.resolve.outputs.name }}
+    permissions:
+      contents: read
+      id-token: write   # trusted publishing + provenance
+    steps:
+      - name: Download the checked tarball
+        uses: actions/download-artifact@v8
+        with:
+          name: npm-tarball
+          path: ${{ github.workspace }}/package
+
+      # Standard library only. Exactly one file was downloaded, it has the
+      # name the build job recorded, that name is a plain `.tgz` file name,
+      # and its sha256 is the one the build job recorded.
+      - name: Check the tarball's name and digest
+        env:
+          FILE: ${{ needs.npm-build.outputs.file }}
+          DIGEST: ${{ needs.npm-build.outputs.digest }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import hashlib, os, pathlib, re, sys
+
+          def fail(problem):
+              print(f"::error::{problem}")
+              sys.exit(1)
+
+          name = os.environ["FILE"]
+          expected = os.environ["DIGEST"]
+          folder = pathlib.Path(os.environ["GITHUB_WORKSPACE"]) / "package"
+
+          if not re.fullmatch(r"[A-Za-z0-9._-]+\.tgz", name):
+              fail(f"the build job recorded no usable file name: {name!r}")
+          if not re.fullmatch(r"[0-9a-f]{64}", expected):
+              fail(f"the build job recorded no usable digest: {expected!r}")
+          found = sorted(p.name for p in folder.iterdir()) if folder.is_dir() else []
+          if found != [name]:
+              fail(f"expected exactly {name} in {folder}, found {found}")
+          path = folder / name
+          if path.is_symlink() or not path.is_file():
+              fail(f"{name} is not a regular file")
+          digest = hashlib.sha256(path.read_bytes()).hexdigest()
+          if digest != expected:
+              fail(
+                  f"{name} has digest {digest}; the build job recorded {expected}"
+              )
+          print(f"{digest}  {name}")
+          PY
+
+      # The package.json inside the tarball has the tag's name and version,
+      # and sets no publish configuration: no top-level `tag` and no
+      # `publishConfig`. Compared with `resolve`, never with the build job.
+      - name: Check the packed package.json against the tag
+        env:
+          NAME: ${{ needs.resolve.outputs.name }}
+          VERSION: ${{ needs.resolve.outputs.version }}
+          FILE: ${{ needs.npm-build.outputs.file }}
+        run: |
+          set -euo pipefail
+          out="$RUNNER_TEMP/published"
+          rm -rf "$out"
+          mkdir -p "$out"
+          tar -xzf "$GITHUB_WORKSPACE/package/$FILE" -C "$out" package/package.json
+          python3 - "$out/package/package.json" <<'PY'
+          import json, os, sys
+
+          with open(sys.argv[1], encoding="utf-8") as handle:
+              manifest = json.load(handle)
+          name = os.environ["NAME"]
+          version = os.environ["VERSION"]
+
+          problems = []
+          if not isinstance(manifest, dict):
+              problems.append("the packed package.json is not an object")
+              manifest = {}
+          if not name or not version:
+              problems.append("the tag resolved no name or no version")
+          if manifest.get("name") != name:
+              problems.append(f"the tarball is {manifest.get('name')!r}, not {name!r}")
+          if manifest.get("version") != version:
+              problems.append(
+                  f"the tarball is version {manifest.get('version')!r}, not {version!r}"
+              )
+          for key in ("tag", "publishConfig"):
+              if key in manifest:
+                  problems.append(f"the packed package.json sets {key!r}")
+
+          for problem in problems:
+              print(f"::error::{problem}")
+          if problems:
+              sys.exit(1)
+          print(f"{name} {version}")
+          PY
+
+      # No `registry-url`: npm publishes to its default registry, and no
+      # .npmrc with a token placeholder is written. Intent, read from the npm
+      # and setup-node sources rather than seen on a real run: with no
+      # trusted publisher configured, the publish stops at npm's
+      # authentication check. No package-manager cache: there is no checkout
+      # and nothing to restore.
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24.21.0'
+          package-manager-cache: false
+
+      # Trusted publishing needs npm 11.5.1 or later; Node 24.21.0 bundles
+      # npm 11.19.0.
+      - name: Node and npm are the pinned versions
+        run: |
+          set -euo pipefail
+          node_version="$(node --version)"
+          npm_version="$(npm --version)"
+          printf 'node %s, npm %s\n' "$node_version" "$npm_version"
+          if [ "$node_version" != "v24.21.0" ] || [ "$npm_version" != "11.19.0" ]; then
+            printf '%s\n' "::error::expected node v24.21.0 with npm 11.19.0, found node $node_version with npm $npm_version"
+            exit 1
+          fi
+
+      # A prerelease goes under `next`. A stable version passes no `--tag`,
+      # so npm applies `latest` itself, together with its refusal to move
+      # `latest` to a version lower than one already published (which npm
+      # skips if it cannot read the package's published versions).
+      - name: Publish
+        env:
+          TGZ: ${{ github.workspace }}/package/${{ needs.npm-build.outputs.file }}
+          PRERELEASE: ${{ needs.resolve.outputs.prerelease }}
+        run: |
+          set -euo pipefail
+          case "$PRERELEASE" in
+            true) npm publish "$TGZ" --provenance --access public --tag next ;;
+            false) npm publish "$TGZ" --provenance --access public ;;
+            *)
+              printf '%s\n' "::error::resolve classified the version as neither a prerelease nor stable: '$PRERELEASE'"
+              exit 1
+              ;;
+          esac
 
   # ---------------------------------------------------------------------------
   # Go: nothing to upload. `go get` resolves the tag from the repository, so

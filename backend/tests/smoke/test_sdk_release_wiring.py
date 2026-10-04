@@ -186,21 +186,28 @@ def test_the_resolve_job_runs_the_version_gate() -> None:
 
 
 # --------------------------------------------------------------------------
-# #687: the npm job publishes the tarball it checked, with registry ranges
+# #687: the npm jobs publish the tarball that was checked, with registry
+# ranges. `npm-build` pins, packs and checks it; `npm` publishes that file.
 # --------------------------------------------------------------------------
 
 PACKED_TGZ = "${{ steps.pack.outputs.tgz }}"
+DOWNLOADED_TGZ = "${{ github.workspace }}/package/${{ needs.npm-build.outputs.file }}"
 
 
-def _npm_steps() -> list[dict]:
+def _npm_build_steps() -> list[dict]:
+    workflow = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
+    return workflow["jobs"]["npm-build"]["steps"]
+
+
+def _npm_publish_steps() -> list[dict]:
     workflow = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
     return workflow["jobs"]["npm"]["steps"]
 
 
-def _index(steps: list[dict], what: str, predicate) -> int:
+def _index(steps: list[dict], what: str, predicate, job: str = "npm-build") -> int:
     found = [i for i in range(len(steps)) if predicate(steps[i])]
     assert len(found) == 1, (
-        f"expected exactly one npm-job step that {what}, found {len(found)}: "
+        f"expected exactly one {job} step that {what}, found {len(found)}: "
         f"{[steps[i].get('name') for i in found]}"
     )
     return found[0]
@@ -213,12 +220,15 @@ def _run_of(step: dict) -> str:
 @pytest.mark.regression
 def test_the_npm_job_pins_checks_and_publishes_the_checked_tarball() -> None:
     """#687: pin -> npm view -> pack -> check the packed package.json ->
-    consumer install -> publish that same tarball, in that order.
+    consumer install -> record -> upload, in that order in `npm-build`; then
+    `npm`, which needs `npm-build`, publishes that same tarball.
 
     On the old job none of these steps existed and ``npm publish`` packed the
     source manifest, ``file:../js`` and all.
     """
-    steps = _npm_steps()
+    workflow = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
+    steps = _npm_build_steps()
+    publish_steps = _npm_publish_steps()
 
     pin = _index(
         steps,
@@ -242,12 +252,31 @@ def test_the_npm_job_pins_checks_and_publishes_the_checked_tarball() -> None:
     consumer = _index(
         steps, "runs npm ls --all", lambda s: "npm ls --all" in _run_of(s)
     )
-    publish = _index(steps, "runs npm publish", lambda s: "npm publish" in _run_of(s))
+    record = _index(steps, "records the tarball", lambda s: s.get("id") == "record")
+    upload = _index(
+        steps,
+        "uploads the tarball",
+        lambda s: str(s.get("uses", "")).startswith("actions/upload-artifact@"),
+    )
+    publish = _index(
+        publish_steps,
+        "runs npm publish",
+        lambda s: "npm publish" in _run_of(s),
+        job="npm",
+    )
 
-    order = [pin, view, pack, check, consumer, publish]
+    order = [pin, view, pack, check, consumer, record, upload]
     assert order == sorted(order), (
-        "the npm job must run, in order: pin, npm view, npm pack, --check-only, "
-        f"the consumer install, npm publish; indices were {order}"
+        "npm-build must run, in order: pin, npm view, npm pack, --check-only, "
+        f"the consumer install, record, upload; indices were {order}"
+    )
+    # The publish runs in a later job, which waits for the build job.
+    assert "npm-build" in workflow["jobs"]["npm"].get("needs", [])
+    assert not any("npm publish" in _run_of(s) for s in steps), (
+        "npm-build publishes nothing"
+    )
+    assert not any("npm pack" in _run_of(s) for s in publish_steps), (
+        "the npm job publishes the downloaded tarball, not a fresh pack"
     )
 
     # The pin step feeds the npm view step's condition and its list.
@@ -275,14 +304,32 @@ def test_the_npm_job_pins_checks_and_publishes_the_checked_tarball() -> None:
     )
     assert "--print-peer-pins" in consumer_run
 
-    # And publishing is of that same tarball, not a fresh pack of the directory.
-    assert _run_of(steps[publish]).startswith('npm publish "$TGZ"')
-    for i in (check, consumer, publish):
+    # The checked, recorded and uploaded file is the packed one ...
+    for i in (check, consumer, record):
         assert (steps[i].get("env") or {}).get("TGZ") == PACKED_TGZ, steps[i].get(
             "name"
         )
-    for i in (pin, view, pack, check, consumer, publish):
+    assert steps[upload]["with"]["path"] == PACKED_TGZ
+    assert workflow["jobs"]["npm-build"]["outputs"]["file"] == (
+        "${{ steps.record.outputs.file }}"
+    )
+
+    # ... and the publish is of that same file, by the name the build job
+    # recorded, not a fresh pack of the directory.
+    publish_commands = [
+        line.strip()
+        for line in _run_of(publish_steps[publish]).splitlines()
+        if "npm publish" in line
+    ]
+    assert publish_commands, _run_of(publish_steps[publish])
+    for command in publish_commands:
+        assert command.split(") ", 1)[-1].startswith('npm publish "$TGZ"'), command
+    assert (publish_steps[publish].get("env") or {}).get("TGZ") == DOWNLOADED_TGZ
+
+    for i in (pin, view, pack, check, consumer, record, upload):
         assert "continue-on-error" not in steps[i], steps[i].get("name")
+    for step in publish_steps:
+        assert "continue-on-error" not in step, step.get("name") or step.get("uses")
 
 
 # --------------------------------------------------------------------------
@@ -335,17 +382,15 @@ def test_every_npm_sdk_names_its_repository(sdk: str) -> None:
 # publish job checks the package it uploads against the tag
 # --------------------------------------------------------------------------
 #
-# Two sets carry the change in progress, and both are exact, so that neither
-# half of it can be undone without a test going red:
+# Two sets, both exact, so that neither split can be undone without a test
+# going red:
 #
-#   UNSPLIT_TOKEN_JOBS  jobs that still install or test while holding
-#                       `id-token: write`. Only `npm`, until it is split the
-#                       way PyPI is; then this becomes the empty set.
-#   PUBLISH_JOBS        jobs split out to hold the token and publish only.
-#                       `pypi` now; `npm` joins it when that job is split.
+#   UNSPLIT_TOKEN_JOBS  jobs that install or test while holding
+#                       `id-token: write`. None.
+#   PUBLISH_JOBS        jobs that hold the token and publish only.
 
-UNSPLIT_TOKEN_JOBS = {"npm"}
-PUBLISH_JOBS = {"pypi"}
+UNSPLIT_TOKEN_JOBS: set[str] = set()
+PUBLISH_JOBS = {"pypi", "npm"}
 RELEASE_ENVIRONMENT = "sdk-release"
 
 #: A step whose `run:` installs packages, runs a test suite or builds one.
@@ -392,8 +437,8 @@ def test_no_job_that_installs_or_tests_can_request_an_oidc_token() -> None:
     """B1. Effective permissions, so a workflow-level grant is seen too.
 
     On the old file both `pypi` and `npm` installed, tested and held
-    `id-token: write`. The set is exact: it fails if the PyPI split is undone,
-    and again once npm is split and the set is not emptied with it.
+    `id-token: write`. The set is exact, and empty: it fails if either split
+    is undone.
     """
     workflow = _workflow()
     holding = {
@@ -568,6 +613,8 @@ def _run_step(
             (bin_dir / name).symlink_to(sys.executable)
     output = tmp_path / "github_output"
     output.touch()
+    runner_temp = tmp_path / "runner_temp"
+    runner_temp.mkdir(exist_ok=True)
 
     def resolve(match: re.Match) -> str:
         expression = match.group(1)
@@ -578,6 +625,7 @@ def _run_step(
         "PATH": f"{bin_dir}{os.pathsep}{os.environ.get('PATH', '')}",
         "GITHUB_OUTPUT": str(output),
         "GITHUB_WORKSPACE": str(tmp_path / "workspace"),
+        "RUNNER_TEMP": str(runner_temp),
         "HOME": str(tmp_path),
     }
     for key, value in (step.get("env") or {}).items():
@@ -773,5 +821,488 @@ def test_the_build_job_refuses_a_version_not_in_its_pep_440_spelling(
         {"needs.resolve.outputs.version": tag},
         tmp_path,
         sdk,
+    )
+    assert (result.returncode == 0) is ok, result.stdout + result.stderr
+
+
+# --------------------------------------------------------------------------
+# #773 and #774, npm: `npm-build` tests and packs with no token; `npm` checks
+# the tarball it downloaded against the build job's digest and the tag, then
+# publishes it, a prerelease under `next` and a stable version with no --tag
+# --------------------------------------------------------------------------
+
+NPM_NAME = "@getexperimently/js-sdk"
+NPM_FILE = "getexperimently-js-sdk-0.1.0.tgz"
+
+
+def test_the_npm_build_and_publish_jobs_are_a_pair() -> None:
+    """Same condition; the publish job needs the build; the build job cannot
+    request a token and uses Node 22's own npm, as sdk-unit-tests.yml does."""
+    workflow = _workflow()
+    build = workflow["jobs"]["npm-build"]
+    publish = workflow["jobs"]["npm"]
+    condition = "needs.resolve.outputs.ecosystem == 'npm'"
+    assert build.get("if") == condition
+    assert publish.get("if") == condition
+    assert build.get("needs") == "resolve"
+    assert set(publish.get("needs") or []) == {"resolve", "npm-build"}
+    assert build.get("permissions") == {"contents": "read"}
+    assert "environment" not in build
+    assert publish.get("name") == "publish to npm"
+    assert build.get("outputs") == {
+        "file": "${{ steps.record.outputs.file }}",
+        "digest": "${{ steps.record.outputs.digest }}",
+    }
+
+    setup = [
+        s
+        for s in build["steps"]
+        if str(s.get("uses", "")).startswith("actions/setup-node@")
+    ]
+    assert len(setup) == 1 and setup[0].get("with") == {"node-version": "22"}, setup
+    global_install = re.compile(r"\bnpm\s+(install|i)\b[^\n]*(\s-g\b|--global)")
+    found = [s.get("name") for s in build["steps"] if global_install.search(_run_of(s))]
+    assert not found, f"npm-build installs a global npm: {found}"
+
+
+#: The npm publish job, step by step. Nothing else may be added to it.
+NPM_PUBLISH_STEPS = [
+    "Download the checked tarball",
+    "Check the tarball's name and digest",
+    "Check the packed package.json against the tag",
+    "actions/setup-node@v7",
+    "Node and npm are the pinned versions",
+    "Publish",
+]
+
+
+def test_the_npm_publish_job_runs_only_its_checks_and_the_publish() -> None:
+    """B2. No checkout and no install: the download, the two checks, Node,
+    the version check and the publish, in that order."""
+    steps = _workflow()["jobs"]["npm"]["steps"]
+    assert [s.get("name") or s.get("uses") for s in steps] == NPM_PUBLISH_STEPS
+
+    download, name_check, manifest_check, setup, versions, publish = steps
+    assert download.get("uses") == "actions/download-artifact@v8"
+    assert download.get("with") == {
+        "name": "npm-tarball",
+        "path": "${{ github.workspace }}/package",
+    }
+    assert "run" not in download
+    assert set(setup) == {"uses", "with"}
+    for step in (name_check, manifest_check, versions, publish):
+        assert "uses" not in step, step.get("name")
+        assert "working-directory" not in step, step.get("name")
+        assert not INSTALLS_OR_TESTS.search(_run_of(step)), step.get("name")
+    assert _run_of(name_check).startswith("set -euo pipefail\npython3 - <<'PY'\n")
+
+
+def test_the_npm_publish_job_sets_no_registry_configuration() -> None:
+    """setup-node gets no `registry-url`, so no .npmrc is written for the
+    publish, and no package-manager cache. No `NPM_CONFIG_*` or
+    `NODE_AUTH_TOKEN` at job or step level."""
+    job = _workflow()["jobs"]["npm"]
+    setup = [
+        s
+        for s in job["steps"]
+        if str(s.get("uses", "")).startswith("actions/setup-node@")
+    ]
+    assert len(setup) == 1, setup
+    assert setup[0].get("with") == {
+        "node-version": "24.21.0",
+        "package-manager-cache": False,
+    }
+
+    forbidden = re.compile(r"npm_config_|node_auth_token|npmrc|registry", re.IGNORECASE)
+    places = [("job env", key) for key in (job.get("env") or {})]
+    for step in job["steps"]:
+        label = step.get("name") or step.get("uses")
+        places += [(f"{label} env", key) for key in (step.get("env") or {})]
+        places += [(f"{label} with", key) for key in (step.get("with") or {})]
+        places += [(f"{label} run", line) for line in _run_of(step).splitlines()]
+    found = [(where, what) for where, what in places if forbidden.search(str(what))]
+    assert not found, f"the npm publish job sets registry configuration: {found}"
+
+
+def test_the_npm_tarball_is_compared_with_the_digest_the_build_job_recorded() -> None:
+    """B4. The expected digest and file name come from the build job's
+    outputs; the name and version come from `resolve`."""
+    record = _step("npm-build", "Record the tarball")
+    assert record.get("id") == "record"
+    assert record.get("env") == {"TGZ": PACKED_TGZ}
+    assert "file=" in _run_of(record) and "digest=" in _run_of(record)
+
+    name_check = _step("npm", "Check the tarball's name and digest")
+    assert name_check.get("env") == {
+        "FILE": "${{ needs.npm-build.outputs.file }}",
+        "DIGEST": "${{ needs.npm-build.outputs.digest }}",
+    }
+    assert 'os.environ["DIGEST"]' in _run_of(name_check)
+    assert "if digest != expected:" in _run_of(name_check)
+
+    manifest_check = _step("npm", "Check the packed package.json against the tag")
+    assert manifest_check.get("env") == {
+        "NAME": "${{ needs.resolve.outputs.name }}",
+        "VERSION": "${{ needs.resolve.outputs.version }}",
+        "FILE": "${{ needs.npm-build.outputs.file }}",
+    }
+
+
+def test_the_npm_tarball_is_uploaded_once_and_never_overwritten() -> None:
+    """B5."""
+    upload = _step("npm-build", "Upload the checked tarball")
+    assert upload.get("uses") == "actions/upload-artifact@v7"
+    assert upload.get("with") == {
+        "name": "npm-tarball",
+        "path": PACKED_TGZ,
+        "if-no-files-found": "error",
+        "overwrite": False,
+    }
+
+
+PUBLISH_CASE = """set -euo pipefail
+case "$PRERELEASE" in
+  true) npm publish "$TGZ" --provenance --access public --tag next ;;
+  false) npm publish "$TGZ" --provenance --access public ;;
+  *)
+"""
+
+
+@pytest.mark.regression
+def test_a_prerelease_publishes_under_next_and_a_stable_version_passes_no_tag() -> None:
+    """B9, #774. On the old file every version was published with no --tag.
+
+    The stable branch is exactly `npm publish "$TGZ" --provenance --access
+    public`, `--tag` appears once, as `--tag next` on the prerelease branch,
+    and any other value fails."""
+    publish = _step("npm", "Publish")
+    assert publish.get("env") == {
+        "TGZ": DOWNLOADED_TGZ,
+        "PRERELEASE": "${{ needs.resolve.outputs.prerelease }}",
+    }
+    script = _run_of(publish)
+    assert script.startswith(PUBLISH_CASE), script
+    assert script.count("--tag") == 1, script
+    assert script.count("npm publish") == 2, script
+    rest = script[len(PUBLISH_CASE) :].splitlines()
+    assert rest[-2:] == ["    ;;", "esac"], rest
+    assert rest[-3] == "    exit 1", rest
+
+
+def _write_executable(path: Path, body: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("#!/bin/bash\n" + body, encoding="utf-8")
+    path.chmod(0o755)
+
+
+PUBLISHED = ["--provenance", "--access", "public"]
+
+
+@pytest.mark.parametrize(
+    ("prerelease", "arguments"),
+    [
+        ("true", [*PUBLISHED, "--tag", "next"]),
+        ("false", PUBLISHED),
+        ("", None),
+        ("TRUE", None),
+        ("next", None),
+    ],
+)
+def test_the_publish_step_passes_the_tag_its_branch_names(
+    prerelease: str, arguments: list[str] | None, tmp_path: Path
+) -> None:
+    """The publish step under bash, with an `npm` that records its arguments,
+    one per line. This shows which arguments the step passes; it says nothing
+    about how npm treats them."""
+    calls = tmp_path / "npm-calls"
+    _write_executable(tmp_path / "bin" / "npm", f'printf \'%s\\n\' "$@" >> "{calls}"\n')
+    workspace = tmp_path / "workspace"
+    result = _run_step(
+        _step("npm", "Publish"),
+        {
+            "github.workspace": str(workspace),
+            "needs.npm-build.outputs.file": NPM_FILE,
+            "needs.resolve.outputs.prerelease": prerelease,
+        },
+        tmp_path,
+        tmp_path,
+    )
+    recorded = calls.read_text(encoding="utf-8").splitlines() if calls.exists() else []
+    if arguments is None:
+        assert result.returncode == 1, result.stdout
+        assert "neither a prerelease nor stable" in result.stdout
+        assert recorded == []
+    else:
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert recorded == ["publish", f"{workspace}/package/{NPM_FILE}", *arguments]
+
+
+@pytest.mark.parametrize(
+    ("version", "prerelease"),
+    [
+        ("0.1.0", "false"),
+        ("1.0.0", "false"),
+        ("1.0.0+build.5", "false"),
+        ("1.0.0+build-5", "false"),
+        ("1.0.0-rc.1", "true"),
+        ("1.0.0-0", "true"),
+        ("2.0.0-beta.2+build.7", "true"),
+    ],
+)
+def test_resolve_classifies_a_prerelease_by_its_version(
+    version: str, prerelease: str, tmp_path: Path
+) -> None:
+    """B8. A `-` once `+build` is removed is a prerelease."""
+    step = _step("resolve", "Classify the version")
+    assert step.get("env") == {"VERSION": "${{ steps.parse.outputs.version }}"}
+    result = _run_step(
+        step, {"steps.parse.outputs.version": version}, tmp_path, tmp_path
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert _outputs(tmp_path) == {"prerelease": prerelease}
+
+
+def test_a_hyphen_in_the_sdk_name_does_not_make_a_prerelease(tmp_path: Path) -> None:
+    """B8. `sdk/react-native/v<its version>` through resolve's real parse
+    step, then the classifier: stable."""
+    workflow = _workflow()
+    assert workflow["jobs"]["resolve"]["outputs"]["prerelease"] == (
+        "${{ steps.classify.outputs.prerelease }}"
+    )
+    import json
+
+    version = json.loads(
+        (SDK_DIR / "react-native" / "package.json").read_text(encoding="utf-8")
+    )["version"]
+    assert "-" not in version, "pick a stable sdk/react-native version for this test"
+    (tmp_path / "parse").mkdir()
+    (tmp_path / "classify").mkdir()
+    parse = _run_step(
+        _step("resolve", "Parse and check"),
+        {
+            "github.ref_name": f"sdk/react-native/v{version}",
+            "github.ref_type": "tag",
+            "inputs.sdk": "",
+            "inputs.version": "",
+        },
+        tmp_path / "parse",
+        ROOT,
+    )
+    assert parse.returncode == 0, parse.stdout + parse.stderr
+    parsed = _outputs(tmp_path / "parse")
+    assert parsed["sdk"] == "react-native" and parsed["version"] == version, parsed
+
+    classify = _run_step(
+        _step("resolve", "Classify the version"),
+        {"steps.parse.outputs.version": parsed["version"]},
+        tmp_path / "classify",
+        tmp_path,
+    )
+    assert classify.returncode == 0, classify.stdout + classify.stderr
+    assert _outputs(tmp_path / "classify") == {"prerelease": "false"}
+
+
+def _tarball(path: Path, manifest: dict) -> bytes:
+    """A gzipped tar holding `package/package.json`, the way npm packs."""
+    import io
+    import json
+    import tarfile
+
+    data = json.dumps(manifest).encode()
+    buffer = io.BytesIO()
+    with tarfile.open(fileobj=buffer, mode="w:gz") as archive:
+        info = tarfile.TarInfo("package/package.json")
+        info.size = len(data)
+        archive.addfile(info, io.BytesIO(data))
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(buffer.getvalue())
+    return buffer.getvalue()
+
+
+def _npm_record(tmp_path: Path, manifest: dict, filename: str = NPM_FILE) -> dict:
+    """Run `npm-build`'s record step over a packed tarball; return its outputs."""
+    tgz = tmp_path / "pack" / filename
+    _tarball(tgz, manifest)
+    result = _run_step(
+        _step("npm-build", "Record the tarball"),
+        {"steps.pack.outputs.tgz": str(tgz)},
+        tmp_path,
+        tmp_path,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    return _outputs(tmp_path)
+
+
+def _download(tmp_path: Path, files: dict[str, bytes]) -> None:
+    folder = tmp_path / "workspace" / "package"
+    folder.mkdir(parents=True)
+    for name, data in files.items():
+        (folder / name).write_bytes(data)
+
+
+def _npm_name_check(tmp_path: Path, file: str, digest: str):
+    return _run_step(
+        _step("npm", "Check the tarball's name and digest"),
+        {
+            "needs.npm-build.outputs.file": file,
+            "needs.npm-build.outputs.digest": digest,
+        },
+        tmp_path,
+        tmp_path,
+    )
+
+
+def _npm_manifest_check(tmp_path: Path, name: str, version: str, file: str):
+    return _run_step(
+        _step("npm", "Check the packed package.json against the tag"),
+        {
+            "needs.resolve.outputs.name": name,
+            "needs.resolve.outputs.version": version,
+            "needs.npm-build.outputs.file": file,
+        },
+        tmp_path,
+        tmp_path,
+    )
+
+
+def test_the_npm_checks_accept_what_the_build_job_recorded(tmp_path: Path) -> None:
+    """The round trip: record in `npm-build`, both checks in `npm`."""
+    manifest = {"name": NPM_NAME, "version": "0.1.0"}
+    recorded = _npm_record(tmp_path / "build", manifest)
+    assert recorded["file"] == NPM_FILE
+    data = (tmp_path / "build" / "pack" / NPM_FILE).read_bytes()
+
+    publish = tmp_path / "publish"
+    _download(publish, {NPM_FILE: data})
+    result = _npm_name_check(publish, recorded["file"], recorded["digest"])
+    assert result.returncode == 0, result.stdout + result.stderr
+    result = _npm_manifest_check(publish, NPM_NAME, "0.1.0", recorded["file"])
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert f"{NPM_NAME} 0.1.0" in result.stdout
+
+
+NPM_NAME_REFUSALS = [
+    (
+        "a byte changed after the digest was recorded",
+        "flipped",
+        NPM_FILE,
+        "has digest",
+    ),
+    ("a second file beside the tarball", "extra", NPM_FILE, "expected exactly"),
+    ("nothing downloaded", "none", NPM_FILE, "expected exactly"),
+    (
+        "another file name than the one recorded",
+        "same",
+        "other-0.1.0.tgz",
+        "expected exactly",
+    ),
+    ("a name that is a path", "same", "../x.tgz", "no usable file name"),
+    ("a name that is not a .tgz", "same", "x.tar", "no usable file name"),
+    ("a name with a space", "same", "a b.tgz", "no usable file name"),
+    ("a name with a substitution", "same", "$(id).tgz", "no usable file name"),
+    ("an empty name", "same", "", "no usable file name"),
+    ("no digest", "same", NPM_FILE, "no usable digest"),
+]
+
+
+@pytest.mark.parametrize(
+    ("case", "files", "file", "refusal"),
+    NPM_NAME_REFUSALS,
+    ids=[case for case, _, _, _ in NPM_NAME_REFUSALS],
+)
+def test_the_npm_name_and_digest_check_refuses(
+    case: str, files: str, file: str, refusal: str, tmp_path: Path
+) -> None:
+    """B4, B5, B6."""
+    recorded = _npm_record(tmp_path / "build", {"name": NPM_NAME, "version": "0.1.0"})
+    data = (tmp_path / "build" / "pack" / NPM_FILE).read_bytes()
+    downloaded = {
+        "same": {NPM_FILE: data},
+        "flipped": {NPM_FILE: data[:-1] + bytes([data[-1] ^ 1])},
+        "extra": {NPM_FILE: data, "notes.txt": b"x"},
+        "none": {},
+    }[files]
+    publish = tmp_path / "publish"
+    _download(publish, downloaded)
+    digest = "" if case == "no digest" else recorded["digest"]
+    result = _npm_name_check(publish, file, digest)
+    assert result.returncode == 1, (case, result.stdout, result.stderr)
+    assert refusal in result.stdout, (case, result.stdout)
+
+
+#: Each case is a tarball whose digest the build job recorded, so only the
+#: check of the packed package.json against `resolve` stands before publish.
+NPM_MANIFEST_REFUSALS = [
+    (
+        "a prerelease that sets a top-level tag",
+        {"name": NPM_NAME, "version": "0.3.0-rc.2", "tag": "latest"},
+        "0.3.0-rc.2",
+        "the packed package.json sets 'tag'",
+    ),
+    (
+        "a stable version that sets publishConfig",
+        {"name": NPM_NAME, "version": "0.1.0", "publishConfig": {"tag": "latest"}},
+        "0.1.0",
+        "the packed package.json sets 'publishConfig'",
+    ),
+    (
+        "another SDK's name",
+        {"name": "@getexperimently/openfeature-provider", "version": "0.1.0"},
+        "0.1.0",
+        f"the tarball is '@getexperimently/openfeature-provider', not '{NPM_NAME}'",
+    ),
+    (
+        "another version",
+        {"name": NPM_NAME, "version": "0.0.9"},
+        "0.1.0",
+        "the tarball is version '0.0.9', not '0.1.0'",
+    ),
+    (
+        "no name",
+        {"version": "0.1.0"},
+        "0.1.0",
+        f"the tarball is None, not '{NPM_NAME}'",
+    ),
+]
+
+
+@pytest.mark.parametrize(
+    ("case", "manifest", "version", "refusal"),
+    NPM_MANIFEST_REFUSALS,
+    ids=[case for case, _, _, _ in NPM_MANIFEST_REFUSALS],
+)
+def test_the_npm_manifest_check_refuses(
+    case: str, manifest: dict, version: str, refusal: str, tmp_path: Path
+) -> None:
+    """The publish job checks the package it uploads against the tag, and
+    refuses a manifest that sets publish configuration."""
+    recorded = _npm_record(tmp_path / "build", manifest)
+    data = (tmp_path / "build" / "pack" / NPM_FILE).read_bytes()
+    publish = tmp_path / "publish"
+    _download(publish, {NPM_FILE: data})
+
+    result = _npm_name_check(publish, recorded["file"], recorded["digest"])
+    assert result.returncode == 0, result.stdout + result.stderr
+    result = _npm_manifest_check(publish, NPM_NAME, version, recorded["file"])
+    assert result.returncode == 1, (case, result.stdout, result.stderr)
+    assert refusal in result.stdout, (case, result.stdout)
+
+
+@pytest.mark.parametrize(
+    ("node", "npm", "ok"),
+    [
+        ("v24.21.0", "11.19.0", True),
+        ("v22.14.0", "11.19.0", False),
+        ("v24.21.0", "11.5.0", False),
+        ("v24.21.0", "", False),
+    ],
+)
+def test_the_npm_publish_job_checks_node_and_npm(
+    node: str, npm: str, ok: bool, tmp_path: Path
+) -> None:
+    for tool, version in (("node", node), ("npm", npm)):
+        _write_executable(tmp_path / "bin" / tool, f"printf '%s\\n' '{version}'\n")
+    result = _run_step(
+        _step("npm", "Node and npm are the pinned versions"), {}, tmp_path, tmp_path
     )
     assert (result.returncode == 0) is ok, result.stdout + result.stderr
