@@ -42,6 +42,7 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 
 import pytest
 
+from backend.tests.unit.infrastructure import _workflow_graph as _wg
 from backend.tests.unit.infrastructure.test_docs_only_gate import _load
 
 pytestmark = [pytest.mark.unit, pytest.mark.regression]
@@ -124,6 +125,12 @@ def _needs(job: Dict[str, Any]) -> List[str]:
     return [needs] if isinstance(needs, str) else list(needs)
 
 
+def _classified_work(workflow: str, job_id: str, job: Dict[str, Any]) -> bool:
+    """A CLASSIFIED job that needs the classifier alone (see test_ci_aggregators)."""
+    row = CLASSIFIED.get(workflow, {}).get(job_id)
+    return row is not None and row[1] == CLASSIFIER and _needs(job) == [CLASSIFIER]
+
+
 def classified_workflows() -> Dict[str, Dict[str, Any]]:
     """Every workflow with a classifier job, or a job that needs one."""
     found = {}
@@ -157,12 +164,18 @@ class TestEveryClassifiedJobIsPinned:
         actual = actual_table().get(workflow, {})
         assert list(actual.items()) == list(CLASSIFIED[workflow].items())
 
+    @pytest.mark.regression
     def test_every_gate_job_needs_the_classifier_alone(self):
-        """`!cancelled()` runs a job after ANY failed need; one need keeps it
-        meaning "after the classifier failed" and nothing else."""
-        for job_id, (cond, needs) in _gate_conditions().items():
-            if cond is not None and "!cancelled()" in cond:
-                assert needs == CLASSIFIER, job_id
+        """`!cancelled()` and `always()` run a job after ANY failed need; one
+        need keeps it meaning "after the classifier failed" and nothing else.
+        The one exception is a required summary, found the way
+        test_ci_aggregators.py finds it, so it carries that file's checks
+        (R3). Not a list of names: an exception carved into a list carries no
+        obligation."""
+        problems = _wg.unselected_runs_after_failure(
+            GATE, _wg.required_checks(), _classified_work
+        )
+        assert not problems, "\n".join(problems)
 
     def test_the_expressions_stay_inside_braces(self):
         """A bare leading `!` is a YAML tag, not an expression."""
@@ -398,3 +411,54 @@ class TestTheChangesStepRuns:
         status, written = run_step(OLD_CHANGES_RUN, tmp_path, GIT_PARTIAL)
         assert status != 0
         assert written == "docs_only=true\n"
+
+
+# ---------------------------------------------------------------------------
+# R3 against the defect it exists for
+# ---------------------------------------------------------------------------
+R3_GATE = """\
+on: pull_request
+jobs:
+  changes:
+    runs-on: ubuntu-latest
+    steps: [{run: "true"}]
+  build:
+    needs: changes
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    steps: [{run: "true"}]
+  late:
+    name: LATE_NAME
+    needs: [changes, build]
+    if: LATE_IF
+    runs-on: ubuntu-latest
+    steps:
+      - run: "true"
+"""
+
+
+def _r3(tmp_path: Path, name: str, cond: str) -> List[str]:
+    path = tmp_path / "pr-qa-gate.yml"
+    text = R3_GATE.replace("LATE_NAME", name).replace("LATE_IF", cond)
+    path.write_text(text, encoding="utf-8")
+    return _wg.unselected_runs_after_failure(path, ["Late Summary"], _classified_work)
+
+
+@pytest.mark.regression
+@pytest.mark.parametrize("cond", ["${{ always() }}", "${{ !cancelled() }}"])
+def test_a_work_job_after_failure_with_two_needs_is_refused(tmp_path, cond):
+    """An `always()` (or `!cancelled()`) job with two needs and no
+    toJSON(needs) reader, whose name is not required: it runs after `build`
+    failed and does its work anyway. The old check looked only at
+    `!cancelled()`, so `always()` passed it."""
+    problems = _r3(tmp_path, "Late Work", cond)
+    assert problems == [
+        f"pr-qa-gate.yml:late runs after a failed need (if: {cond!r}) and needs "
+        "['build'] beyond changes, but is not a required summary"
+    ]
+
+
+@pytest.mark.regression
+def test_a_required_summary_is_the_exception(tmp_path):
+    """Selected as a summary, it answers to test_ci_aggregators.py instead."""
+    assert _r3(tmp_path, "Late Summary", "${{ always() }}") == []
