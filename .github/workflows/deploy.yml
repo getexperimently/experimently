@@ -307,6 +307,11 @@ jobs:
       FARGATE_STACK: experimentation-fargate-${{ inputs.environment }}
       DATABASE_STACK: experimentation-database-${{ inputs.environment }}
       SECRETS_PREFIX: /${{ inputs.environment }}/experimentation
+      # 'true' or 'false', never the token. A step's `if:` cannot read
+      # `secrets`, so the Slack steps read this: without the secret they are
+      # skipped, and the last step says so once in the run summary. A token
+      # that is set but wrong still turns its step red (continue-on-error).
+      SLACK_ON: ${{ secrets.SLACK_BOT_TOKEN != '' }}
     steps:
       # FIRST, and the only place the account ID is read (PE v1 C9). It is an
       # environment SECRET, never a variable: a step's log header prints its
@@ -563,6 +568,7 @@ jobs:
             --family "$ECS_DASHBOARD_TASK_FAMILY" --github-output "$GITHUB_OUTPUT"
 
       - name: Notify deployment started
+        if: env.SLACK_ON == 'true'
         uses: slackapi/slack-github-action@v1.26.0
         with:
           channel-id: '#deployments'
@@ -1458,7 +1464,7 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Notify deployment result
-        if: always()
+        if: always() && env.SLACK_ON == 'true'
         uses: slackapi/slack-github-action@v1.26.0
         with:
           channel-id: '#deployments'
@@ -1471,3 +1477,12 @@ jobs:
         env:
           SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
         continue-on-error: true
+
+      # One line, once per run, only when there is no token to post with: a
+      # missing optional secret is a valid setup, so it is not a warning.
+      - name: Say Slack was not notified
+        if: always() && env.SLACK_ON != 'true'
+        # A failed summary write must not turn a green job red.
+        continue-on-error: true
+        run: |
+          printf '\n%s\n' "Slack: not notified -- SLACK_BOT_TOKEN is not set (optional; docs/deployment/README.md)." >> "$GITHUB_STEP_SUMMARY"

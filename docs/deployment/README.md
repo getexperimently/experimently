@@ -39,6 +39,8 @@ not configured. Per GitHub environment (**Settings → Environments →
    e.g. `https://app.example.com` -- the smoke test calls it).
 
 `SLACK_BOT_TOKEN` (repository secret, optional) posts to `#deployments`.
+Without it, Deploy and Rollback skip their Slack steps and say so in one line
+of the run summary.
 
 The AWS side -- IAM, certificate, ECR, secrets, stacks -- is the ordered
 checklist in [the deployment guide](deployment-guide.md#1-before-the-first-deploy).

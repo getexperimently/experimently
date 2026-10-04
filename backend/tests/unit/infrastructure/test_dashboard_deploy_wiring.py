@@ -434,6 +434,11 @@ class Runner:
                     return outputs.get(m.group(1), {}).get("__outcome__", "")
                 if expr.startswith(("needs.", "env.")):
                     return inputs.get(expr, "")
+                # A job env that says whether a secret is set (SLACK_ON):
+                # 'true' only when the test passes `secrets.NAME` itself.
+                m = re.fullmatch(r"secrets\.(\w+) != ''", expr)
+                if m:
+                    return "true" if inputs.get(expr.split(" ", 1)[0]) else "false"
                 raise AssertionError(
                     f"the test runner cannot resolve ${{{{ {expr} }}}}"
                 )
@@ -707,13 +712,19 @@ def _tail_of_the_job(runner: Runner, rules: list, drop: str | None = None):
     return ("failure" if failed else "success"), outputs, log
 
 
-def _if(expression: str, outputs: dict, failed: bool) -> bool:
-    """The `if:` forms these workflows use: &&-joined status functions and
-    step comparisons. Anything else fails the test rather than guessing."""
+def _if(expression: str, outputs: dict, failed: bool, env: dict | None = None) -> bool:
+    """The `if:` forms these workflows use: &&-joined status functions, step
+    comparisons and job-env comparisons (`env.SLACK_ON == 'true'`; an env
+    name not given reads as unset, as with no SLACK_BOT_TOKEN). Anything
+    else fails the test rather than guessing."""
     result = True
     for term in expression.split(" && "):
         term = term.strip()
-        if term == "always()":
+        env_term = re.fullmatch(r"env\.(\w+) (==|!=) '([^']*)'", term)
+        if env_term:
+            actual = (env or {}).get(env_term.group(1), "")
+            value = (actual == env_term.group(3)) == (env_term.group(2) == "==")
+        elif term == "always()":
             value = True
         elif term == "failure()":
             value = failed
