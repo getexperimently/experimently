@@ -102,6 +102,9 @@ def service(experiment):
     svc = AssignmentService(db)
     svc.event_service = MagicMock()
     svc.global_holdout_service = MagicMock()
+    # No measurable holdout is active, so assign_user records no population
+    # row; the stubbed answer drives the eligibility branch (#445).
+    svc.global_holdout_service.get_active_holdout.return_value = None
     svc.global_holdout_service.is_user_in_holdout.return_value = (False, 0, 57)
     svc.mutual_exclusion_service = MagicMock()
     svc.mutual_exclusion_service.is_user_eligible_for_experiment.return_value = True
@@ -456,3 +459,55 @@ class TestCoerceTargetingRules:
             [{"type": "user_id", "conditions": [], "percentage": 100}]
         )
         assert rules is None and "List-shaped" in why
+
+
+class TestHoldoutPopulation:
+    """The population write on the new-user path (#445): executed before the
+    eligibility checks, never committed on its own."""
+
+    @staticmethod
+    def _holdout(measurable):
+        holdout = MagicMock()
+        holdout.id = uuid4()
+        holdout.is_measurable = measurable
+        return holdout
+
+    def test_held_out_user_is_recorded_and_committed_once(self, service, experiment):
+        holdout = self._holdout(True)
+        service.global_holdout_service.get_active_holdout.return_value = holdout
+        service.global_holdout_service.is_user_in_holdout.return_value = (True, 10, 3)
+
+        result = service.assign_user("user-1", experiment.id)
+
+        _assert_not_assigned(result, experiment, REASON_HOLDOUT)
+        service.db.execute.assert_called_once()
+        statement = str(service.db.execute.call_args[0][0])
+        assert "holdout_population" in statement and "ON CONFLICT" in statement
+        service.db.commit.assert_called_once()
+        # The loaded holdout is passed on, not looked up again.
+        service.global_holdout_service.is_user_in_holdout.assert_called_once_with(
+            "user-1", holdout=holdout
+        )
+
+    def test_a_holdout_that_is_not_measurable_records_nothing(
+        self, service, experiment
+    ):
+        service.global_holdout_service.get_active_holdout.return_value = self._holdout(
+            False
+        )
+        service.global_holdout_service.is_user_in_holdout.return_value = (True, 10, 3)
+
+        service.assign_user("user-1", experiment.id)
+
+        service.db.execute.assert_not_called()
+        service.db.commit.assert_not_called()
+
+    def test_a_failed_write_propagates(self, service, experiment):
+        service.global_holdout_service.get_active_holdout.return_value = self._holdout(
+            True
+        )
+        service.db.execute.side_effect = RuntimeError("write failed")
+
+        with pytest.raises(RuntimeError, match="write failed"):
+            service.assign_user("user-1", experiment.id)
+        service.db.commit.assert_not_called()

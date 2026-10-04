@@ -31,11 +31,18 @@ class GlobalHoldoutCreate(BaseModel):
         default=10,
         ge=1,
         le=20,
-        description="Percentage of users to hold out (1-20%).",
+        description=(
+            "Percentage of users to hold out, 1-20. Recommended: 1-5%, up to 10% "
+            "when traffic is low; run for 1-3 months. Cannot change once the "
+            "holdout has been active."
+        ),
     )
     is_active: bool = Field(
         default=False,
-        description="Whether the holdout is active.",
+        description=(
+            "Whether the holdout is active. True makes it the active holdout "
+            "and deactivates the one that was active."
+        ),
     )
 
     @field_validator("holdout_percentage", mode="before")
@@ -64,11 +71,18 @@ class GlobalHoldoutUpdate(BaseModel):
         None,
         ge=1,
         le=20,
-        description="Updated holdout percentage (1-20%).",
+        description=(
+            "Percentage of users to hold out, 1-20. Recommended: 1-5%, up to 10% "
+            "when traffic is low; run for 1-3 months. Cannot change once the "
+            "holdout has been active."
+        ),
     )
     is_active: Optional[bool] = Field(
         None,
-        description="Updated active status.",
+        description=(
+            "Updated active status. True deactivates the active holdout; a "
+            "holdout that has ended cannot restart."
+        ),
     )
 
     @field_validator("holdout_percentage", mode="before")
@@ -90,6 +104,18 @@ class GlobalHoldoutResponse(BaseModel):
     holdout_percentage: int
     is_active: bool
     owner_id: Optional[UUID] = None
+    activated_at: Optional[datetime] = Field(
+        None,
+        description=(
+            "When the holdout was activated (UTC). Null for a holdout never "
+            "activated, and for one active since before holdout membership "
+            "was recorded."
+        ),
+    )
+    deactivated_at: Optional[datetime] = Field(
+        None,
+        description="When the holdout was deactivated (UTC); it cannot restart.",
+    )
     created_at: datetime
     updated_at: datetime
 

@@ -725,7 +725,11 @@ def test_holdout_create_update_and_activation(client, fresh, admin):
     w = Written(fresh)
     response = client.put(f"{V1}/holdout/{a}", json={"is_active": True}, headers=h)
     assert response.status_code == 200, response.text
-    _one(w, "holdout_activate", "holdout", a, admin)
+    # The activation timestamp belongs to the activate entry, not a second one.
+    old, new = _values(_one(w, "holdout_activate", "holdout", a, admin))
+    assert old == {"is_active": False, "activated_at": None}
+    assert set(new) == {"is_active", "activated_at"}
+    assert new["is_active"] is True and new["activated_at"]
 
     # Activating B turns A off: B's entry and one for A.
     w = Written(fresh)
@@ -734,6 +738,50 @@ def test_holdout_create_update_and_activation(client, fresh, admin):
     rows = {(r.action_type, str(r.entity_id)) for r in w.rows()}
     assert rows == {("holdout_activate", b), ("holdout_deactivate", a)}
     assert w.v2_delta() == 0
+
+    w = Written(fresh)
+    response = client.put(f"{V1}/holdout/{b}", json={"is_active": False}, headers=h)
+    assert response.status_code == 200, response.text
+    old, new = _values(_one(w, "holdout_deactivate", "holdout", b, admin))
+    assert old == {"is_active": True, "deactivated_at": None}
+    assert set(new) == {"is_active", "deactivated_at"}
+    assert new["is_active"] is False and new["deactivated_at"]
+
+
+def test_holdout_post_activation_records_the_one_it_ends(client, fresh, admin):
+    """POST with is_active true ends the active holdout: one deactivate for it."""
+    h = _auth(admin)
+
+    def create_active(name):
+        response = client.post(
+            f"{V1}/holdout",
+            json={"name": name, "holdout_percentage": 5, "is_active": True},
+            headers=h,
+        )
+        assert response.status_code == 201, response.text
+        return response.json()["id"]
+
+    a = create_active(f"{P} holdout post A")
+
+    w = Written(fresh)
+    b = create_active(f"{P} holdout post B")
+    rows = {(r.action_type, str(r.entity_id)): r for r in w.rows()}
+    assert set(rows) == {("holdout_create", b), ("holdout_deactivate", a)}
+    assert w.v2_delta() == 0
+
+    ended = rows[("holdout_deactivate", a)]
+    assert ended.user_id == admin.id
+    assert _values(ended) == ({"is_active": True}, {"is_active": False})
+    _, created = _values(rows[("holdout_create", b)])
+    assert created["is_active"] is True and created["activated_at"]
+    assert created["deactivated_at"] is None
+
+    session = fresh()
+    try:
+        stored = session.get(GlobalHoldout, uuid.UUID(a))
+        assert stored.is_active is False and stored.deactivated_at is not None
+    finally:
+        session.close()
 
 
 # --- G3: mutual exclusion groups ----------------------------------------------

@@ -7250,7 +7250,7 @@
           },
           "holdout_percentage": {
             "default": 10,
-            "description": "Percentage of users to hold out (1-20%).",
+            "description": "Percentage of users to hold out, 1-20. Recommended: 1-5%, up to 10% when traffic is low; run for 1-3 months. Cannot change once the holdout has been active.",
             "maximum": 20,
             "minimum": 1,
             "title": "Holdout Percentage",
@@ -7258,7 +7258,7 @@
           },
           "is_active": {
             "default": false,
-            "description": "Whether the holdout is active.",
+            "description": "Whether the holdout is active. True makes it the active holdout and deactivates the one that was active.",
             "title": "Is Active",
             "type": "boolean"
           },
@@ -7301,10 +7301,36 @@
       "GlobalHoldoutResponse": {
         "description": "Response schema for a global holdout.",
         "properties": {
+          "activated_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When the holdout was activated (UTC). Null for a holdout never activated, and for one active since before holdout membership was recorded.",
+            "title": "Activated At"
+          },
           "created_at": {
             "format": "date-time",
             "title": "Created At",
             "type": "string"
+          },
+          "deactivated_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When the holdout was deactivated (UTC); it cannot restart.",
+            "title": "Deactivated At"
           },
           "description": {
             "anyOf": [
@@ -7390,7 +7416,7 @@
                 "type": "null"
               }
             ],
-            "description": "Updated holdout percentage (1-20%).",
+            "description": "Percentage of users to hold out, 1-20. Recommended: 1-5%, up to 10% when traffic is low; run for 1-3 months. Cannot change once the holdout has been active.",
             "title": "Holdout Percentage"
           },
           "is_active": {
@@ -7402,7 +7428,7 @@
                 "type": "null"
               }
             ],
-            "description": "Updated active status.",
+            "description": "Updated active status. True deactivates the active holdout; a holdout that has ended cannot restart.",
             "title": "Is Active"
           },
           "name": {
@@ -17184,7 +17210,7 @@
   "info": {
     "description": "API for managing experiments and feature flags in test environment",
     "title": "Experimently",
-    "version": "0.19.0"
+    "version": "0.20.0"
   },
   "openapi": "3.1.0",
   "paths": {
@@ -25627,7 +25653,7 @@
         ]
       },
       "post": {
-        "description": "Create a new global holdout configuration. Requires ADMIN role.",
+        "description": "Create a new global holdout configuration. Requires ADMIN role. With is_active true it becomes the active holdout and the one that was active is deactivated; 409 when another activation happened at the same time.",
         "operationId": "create_holdout_api_v1_holdout_post",
         "requestBody": {
           "content": {
@@ -25787,7 +25813,7 @@
     },
     "/api/v1/holdout/{holdout_id}": {
       "put": {
-        "description": "Update a global holdout configuration. Requires ADMIN role.",
+        "description": "Update a global holdout configuration. Requires ADMIN role. is_active true deactivates the active holdout. Refused with 422: a different holdout_percentage once the holdout has been active (the same value is accepted), and is_active true on a holdout that has ended. 409 when another activation happened at the same time.",
         "operationId": "update_holdout_api_v1_holdout__holdout_id__put",
         "parameters": [
           {

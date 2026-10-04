@@ -83,9 +83,9 @@ pytestmark = [pytest.mark.integration]
 REVISION = "1ab99332f0ba"
 #: The core revision it extends: the recipe's downgrade target.
 PARENT = "a89544fb1075"
-#: The core head of this tree, which ``upgrade heads`` runs on to: the
-#: experiments' correction settings (#580), the revision after this one.
-CORE_HEAD = "806901fb7735"
+#: The core head of this tree, which ``upgrade heads`` runs on to past this
+#: revision, through ``806901fb7735`` (#580): ``d29a479daafe`` (#445).
+CORE_HEAD = "d29a479daafe"
 #: The core head of the previous release (0.16.2), with ``d12cbd384bbe`` and
 #: ``a89544fb1075`` pending in front of this revision.
 RELEASED = "271f03a31742"

@@ -93,6 +93,7 @@ from backend.app.models.safety import (
 )
 from backend.app.schemas.bayesian import BayesianConfig
 from backend.app.schemas.experiment import SequentialTestingConfigInput
+from backend.app.services.global_holdout_service import GlobalHoldoutService
 from backend.scripts.seed_demo_data import (
     _bulk_insert,
     days_ago,
@@ -125,6 +126,12 @@ HISTORY_USER_PREFIX = "streampulse_hist"
 
 MEG_NAME = "streampulse-profile"
 HOLDOUT_NAME = "streampulse-holdout"
+#: The demo holdout's salt, fixed so the device ids the demo documents stay
+#: where they are across re-seeds: ``sp-holdout-15`` is held out (bucket 1,
+#: the same bucket it has under the legacy salt) and every preset in
+#: ``demo/streampulse/src/lib/devices.ts`` is not.  Chosen by search for that
+#: property; ``test_seed_streampulse_holdout.py`` pins it.
+DEMO_HOLDOUT_SALT = "holdout:streampulse-demo-22"
 HOLDOUT_PERCENTAGE = 2
 
 SUBSCRIPTION_PRICE = 9.99
@@ -592,13 +599,26 @@ def seed_mutual_exclusion_group(db, admin_user) -> MutualExclusionGroup:
 
 def seed_global_holdout(db, admin_user) -> GlobalHoldout:
     """
-    Ensure an active global holdout exists.
+    Ensure an active global holdout exists, through ``GlobalHoldoutService``.
 
     Only one holdout may be active at a time, so an already-active holdout
     (whatever its name) is reused and reported instead of creating a second one.
+    For each state of ``streampulse-holdout`` (#445):
+
+    * active but not measurable (active since before membership was
+      recorded): reused, with a note that ``--reset`` gives a measurable one;
+    * ended (deactivated): it cannot restart, so nothing is activated and the
+      seed carries on without an active holdout;
+    * inactive and never ended: activated through the service;
+    * absent: created and activated through the service.
+
+    The percentage of a holdout that has been active is never changed, and no
+    ``holdout_population`` row is written: membership is recorded only from
+    real ``/tracking/assign`` calls, so results need a warm-up.
     """
     print("  Seeding global holdout...")
-    active = db.query(GlobalHoldout).filter(GlobalHoldout.is_active.is_(True)).first()
+    service = GlobalHoldoutService(db)
+    active = service.get_active_holdout()
     if active is not None:
         if active.name == HOLDOUT_NAME:
             print(
@@ -610,26 +630,39 @@ def seed_global_holdout(db, admin_user) -> GlobalHoldout:
                 f"({active.holdout_percentage}%); '{HOLDOUT_NAME}' was not created "
                 "because only one holdout can be active."
             )
+        if not active.is_measurable:
+            print(
+                f"    NOTE: '{active.name}' has been active since before holdout "
+                "membership was recorded, so it cannot be measured. "
+                "Run with --reset for a holdout that can."
+            )
         return active
 
     holdout = db.query(GlobalHoldout).filter(GlobalHoldout.name == HOLDOUT_NAME).first()
+    if holdout is not None and holdout.deactivated_at is not None:
+        print(
+            f"    '{HOLDOUT_NAME}' has ended and cannot restart; no holdout is "
+            "active. Run with --reset to create a new one."
+        )
+        return holdout
     if holdout is not None:
-        holdout.is_active = True
-        holdout.holdout_percentage = HOLDOUT_PERCENTAGE
-        db.commit()
-        print(f"    Re-activated '{HOLDOUT_NAME}' at {HOLDOUT_PERCENTAGE}%.")
+        never_active = holdout.activated_at is None
+        holdout = service.update_holdout(
+            holdout.id,
+            holdout_percentage=HOLDOUT_PERCENTAGE if never_active else None,
+            is_active=True,
+        )
+        print(f"    Activated '{HOLDOUT_NAME}' at {holdout.holdout_percentage}%.")
         return holdout
 
-    holdout = GlobalHoldout(
+    holdout = service.create_holdout(
         name=HOLDOUT_NAME,
         description="2% of devices never enter any StreamPulse experiment (clean baseline).",
         holdout_percentage=HOLDOUT_PERCENTAGE,
         is_active=True,
         owner_id=admin_user.id,
+        hash_salt=DEMO_HOLDOUT_SALT,
     )
-    db.add(holdout)
-    db.commit()
-    db.refresh(holdout)
     print(f"    Created '{HOLDOUT_NAME}' at {HOLDOUT_PERCENTAGE}% (active).")
     return holdout
 
@@ -1325,7 +1358,8 @@ def print_summary(
             f"{rules}{schedule}{safety}"
         )
     print()
-    print(f"  Holdout:       {holdout.name} at {holdout.holdout_percentage}% (active)")
+    state = "active" if holdout.is_active else "ended"
+    print(f"  Holdout:       {holdout.name} at {holdout.holdout_percentage}% ({state})")
     print(f"  API key file:  {_display(API_KEY_FILE)}  (X-API-Key)")
     print(f"  Env file:      {_display(ENV_LOCAL_FILE)}  ({ENV_KEY_NAME})")
     print(f"  Owner:         {ADMIN_EMAIL} / Demo1234!")
