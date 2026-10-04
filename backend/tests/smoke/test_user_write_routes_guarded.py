@@ -17,6 +17,7 @@ from __future__ import annotations
 import inspect
 
 import pytest
+from fastapi.routing import APIRoute
 
 from backend.app.main import app
 
@@ -60,7 +61,11 @@ def _contexts(application):
     for route in application.routes:
         contexts = getattr(route, "effective_route_contexts", None)
         if contexts is None:
-            continue
+            # A route declared on the app itself (``@app.post``) is a plain
+            # APIRoute, with no contexts: it is its own context.
+            if not isinstance(route, APIRoute):
+                continue
+            contexts = (route,)
         for ctx in contexts() if callable(contexts) else contexts:
             for method in getattr(ctx, "methods", None) or ():
                 yield method, ctx.path, ctx
