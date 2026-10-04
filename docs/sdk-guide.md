@@ -95,13 +95,13 @@ synchronous. Full reference: [Python SDK](sdk/python.md).
 
 ### Installation
 
-**Not yet published.** The `experimently` package is not on PyPI yet, so this fails today:
+The `experimently` package is on [PyPI](https://pypi.org/project/experimently/) (0.1.0, beta):
 
 ```bash
-pip install experimently
+pip install experimently==0.1.0
 ```
 
-Install it from a clone of this repository instead:
+To work on the SDK itself, install it from a clone of this repository instead:
 
 ```bash
 pip install -e ./sdk/python
