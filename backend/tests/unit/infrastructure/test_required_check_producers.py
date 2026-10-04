@@ -109,14 +109,47 @@ def test_the_event_dependent_name_evaluates(event, expected):
 
 def test_matrix_and_reusable_names_are_expanded(producers):
     by_name, _ = producers
-    assert [p[2] for p in by_name.get("core-build", [])] == ["profile-build"]
-    assert [p[2] for p in by_name.get("full-build", [])] == ["profile-build"]
+    # Two plain jobs since #869 (they were one `${{ matrix.profile }}-build`
+    # matrix); each reports under its id, from pr-qa-gate.yml alone.
+    assert by_name.get("core-build", []) == [
+        ("pull_request", "pr-qa-gate.yml", "core-build")
+    ]
+    assert by_name.get("full-build", []) == [
+        ("pull_request", "pr-qa-gate.yml", "full-build")
+    ]
     assert [
         p[2] for p in by_name.get("SDK Live Contract / sdk-live-contract (core)", [])
     ] == ["sdk-live-contract"]
     # A job with no name reports under its id.
     assert [p[1] for p in by_name.get("integration-tests", [])] == [
         "integration-tests.yml"
+    ]
+
+
+def test_a_static_matrix_name_is_expanded(tmp_path):
+    """The reader's matrix expansion, which no required name exercises since
+    `profile-build` became two jobs: kept honest on a planted workflow, so a
+    future matrix that renders a required name twice is still seen twice."""
+    path = tmp_path / "matrix.yml"
+    path.write_text(
+        "on: pull_request\n"
+        "jobs:\n"
+        "  profile-build:\n"
+        "    name: ${{ matrix.profile }}-build\n"
+        "    runs-on: ubuntu-latest\n"
+        "    strategy:\n"
+        "      matrix:\n"
+        "        include:\n"
+        "          - profile: core\n"
+        "          - profile: core\n"
+        "          - profile: full\n"
+        "    steps: [{run: 'true'}]\n",
+        encoding="utf-8",
+    )
+    assert [name for _, name in wg.check_names(path, "pull_request")] == [
+        "core-build",
+        "core-build",
+        "full-build",
     ]
 
 

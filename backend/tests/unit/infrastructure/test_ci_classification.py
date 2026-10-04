@@ -10,8 +10,8 @@ that went green over nothing:
   ``success() &&``), a classifier that failed or timed out skipped every
   classified job and the gate merged with nothing run. Every classified job is
   now ``${{ !cancelled() && (needs.changes.result != 'success' || <lane>) }}``
-  and the two that must never skip (``profile-build``, ``sdk-live-contract``)
-  are ``${{ !cancelled() }}``.
+  and the three that must never skip (``core-build``, ``full-build``,
+  ``sdk-live-contract``) are ``${{ !cancelled() }}``.
 * **A partial write.** ``git diff ... | classify >> "$GITHUB_OUTPUT"`` appends
   a verdict on whatever part of the list it received, and only then does
   ``pipefail`` fail the step. The step now collects the list and the verdict
@@ -22,7 +22,7 @@ that went green over nothing:
 ``!cancelled()`` has one cost: it runs the job after ANY of its needs fails.
 So ``CLASSIFIED`` pins the exact ``needs:`` as well as the exact ``if:`` of
 every job in every workflow that has a ``changes`` job, compared as an ordered
-list of items, the way ``PROFILE_BUILD_STEPS`` pins steps. A new job, an
+list of items, the way ``CORE_BUILD_STEPS`` pins steps. A new job, an
 inverted condition or a second need fails with a diff naming the job.
 
 ``sdk-unit-tests.yml`` keeps its plain lane conditions: when its ``changes``
@@ -80,7 +80,8 @@ CLASSIFIED: Dict[str, Dict[str, Tuple[Optional[str], Needs]]] = {
         "smoke-tests": (RUNS_UNLESS_DOCS, "changes"),
         "frontend-tests": (RUNS_UNLESS_DOCS, "changes"),
         "sdk-contracts": (RUNS_UNLESS_DOCS, "changes"),
-        "profile-build": (NEVER_SKIPS, "changes"),
+        "core-build": (NEVER_SKIPS, "changes"),
+        "full-build": (NEVER_SKIPS, "changes"),
         "sdk-live-contract": (NEVER_SKIPS, "changes"),
         "browser-e2e": (RUNS_UNLESS_DOCS, "changes"),
         "docker-smoke": (RUNS_UNLESS_DOCS, "changes"),
@@ -305,13 +306,13 @@ class TestAFailedClassifierRunsEverything:
             for job_id, (cond, needs) in _gate_conditions().items()
             if needs is not None and evaluate(cond, "success", "true")
         }
-        assert ran == {"profile-build", "sdk-live-contract"}
+        assert ran == {"core-build", "full-build", "sdk-live-contract"}
 
     def test_the_old_form_skips_after_a_failure(self):
         """The defect: implicit success() turns a crashed classifier into a skip."""
         assert not evaluate(OLD_IF, "failure", "true")
         assert not evaluate(OLD_IF, "failure", "")
-        assert not evaluate(None, "failure", "")  # the old no-`if` profile-build
+        assert not evaluate(None, "failure", "")  # the old no-`if` profile-build matrix
 
     def test_the_evaluator_refuses_what_it_does_not_know(self):
         with pytest.raises(AssertionError):
