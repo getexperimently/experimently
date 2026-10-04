@@ -9,8 +9,9 @@ import {
   INITIAL_ESTIMATE_INPUTS,
   isEvenSplit,
   POWER_OPTIONS,
-  SIGNIFICANCE_OPTIONS,
+  estimateSignificance,
 } from '@/components/experiments/new/estimate';
+import { CONFIDENCE_OPTIONS } from '@/components/results/shared/analysisSettings';
 
 const inputs = (over: Partial<EstimateInputs> = {}): EstimateInputs => ({
   ...INITIAL_ESTIMATE_INPUTS,
@@ -20,22 +21,26 @@ const inputs = (over: Partial<EstimateInputs> = {}): EstimateInputs => ({
 });
 
 describe('estimate options', () => {
-  it('offers power 80/90/95% and significance 5/1/10%, defaulting to 80% and 5%', () => {
+  it('offers power 80/90/95%, defaulting to 80%', () => {
     expect([...POWER_OPTIONS]).toEqual([0.8, 0.9, 0.95]);
-    expect([...SIGNIFICANCE_OPTIONS]).toEqual([0.05, 0.01, 0.1]);
     expect(INITIAL_ESTIMATE_INPUTS.power).toBe(0.8);
-    expect(INITIAL_ESTIMATE_INPUTS.significance).toBe(0.05);
+  });
+
+  it('plans at 1 minus each confidence level the form offers: 10%, 5% and 1%', () => {
+    expect(CONFIDENCE_OPTIONS.map(estimateSignificance)).toEqual([0.1, 0.05, 0.01]);
   });
 
   it('keeps every option inside the bounds the endpoint accepts', () => {
-    // statistical_power: ge=0.5, le=0.99; significance_level: ge=0.01, le=0.1
+    // statistical_power: ge=0.5, le=0.99; significance_level: ge=0.01, le=0.1.
+    // A frontend-divided alpha (0.05 / 2) would be refused, so the estimate
+    // never divides it (PE condition 9).
     for (const p of POWER_OPTIONS) {
       expect(p).toBeGreaterThanOrEqual(0.5);
       expect(p).toBeLessThanOrEqual(0.99);
     }
-    for (const s of SIGNIFICANCE_OPTIONS) {
-      expect(s).toBeGreaterThanOrEqual(0.01);
-      expect(s).toBeLessThanOrEqual(0.1);
+    for (const level of CONFIDENCE_OPTIONS) {
+      expect(estimateSignificance(level)).toBeGreaterThanOrEqual(0.01);
+      expect(estimateSignificance(level)).toBeLessThanOrEqual(0.1);
     }
   });
 });
@@ -52,6 +57,11 @@ describe('buildEstimateQuery', () => {
         variant_count: 2,
       },
     });
+  });
+
+  it('plans at 1 minus the confidence level it is given, with no correction for 3 variants', () => {
+    const built = buildEstimateQuery(inputs(), 3, 0.9);
+    expect(built.ok && built.query.significance_level).toBe(0.1);
   });
 
   it('sends the variant count it is given', () => {

@@ -17,6 +17,7 @@ import {
   experimentTypeLabel,
 } from '@/types/experiments';
 import { canChangeExperiment } from '@/utils/experimentPermissions';
+import { correctionName, formatConfidence } from '@/components/results/shared/analysisSettings';
 
 /** Lifecycle transitions exposed per status (mirrors the backend guards). */
 export type LifecycleAction = 'start' | 'pause' | 'complete' | 'archive';
@@ -243,6 +244,17 @@ export default function ExperimentDetailPage() {
                   <dt className="text-slate-400">Type</dt>
                   <dd data-testid="experiment-type">{experimentTypeLabel(experiment.experiment_type)}</dd>
                 </div>
+                {experiment.correction_method && typeof experiment.confidence_level === 'number' && (
+                  <div className="flex items-center gap-1.5">
+                    <dt className="text-slate-400">Analysis</dt>
+                    <dd data-testid="experiment-analysis">
+                      {formatConfidence(experiment.confidence_level)} confidence ·{' '}
+                      {experiment.correction_method === 'none'
+                        ? 'no correction'
+                        : correctionName(experiment.correction_method)}
+                    </dd>
+                  </div>
+                )}
                 <div className="flex items-center gap-1.5">
                   <dt className="text-slate-400">Owner</dt>
                   <dd data-testid="experiment-owner" title={experiment.owner_id}>

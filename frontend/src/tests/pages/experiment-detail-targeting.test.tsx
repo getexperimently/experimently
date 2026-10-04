@@ -611,6 +611,32 @@ describe('Who can join — saving', () => {
     ]);
   });
 
+  // EM condition 9 (#580): the API refuses correction_method or
+  // confidence_level in a PUT once the experiment has left draft, so the only
+  // PUT the dashboard sends must never carry them, even when the experiment it
+  // read does.
+  it('never sends the stored correction or confidence level in its PUT on a paused experiment', async () => {
+    const puts = install({ status: 'paused', correction_method: 'none', confidence_level: 0.9 });
+    render(<ExperimentDetailPage />);
+    const s = await section();
+    expect(screen.getByTestId('experiment-analysis')).toHaveTextContent('90% confidence · no correction');
+    fireEvent.click(editButton()!);
+    fireEvent.change(within(s).getByRole('textbox', { name: 'Group 1, condition 1 value' }), {
+      target: { value: 'DE' },
+    });
+    fireEvent.click(within(s).getByRole('button', { name: 'Save rules' }));
+    fireEvent.click(
+      within(within(s).getByRole('dialog', { name: 'Save rules while paused' })).getByRole('button', {
+        name: 'Save rules',
+      }),
+    );
+    await within(s).findByText('Saved. The new rules apply when you resume the experiment.');
+    expect(puts).toHaveLength(1);
+    expect(Object.keys(puts[0])).toEqual(['targeting_rules']);
+    expect(puts[0]).not.toHaveProperty('correction_method');
+    expect(puts[0]).not.toHaveProperty('confidence_level');
+  });
+
   it('does not use window.confirm', async () => {
     const confirmSpy = jest.spyOn(window, 'confirm');
     install({ status: 'paused' });

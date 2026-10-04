@@ -105,17 +105,36 @@ Every condition needs an attribute, an operator and (for most operators) a value
 missing, **Create Experiment** stops and the problem is shown beside the targeting rules; a
 condition the server cannot apply is reported there too.
 
-**Step 4: Estimate (optional)**
+**Step 4: How results will be judged, and an estimate**
 
-Enter your baseline conversion rate and the smallest change worth detecting — a
-*relative* change, so 5% on a 12% baseline means 12% → 12.6% — and press **Calculate
-estimate**. At 80% power and 5% significance that example needs 47,036 users per variant.
-Add your daily users to see roughly how many days that takes. The estimate is advisory:
-nothing here is saved with the experiment.
+First, **How results will be judged**. These two settings are saved with the experiment and
+cannot be changed after it starts:
+
+- **Confidence level**: 90%, 95% (recommended) or 99%. At 95%, a variant is significant when
+  its p-value is below 0.05.
+- **Correction for several variants**: Benjamini-Hochberg (recommended), Bonferroni (stricter)
+  or None. It only matters with three or more variants: each extra variant is another chance
+  for one to look like a winner by luck. Benjamini-Hochberg keeps the share of false winners
+  among the variants called significant at about 5% (at 95% confidence); Bonferroni keeps the
+  chance of even one false winner at 5% and needs more users. The correction applies to the
+  variants of each metric, not across metrics.
+
+The single-page form has the same two settings in a collapsed **Analysis settings** section,
+whose title shows the current values.
+
+Then, optionally, the estimate. Enter your baseline conversion rate and the smallest change
+worth detecting — a *relative* change, so 5% on a 12% baseline means 12% → 12.6% — and press
+**Calculate estimate**. At 80% power and 95% confidence that example needs 47,036 users per
+variant. Add your daily users to see roughly how many days that takes. The estimate is
+advisory and is not saved. It plans each comparison at 1 − the confidence level and makes no
+correction for comparing several variants, so with three or more variants and a correction
+the experiment needs more users than it says.
 
 **Step 5: Review and create**
 
-Check the summary, use **Edit** to go back to any step, then press **Create Experiment**.
+Check the summary, including the **Analysis** row (for example "95% confidence ·
+Benjamini-Hochberg correction"), use **Edit** to go back to any step, then press **Create
+Experiment**.
 The experiment is created as a draft and you land on its page.
 
 **Then: start the experiment**
@@ -183,6 +202,15 @@ Shows at a glance:
   planned sample size: the **Sample Size** tab shows that, and the card's "See the Sample
   Size tab for the planned sample." link opens it.
 - **Recommendation**: SHIP VARIANT / KEEP CONTROL / CONTINUE TESTING / INCONCLUSIVE
+- **Analysis**: the confidence level and correction the results use, which are the
+  experiment's own settings. For example "95% confidence · Benjamini-Hochberg correction for
+  the 2 comparisons with the control on each metric", or, with one treatment, "one comparison
+  with the control on each metric, so no correction is needed".
+
+For an experiment with several variants and a correction, a note says that since v0.19 its
+results use the experiment's correction, and that earlier versions showed them uncorrected, so
+a variant marked significant then may not be significant now. To see the uncorrected numbers,
+ask the API with `?correction_method=none` (`GET /api/v1/results/{experiment_id}`).
 
 #### Recommendation Meanings
 
@@ -202,8 +230,8 @@ For each metric and variant pair:
 | **Sample Size** | Users assigned to this variant |
 | **Value** | Conversion rate or average value for this variant |
 | **Improvement** | How much better/worse vs. control (e.g., +12.3%) |
-| **p-value** | Probability the difference is due to chance (lower = more confident) |
-| **Significance** | p-value < (1 - confidence level), e.g., < 0.05 for 95% confidence |
+| **p-value** | Probability the difference is due to chance (lower = more confident). Headed **Adjusted p-value** when a correction applies and a metric has two or more treatments with a p-value: the p-value after the experiment's correction, with the unadjusted value beneath it. A footnote under the table names the correction. |
+| **Significance** | (adjusted) p-value < (1 - confidence level), e.g., < 0.05 for 95% confidence |
 
 The table has no effect size or confidence interval column yet. Both are in the API
 response: `GET /api/v1/results/{experiment_id}` returns `effect_size`, `effect_size_label`
@@ -237,14 +265,16 @@ detect the smallest lift you care about, and how far the experiment has got.
   rate can be newer than the one on the Overview.
 - **Minimum detectable effect**: 5% relative unless you change it. Relative means 12% → 12.6%,
   not 17%. Experiments do not store a planned effect.
-- **Power** (80%, 90% or 95%) and **significance** (5%, 1% or 10%, always two-sided, which is
-  what the results test).
-- **Correction**, for three or more variants: none unless you choose one, the same as the
-  results. Bonferroni or Benjamini-Hochberg plans each comparison with the control at
+- **Power** (80%, 90% or 95%) and **significance** (always two-sided, which is what the
+  results test): 1 − the experiment's confidence level unless you choose 5%, 1% or 10%. A level
+  set through the API, such as 92%, shows as "8% (this experiment's setting)".
+- **Correction**, for three or more variants: the experiment's correction unless you choose
+  another. Bonferroni or Benjamini-Hochberg plans each comparison with the control at
   significance ÷ (variants − 1).
 
 Change any of them and press **Recalculate**. Nothing is saved and the page address does not
-change, so the plan goes back to the observed rate and the defaults when you reload.
+change, so the plan goes back to the observed rate, the defaults and the experiment's settings
+when you reload.
 
 **Progress** is the smallest variant: "Smallest variant: 20,000 of 47,036 (43%)", then either
 "43% of planned sample" or "Planned sample reached". The power shown is the power to detect your

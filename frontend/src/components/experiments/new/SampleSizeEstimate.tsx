@@ -5,12 +5,14 @@ import { isApiError } from '@/services/api';
 import {
   buildEstimateQuery,
   EstimateInputs,
+  estimateSignificance,
   INITIAL_ESTIMATE_INPUTS,
   isEvenSplit,
   POWER_OPTIONS,
-  SIGNIFICANCE_OPTIONS,
 } from './estimate';
 import { wizardInputClass } from './fieldStyles';
+import { CorrectionMethod } from '@/types/results';
+import { correctionName } from '@/components/results/shared/analysisSettings';
 
 /** Everything the Estimate step shows, held by the wizard so it survives Back and Next. */
 export interface EstimatePanelState {
@@ -42,27 +44,62 @@ interface SampleSizeEstimateProps {
   onChange: React.Dispatch<React.SetStateAction<EstimatePanelState>>;
   /** Each variant's share of traffic, in percent, from the Variants step. */
   allocations: number[];
+  /** The experiment's confidence level: the estimate plans at 1 minus it. */
+  confidenceLevel: number;
+  /** The experiment's correction. The estimate does not apply it; the copy says so. */
+  correctionMethod: CorrectionMethod;
 }
 
 const pct = (fraction: number) => `${Math.round(fraction * 1000) / 10}%`;
 const count = (n: number) => n.toLocaleString('en-US');
 
 /**
+ * What the estimate says about the correction with three or more variants. The
+ * estimate plans each comparison without one (PE condition 9; #820 would add it).
+ */
+export function noCorrectionInEstimate(
+  variantCount: number,
+  confidenceLevel: number,
+  correctionMethod: CorrectionMethod,
+): string {
+  const sig = pct(estimateSignificance(confidenceLevel));
+  if (correctionMethod === 'none') {
+    return (
+      `With ${variantCount} variants, this estimate plans each comparison with the control at ` +
+      `${sig} significance and makes no correction for comparing several variants, the same as ` +
+      'the results will, because no correction is chosen above.'
+    );
+  }
+  return (
+    `With ${variantCount} variants, this estimate plans each comparison with the control at ` +
+    `${sig} significance and makes no correction for comparing several variants. The results ` +
+    `will use the ${correctionName(correctionMethod)} correction chosen above, so the experiment ` +
+    'needs more users than this.'
+  );
+}
+
+/**
  * An advisory sample-size and duration estimate. It is calculated only when the
  * button is pressed, never blocks creating the experiment, and nothing it holds
  * is sent with the experiment.
  */
-export function SampleSizeEstimate({ value, onChange, allocations }: SampleSizeEstimateProps) {
+export function SampleSizeEstimate({
+  value,
+  onChange,
+  allocations,
+  confidenceLevel,
+  correctionMethod,
+}: SampleSizeEstimateProps) {
   const variantCount = allocations.length;
   const { inputs, result, problem, loading } = value;
-  const current = buildEstimateQuery(inputs, variantCount);
+  const current = buildEstimateQuery(inputs, variantCount, confidenceLevel);
   const stale = result !== null && (!current.ok || JSON.stringify(current.query) !== result.queryKey);
 
   const setInput = <K extends keyof EstimateInputs>(key: K, next: EstimateInputs[K]) =>
     onChange((prev) => ({ ...prev, inputs: { ...prev.inputs, [key]: next } }));
 
   const calculate = async () => {
-    const built = buildEstimateQuery(inputs, variantCount);
+    const built = buildEstimateQuery(inputs, variantCount, confidenceLevel);
     if (!built.ok) {
       onChange((prev) => ({ ...prev, problem: built.problem }));
       return;
@@ -96,8 +133,9 @@ export function SampleSizeEstimate({ value, onChange, allocations }: SampleSizeE
   return (
     <div className="space-y-5" data-testid="sample-size-estimate">
       <p className="text-sm text-slate-600">
-        Advisory only; nothing is saved. This estimate is not stored with the experiment and does not
-        affect how it runs.
+        Advisory only; nothing in this estimate is saved with the experiment or affects how it runs. It
+        plans at {pct(estimateSignificance(confidenceLevel))} significance, from the confidence level
+        above.
       </p>
 
       <div className="grid gap-4 sm:grid-cols-2">
@@ -158,25 +196,6 @@ export function SampleSizeEstimate({ value, onChange, allocations }: SampleSizeE
             {POWER_OPTIONS.map((p) => (
               <option key={p} value={String(p)}>
                 {pct(p)}
-              </option>
-            ))}
-          </select>
-        </div>
-
-        <div>
-          <label htmlFor="estimate-significance" className="block text-sm font-medium text-slate-700 mb-1">
-            Significance level (two-sided)
-          </label>
-          <select
-            id="estimate-significance"
-            value={String(inputs.significance)}
-            onChange={(e) => setInput('significance', Number(e.target.value))}
-            className={wizardInputClass}
-            data-testid="estimate-significance"
-          >
-            {SIGNIFICANCE_OPTIONS.map((s) => (
-              <option key={s} value={String(s)}>
-                {pct(s)}
               </option>
             ))}
           </select>
@@ -282,12 +301,11 @@ export function SampleSizeEstimate({ value, onChange, allocations }: SampleSizeE
             )}
             {variantCount >= 3 && (
               <p data-testid="estimate-many-variants">
-                With {variantCount} variants, this estimate makes no correction for comparing several
-                variants with the control. The{' '}
+                {noCorrectionInEstimate(variantCount, confidenceLevel, correctionMethod)} The{' '}
                 <Link href="/power-calculator" className="text-blue-700 underline hover:text-blue-900">
                   Power Calculator
                 </Link>{' '}
-                applies one, so its number is higher.
+                applies a Bonferroni correction, so its number is higher.
               </p>
             )}
           </div>

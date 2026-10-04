@@ -15426,7 +15426,7 @@
             "title": "Adjusted P Value"
           },
           "confidence_interval": {
-            "description": "Two-sided confidence interval as (lower, upper).  Its level is the confidence_level the request asked for (default 0.95); experiments store no level of their own.",
+            "description": "Two-sided confidence interval as (lower, upper).  Its level is the response's confidence_level: the one the request sent, otherwise the experiment's stored level.",
             "maxItems": 2,
             "minItems": 2,
             "prefixItems": [

@@ -33,6 +33,8 @@ describe('INITIAL_FORM_STATE', () => {
         { name: 'Treatment', description: '', traffic_allocation: 50, is_control: false },
       ],
       metrics: [{ name: 'Conversion', event_name: 'conversion', metric_type: 'conversion', is_primary: true }],
+      confidenceLevel: 0.95,
+      correctionMethod: 'benjamini_hochberg',
     });
   });
 
@@ -296,10 +298,23 @@ describe('buildCreatePayload', () => {
         { name: 'Purchase', event_name: 'purchase', metric_type: 'conversion', is_primary: true },
         { name: 'Revenue', event_name: 'purchase', metric_type: 'revenue', is_primary: false },
       ],
+      confidence_level: 0.95,
+      correction_method: 'benjamini_hochberg',
     });
   });
 
-  it('sends exactly these eight keys and nothing else', () => {
+  it('sends the confidence level and correction chosen (#580)', () => {
+    const s = apply(
+      [
+        { type: 'setConfidenceLevel', confidenceLevel: 0.9 },
+        { type: 'setCorrectionMethod', correctionMethod: 'none' },
+      ],
+      pageTestState(),
+    );
+    expect(buildCreatePayload(s)).toMatchObject({ confidence_level: 0.9, correction_method: 'none' });
+  });
+
+  it('sends exactly these ten keys and nothing else', () => {
     // toEqual ignores keys whose value is undefined; this does not.
     expect(Object.keys(buildCreatePayload(pageTestState())).sort()).toEqual(
       [
@@ -311,6 +326,8 @@ describe('buildCreatePayload', () => {
         'targeting_rules',
         'variants',
         'metrics',
+        'confidence_level',
+        'correction_method',
       ].sort(),
     );
   });

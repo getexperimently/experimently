@@ -1,4 +1,5 @@
 import {
+  CorrectionMethod,
   ExperimentResultsResponse,
   DailyResultsResponse,
   SampleSizeOverrides,
@@ -7,14 +8,23 @@ import {
 import { SequentialTestingResponse } from '@/types/sequential';
 import { apiFetch } from '@/services/api';
 
+/** Query for `GET /results/{id}`. A setting left out is the experiment's stored one. */
+export interface ResultsQuery {
+  breakdown?: string;
+  correction_method?: CorrectionMethod;
+  confidence_level?: number;
+}
+
 export class ResultsService {
   static async getResults(
     experimentId: string,
-    params?: { breakdown?: string }
+    params?: ResultsQuery
   ): Promise<ExperimentResultsResponse> {
     return apiFetch<ExperimentResultsResponse>(`/api/v1/results/${experimentId}`, {
       query: {
         breakdown: params?.breakdown || undefined,
+        correction_method: params?.correction_method,
+        confidence_level: params?.confidence_level,
       },
     });
   }
@@ -31,7 +41,7 @@ export class ResultsService {
   /**
    * The planned sample size. Send only what the user changed: anything left
    * out is decided by the server (the observed control rate, a 5% relative
-   * MDE, 80% power, 95% confidence, no correction).
+   * MDE, 80% power, and the experiment's own confidence level and correction).
    */
   static async getSampleSize(
     experimentId: string,

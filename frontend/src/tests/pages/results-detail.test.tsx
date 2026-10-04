@@ -9,6 +9,7 @@
 import React from 'react';
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import axe from 'axe-core';
 import ResultDetailPage from '@/pages/results/[id]';
 import { apiFetch } from '@/services/api';
 import { makeRouter, routedApi } from './helpers/apiMock';
@@ -159,5 +160,116 @@ describe('ResultDetailPage (/results/[id]) sequential tab', () => {
     expect(note).toHaveTextContent(/not a reason to stop/i);
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
     expect(screen.getByTestId('action-label')).toHaveTextContent(/continue testing/i);
+  });
+});
+
+// #580: the page reads the experiment and sends its stored settings; the
+// results it then shows are judged with them. Through apiFetch, so the page,
+// the dashboard and both services run as in the browser.
+describe('ResultDetailPage (/results/[id]) with stored analysis settings', () => {
+  function treatment(id: string, name: string, p: number, adjusted: number, significant: boolean) {
+    return {
+      variant_id: id,
+      variant_name: name,
+      is_control: false,
+      sample_size: 1000,
+      conversions: 140,
+      mean: 0.14,
+      std_dev: null,
+      confidence_interval: [0.12, 0.16],
+      p_value: p,
+      adjusted_p_value: adjusted,
+      is_significant: significant,
+      effect_size: null,
+      effect_size_label: null,
+      relative_improvement_pct: 16.7,
+      power: null,
+      statistical_test_used: 'fisher_exact',
+    };
+  }
+
+  const THREE_VARIANTS = {
+    ...RESULTS,
+    correction_method: 'benjamini_hochberg',
+    confidence_level: 0.9,
+    metrics: [
+      {
+        metric_id: 'm-1',
+        metric_name: 'Purchase',
+        metric_type: 'conversion',
+        is_primary: true,
+        variants: [
+          {
+            ...treatment('ctrl', 'Control', 0, 0, false),
+            is_control: true,
+            p_value: null,
+            adjusted_p_value: null,
+            relative_improvement_pct: null,
+            statistical_test_used: null,
+          },
+          treatment('b', 'Blue', 0.035, 0.071, true),
+          treatment('c', 'Green', 0.2, 0.2, false),
+        ],
+      },
+    ],
+  };
+
+  function installStored() {
+    mockedApiFetch.mockImplementation(
+      routedApi([
+        {
+          path: '/api/v1/experiments/exp-1',
+          handler: () => ({ id: 'exp-1', correction_method: 'benjamini_hochberg', confidence_level: 0.9 }),
+        },
+        { path: '/api/v1/results/exp-1', handler: () => THREE_VARIANTS },
+        {
+          path: '/api/v1/results/exp-1/daily',
+          handler: () => ({ experiment_id: 'exp-1', metric_id: null, series: [] }),
+        },
+        {
+          path: '/api/v1/results/exp-1/sample-size',
+          handler: () => {
+            throw new Error('not needed here');
+          },
+        },
+        {
+          path: '/api/v1/results/exp-1/sequential',
+          handler: () => {
+            throw new Error('not sequential');
+          },
+        },
+      ]) as unknown as typeof apiFetch
+    );
+  }
+
+  beforeEach(() => {
+    mockedApiFetch.mockReset();
+    installStored();
+  });
+
+  it('sends the stored settings and shows the adjusted p-values with the footnote and notice', async () => {
+    render(<ResultDetailPage />);
+    await screen.findByTestId('experiment-summary');
+    const resultsCall = mockedApiFetch.mock.calls.find(([p]) => p === '/api/v1/results/exp-1');
+    expect(resultsCall?.[1]?.query).toMatchObject({
+      correction_method: 'benjamini_hochberg',
+      confidence_level: 0.9,
+    });
+    expect(screen.getByTestId('analysis-summary-text')).toHaveTextContent(
+      '90% confidence · Benjamini-Hochberg correction for the 2 comparisons with the control on each metric'
+    );
+    expect(screen.getByRole('columnheader', { name: /^adjusted p-value/i })).toBeInTheDocument();
+    expect(screen.getByText('unadjusted 0.0350')).toBeInTheDocument();
+    expect(screen.getByTestId('adjusted-p-footnote')).toHaveTextContent('below 0.1.');
+    expect(screen.getByTestId('corrected-results-notice')).toBeInTheDocument();
+  });
+
+  it('has no axe violations on the Overview (axe-core in jsdom; colour contrast is not computable here)', async () => {
+    const { container } = render(<ResultDetailPage />);
+    await screen.findByTestId('adjusted-p-footnote');
+    const result = await axe.run(container, { rules: { 'color-contrast': { enabled: false } } });
+    expect(result.violations.map((v) => `${v.id}: ${v.nodes.map((n) => n.target).join(', ')}`)).toEqual(
+      []
+    );
   });
 });

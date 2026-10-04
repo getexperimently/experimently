@@ -3,6 +3,7 @@ import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { ResultsDashboard } from '@/components/results/ResultsDashboard/ResultsDashboard';
 import { ResultsService } from '@/services/results';
+import { ExperimentsService } from '@/services/experiments';
 import { ApiError } from '@/services/api';
 import {
   ExperimentResultsResponse,
@@ -12,10 +13,12 @@ import {
 } from '@/types/results';
 
 jest.mock('@/services/results');
+jest.mock('@/services/experiments');
 
 const mockGetResults = ResultsService.getResults as jest.Mock;
 const mockGetDailyResults = ResultsService.getDailyResults as jest.Mock;
 const mockGetSampleSize = ResultsService.getSampleSize as jest.Mock;
+const mockGetExperiment = ExperimentsService.get as jest.Mock;
 
 const mockResults: ExperimentResultsResponse = {
   experiment_id: 'exp-1',
@@ -478,5 +481,179 @@ describe('ResultsDashboard', () => {
     await waitFor(() =>
       expect(mockGetResults).toHaveBeenCalledWith('exp-1', { breakdown: 'country' })
     );
+  });
+});
+
+// #580 / D49: the dashboard sends the experiment's stored correction method and
+// confidence level with every results request. Non-default values (none, 0.9),
+// so a dashboard that sent nothing, or the defaults, would fail.
+describe('the stored analysis settings', () => {
+  const stored = { id: 'exp-1', correction_method: 'none', confidence_level: 0.9 };
+
+  function variant(id: string, name: string, p: number | null, adjusted: number | null) {
+    return {
+      variant_id: id,
+      variant_name: name,
+      is_control: false,
+      sample_size: 1000,
+      conversions: 130,
+      mean: 0.13,
+      std_dev: null,
+      confidence_interval: null,
+      p_value: p,
+      adjusted_p_value: adjusted,
+      is_significant: false,
+      effect_size: null,
+      effect_size_label: null,
+      relative_improvement_pct: 8,
+      power: null,
+    };
+  }
+
+  /** A response with a control and the given treatments on one metric. */
+  function withTreatments(
+    treatments: ReturnType<typeof variant>[],
+    overrides: Partial<ExperimentResultsResponse> = {}
+  ): ExperimentResultsResponse {
+    return {
+      ...mockResults,
+      metrics: [{ ...mockResults.metrics[0], variants: [mockResults.metrics[0].variants[0], ...treatments] }],
+      ...overrides,
+    };
+  }
+
+  function loads(results: ExperimentResultsResponse = mockResults) {
+    mockGetResults.mockResolvedValue(results);
+    mockGetDailyResults.mockResolvedValue(mockDaily);
+    mockGetSampleSize.mockResolvedValue(mockSampleSize);
+  }
+
+  it('sends them on the initial load and on a breakdown', async () => {
+    mockGetExperiment.mockResolvedValue(stored);
+    loads();
+    mockGetResults.mockResolvedValueOnce(mockResults).mockResolvedValue({
+      ...mockResults,
+      breakdown: mockBreakdown,
+    });
+
+    render(<ResultsDashboard experimentId="exp-1" />);
+    await waitFor(() => screen.getByTestId('experiment-summary'));
+    expect(mockGetExperiment).toHaveBeenCalledWith('exp-1');
+    expect(mockGetResults).toHaveBeenCalledTimes(1);
+    expect(mockGetResults.mock.calls[0]).toEqual([
+      'exp-1',
+      { correction_method: 'none', confidence_level: 0.9 },
+    ]);
+
+    await userEvent.click(screen.getByRole('tab', { name: /breakdowns/i }));
+    await userEvent.selectOptions(screen.getByRole('combobox'), 'platform');
+    await waitFor(() => expect(mockGetResults).toHaveBeenCalledTimes(2));
+    expect(mockGetResults.mock.calls[1]).toEqual([
+      'exp-1',
+      { breakdown: 'platform', correction_method: 'none', confidence_level: 0.9 },
+    ]);
+  });
+
+  it('still asks for the results, with no settings, when the experiment cannot be read (PE condition 14)', async () => {
+    mockGetExperiment.mockRejectedValue(new ApiError({ status: 500, detail: 'boom' }));
+    loads();
+
+    render(<ResultsDashboard experimentId="exp-1" />);
+    await waitFor(() => screen.getByTestId('experiment-summary'));
+    expect(screen.queryByTestId('error-state')).not.toBeInTheDocument();
+    expect(mockGetResults).toHaveBeenCalledTimes(1);
+    // Exactly the id: the server then uses the experiment's stored settings.
+    expect(mockGetResults.mock.calls[0]).toEqual(['exp-1']);
+    // The summary still says what the results were computed with.
+    expect(screen.getByTestId('analysis-summary-text')).toHaveTextContent('95% confidence');
+  });
+
+  it('shows a stored 92% truthfully on the Analysis row and the Sample Size tab (PE condition 14)', async () => {
+    mockGetExperiment.mockResolvedValue({ ...stored, correction_method: 'benjamini_hochberg', confidence_level: 0.92 });
+    loads({ ...mockResults, confidence_level: 0.92, correction_method: 'benjamini_hochberg' });
+    mockGetSampleSize.mockResolvedValue({ ...mockSampleSize, confidence_level: 0.92, alpha: 0.08 });
+
+    render(<ResultsDashboard experimentId="exp-1" />);
+    await waitFor(() => screen.getByTestId('experiment-summary'));
+    expect(mockGetResults.mock.calls[0]).toEqual([
+      'exp-1',
+      { correction_method: 'benjamini_hochberg', confidence_level: 0.92 },
+    ]);
+    expect(screen.getByTestId('analysis-summary-text')).toHaveTextContent(/^92% confidence/);
+    expect(screen.queryByTestId('analysis-summary-override')).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole('tab', { name: /sample size/i }));
+    await screen.findByTestId('sample-size-meter');
+    const select = screen.getByLabelText('Significance (two-sided)') as HTMLSelectElement;
+    expect(select.selectedOptions[0].textContent).toBe("8% (this experiment's setting)");
+    expect(screen.getByTestId('sample-size-required')).toHaveTextContent('8% significance');
+  });
+
+  it('says so when the results were computed with other settings than the stored ones', async () => {
+    mockGetExperiment.mockResolvedValue({ ...stored, correction_method: 'benjamini_hochberg', confidence_level: 0.95 });
+    loads({ ...mockResults, correction_method: 'none', confidence_level: 0.95 });
+
+    render(<ResultsDashboard experimentId="exp-1" />);
+    await waitFor(() => screen.getByTestId('experiment-summary'));
+    expect(screen.getByTestId('analysis-summary-override')).toHaveTextContent(
+      'Shown with 95% confidence · no correction; this experiment is set to 95% confidence · Benjamini-Hochberg correction.'
+    );
+  });
+
+  describe('the Analysis row', () => {
+    it.each([
+      [
+        'two corrected comparisons',
+        [variant('b', 'B', 0.02, 0.04), variant('c', 'C', 0.04, 0.04)],
+        'benjamini_hochberg',
+        '95% confidence · Benjamini-Hochberg correction for the 2 comparisons with the control on each metric',
+      ],
+      [
+        'one comparison',
+        [variant('b', 'B', 0.02, 0.02)],
+        'benjamini_hochberg',
+        '95% confidence · one comparison with the control on each metric, so no correction is needed',
+      ],
+      [
+        'three variants, one without a p-value (k = 1)',
+        [variant('b', 'B', 0.02, 0.02), variant('c', 'C', null, null)],
+        'bonferroni',
+        '95% confidence · one comparison with the control on each metric, so no correction is needed',
+      ],
+      [
+        'two comparisons and no correction',
+        [variant('b', 'B', 0.02, null), variant('c', 'C', 0.04, null)],
+        'none',
+        '95% confidence · no correction (chosen for this experiment)',
+      ],
+    ])('%s', async (_label, treatments, method, text) => {
+      loads(withTreatments(treatments, { correction_method: method as 'none' }));
+      render(<ResultsDashboard experimentId="exp-1" />);
+      await waitFor(() => screen.getByTestId('experiment-summary'));
+      expect(screen.getByTestId('analysis-summary-text')).toHaveTextContent(text);
+    });
+  });
+
+  describe('the one-release notice (#821 removes it)', () => {
+    it.each([
+      ['two comparisons, corrected', [variant('b', 'B', 0.02, 0.04), variant('c', 'C', 0.04, 0.04)], 'benjamini_hochberg', true],
+      ['two comparisons, Bonferroni', [variant('b', 'B', 0.02, 0.04), variant('c', 'C', 0.04, 0.08)], 'bonferroni', true],
+      ['two comparisons, no correction', [variant('b', 'B', 0.02, null), variant('c', 'C', 0.04, null)], 'none', false],
+      ['one comparison, corrected', [variant('b', 'B', 0.02, 0.02)], 'benjamini_hochberg', false],
+      ['three variants, one without a p-value', [variant('b', 'B', 0.02, 0.02), variant('c', 'C', null, null)], 'benjamini_hochberg', false],
+    ])('%s: shown = %s', async (_label, treatments, method, shown) => {
+      loads(withTreatments(treatments, { correction_method: method as 'none' }));
+      render(<ResultsDashboard experimentId="exp-1" />);
+      await waitFor(() => screen.getByTestId('experiment-summary'));
+      const notice = screen.queryByTestId('corrected-results-notice');
+      if (shown) {
+        expect(notice).toHaveTextContent(
+          "Since v0.19, results for experiments with several variants use the experiment's correction; earlier versions showed them uncorrected"
+        );
+        expect(notice).not.toHaveAttribute('role', 'alert');
+      } else {
+        expect(notice).not.toBeInTheDocument();
+      }
+    });
   });
 });

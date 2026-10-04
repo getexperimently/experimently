@@ -20,6 +20,8 @@ import { BasicInfoFields } from './BasicInfoFields';
 import { VariantsEditor } from './VariantsEditor';
 import { MetricsEditor } from './MetricsEditor';
 import { EstimatePanelState, INITIAL_ESTIMATE_PANEL, SampleSizeEstimate } from './SampleSizeEstimate';
+import { AnalysisSettingsFields } from './AnalysisSettingsFields';
+import { describeSettings } from '@/components/results/shared/analysisSettings';
 import { CreateError, footMessage } from './createErrors';
 import { TargetingProblems } from './TargetingProblems';
 
@@ -37,7 +39,7 @@ export const STEP_HEADINGS: Record<FormStep, string> = {
   type: 'What kind of experiment?',
   details: 'Name it and choose what to measure',
   variants: 'Set up the versions users will see',
-  estimate: 'How many users will you need?',
+  estimate: 'How results will be judged, and how many users you need',
   review: 'Check and create',
 };
 
@@ -390,11 +392,30 @@ export function Wizard({ state, dispatch, error, isSubmitting, onCreate, onClear
           )}
 
           {step === 'estimate' && (
-            <SampleSizeEstimate
-              value={estimate}
-              onChange={setEstimate}
-              allocations={state.variants.map((v) => Number(v.traffic_allocation) || 0)}
-            />
+            <>
+              <AnalysisSettingsFields
+                confidenceLevel={state.confidenceLevel}
+                correctionMethod={state.correctionMethod}
+                dispatch={dispatch}
+                variantCount={state.variants.length}
+              />
+              {/* Saved settings above; the advisory, unsaved estimate below. */}
+              <section
+                aria-labelledby="wizard-estimate-heading"
+                className="border-t border-slate-200 pt-4 space-y-3"
+              >
+                <h3 id="wizard-estimate-heading" className="text-base font-semibold text-slate-900">
+                  Sample size estimate (optional, not saved)
+                </h3>
+                <SampleSizeEstimate
+                  value={estimate}
+                  onChange={setEstimate}
+                  allocations={state.variants.map((v) => Number(v.traffic_allocation) || 0)}
+                  confidenceLevel={state.confidenceLevel}
+                  correctionMethod={state.correctionMethod}
+                />
+              </section>
+            </>
           )}
 
           {step === 'review' && payload && (
@@ -456,6 +477,14 @@ export function Wizard({ state, dispatch, error, isSubmitting, onCreate, onClear
                     </button>
                   </TargetingProblems>
                 </div>
+              </ReviewRow>
+              <ReviewRow title="Analysis" onEdit={() => goTo(3)} editLabel="Edit analysis">
+                <p data-testid="review-analysis">
+                  {describeSettings(
+                    payload.confidence_level ?? state.confidenceLevel,
+                    payload.correction_method ?? state.correctionMethod,
+                  )}
+                </p>
               </ReviewRow>
               <ReviewRow title="Estimate" onEdit={() => goTo(3)} editLabel="Edit estimate">
                 <p data-testid="review-estimate">

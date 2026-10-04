@@ -10,6 +10,7 @@ import path from 'path';
 import React from 'react';
 import { act, render, screen, fireEvent, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import axe from 'axe-core';
 import NewExperimentPage, { ROLE_CANNOT_CREATE } from '@/pages/experiments/new';
 import { apiFetch } from '@/services/api';
 import { navigateHard } from '@/components/experiments/new/leaveGuard';
@@ -19,11 +20,8 @@ import {
   FORM_EXPERIMENT_TYPES,
   validateForm,
 } from '@/components/experiments/new/formState';
-import {
-  ESTIMATE_PROBLEMS,
-  POWER_OPTIONS,
-  SIGNIFICANCE_OPTIONS,
-} from '@/components/experiments/new/estimate';
+import { ESTIMATE_PROBLEMS, POWER_OPTIONS } from '@/components/experiments/new/estimate';
+import { CONFIDENCE_OPTIONS } from '@/components/results/shared/analysisSettings';
 import {
   NO_USABLE_ESTIMATE,
   SESSION_EXPIRED_ESTIMATE,
@@ -181,7 +179,15 @@ const PARITY_LITERAL = {
     { name: 'Add to cart', event_name: 'add_to_cart', metric_type: 'count', is_primary: false },
     { name: 'Revenue', event_name: 'purchase', metric_type: 'revenue', is_primary: true },
   ],
+  confidence_level: 0.9,
+  correction_method: 'bonferroni',
 };
+
+/** Non-default analysis settings, so the parity test proves both views send what was chosen. */
+function chooseAnalysisSettings() {
+  setValue('analysis-confidence', '0.9');
+  setValue('analysis-correction', 'bonferroni');
+}
 
 async function createThroughAdvanced(): Promise<unknown> {
   routerAt({ advanced: '' });
@@ -190,6 +196,7 @@ async function createThroughAdvanced(): Promise<unknown> {
   setValue('experiment-type', 'mv');
   fillDetails();
   fillVariantsAndTargeting();
+  chooseAnalysisSettings();
   fireEvent.click(screen.getByTestId('submit-experiment'));
   await waitFor(() => expect(mockRouter.push).toHaveBeenCalledWith('/experiments/exp-9'));
   const body = postedBody();
@@ -208,6 +215,7 @@ async function createThroughGuided(): Promise<unknown> {
   next();
   fillVariantsAndTargeting();
   next();
+  chooseAnalysisSettings();
   next(); // the estimate is optional
   expect(heading()).toHaveTextContent(STEP_HEADINGS.review);
   fireEvent.click(screen.getByTestId('wizard-create'));
@@ -226,7 +234,7 @@ describe('guided setup sends exactly the request the single-page form sends', ()
     expect(guided).toStrictEqual(PARITY_LITERAL);
   });
 
-  it('sends the eight keys of the create request and nothing else', async () => {
+  it('sends the ten keys of the create request and nothing else', async () => {
     const guided = (await createThroughGuided()) as Record<string, unknown>;
     expect(Object.keys(guided).sort()).toEqual(
       [
@@ -238,6 +246,8 @@ describe('guided setup sends exactly the request the single-page form sends', ()
         'targeting_rules',
         'variants',
         'metrics',
+        'confidence_level',
+        'correction_method',
       ].sort(),
     );
   });
@@ -594,7 +604,7 @@ describe('the Estimate step', () => {
     expect(screen.getByTestId('estimate-even-split')).toBeInTheDocument();
   });
 
-  it('sends each power and significance option as offered', async () => {
+  it('sends each power option, and 1 minus each confidence level as the significance', async () => {
     api();
     await toEstimate();
     setValue('estimate-baseline', '12');
@@ -602,7 +612,7 @@ describe('the Estimate step', () => {
     const sent: Array<[unknown, unknown]> = [];
     for (let i = 0; i < 3; i += 1) {
       setValue('estimate-power', String(POWER_OPTIONS[i]));
-      setValue('estimate-significance', String(SIGNIFICANCE_OPTIONS[i]));
+      setValue('analysis-confidence', String(CONFIDENCE_OPTIONS[i]));
       fireEvent.click(screen.getByTestId('estimate-calculate'));
       await waitFor(() => expect(estimateCalls()).toHaveLength(i + 1));
       await waitFor(() => expect(screen.getByTestId('estimate-calculate')).not.toBeDisabled());
@@ -610,7 +620,7 @@ describe('the Estimate step', () => {
       sent.push([q.statistical_power, q.significance_level]);
     }
     expect(sent.map(([p]) => p)).toEqual([0.8, 0.9, 0.95]);
-    expect(sent.map(([, s]) => s)).toEqual([0.05, 0.01, 0.1]);
+    expect(sent.map(([, s]) => s)).toEqual([0.1, 0.05, 0.01]);
   });
 
   it('sends the number of variants on the Variants step', async () => {
@@ -903,5 +913,146 @@ describe('contrast', () => {
       'utf8',
     );
     expect(source.match(/\btext-(slate-400|red-400|red-500)\b/g)).toBeNull();
+  });
+});
+
+// #580: the confidence level and correction are saved with the experiment.
+describe('how results will be judged', () => {
+  it('asks on the Estimate step, in a fieldset that says the values are saved and lock at start', async () => {
+    api();
+    await toEstimate();
+    const group = screen.getByRole('group', { name: 'How results will be judged' });
+    expect(group).toHaveTextContent('Saved with the experiment. You cannot change these after it starts.');
+    expect(screen.getByLabelText('Confidence level')).toHaveValue('0.95');
+    expect(screen.getByLabelText('Correction for several variants')).toHaveValue('benjamini_hochberg');
+    expect(screen.getByLabelText('Confidence level')).toHaveAccessibleDescription(
+      'How sure the results must be before a difference is called significant. At 95%, a variant is significant when its p-value is below 0.05.'
+    );
+    // The estimate has no significance control of its own to disagree with it.
+    expect(screen.queryByTestId('estimate-significance')).not.toBeInTheDocument();
+  });
+
+  it('shows both on the Review step, and "Edit analysis" goes back to them', async () => {
+    api();
+    await toEstimate();
+    setValue('analysis-confidence', '0.99');
+    setValue('analysis-correction', 'none');
+    next();
+    expect(screen.getByTestId('review-analysis')).toHaveTextContent('99% confidence · no correction');
+    fireEvent.click(screen.getByTestId('review-edit-analysis'));
+    await waitFor(() => expect(heading()).toHaveTextContent(STEP_HEADINGS.estimate));
+    expect(screen.getByLabelText('Confidence level')).toHaveValue('0.99');
+  });
+
+  it('defaults the Review row to 95% and Benjamini-Hochberg', async () => {
+    api();
+    await toEstimate();
+    next();
+    expect(screen.getByTestId('review-analysis')).toHaveTextContent(
+      '95% confidence · Benjamini-Hochberg correction'
+    );
+  });
+
+  it('hints, without an alert, when None is chosen with three variants', async () => {
+    api();
+    await toEstimate(() => {
+      fireEvent.click(screen.getByTestId('add-variant'));
+      setValue('variant-allocation-0', '34');
+      setValue('variant-allocation-1', '33');
+      setValue('variant-allocation-2', '33');
+    });
+    expect(screen.queryByTestId('analysis-no-correction-hint')).not.toBeInTheDocument();
+    setValue('analysis-correction', 'none');
+    const hint = screen.getByTestId('analysis-no-correction-hint');
+    expect(hint).toHaveTextContent(
+      'With 3 variants and no correction, the chance that at least one looks like a winner by luck is higher than 5%.'
+    );
+    expect(hint).not.toHaveAttribute('role');
+  });
+
+  it('says the estimate makes no correction, and plans at 1 minus the chosen level (PE condition 9)', async () => {
+    api();
+    await toEstimate(() => {
+      fireEvent.click(screen.getByTestId('add-variant'));
+      setValue('variant-allocation-0', '34');
+      setValue('variant-allocation-1', '33');
+      setValue('variant-allocation-2', '33');
+    });
+    setValue('analysis-confidence', '0.9');
+    setValue('estimate-baseline', '12');
+    setValue('estimate-mde', '5');
+    fireEvent.click(screen.getByTestId('estimate-calculate'));
+    await screen.findByTestId('estimate-per-variant');
+    // 0.1 is inside the endpoint's 0.01-0.1 bound; a divided 0.05 would not
+    // be what the copy says, and 0.1 / 2 is never sent.
+    expect((estimateCalls()[0][1]?.query as Record<string, unknown>).significance_level).toBe(0.1);
+    expect(screen.getByTestId('estimate-many-variants')).toHaveTextContent(
+      'With 3 variants, this estimate plans each comparison with the control at 10% significance and makes no correction for comparing several variants. The results will use the Benjamini-Hochberg correction chosen above, so the experiment needs more users than this.'
+    );
+  });
+
+  it('marks the estimate out of date when the confidence level changes', async () => {
+    api();
+    await toEstimate();
+    setValue('estimate-baseline', '12');
+    setValue('estimate-mde', '5');
+    fireEvent.click(screen.getByTestId('estimate-calculate'));
+    await screen.findByTestId('estimate-per-variant');
+    setValue('analysis-confidence', '0.99');
+    expect(screen.getByTestId('estimate-stale')).toBeInTheDocument();
+  });
+
+  it('keeps them in a collapsed "Analysis settings" section on the single-page form, with live values', () => {
+    routerAt({ advanced: '' });
+    api();
+    render(<NewExperimentPage />);
+    const details = screen.getByTestId('analysis-settings-details');
+    expect(details.tagName).toBe('DETAILS');
+    expect(details).not.toHaveAttribute('open');
+    const summary = screen.getByTestId('analysis-settings-summary');
+    expect(summary).toHaveTextContent('Analysis settings: 95% confidence, Benjamini-Hochberg correction');
+    setValue('analysis-confidence', '0.9');
+    setValue('analysis-correction', 'bonferroni');
+    expect(summary).toHaveTextContent('Analysis settings: 90% confidence, Bonferroni correction');
+  });
+});
+
+describe('accessibility of /experiments/new (axe-core in jsdom; colour contrast is not computable here)', () => {
+  const axeOptions: axe.RunOptions = { rules: { 'color-contrast': { enabled: false } } };
+
+  // The rendered page (React Testing Library's container), as the other page
+  // tests scan it; the app's layout, which supplies the landmarks, is not here.
+  async function violations() {
+    const container = document.querySelector('body > div');
+    if (!container) throw new Error('nothing rendered');
+    const result = await axe.run(container, axeOptions);
+    return result.violations.map((v) => `${v.id}: ${v.nodes.map((n) => n.target).join(', ')}`);
+  }
+
+  it('the Estimate step, with the None hint showing, has no axe violations', async () => {
+    api();
+    await toEstimate(() => {
+      fireEvent.click(screen.getByTestId('add-variant'));
+      setValue('variant-allocation-0', '34');
+      setValue('variant-allocation-1', '33');
+      setValue('variant-allocation-2', '33');
+    });
+    setValue('analysis-correction', 'none');
+    expect(await violations()).toEqual([]);
+  });
+
+  it('the Review step has no axe violations', async () => {
+    api();
+    await toEstimate();
+    next();
+    expect(await violations()).toEqual([]);
+  });
+
+  it('the single-page form, with Analysis settings open, has no axe violations', async () => {
+    routerAt({ advanced: '' });
+    api();
+    render(<NewExperimentPage />);
+    fireEvent.click(screen.getByTestId('analysis-settings-summary'));
+    expect(await violations()).toEqual([]);
   });
 });

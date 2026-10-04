@@ -94,7 +94,7 @@ Built using modern, scalable architecture leveraging AWS services:
 ### Statistical Rigor
 - **Bayesian & Frequentist**: Dual statistical approaches
 - **Sequential Testing**: Early stopping with O'Brien-Fleming bounds
-- **Multiple Testing Correction**: Bonferroni and other methods
+- **Multiple-comparison correction**: Benjamini-Hochberg by default, or Bonferroni, across each experiment's variants; stored with the experiment alongside its confidence level
 - **Sample Size Calculations**: Automatic power analysis
 
 ### Security controls
