@@ -48,6 +48,11 @@ Security headers are the last line of defence against a range of client-side att
 `RateLimitMiddleware` enforces per-IP, per-path sliding-window limits. Counters live in Redis
 (`RedisRateLimiter`, shared across API instances); when Redis is unreachable the middleware falls back to
 an in-process sliding window so requests are never rejected because the limiter is down.
+Each process counts on its own while Redis is unavailable, so per-IP limits are multiplied by the number
+of API processes (the running task count). The limiter tries Redis again every 30 s, with redis-py's client
+retries turned off so a retry holds a request for at most one connect timeout (2 s), and returns to shared
+counts within 30 s of Redis recovering. Each switch is logged once per process (a `rate_limiter` field), and
+the state is on `/metrics` as `rate_limit_redis_fallback_active`.
 
 Limits are resolved by `resolve_rate_limit(path)`: exact entries first, then SDK path prefixes, then the
 default.
@@ -181,7 +186,7 @@ The `decode_token` stub returns hardcoded values and performs no signature verif
 
 | Priority | Item |
 |---|---|
-| High | Replace in-memory rate limiter with Redis-backed solution before horizontal scaling |
+| Done | Redis-backed rate limiter, which returns to Redis within 30 s of an outage (#790). Follow-ups: #808 (calls without blocking the event loop), #809 (fallback key eviction), #810 (retries in the other Redis clients), #811 (the ApiErrorLogs filter) |
 | High | Audit all remaining schemas for missing length constraints (user.py, auth.py, metrics.py) |
 | Medium | Consider adding a WAF (AWS WAF) in front of the API for additional protection |
 | Medium | Evaluate whether `Access-Token-Expire-Minutes` (currently 8 days) is too long for the security posture |

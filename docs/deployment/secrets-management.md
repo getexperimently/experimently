@@ -102,7 +102,7 @@ connect over TLS (`ssl=True`). It defaults to `false`, for the plaintext
 there is no password to store: `REDIS_PASSWORD` stays unset.
 
 Redis is optional to the application: without it the rate limiter falls back
-to per-task memory and the caches are skipped, and `/health/ready` still
+to per-task memory (and retries Redis every 30 s) and the caches are skipped, and `/health/ready` still
 answers 200 unless `REDIS_REQUIRED=true`. So a Redis the tasks cannot reach (a
 TLS failure, say) does **not** fail a deployment by itself. Two things exist to
 catch it, and the first staging deploy uses one of them:
