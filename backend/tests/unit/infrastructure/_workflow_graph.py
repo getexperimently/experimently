@@ -16,7 +16,7 @@ from __future__ import annotations
 import itertools
 import re
 from pathlib import Path
-from typing import Any, Dict, Iterator, List, Optional, Tuple
+from typing import Any, Callable, Dict, Iterator, List, Optional, Set, Tuple
 
 from backend.tests.unit.infrastructure.test_docs_only_gate import _load
 
@@ -402,12 +402,14 @@ def workflow_files() -> List[Path]:
 Producer = Tuple[str, str, str]  # (event, workflow file, job id)
 
 
-def head_commit_producers() -> Tuple[Dict[str, List[Producer]], List[Producer]]:
+def head_commit_producers(
+    paths: Optional[List[Path]] = None,
+) -> Tuple[Dict[str, List[Producer]], List[Producer]]:
     """On a pull request's head commit: check name -> producers, and the
     producers whose name is only known at run time (a dynamic matrix)."""
     producers: Dict[str, List[Producer]] = {}
     unresolved: List[Producer] = []
-    for path in workflow_files():
+    for path in workflow_files() if paths is None else paths:
         workflow = load(path)
         for event in HEAD_COMMIT_EVENTS:
             if not fires(workflow, event):
@@ -418,3 +420,117 @@ def head_commit_producers() -> Tuple[Dict[str, List[Producer]], List[Producer]]:
                 else:
                     producers.setdefault(name, []).append((event, path.name, job_id))
     return producers, unresolved
+
+
+# --------------------------------------------------------------------------
+# Summary jobs: found by the check name they report
+# --------------------------------------------------------------------------
+
+#: An `if:` under which a job runs after one of its needs failed.
+RUNS_AFTER_FAILURE = re.compile(r"always\(\)|!\s*cancelled\(\)")
+
+#: The only `if:` a required summary may have. Anything added to it (a
+#: docs-only lane, say) can make it false, and a skipped required check is
+#: accepted as passing.
+SUMMARY_IF = ("always()", "${{ always() }}")
+
+#: (workflow file name, job id) -> True when that job is a classified work job
+#: (test_ci_classification.CLASSIFIED) that needs the classifier alone.
+ClassifiedWork = Callable[[str, str, Dict[str, Any]], bool]
+
+#: (workflow file name, job id, job, every job of that workflow)
+Summary = Tuple[str, str, Dict[str, Any], Dict[str, Any]]
+
+
+def needs_of(job: Dict[str, Any]) -> List[str]:
+    needs = job.get("needs") or []
+    return [needs] if isinstance(needs, str) else list(needs)
+
+
+def reported_names(path: Path) -> Dict[str, Set[str]]:
+    """job id -> every check name that job reports, for any head-commit event.
+
+    A job with no ``name:`` reports under its id (``integration-tests``), so
+    reading ``job["name"]`` misses it; this reads what GitHub shows.
+    """
+    names: Dict[str, Set[str]] = {}
+    for event in HEAD_COMMIT_EVENTS:
+        for job_id, name in check_names(path, event):
+            if not isinstance(name, Unresolved):
+                names.setdefault(job_id, set()).add(name)
+    return names
+
+
+def select_summaries(
+    paths: List[Path], required: List[str], classified_work: ClassifiedWork
+) -> List[Summary]:
+    """Every job that reports a required check name, has needs, runs after a
+    failed need, and is not a classified work job (R1)."""
+    wanted = set(required)
+    found: List[Summary] = []
+    for path in paths:
+        jobs = load(path).get("jobs") or {}
+        names = reported_names(path)
+        for job_id, job in jobs.items():
+            if not needs_of(job) or not RUNS_AFTER_FAILURE.search(
+                str(job.get("if", ""))
+            ):
+                continue
+            if classified_work(path.name, job_id, job):
+                continue
+            if names.get(job_id, set()) & wanted:
+                found.append((path.name, job_id, job, jobs))
+    return found
+
+
+def unguarded_required_names(
+    paths: List[Path], required: List[str], classified_work: ClassifiedWork
+) -> List[str]:
+    """R2: a required name whose producer has needs, and is neither a summary
+    that runs on exactly ``always()`` nor a classified job that needs only the
+    classifier. If a job it needs fails, such a producer is skipped -- and
+    branch protection accepts a skipped check. Empty when every one is sound."""
+    by_name = {p.name: p for p in paths}
+    selected = {
+        (w, j) for w, j, _, _ in select_summaries(paths, required, classified_work)
+    }
+    producers, _ = head_commit_producers(paths)
+    problems = []
+    for name in required:
+        for _event, workflow, job_id in producers.get(name, []):
+            job = (load(by_name[workflow]).get("jobs") or {})[job_id]
+            needs = needs_of(job)
+            if not needs:
+                continue
+            if (workflow, job_id) in selected and job.get("if") in SUMMARY_IF:
+                continue
+            if classified_work(workflow, job_id, job):
+                continue
+            problems.append(
+                f"{name!r} ({workflow}:{job_id}) needs {needs} with if: "
+                f"{job.get('if')!r}; it must be a summary whose if: is exactly "
+                "always(), or a classified job that needs only changes "
+                "(a skipped required check is green)"
+            )
+    return problems
+
+
+def unselected_runs_after_failure(
+    path: Path, required: List[str], classified_work: ClassifiedWork
+) -> List[str]:
+    """R3: in `path`, a job that runs after a failed need and needs more than
+    the classifier must be a summary R1 selects, so that it carries the
+    summary checks (toJSON(needs), closed needs). Empty when sound."""
+    selected = {j for _, j, _, _ in select_summaries([path], required, classified_work)}
+    problems = []
+    for job_id, job in (load(path).get("jobs") or {}).items():
+        if not RUNS_AFTER_FAILURE.search(str(job.get("if", ""))):
+            continue
+        extra = sorted(set(needs_of(job)) - {"changes"})
+        if extra and job_id not in selected:
+            problems.append(
+                f"{path.name}:{job_id} runs after a failed need (if: "
+                f"{job.get('if')!r}) and needs {extra} beyond changes, but is "
+                "not a required summary"
+            )
+    return problems

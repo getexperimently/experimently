@@ -14,14 +14,23 @@ be green over a failure:
   ``skipped`` (``SDK Unit Tests`` does, for SDKs a change does not touch)
   sees only the skips -- unless the failed ancestor is in its own ``needs``.
 
-The summary jobs are found, not listed: every job with such an ``if:`` whose
-name is a required check.
+The summary jobs are found, not listed: every job with such an ``if:`` that
+REPORTS a required check name (R1). A job with no ``name:`` reports under its
+id, so a selector reading ``job["name"]`` never saw an unnamed summary, and
+none of the checks below applied to it.
+
+And a required name produced by a job with ``needs`` must be one of those
+summaries with ``if:`` exactly ``always()``, or a classified job that needs
+only the classifier (R2). Otherwise a summary that lost its ``if:``, or gained
+a docs-only lane in it, is skipped -- and branch protection accepts a skipped
+check -- while simply dropping out of every check here.
 """
 
 from __future__ import annotations
 
 import re
-from typing import Any, Dict, List, Set, Tuple
+from pathlib import Path
+from typing import Any, Dict, List, Set
 
 import pytest
 import yaml
@@ -38,16 +47,12 @@ if not wg.CONFIGURE_REPO.is_file() or not wg.WORKFLOWS.is_dir():
 #: test is no longer checking it.
 EXPECTED = {"Release Gate Summary", "Security Scan Summary", "SDK Unit Tests"}
 
-RUNS_AFTER_FAILURE = re.compile(r"always\(\)|!\s*cancelled\(\)")
 TYPED_RESULT = re.compile(r"needs\.[A-Za-z_][\w-]*\.result")
 
-
-def _needs(job: Dict[str, Any]) -> List[str]:
-    needs = job.get("needs") or []
-    return [needs] if isinstance(needs, str) else list(needs)
+_needs = wg.needs_of
 
 
-def _is_classified_work(workflow: str, job_id: str) -> bool:
+def _is_classified_work(workflow: str, job_id: str, job: Dict[str, Any]) -> bool:
     """A job that runs after a FAILED classifier so that it does its work.
 
     ``!cancelled() && (needs.changes.result != 'success' || ...)`` matches
@@ -56,30 +61,38 @@ def _is_classified_work(workflow: str, job_id: str) -> bool:
     classifier alone, so it has no other ancestor to miss.
     """
     row = CLASSIFIED.get(workflow, {}).get(job_id)
-    return row is not None and row[1] == "changes"
+    return row is not None and row[1] == "changes" and _needs(job) == ["changes"]
 
 
-def _summaries() -> List[Tuple[str, str, Dict[str, Any], Dict[str, Any]]]:
-    required = set(wg.required_checks())
-    found = []
-    for path in wg.workflow_files():
-        workflow = wg.load(path)
-        for job_id, job in (workflow.get("jobs") or {}).items():
-            if not _needs(job) or not RUNS_AFTER_FAILURE.search(str(job.get("if", ""))):
-                continue
-            if _is_classified_work(path.name, job_id):
-                continue
-            if job.get("name") in required:
-                found.append((path.name, job_id, job, workflow["jobs"]))
-    return found
+def _summaries() -> List[wg.Summary]:
+    return wg.select_summaries(
+        wg.workflow_files(), wg.required_checks(), _is_classified_work
+    )
 
 
 SUMMARIES = _summaries()
 IDS = [f"{w}:{j}" for w, j, _, _ in SUMMARIES]
 
 
+def _reported(workflow: str, job_id: str) -> Set[str]:
+    return wg.reported_names(wg.WORKFLOWS / workflow)[job_id]
+
+
 def test_the_summaries_are_found():
-    assert {job["name"] for _, _, job, _ in SUMMARIES} == EXPECTED
+    required = set(wg.required_checks())
+    found = set()
+    for workflow, job_id, _, _ in SUMMARIES:
+        found |= _reported(workflow, job_id) & required
+    assert found == EXPECTED
+
+
+@pytest.mark.regression
+def test_every_required_name_with_needs_runs_after_failure():
+    """R2 on the real workflows."""
+    problems = wg.unguarded_required_names(
+        wg.workflow_files(), wg.required_checks(), _is_classified_work
+    )
+    assert not problems, "\n".join(problems)
 
 
 def reads_all_needs(job: Dict[str, Any]) -> List[str]:
@@ -146,3 +159,112 @@ def test_a_typed_list_is_refused():
 def test_a_dropped_ancestor_is_found():
     jobs = {"changes": {}, "linux": {"needs": "changes"}, "sum": {"needs": ["linux"]}}
     assert missing_ancestors(jobs["sum"], jobs) == {"changes"}
+
+
+# R1 and R2 against the defects they exist for, on synthetic workflows: an
+# unnamed summary (QA E5), a summary with no `if:`, and one whose `if:` adds a
+# docs-only lane.
+
+UNNAMED_TYPED = """\
+on: pull_request
+jobs:
+  shard:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        shard: [1, 2]
+    steps:
+      - run: pytest
+  integration-tests:
+    needs: shard
+{if_line}    runs-on: ubuntu-latest
+    steps:
+      - run: test "${{{{ needs.shard.result }}}}" = success
+"""
+
+
+def _workflow(tmp_path: Path, text: str) -> Path:
+    path = tmp_path / "integration-tests.yml"
+    path.write_text(text, encoding="utf-8")
+    return path
+
+
+def _no_classified(workflow: str, job_id: str, job: Dict[str, Any]) -> bool:
+    return False
+
+
+@pytest.mark.regression
+def test_an_unnamed_summary_is_found_by_its_check_name(tmp_path):
+    """R1: the summary reports `integration-tests` under its id, with no
+    `name:`; the old selector (``job.get("name") in required``) never saw it,
+    so its typed list of results went unreported."""
+    path = _workflow(
+        tmp_path, UNNAMED_TYPED.format(if_line="    if: ${{ !cancelled() }}\n")
+    )
+    found = wg.select_summaries([path], ["integration-tests"], _no_classified)
+    assert [(w, j) for w, j, _, _ in found] == [
+        ("integration-tests.yml", "integration-tests")
+    ]
+    assert "name" not in found[0][2]
+    assert reads_all_needs(found[0][2])
+
+
+@pytest.mark.regression
+@pytest.mark.parametrize(
+    "if_line",
+    [
+        "",
+        "    if: ${{ always() && needs.shard.outputs.docs_only != 'true' }}\n",
+        "    if: ${{ !cancelled() }}\n",
+    ],
+    ids=["no-if", "always-and-docs-only", "not-cancelled"],
+)
+def test_a_summary_that_can_skip_is_refused(tmp_path, if_line):
+    """R2: no `if:` skips the summary when a shard fails (QA E5); an `if:` that
+    adds a lane to always() skips it on that lane; `!cancelled()` reports
+    cancelled. Each of these is refused by name."""
+    path = _workflow(tmp_path, UNNAMED_TYPED.format(if_line=if_line))
+    problems = wg.unguarded_required_names(
+        [path], ["integration-tests"], _no_classified
+    )
+    assert len(problems) == 1, problems
+    assert problems[0].startswith(
+        "'integration-tests' (integration-tests.yml:integration-tests)"
+    )
+
+
+@pytest.mark.regression
+@pytest.mark.parametrize("cond", wg.SUMMARY_IF)
+def test_a_summary_on_exactly_always_is_accepted(tmp_path, cond):
+    path = _workflow(tmp_path, UNNAMED_TYPED.format(if_line=f"    if: {cond}\n"))
+    assert (
+        wg.unguarded_required_names([path], ["integration-tests"], _no_classified) == []
+    )
+
+
+@pytest.mark.regression
+def test_only_a_classified_job_needing_changes_alone_is_exempt(tmp_path):
+    text = """\
+on: pull_request
+jobs:
+  changes:
+    runs-on: ubuntu-latest
+    steps: [{run: "true"}]
+  other:
+    runs-on: ubuntu-latest
+    steps: [{run: "true"}]
+  unit-tests:
+    name: Unit Tests
+    needs: NEEDS
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    steps: [{run: pytest}]
+"""
+
+    def classified(workflow: str, job_id: str, job: Dict[str, Any]) -> bool:
+        return job_id == "unit-tests" and _needs(job) == ["changes"]
+
+    one = _workflow(tmp_path, text.replace("NEEDS", "changes"))
+    assert wg.unguarded_required_names([one], ["Unit Tests"], classified) == []
+    two = _workflow(tmp_path, text.replace("NEEDS", "[changes, other]"))
+    assert wg.unguarded_required_names([two], ["Unit Tests"], classified)
