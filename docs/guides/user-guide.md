@@ -569,11 +569,12 @@ Set `optimization_type` to `thompson_sampling`, `ucb1`, or `epsilon_greedy` when
 
 ### Interaction Detection — Are Your Experiments Interfering?
 
-When multiple experiments run simultaneously on overlapping user populations, they can distort each other's results. Run an interaction scan to find the pairs that share users. Only the overlap is measured yet: the interaction, novelty and SUTVA results are `null` ([#219](https://github.com/getexperimently/experimently/issues/219)).
+When multiple experiments run simultaneously on overlapping user populations, they can distort each other's results. Run an interaction scan to find the pairs that share users, then ask the pair route whether one experiment's effect differs across the other's arms (beta). The scan measures overlap only.
 
 Access via:
 ```text
 GET /api/v1/interactions/scan
+GET /api/v1/interactions/{exp_a_id}/{exp_b_id}
 ```
 
 If high-risk pairs are found, add the experiments to a [Mutual Exclusion Group](../api/mutual-exclusion-groups.md) to prevent overlap in future runs. See the [Interaction Detection Guide](../api/interaction-detection.md).

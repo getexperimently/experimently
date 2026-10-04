@@ -9,8 +9,8 @@ DB-backed regressions for #217 (CUPED) and #219 (interaction analysis).
 * CUPED counts conversions with ``event_matching.conversion_event_filter``: an
   exposure row carrying the metric's event name is not a conversion.
 * #219's exact case -- two experiments sharing the same 40 users and no events
-  -- answers with the overlap (1.0) and null interaction, novelty and SUTVA
-  results, and ``/novelty`` never answers ``has_novelty: false``.
+  -- answers with the overlap (1.0) and rows that say why they were not tested
+  (``too_few_shared_users``), never a verdict invented from user counts.
 * Every one of these responses carries the ``analysis_status`` and
   ``analysis_notice`` the table in ``backend/app/core/analysis_status.py`` holds.
 
@@ -227,10 +227,10 @@ def shared_pair(db_session, make_experiment):
 
 
 @pytest.mark.regression
-def test_shared_users_and_no_events_give_the_overlap_and_nulls(
+def test_shared_users_and_no_events_give_the_overlap_and_no_verdict(
     admin_client, shared_pair
 ):
-    """#219: no interaction/novelty/SUTVA result is invented from user counts."""
+    """#219: no interaction result is invented from user counts."""
     first, second = shared_pair
 
     response = admin_client.get(f"/api/v1/interactions/{first.id}/{second.id}")
@@ -239,30 +239,24 @@ def test_shared_users_and_no_events_give_the_overlap_and_nulls(
     body = response.json()
     assert body["overlap_coefficient"] == 1.0
     assert body["has_significant_overlap"] is True
-    assert body["interaction_result"] is None
-    assert body["novelty_result"] is None
-    assert body["sutva_result"] is None
-    # From the overlap alone: 1.0 is above the 0.6 high-overlap band.
-    assert body["overall_risk"] == "high"
+    assert body["shared_users"] == 40
+    assert body["share_of_a"] == body["share_of_b"] == 1.0
+    assert body["has_interaction"] is None
+    reasons = [row["unavailable_reason"] for row in body["interaction_results"]]
+    assert reasons == ["too_few_shared_users", "too_few_shared_users"]
+    for row in body["interaction_results"]:
+        assert row["is_significant"] is None and row["p_value"] is None
+    for gone in ("overall_risk", "interaction_result", "novelty_result"):
+        assert gone not in body
     label = ANALYSIS_STATUS["interactions"]
     assert body["analysis_status"] == label.status == "beta"
     assert body["analysis_notice"] == label.notice
     assert "/issues/219" in body["analysis_notice"]
 
 
-@pytest.mark.regression
-def test_novelty_is_not_computed_never_false(admin_client, shared_pair):
-    """#219: /novelty says not computed; it never answers has_novelty false."""
+def test_the_novelty_route_is_gone(admin_client, shared_pair):
     first, second = shared_pair
 
     response = admin_client.get(f"/api/v1/interactions/{first.id}/{second.id}/novelty")
 
-    assert response.status_code == 200, response.text
-    body = response.json()
-    assert body["has_novelty"] is not False
-    assert body["computed"] is False
-    assert body["has_novelty"] is None
-    assert body["decline_rate"] is None
-    label = ANALYSIS_STATUS["novelty"]
-    assert body["analysis_status"] == label.status == "beta"
-    assert body["analysis_notice"] == label.notice
+    assert response.status_code == 404

@@ -6,11 +6,11 @@ responses that carry it -- #217 (CUPED) and #219 (interaction analysis).
 * Every labelled response reads the table when it is built: patching an entry
   changes the response, so no response can hard-code its own label.
 * A notice is present exactly when the status is ``beta``.
-* The three routes whose numbers are not computed as described are marked
+* The two routes whose numbers are labelled beta are marked
   ``x-stability: beta`` in the live OpenAPI document; ``/interactions/scan``
-  and ``/results/{id}`` are not.
-* CUPED's ``none`` applies no adjustment (θ exactly 0.0), the pair analysis
-  invents no sub-result, and ``/novelty`` never answers ``has_novelty: false``.
+  and ``/results/{id}`` are not.  ``/interactions/{a}/{b}/novelty`` is gone.
+* CUPED's ``none`` applies no adjustment (θ exactly 0.0), and the stable
+  scan invents no sub-result.
 """
 
 import uuid
@@ -31,7 +31,6 @@ from backend.app.core.analysis_status import (
 from backend.app.schemas.interaction import (
     InteractionAnalysisResponse,
     InteractionPairResponse,
-    NoveltyAnalysisResponse,
 )
 from backend.app.schemas.variance_reduction import (
     CupedResultsResponse,
@@ -49,13 +48,12 @@ pytestmark = pytest.mark.unit
 EXPECTED_STATUS = {
     "cuped": "beta",
     "interactions": "beta",
-    "novelty": "beta",
     "sequential": "beta",
     "warehouse_proportion": "ga",
     "warehouse_mean": "ga",
 }
 
-EXPECTED_ISSUE = {"cuped": 217, "interactions": 219, "novelty": 219, "sequential": 232}
+EXPECTED_ISSUE = {"cuped": 217, "interactions": 219, "sequential": 232}
 
 
 # ---------------------------------------------------------------------------
@@ -121,17 +119,17 @@ def _pair() -> InteractionPairResponse:
     return InteractionPairResponse(
         experiment_a_id="a",
         experiment_b_id="b",
-        overlap_coefficient=0.5,
-        has_significant_overlap=True,
-        overall_risk="medium",
+        shared_users=0,
+        share_of_a=0.0,
+        share_of_b=0.0,
+        overlap_coefficient=0.0,
+        has_significant_overlap=False,
+        min_users_per_cell=100,
+        min_expected_per_cell=25,
     )
 
 
-def _novelty() -> NoveltyAnalysisResponse:
-    return NoveltyAnalysisResponse(recommendation="not computed")
-
-
-BUILDERS = {"cuped": _cuped, "interactions": _pair, "novelty": _novelty}
+BUILDERS = {"cuped": _cuped, "interactions": _pair}
 
 
 @pytest.mark.parametrize("name", sorted(BUILDERS))
@@ -163,7 +161,6 @@ def test_the_stable_scan_schema_is_not_labelled():
 BETA_OPERATIONS = {
     ("get", "/api/v1/results/{experiment_id}/cuped"),
     ("get", "/api/v1/interactions/{exp_a_id}/{exp_b_id}"),
-    ("get", "/api/v1/interactions/{exp_a_id}/{exp_b_id}/novelty"),
 }
 
 STILL_STABLE = {
@@ -216,84 +213,47 @@ def _users(first, second):
 SHARED_40 = {f"shared-user-{i}" for i in range(40)}
 
 
+def _pair_route():
+    """The pair route with its experiments found and its analysis built now."""
+    service = InteractionDetectionService
+    return (
+        patch.object(service, "load_experiment", return_value=MagicMock()),
+        patch.object(
+            service, "analyze_pair_interactions", side_effect=lambda *a: _pair()
+        ),
+    )
+
+
 def test_pair_route_answers_with_the_tables_label(client, monkeypatch):
     a, b = uuid.uuid4(), uuid.uuid4()
-    with _users(SHARED_40, SHARED_40):
+    found, analysed = _pair_route()
+    with found, analysed:
         body = client.get(f"/api/v1/interactions/{a}/{b}").json()
     assert body["analysis_status"] == "beta"
     assert body["analysis_notice"] == analysis_notice("interactions")
 
     monkeypatch.setitem(table.ANALYSIS_STATUS, "interactions", AnalysisLabel("ga"))
-    with _users(SHARED_40, SHARED_40):
+    found, analysed = _pair_route()
+    with found, analysed:
         body = client.get(f"/api/v1/interactions/{a}/{b}").json()
     assert body["analysis_status"] == "ga"
     assert body["analysis_notice"] is None
 
 
-def test_pair_route_with_no_overlap_is_labelled_too(client):
+def test_the_pair_notice_states_the_corrected_decision_in_percentage_points():
+    notice = analysis_notice("interactions")
+    assert "percentage points" in notice
+    assert "corrected" in notice
+    assert "unadjusted" not in notice
+    assert "novelty" not in notice.lower()
+
+
+def test_novelty_is_gone_from_the_table_and_the_routes(client, openapi):
+    assert "novelty" not in ANALYSIS_STATUS
+    assert not [path for path in openapi["paths"] if "novelty" in path]
     a, b = uuid.uuid4(), uuid.uuid4()
-    with _users({"u1"}, {"u2"}):
-        body = client.get(f"/api/v1/interactions/{a}/{b}").json()
-    assert body["overlap_coefficient"] == 0.0
-    assert body["overall_risk"] == "low"
-    assert body["analysis_status"] == "beta"
-
-
-def test_novelty_route_answers_with_the_tables_label(client, monkeypatch):
-    a, b = uuid.uuid4(), uuid.uuid4()
-    monkeypatch.setitem(table.ANALYSIS_STATUS, "novelty", AnalysisLabel("ga"))
-    with _users(SHARED_40, SHARED_40):
-        body = client.get(f"/api/v1/interactions/{a}/{b}/novelty").json()
-    assert body["analysis_status"] == "ga"
-    assert body["analysis_notice"] is None
-
-
-# ---------------------------------------------------------------------------
-# #219: nothing invented from user counts; novelty never false
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.regression
-def test_219_case_shared_users_give_overlap_and_null_sub_results(client):
-    """40 shared users, no events: overlap 1.0 and null sub-results."""
-    a, b = uuid.uuid4(), uuid.uuid4()
-    with _users(SHARED_40, SHARED_40):
-        body = client.get(f"/api/v1/interactions/{a}/{b}").json()
-    assert body["overlap_coefficient"] == 1.0
-    assert body["has_significant_overlap"] is True
-    assert body["interaction_result"] is None
-    assert body["novelty_result"] is None
-    assert body["sutva_result"] is None
-    assert body["overall_risk"] == "high"
-
-
-@pytest.mark.regression
-@pytest.mark.parametrize(
-    "first,second",
-    [
-        (SHARED_40, SHARED_40),  # overlap 1.0
-        ({"u1", "u2", "u3"}, {"u2", "u3", "u4"}),  # overlap 0.5
-        ({"u1"}, {"u2"}),  # no overlap
-        (set(), set()),  # no users at all
-    ],
-)
-def test_novelty_never_answers_has_novelty_false(client, first, second):
-    a, b = uuid.uuid4(), uuid.uuid4()
-    with _users(first, second):
-        response = client.get(f"/api/v1/interactions/{a}/{b}/novelty")
-    assert response.status_code == 200, response.text
-    body = response.json()
-    assert body["has_novelty"] is not False
-    assert body["computed"] is False
-    assert body["has_novelty"] is None
-    assert body["decline_rate"] is None
-
-
-def test_the_novelty_schema_refuses_a_default_false():
-    with pytest.raises(ValidationError):
-        NoveltyAnalysisResponse(computed=False, has_novelty=False, recommendation="x")
-    with pytest.raises(ValidationError):
-        NoveltyAnalysisResponse(computed=True, recommendation="x")
+    response = client.get(f"/api/v1/interactions/{a}/{b}/novelty")
+    assert response.status_code == 404
 
 
 @pytest.mark.parametrize(

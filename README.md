@@ -255,7 +255,7 @@ One codebase, two profiles. The **core profile** is `backend/` and `frontend/`: 
 feature flags end to end, targeting with 20+ operators, gradual rollouts, safety monitoring with
 automatic rollback, scheduling, the full statistics (frequentist and Bayesian, sequential testing,
 CUPED (beta), multi-armed bandits, mutual exclusion groups and global holdouts, dimensional
-breakdowns, experiment overlap detection (beta: interaction and novelty are not computed yet),
+breakdowns, experiment overlap and interaction detection (beta),
 live results), the four built-in roles, audit logging, API keys, alerting
 and every SDK. The **full profile** adds the optional modules under `modules/`, which plug into
 the core through the registration hooks in `backend/app/core/`:

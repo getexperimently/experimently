@@ -47,8 +47,7 @@ class AnalysisLabel:
 
 
 #: Keyed by the analysis, not the route: ``interactions`` labels
-#: ``GET /interactions/{a}/{b}``, ``novelty`` labels ``.../novelty``,
-#: ``cuped`` labels ``GET /results/{id}/cuped`` and ``sequential`` labels
+#: ``GET /interactions/{a}/{b}``, ``cuped`` labels ``GET /results/{id}/cuped`` and ``sequential`` labels
 #: ``GET /results/{id}/sequential``.
 ANALYSIS_STATUS: Dict[str, AnalysisLabel] = {
     "cuped": AnalysisLabel(
@@ -60,16 +59,13 @@ ANALYSIS_STATUS: Dict[str, AnalysisLabel] = {
     ),
     "interactions": AnalysisLabel(
         BETA,
-        "Beta: only the overlap between the two experiments' users is measured. "
-        "The interaction, novelty and SUTVA analyses are not computed yet, so "
-        "interaction_result, novelty_result and sutva_result are null and "
-        "overall_risk reflects the overlap alone. "
-        f"{_ISSUES}/219",
-    ),
-    "novelty": AnalysisLabel(
-        BETA,
-        "Beta: novelty is not computed yet, so has_novelty and decline_rate are "
-        "null. A null has_novelty means not computed, not no novelty. "
+        "Beta: tests whether each treatment's lift, in percentage points, on its "
+        "experiment's primary conversion metric differs across the other "
+        "experiment's variants, among the users in both. p_value is uncorrected; "
+        "corrected_p_value applies the experiment's stored correction across its "
+        "own treatments, and is_significant uses it at the experiment's "
+        "confidence level. Pairs are tested one at a time, with no correction "
+        "across pairs. Secondary and non-conversion metrics are not tested. "
         f"{_ISSUES}/219",
     ),
     # The confidence sequence is the inverted mSPRT (#231), so it agrees with

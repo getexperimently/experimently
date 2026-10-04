@@ -230,3 +230,24 @@ def first_conversion_times(
         for _, first in _assigned_converters(db, experiment_id, variant_id, event_name)
         if first is not None
     ]
+
+
+def converting_user_ids(
+    db: Session,
+    experiment_id: Any,
+    variant_id: Any,
+    event_name: Optional[str],
+) -> Set[str]:
+    """
+    The users ``count_converting_users`` counts, as a set of ids.
+
+    The same definition: a user assigned to ``variant_id`` with at least one
+    conversion tagged with that variant.  CUPED's outcome is read with it, so
+    its converters are exactly ``/results``' (#217).
+    """
+    return {
+        user_id
+        for user_id, _ in _assigned_converters(
+            db, experiment_id, variant_id, event_name
+        )
+    }
