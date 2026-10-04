@@ -10,9 +10,20 @@ Flag evaluation and experiment assignment are **decided by the server** by defau
 cached per user + key in memory. Server-side code can opt in to **local evaluation**
 (`evaluation: 'local'`, beta): flags are answered in-process from the server's ruleset, with the
 server's answers, and anything that cannot be answered exactly goes to the server. See
-[`docs/sdk/local-evaluation.md`](../../docs/sdk/local-evaluation.md).
+[`docs/sdk/local-evaluation.md`](https://github.com/getexperimently/experimently/blob/main/docs/sdk/local-evaluation.md).
 
-Full documentation: [`docs/sdk/javascript.md`](../../docs/sdk/javascript.md).
+Full documentation: [`docs/sdk/javascript.md`](https://github.com/getexperimently/experimently/blob/main/docs/sdk/javascript.md).
+
+## Install
+
+The package is on [npm](https://www.npmjs.com/package/@getexperimently/js-sdk). 0.1.0 is a
+beta release.
+
+```bash
+npm install @getexperimently/js-sdk@0.1.0
+```
+
+To work on the SDK itself, see [Development](#development) below.
 
 ## Quick start
 
@@ -96,11 +107,13 @@ Verified against a live backend: **yes (2026-09-11)**.
 
 ## Development
 
+From `sdk/js` in a clone of [this repository](https://github.com/getexperimently/experimently):
+
 ```bash
 npm install
 npm test
 npm run build
 ```
 
-- `npm test`: 171 Jest tests (fetch mocked; the local evaluator runs against tests/sdk-contract/ruleset-vectors.json)
+- `npm test`: the Jest tests (fetch mocked; the local evaluator runs against tests/sdk-contract/ruleset-vectors.json)
 - `npm run build`: tsc → dist/ (CommonJS + .d.ts)

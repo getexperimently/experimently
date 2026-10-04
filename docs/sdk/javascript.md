@@ -21,13 +21,14 @@ Verified against a live backend: **yes (2026-09-11)** via the contract smoke bel
 
 ## Installation
 
-**Not yet published.** `@getexperimently/js-sdk` is not on npm yet, so this fails today:
+The `@getexperimently/js-sdk` package is on [npm](https://www.npmjs.com/package/@getexperimently/js-sdk).
+0.1.0 is a beta release.
 
 ```bash
-npm install @getexperimently/js-sdk
+npm install @getexperimently/js-sdk@0.1.0
 ```
 
-Build it from a clone of this repository instead. `npm pack` writes
+To work on the SDK itself, build it from a clone of this repository instead. `npm pack` writes
 `getexperimently-js-sdk-0.1.0.tgz`:
 
 ```bash

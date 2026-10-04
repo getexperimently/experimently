@@ -269,6 +269,52 @@ your holdout has its own salt. A new user in the holdout is answered by
 `POST /api/v1/tracking/assign` with the control variant, `"assigned": false` and
 `"reason": "holdout"`.
 
+### GET /api/v1/holdout/{holdout_id}/results (beta)
+
+**Beta:** this measures the combined effect of running experiments' treatment arms on users first seen while the holdout was active. Feature flags and split-URL experiments ignore the holdout: once a winner ships behind a flag, users in the holdout get it too, so shipped features are not part of this comparison. `always_valid_ci_lower` and `always_valid_ci_upper` stay valid however often you check. See [#445](https://github.com/getexperimently/experimently/issues/445).
+
+For one event name (`metric`, required), it compares the share of users who sent at least one matching event in two groups: `in_holdout`, the users the holdout kept out, and `not_in_holdout`, everyone else first seen while it was active. A user is first seen the first time `POST /api/v1/tracking/assign` answers for them while the holdout is active. Every user recorded is in their group, including users the targeting rules or a mutual exclusion group turned away. A user who already had an experiment assignment before they were first seen is in neither group; `excluded_users` counts them, in total and per group.
+
+An event counts when its own time and the time the server received it are both between the user's first-seen time and the end of the holdout. Events received after a holdout ends never change its results. `window_end` is when the holdout was deactivated, or the time of your request while it is active. Events with or without an experiment or flag key count alike, so send the metric event for every user, held out or not: an integration that sends it only for users with `"assigned": true` leaves the holdout group without events and makes the experiments look better than they are. The SDKs' key-less `track()` sends it for held-out users too.
+
+`difference` is "not in holdout" minus "in holdout": a positive value means the running experiments raised the metric. `ci_lower` and `ci_upper` are a 95% interval for it (Agresti-Caffo) to read once; `always_valid_ci_lower` and `always_valid_ci_upper` are a confidence sequence (mSPRT). `p_value` and `is_significant` (`p_value < 0.05`) are Fisher's exact test, as on `/results`; the interval is computed separately, so near the boundary it can include 0 while `is_significant` is true, or the reverse. Only proportions are computed; mean metrics are [#835](https://github.com/getexperimently/experimently/issues/835). Any role that can read experiment results can read this route.
+
+`holdout_users_with_assignments` counts users in the holdout group who were assigned to an experiment while it was active. It is 0 unless a release that does not record holdouts served traffic, after a rollback; those users stay in their group, the difference is then smaller than the real one, and `analysis_notice` says so.
+
+`difference` is null, and `unavailable_reason` and `message` say why, in these cases:
+
+| `unavailable_reason` | When |
+|---|---|
+| `activated_before_measurement` | The holdout was active before the release that records who a holdout covers. Create a new holdout. |
+| `not_activated` | The holdout has not been activated since then. |
+| `too_few_users` | A group has fewer than 100 users. The groups and their counts are filled in. |
+| `no_events` | Neither group sent an event with this name in the window: check the event name. |
+
+On a fresh holdout neither group has 100 users yet:
+
+```{.bash exec}
+HOLDOUT_ID=$(curl -s localhost:8000/api/v1/holdout -H "Authorization: Bearer $TOKEN" | jq -r .id)
+curl -s "localhost:8000/api/v1/holdout/$HOLDOUT_ID/results?metric=purchase" \
+  -H "Authorization: Bearer $TOKEN" | jq '{unavailable_reason, groups: [.groups[] | {group, users}]}'
+```
+<!-- expect: "unavailable_reason": "too_few_users" -->
+
+```json
+{
+  "unavailable_reason": "too_few_users",
+  "groups": [
+    {
+      "group": "in_holdout",
+      "users": 0
+    },
+    {
+      "group": "not_in_holdout",
+      "users": 0
+    }
+  ]
+}
+```
+
 ---
 
 ## Permissions
@@ -276,6 +322,7 @@ your holdout has its own salt. A new user in the holdout is answered by
 | Action | Minimum Role |
 |--------|-------------|
 | List groups / view holdout | DEVELOPER |
+| Read holdout results | VIEWER |
 | Create / update groups | DEVELOPER |
 | Add/remove experiments from groups | DEVELOPER |
 | Archive groups / manage holdout | ADMIN |
@@ -286,5 +333,5 @@ your holdout has its own salt. A new user in the holdout is answered by
 
 1. Create mutual exclusion groups for each major product surface (checkout, onboarding, pricing)
 2. Add experiments to the appropriate group before activating them
-3. Set a 5% global holdout at the start of each quarter for cumulative impact measurement
-4. Review holdout vs. overall population metrics monthly
+3. Hold out 1–5% of new users for 1–3 months, then deactivate the holdout and create a new one.
+4. Read `GET /api/v1/holdout/{id}/results?metric=<event>` for your primary metric; it needs 100 users in each group.

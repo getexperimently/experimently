@@ -13,7 +13,7 @@
 
 [meta]
 documents = 37
-exec = 195
+exec = 196
 universe = [
     ".github/pull_request_template.md",
     "CHANGELOG.md",
@@ -280,9 +280,9 @@ expects = 8
 [[document]]
 path = "docs/api/mutual-exclusion-groups.md"
 environment = "stack"
-exec = 8
+exec = 9
 skip = 0
-expects = 14
+expects = 15
 
 [[document]]
 path = "docs/guides/experiment-wizard.md"

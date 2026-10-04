@@ -733,6 +733,25 @@ describe('track fan-out (no key)', () => {
     });
   });
 
+  it('fans out to an assignment the global holdout answered (assigned: false)', async () => {
+    // Holdout results (#445) count a held-out user's events exactly as everyone
+    // else's: a key-less track() must reach the held-out experiment too.
+    const fetchMock = mockFetchSequence(
+      { body: { ...controlAssignment, experiment_key: 'hero', assigned: false, reason: 'holdout' } },
+      { body: { success_count: 1, failure_count: 0 } }
+    );
+    const client = new ExperimentationClient(baseConfig);
+    const answer = await client.getAssignment('hero', user);
+    expect(answer.assigned).toBe(false);
+
+    await client.track('user-123', 'purchase');
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const { url, body } = call(fetchMock, 1);
+    expect(url).toBe('https://api.example.com/api/v1/tracking/batch');
+    expect(body.events.map((e: { experiment_key: string }) => e.experiment_key)).toEqual(['hero']);
+  });
+
   it('does not fan out to a failed assignment or an expired one', async () => {
     const now = jest.spyOn(Date, 'now').mockReturnValue(1_000_000);
     const fetchMock = mockFetchSequence(

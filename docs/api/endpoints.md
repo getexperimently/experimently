@@ -1466,12 +1466,12 @@ assignments = client.get_user_assignments(
 
 #### Installation
 
-**Not yet published.** `@getexperimently/js-sdk` is not on npm yet, so this line fails today.
-Build and install it from this repository instead, as described in the
-[JavaScript SDK](../sdk/javascript.md#installation) page.
+The `@getexperimently/js-sdk` package is on npm (0.1.0, beta). The
+[JavaScript SDK](../sdk/javascript.md#installation) page also shows how to build and install it
+from this repository.
 
 ```bash
-npm install @getexperimently/js-sdk
+npm install @getexperimently/js-sdk@0.1.0
 ```
 
 #### Basic Usage
@@ -2105,6 +2105,7 @@ GET  /api/v1/holdout/all          — List all holdouts (ADMIN)
 POST /api/v1/holdout              — Create holdout (ADMIN)
 PUT  /api/v1/holdout/{id}         — Update holdout (ADMIN)
 GET  /api/v1/holdout/check/{uid}  — Check if user is in holdout
+GET  /api/v1/holdout/{id}/results — Holdout vs everyone else for one metric (beta)
 ```
 
 ---

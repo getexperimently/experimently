@@ -88,6 +88,7 @@ INVENTORY: Dict[str, str] = {
     "backend/app/services/event_service.py::EventService.track_conversion": READS,
     "backend/app/services/export_service.py::ExportService._count_assignments": READS,
     "backend/app/services/export_service.py::ExportService._experiments_to_rows": READS,
+    "backend/app/services/holdout_results.py::count_statement": READS,
     "backend/app/services/interaction_detection_service.py::InteractionDetectionService._arm_totals": READS,
     "backend/app/services/interaction_detection_service.py::InteractionDetectionService._get_experiment_users": READS,
     "backend/app/services/interaction_detection_service.py::InteractionDetectionService._shared_assignments": READS,

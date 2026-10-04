@@ -47,7 +47,8 @@ JavaScript and Python SDKs send the context today; the other SDKs will follow.
 
 Every SDK was rewired to the contract above in September 2026: the server decides assignment and flag
 evaluation, results are cached per user + key, and `track` fans out to the user's cached assignments and
-flags when no key is given. The MD5 consistent hash remains exported by each SDK as a compatibility utility
+flags when no key is given. The cached assignments include answers with `"assigned": false` (a user the
+global holdout kept out, for example): holdout results count those users' events like everyone else's. The MD5 consistent hash remains exported by each SDK as a compatibility utility
 (the golden-vector tests still cover it). It is not the function the server buckets flag rollouts with,
 and nothing uses it to decide a flag or a variant; local evaluation (JavaScript and Python, opt-in) uses
 the server's `md5-mod100-v1` bucketing instead.
@@ -190,13 +191,13 @@ Smoke against a live backend: `python sdk/python/examples/contract_smoke.py`.
 
 ### Installation
 
-**Not yet published.** `@getexperimently/js-sdk` is not on npm yet, so this fails today:
+The `@getexperimently/js-sdk` package is on [npm](https://www.npmjs.com/package/@getexperimently/js-sdk) (0.1.0, beta):
 
 ```bash
-npm install @getexperimently/js-sdk
+npm install @getexperimently/js-sdk@0.1.0
 ```
 
-Build it from a clone of this repository instead. `npm pack` writes
+To work on the SDK itself, build it from a clone of this repository instead. `npm pack` writes
 `getexperimently-js-sdk-0.1.0.tgz`:
 
 ```bash

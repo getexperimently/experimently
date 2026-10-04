@@ -647,6 +647,12 @@
         "summary": "Update a global holdout"
       }
     },
+    "/api/v1/holdout/{holdout_id}/results": {
+      "get": {
+        "operationId": "get_holdout_results_api_v1_holdout__holdout_id__results_get",
+        "summary": "Beta: results for a global holdout"
+      }
+    },
     "/api/v1/integrations": {
       "get": {
         "operationId": "list_integrations_api_v1_integrations_get",
