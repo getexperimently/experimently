@@ -216,107 +216,133 @@ def mock_sequential_analysis():
 # ---------------------------------------------------------------------------
 
 
+class _DictCache:
+    """An in-memory stand-in for the Redis-backed results cache."""
+
+    def __init__(self) -> None:
+        self.store: Dict[str, str] = {}
+
+    def get(self, key: str):
+        return self.store.get(key)
+
+    def set(self, key: str, value: str, expire: int = 0) -> None:
+        self.store[key] = value
+
+
+def _results_experiment(mock_db, enabled: bool):
+    """The experiment the results route loads, with sequential testing on or off.
+
+    The flag is set explicitly: a bare MagicMock attribute is truthy, which
+    would send a "disabled" test down the enabled path.
+    """
+    experiment = mock_db.query.return_value.filter.return_value.first.return_value
+    experiment.id = EXPERIMENT_UUID
+    experiment.sequential_testing_enabled = enabled
+    experiment.sequential_testing_method = "msprt"
+    experiment.sequential_testing_config = {"tau_squared": 0.001}
+    experiment.start_date = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    return experiment
+
+
 class TestSequentialTestingInResults:
-    """Tests for sequential_testing field in GET /api/v1/results/{experiment_id}."""
+    """The sequential_testing block of GET /api/v1/results/{experiment_id} (#922).
+
+    These tests drive the experiment's ``sequential_testing_enabled`` flag and
+    let the route compute the block.  They used to have the mocked analysis
+    service return a ``sequential_testing`` key itself, a key the real service
+    never produces, so they passed while the field was always null.
+    """
+
+    @staticmethod
+    def _get_results(client, results, sequential_data=(500, 5000, 600, 5000), **kw):
+        with (
+            patch("backend.app.api.v1.endpoints.results.AnalysisService") as MockCls,
+            patch(
+                "backend.app.api.v1.endpoints.results._get_sequential_data",
+                **(
+                    {"side_effect": sequential_data}
+                    if isinstance(sequential_data, BaseException)
+                    else {"return_value": sequential_data}
+                ),
+            ),
+        ):
+            MockCls.return_value.get_experiment_results.return_value = results
+            return client.get(
+                f"/api/v1/results/{EXPERIMENT_UUID}",
+                params={"use_cache": "false", **kw},
+            )
 
     @pytest.mark.unit
     def test_results_include_sequential_testing_null_when_disabled(
-        self, client, mock_experiment_results_with_sequential
+        self, client, mock_db, mock_experiment_results_with_sequential
     ):
-        """Non-sequential experiments should have sequential_testing=null."""
-        results = {
-            **mock_experiment_results_with_sequential,
-            "sequential_testing_enabled": False,
-            # No "sequential_testing" key — should remain null in response
-        }
-        results.pop("sequential_testing", None)
-
-        with patch("backend.app.api.v1.endpoints.results.AnalysisService") as MockCls:
-            mock_instance = MagicMock()
-            mock_instance.get_experiment_results.return_value = results
-            MockCls.return_value = mock_instance
-            response = client.get(
-                f"/api/v1/results/{EXPERIMENT_UUID}",
-                params={"use_cache": "false"},
+        """Sequential testing off: null, and the analysis is never computed."""
+        _results_experiment(mock_db, enabled=False)
+        with patch(
+            "backend.app.api.v1.endpoints.results._compute_sequential_response"
+        ) as compute:
+            response = self._get_results(
+                client, mock_experiment_results_with_sequential
             )
 
         assert response.status_code == 200
-        data = response.json()
-        assert data.get("sequential_testing") is None
+        assert response.json()["sequential_testing"] is None
+        compute.assert_not_called()
 
     @pytest.mark.unit
+    @pytest.mark.regression
     def test_results_include_sequential_testing_when_enabled(
-        self, client, mock_experiment_results_with_sequential, mock_sequential_analysis
+        self,
+        client,
+        mock_db,
+        mock_experiment_results_with_sequential,
+        mock_sequential_analysis,
     ):
-        """Sequential experiments should have sequential_testing populated."""
-        results = {
-            **mock_experiment_results_with_sequential,
-            "sequential_testing": {
-                "method": "msprt",
-                "msprt_result": {
-                    "lambda_ratio": 25.0,
-                    "always_valid_p_value": 0.04,
-                    "can_stop": True,
-                    "evidence_strength": "strong_for_effect",
-                    "boundary": 20.0,
-                },
-                "confidence_sequence": {
-                    "lower": 0.01,
-                    "upper": 0.08,
-                    "width": 0.07,
-                    "sample_size": 10000,
-                },
-                "evidence_trajectory": [],
-                "alpha_spending": [],
-                "long_running_risk": None,
-                "recommended_action": "stop_for_effect",
-            },
-        }
+        """Sequential testing on: the route computes the block from the experiment."""
+        _results_experiment(mock_db, enabled=True)
+        results = dict(mock_experiment_results_with_sequential)
+        assert "sequential_testing" not in results  # the service never sets it
 
-        with patch("backend.app.api.v1.endpoints.results.AnalysisService") as MockCls:
-            mock_instance = MagicMock()
-            mock_instance.get_experiment_results.return_value = results
-            MockCls.return_value = mock_instance
-            response = client.get(
-                f"/api/v1/results/{EXPERIMENT_UUID}",
-                params={"use_cache": "false"},
+        with patch(
+            "backend.app.api.v1.endpoints.results.SequentialTestingService"
+        ) as MockService:
+            MockService.return_value.run_sequential_analysis.return_value = (
+                mock_sequential_analysis
             )
+            response = self._get_results(client, results)
 
         assert response.status_code == 200
         data = response.json()
         assert data["sequential_testing"] is not None
         assert data["sequential_testing"]["method"] == "msprt"
         assert data["sequential_testing"]["recommended_action"] == "stop_for_effect"
+        assert data["sequential_testing"]["analysis_status"] == "beta"
+        kwargs = MockService.return_value.run_sequential_analysis.call_args.kwargs
+        assert (
+            kwargs["control_successes"],
+            kwargs["control_total"],
+            kwargs["treatment_successes"],
+            kwargs["treatment_total"],
+        ) == (500, 5000, 600, 5000)
 
     @pytest.mark.unit
     def test_sequential_msprt_result_fields(
-        self, client, mock_experiment_results_with_sequential
+        self,
+        client,
+        mock_db,
+        mock_experiment_results_with_sequential,
+        mock_sequential_analysis,
     ):
         """mSPRT result should contain lambda_ratio, can_stop, evidence_strength."""
-        results = {
-            **mock_experiment_results_with_sequential,
-            "sequential_testing": {
-                "method": "msprt",
-                "msprt_result": {
-                    "lambda_ratio": 25.0,
-                    "always_valid_p_value": 0.04,
-                    "can_stop": True,
-                    "evidence_strength": "strong_for_effect",
-                    "boundary": 20.0,
-                },
-                "evidence_trajectory": [],
-                "alpha_spending": [],
-                "recommended_action": "stop_for_effect",
-            },
-        }
-
-        with patch("backend.app.api.v1.endpoints.results.AnalysisService") as MockCls:
-            mock_instance = MagicMock()
-            mock_instance.get_experiment_results.return_value = results
-            MockCls.return_value = mock_instance
-            response = client.get(
-                f"/api/v1/results/{EXPERIMENT_UUID}",
-                params={"use_cache": "false"},
+        _results_experiment(mock_db, enabled=True)
+        with patch(
+            "backend.app.api.v1.endpoints.results.SequentialTestingService"
+        ) as MockService:
+            MockService.return_value.run_sequential_analysis.return_value = (
+                mock_sequential_analysis
+            )
+            response = self._get_results(
+                client, mock_experiment_results_with_sequential
             )
 
         assert response.status_code == 200
@@ -328,32 +354,22 @@ class TestSequentialTestingInResults:
 
     @pytest.mark.unit
     def test_sequential_confidence_sequence_fields(
-        self, client, mock_experiment_results_with_sequential
+        self,
+        client,
+        mock_db,
+        mock_experiment_results_with_sequential,
+        mock_sequential_analysis,
     ):
         """Confidence sequence should contain lower, upper, width, sample_size."""
-        results = {
-            **mock_experiment_results_with_sequential,
-            "sequential_testing": {
-                "method": "msprt",
-                "confidence_sequence": {
-                    "lower": 0.01,
-                    "upper": 0.08,
-                    "width": 0.07,
-                    "sample_size": 10000,
-                },
-                "evidence_trajectory": [],
-                "alpha_spending": [],
-                "recommended_action": "stop_for_effect",
-            },
-        }
-
-        with patch("backend.app.api.v1.endpoints.results.AnalysisService") as MockCls:
-            mock_instance = MagicMock()
-            mock_instance.get_experiment_results.return_value = results
-            MockCls.return_value = mock_instance
-            response = client.get(
-                f"/api/v1/results/{EXPERIMENT_UUID}",
-                params={"use_cache": "false"},
+        _results_experiment(mock_db, enabled=True)
+        with patch(
+            "backend.app.api.v1.endpoints.results.SequentialTestingService"
+        ) as MockService:
+            MockService.return_value.run_sequential_analysis.return_value = (
+                mock_sequential_analysis
+            )
+            response = self._get_results(
+                client, mock_experiment_results_with_sequential
             )
 
         assert response.status_code == 200
@@ -361,6 +377,71 @@ class TestSequentialTestingInResults:
         assert cs["lower"] == 0.01
         assert cs["upper"] == 0.08
         assert cs["width"] == 0.07
+        assert cs["sample_size"] == 10000
+
+    @pytest.mark.unit
+    @pytest.mark.regression
+    def test_a_failed_sequential_analysis_is_null_and_logged(
+        self, client, mock_db, mock_experiment_results_with_sequential
+    ):
+        """A failure is null plus one warning naming the experiment; still 200."""
+        _results_experiment(mock_db, enabled=True)
+        with patch("backend.app.api.v1.endpoints.results.logger") as log:
+            response = self._get_results(
+                client,
+                mock_experiment_results_with_sequential,
+                sequential_data=RuntimeError("boom"),
+            )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["sequential_testing"] is None
+        assert data["metrics"]  # the rest of the response is unaffected
+        warnings = [
+            c.args[0] % c.args[1:]
+            for c in log.warning.call_args_list
+            if "Sequential analysis" in c.args[0]
+        ]
+        assert len(warnings) == 1, warnings
+        assert str(EXPERIMENT_UUID) in warnings[0]
+        assert "RuntimeError" in warnings[0]
+        assert "boom" not in warnings[0]  # the class name only, not the message
+
+    @pytest.mark.unit
+    @pytest.mark.regression
+    def test_the_sequential_block_survives_the_results_cache(
+        self,
+        client,
+        mock_db,
+        mock_experiment_results_with_sequential,
+        mock_sequential_analysis,
+    ):
+        """A cached answer carries the same block as the fresh one."""
+        _results_experiment(mock_db, enabled=True)
+        cache = _DictCache()
+        with (
+            patch(
+                "backend.app.api.v1.endpoints.results._get_cache_service",
+                return_value=cache,
+            ),
+            patch(
+                "backend.app.api.v1.endpoints.results.SequentialTestingService"
+            ) as MockService,
+        ):
+            MockService.return_value.run_sequential_analysis.return_value = (
+                mock_sequential_analysis
+            )
+            fresh = self._get_results(client, mock_experiment_results_with_sequential)
+            assert len(cache.store) == 1
+            with patch(
+                "backend.app.api.v1.endpoints.results.AnalysisService"
+            ) as NotCalled:
+                cached = client.get(f"/api/v1/results/{EXPERIMENT_UUID}")
+                NotCalled.assert_not_called()
+
+        assert fresh.status_code == cached.status_code == 200
+        assert fresh.json()["sequential_testing"] is not None
+        assert cached.json()["sequential_testing"] == fresh.json()["sequential_testing"]
 
 
 # ---------------------------------------------------------------------------
@@ -420,6 +501,9 @@ class TestGetSequentialResults:
             response = client.get(f"/api/v1/results/{EXPERIMENT_UUID}/sequential")
 
         assert response.status_code == 404
+        assert response.json()["detail"] == (
+            "Sequential testing is not enabled for this experiment"
+        )
 
     @pytest.mark.unit
     def test_sequential_endpoint_returns_evidence_trajectory(
@@ -512,6 +596,7 @@ class TestGetSequentialResults:
             response = client.get(f"/api/v1/results/{EXPERIMENT_UUID}/sequential")
 
         assert response.status_code == 404
+        assert response.json()["detail"] == "Experiment not found"
 
     @pytest.mark.unit
     def test_sequential_continue_recommendation(self, client):

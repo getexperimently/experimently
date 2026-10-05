@@ -242,6 +242,35 @@ experiment's method is stored as `always_valid`, the notice adds that it is an a
 | `continue` | Keep running — not enough evidence yet |
 | `stop_for_futility` | Kept in the value set, but not returned by the current analysis: the mSPRT has no futility boundary. A long-running experiment is flagged with `at_risk` instead |
 
+### In the results response
+
+`GET /api/v1/results/{experiment_id}` and `GET /api/v1/experiments/{experiment_id}/results`
+carry the same analysis as `sequential_testing`, computed by the same code as
+`/sequential` without `alpha`: the primary metric, the control against the first
+treatment, at the stored `sequential_testing_config.alpha`. The `alpha` parameter exists
+only on `/sequential`, and the results routes' `confidence_level` and
+`correction_method` do not change this block. It is `null` when sequential testing is
+off. It is also `null` when the analysis could not be computed: the API logs a warning,
+the rest of the response is unaffected, and `/sequential` answers with the error itself.
+
+It is cached with the rest of the results: for up to 5 minutes for a running experiment
+and 24 hours otherwise. A change to `sequential_testing_enabled` or
+`sequential_testing_config`, which is accepted on a running experiment, therefore shows
+here only when the cached answer expires or
+`POST /api/v1/results/{experiment_id}/invalidate-cache` clears it, not immediately;
+`/sequential` is not cached. The request below passes `use_cache=false` for that reason:
+
+```{.bash exec}
+curl -s "localhost:8000/api/v1/results/$EXP_ID?use_cache=false" \
+  -H "Authorization: Bearer $TOKEN" \
+  | jq '{embedded_method: .sequential_testing.method, embedded_boundary: .sequential_testing.msprt_result.boundary}'
+```
+<!-- expect: "embedded_method": "msprt" -->
+<!-- expect: "embedded_boundary": 20 -->
+
+It prints `"embedded_method": "msprt"` and the boundary `20.0`, the same as the first
+`/sequential` request above.
+
 ---
 
 ## Permissions
