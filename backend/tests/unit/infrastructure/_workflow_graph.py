@@ -429,6 +429,15 @@ def head_commit_producers(
 #: An `if:` under which a job runs after one of its needs failed.
 RUNS_AFTER_FAILURE = re.compile(r"always\(\)|!\s*cancelled\(\)")
 
+#: Any `if:` that CAN run a job after a failed need: one that calls a status
+#: function other than a plain ``success()`` -- ``failure()``, ``cancelled()``
+#: (``!cancelled()`` included), ``always()`` -- or negates ``success()``.
+#: Wider than RUNS_AFTER_FAILURE on purpose: R3 reads this one, so a job on
+#: ``success() || failure()`` is not a summary that escaped every check.
+CAN_RUN_AFTER_FAILURE = re.compile(
+    r"\b(?:always|failure|cancelled)\s*\(\s*\)|!\s*success\s*\(\s*\)"
+)
+
 #: The only `if:` a required summary may have. Anything added to it (a
 #: docs-only lane, say) can make it false, and a skipped required check is
 #: accepted as passing.
@@ -518,13 +527,14 @@ def unguarded_required_names(
 def unselected_runs_after_failure(
     path: Path, required: List[str], classified_work: ClassifiedWork
 ) -> List[str]:
-    """R3: in `path`, a job that runs after a failed need and needs more than
-    the classifier must be a summary R1 selects, so that it carries the
-    summary checks (toJSON(needs), closed needs). Empty when sound."""
+    """R3: in `path`, a job whose `if:` can run it after a failed need
+    (CAN_RUN_AFTER_FAILURE) and that needs more than the classifier must be a
+    summary R1 selects, so that it carries the summary checks (toJSON(needs),
+    closed needs). Empty when sound."""
     selected = {j for _, j, _, _ in select_summaries([path], required, classified_work)}
     problems = []
     for job_id, job in (load(path).get("jobs") or {}).items():
-        if not RUNS_AFTER_FAILURE.search(str(job.get("if", ""))):
+        if not CAN_RUN_AFTER_FAILURE.search(str(job.get("if", ""))):
             continue
         extra = sorted(set(needs_of(job)) - {"changes"})
         if extra and job_id not in selected:
@@ -534,3 +544,18 @@ def unselected_runs_after_failure(
                 "not a required summary"
             )
     return problems
+
+
+def r3_workflows(
+    paths: List[Path], required: List[str], classified_work: ClassifiedWork
+) -> List[Path]:
+    """The workflows R3 applies to: every one with a classifier (a ``changes``
+    job) or a summary R1 selects. In the others a job after a failed need is
+    a notifier (``nightly-qa``'s, ``chart-kind``'s failure issues), not a
+    stand-in for a required check."""
+    out = []
+    for path in paths:
+        jobs = load(path).get("jobs") or {}
+        if "changes" in jobs or select_summaries([path], required, classified_work):
+            out.append(path)
+    return out

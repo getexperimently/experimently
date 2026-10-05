@@ -45,7 +45,12 @@ if not wg.CONFIGURE_REPO.is_file() or not wg.WORKFLOWS.is_dir():
 
 #: The summaries this test must find; if the selector stops finding one, the
 #: test is no longer checking it.
-EXPECTED = {"Release Gate Summary", "Security Scan Summary", "SDK Unit Tests"}
+EXPECTED = {
+    "Release Gate Summary",
+    "Security Scan Summary",
+    "SDK Unit Tests",
+    "integration-tests",
+}
 
 TYPED_RESULT = re.compile(r"needs\.[A-Za-z_][\w-]*\.result")
 
@@ -92,6 +97,30 @@ def test_every_required_name_with_needs_runs_after_failure():
     problems = wg.unguarded_required_names(
         wg.workflow_files(), wg.required_checks(), _is_classified_work
     )
+    assert not problems, "\n".join(problems)
+
+
+@pytest.mark.regression
+def test_every_job_after_a_failed_need_is_a_summary():
+    """R3 in every workflow with a classifier or a required summary, not only
+    pr-qa-gate.yml, and for any `if:` that can run after a failed need
+    (`failure()`, `cancelled()`, `success() || failure()`), not only
+    `always()` and `!cancelled()`."""
+    required = wg.required_checks()
+    scope = wg.r3_workflows(wg.workflow_files(), required, _is_classified_work)
+    names = {p.name for p in scope}
+    assert {
+        "pr-qa-gate.yml",
+        "sdk-unit-tests.yml",
+        "integration-tests.yml",
+        "release-gate.yml",
+        "security-scan.yml",
+    } <= names, sorted(names)
+    problems = []
+    for path in scope:
+        problems += wg.unselected_runs_after_failure(
+            path, required, _is_classified_work
+        )
     assert not problems, "\n".join(problems)
 
 
@@ -268,3 +297,78 @@ jobs:
     assert wg.unguarded_required_names([one], ["Unit Tests"], classified) == []
     two = _workflow(tmp_path, text.replace("NEEDS", "[changes, other]"))
     assert wg.unguarded_required_names([two], ["Unit Tests"], classified)
+
+
+# R3, widened, against the defects it exists for: a job on an `if:` that
+# RUNS_AFTER_FAILURE misses, and the same shape outside pr-qa-gate.yml.
+
+
+@pytest.mark.regression
+@pytest.mark.parametrize(
+    "cond",
+    [
+        "${{ success() || failure() }}",
+        "${{ failure() || cancelled() }}",
+        "${{ failure() }}",
+        "${{ !success() }}",
+    ],
+)
+def test_a_job_after_failure_on_any_status_function_is_refused(tmp_path, cond):
+    """It reads no needs and reports no required name, and it runs after a
+    shard failed. RUNS_AFTER_FAILURE matches none of these conditions, so the
+    old R3 passed it."""
+    text = UNNAMED_TYPED.format(if_line="    if: ${{ always() }}\n") + (
+        "  late:\n"
+        "    needs: [shard, integration-tests]\n"
+        f"    if: {cond}\n"
+        "    runs-on: ubuntu-latest\n"
+        "    steps: [{run: pytest}]\n"
+    )
+    path = _workflow(tmp_path, text)
+    assert not wg.RUNS_AFTER_FAILURE.search(cond) or "cancelled" in cond
+    assert wg.r3_workflows([path], ["integration-tests"], _no_classified) == [path]
+    assert wg.unselected_runs_after_failure(
+        path, ["integration-tests"], _no_classified
+    ) == [
+        f"integration-tests.yml:late runs after a failed need (if: {cond!r}) and "
+        "needs ['integration-tests', 'shard'] beyond changes, but is not a "
+        "required summary"
+    ]
+
+
+@pytest.mark.regression
+def test_a_job_after_failure_in_sdk_unit_tests_is_refused(tmp_path):
+    """The real sdk-unit-tests.yml with one job added: it runs after a failed
+    lane and is not its summary. The old R3 read pr-qa-gate.yml alone."""
+    real = wg.WORKFLOWS / "sdk-unit-tests.yml"
+    path = tmp_path / real.name
+    path.write_text(
+        real.read_text(encoding="utf-8").rstrip("\n") + "\n\n  late:\n"
+        "    needs: [changes, linux]\n"
+        "    if: ${{ success() || failure() }}\n"
+        "    runs-on: ubuntu-latest\n"
+        '    steps: [{run: "true"}]\n',
+        encoding="utf-8",
+    )
+    required = wg.required_checks()
+    assert wg.r3_workflows([real], required, _is_classified_work) == [real]
+    assert wg.unselected_runs_after_failure(real, required, _is_classified_work) == []
+    assert wg.r3_workflows([path], required, _is_classified_work) == [path]
+    assert wg.unselected_runs_after_failure(path, required, _is_classified_work) == [
+        "sdk-unit-tests.yml:late runs after a failed need (if: "
+        "'${{ success() || failure() }}') and needs ['linux'] beyond changes, "
+        "but is not a required summary"
+    ]
+
+
+def test_a_notifier_outside_the_scope_is_left_alone(tmp_path):
+    """No classifier and no required summary: nightly-qa's failure issue."""
+    path = tmp_path / "nightly.yml"
+    path.write_text(
+        "on: schedule\njobs:\n  a:\n    runs-on: ubuntu-latest\n"
+        '    steps: [{run: "true"}]\n  issue:\n    needs: a\n'
+        "    if: failure()\n    runs-on: ubuntu-latest\n"
+        '    steps: [{run: "true"}]\n',
+        encoding="utf-8",
+    )
+    assert wg.r3_workflows([path], ["integration-tests"], _no_classified) == []
