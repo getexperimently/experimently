@@ -205,3 +205,73 @@ def compute_srm_for_experiment(
     observed = {str(variant_id): int(count) for variant_id, count in count_rows}
 
     return compute_srm(observed, allocations, threshold=threshold)
+
+
+def sample_ratio_check(db: Session, experiment_id: UUID) -> Optional[Dict[str, Any]]:
+    """The SRM test for an experiment as a plain dict, or ``None``.
+
+    ``None`` when the test is undefined (see :func:`compute_srm_for_experiment`)
+    or when it, or reading its result, raised: a failed check is logged and
+    must never turn a results computation into an error, so it fails open.
+    """
+    try:
+        result = compute_srm_for_experiment(db, experiment_id)
+    except Exception as exc:
+        logger.warning("SRM check failed for experiment %s: %s", experiment_id, exc)
+        try:
+            db.rollback()
+        except Exception:  # pragma: no cover - defensive
+            pass
+        return None
+    if result is None:
+        return None
+    try:
+        return result.to_dict()
+    except Exception as exc:
+        logger.warning(
+            "SRM result for experiment %s could not be read (%s)",
+            experiment_id,
+            type(exc).__name__,
+        )
+        return None
+
+
+#: ``summary.recommendation`` when the sample-ratio check fails (#880).
+SRM_RECOMMENDATION: str = "INCONCLUSIVE"
+
+#: ``summary.recommendation_reason`` when the sample-ratio check fails (#880).
+SRM_RECOMMENDATION_REASON: str = (
+    "Sample-ratio mismatch: the observed assignment split does not match the "
+    "configured traffic allocation (p = {p_value:.2g}), so these results "
+    "cannot be trusted until the cause is found."
+)
+
+
+def recommendation_under_srm(
+    summary: Mapping[str, Any], srm: Optional[Mapping[str, Any]]
+) -> Dict[str, Any]:
+    """The summary's recommendation, given the sample-ratio check.
+
+    When ``srm`` is present and its ``warning`` is set, the randomisation is
+    broken and no recommendation from the numbers stands, not even
+    ``CONTINUE_TESTING`` (more data does not repair it): the answer is
+    ``INCONCLUSIVE`` with :data:`SRM_RECOMMENDATION_REASON`.  ``has_winner``
+    and ``winning_variant_id`` are left alone; they describe significance.
+
+    A ``None`` check (a bandit, fewer than two variants, no assignments, or
+    a check that raised) changes nothing.
+
+    Returns the ``recommendation`` and ``recommendation_reason`` to apply.
+    """
+    current = {
+        "recommendation": summary.get("recommendation"),
+        "recommendation_reason": summary.get("recommendation_reason"),
+    }
+    if srm is None or srm.get("warning") is not True:
+        return current
+    return {
+        "recommendation": SRM_RECOMMENDATION,
+        "recommendation_reason": SRM_RECOMMENDATION_REASON.format(
+            p_value=float(srm["p_value"])
+        ),
+    }

@@ -156,19 +156,19 @@ See `demo/streampulse/README.md`.
 - Show the results panel:
   - p-value < 0.001 — highly significant
   - 12% relative lift in signup conversion (7.5% → 8.4%)
-  - Confidence interval doesn't cross zero
   - "The platform made the decision: Ship It. No analyst needed to interpret this."
 - Click the **Sequential** tab (it appears when the experiment has a sequential analysis)
   - "mSPRT lets us peek at results without inflating false positives. No more waiting for a fixed sample size."
-- The dashboard has no Bayesian or CUPED tab. The Bayesian analysis is in the API
-  (`GET /api/v1/results/{id}/bayesian`, see `docs/api/bayesian.md`); show it from http://localhost:8000/api/v1/docs if
-  the audience asks.
-  - CUPED is in the API too (`GET /api/v1/results/{id}/cuped`). On ShopLab's checkout it adjusts almost nothing,
-    because the simulator's visitors are new and have no history; the Quick Start's `checkout_button_color` has
-    history and shows the reduction (see `docs/api/cuped.md`).
+- The Bayesian analysis: if the end of the **Overview** tab has a **Bayesian analysis (primary metric)** panel,
+  show it there. A version without that panel has it in the API only (`GET /api/v1/results/{id}/bayesian`, see
+  `docs/api/bayesian.md`); show it from http://localhost:8000/api/v1/docs if the audience asks.
+- CUPED has no tab in the dashboard; it is in the API (`GET /api/v1/results/{id}/cuped`). On ShopLab's checkout it
+  adjusts almost nothing, because the simulator's visitors are new and have no history; the Quick Start's
+  `checkout_button_color` has history and shows the reduction (see `docs/api/cuped.md`).
+- `docs/guides/dashboard-and-api.md` lists which capabilities have a screen and which are API only.
 
 **Key talking points:**
-- Multiple statistical methods in one platform (frequentist + sequential in the dashboard, Bayesian in the API)
+- Multiple statistical methods in one platform: frequentist, sequential and Bayesian
 - Platform-generated decision ("Ship It") — removes analyst bottleneck
 
 ---
@@ -178,11 +178,12 @@ See `demo/streampulse/README.md`.
 **What to show:**
 - Navigate to `/experiments` → click **Recommendation Algorithm MAB**
 - Show: 3 variants (algo_v1, v2, v3), Thompson Sampling, ACTIVE
-- Show the traffic allocation chart — algo_v2 is getting more traffic
+- Scroll to **Current traffic weights** — algo_v2 has the largest share of new traffic
   - "This started at 33/33/34%. Thompson Sampling has noticed v2 performs better (9% click rate vs 5–6%) and is routing more traffic there automatically."
   - "No one made that decision. The algorithm did."
-- Watch the live updates — traffic percentages shifting
+- Press **Refresh** to see the latest weights. The panel does not update by itself; `setup-local.sh` recomputes the weights every minute (`BANDIT_UPDATE_INTERVAL_MINUTES`, 5 by default)
   - "While we're talking, the platform is learning and reallocating."
+- The dashboard shows the current weights only. It has no chart of how they changed over time
 
 **Key talking points:**
 - MAB for optimization problems where you can't wait for a winner

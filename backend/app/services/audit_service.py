@@ -140,8 +140,10 @@ WRITTEN_ACTION_TYPES: frozenset = frozenset(
 )
 
 #: Action types only the modules write. In a core build the dashboard's list
-#: may carry these and nothing else beyond ``WRITTEN_ACTION_TYPES``.
-MODULES_ONLY_ACTION_TYPES: frozenset = frozenset()
+#: may carry these and nothing else beyond ``WRITTEN_ACTION_TYPES``. The
+#: modules' inventories (``modules/backend/tests/smoke/test_audit_inventory_modules.py``)
+#: pin it to what the modules write that core does not.
+MODULES_ONLY_ACTION_TYPES: frozenset = frozenset({ActionType.ROLE_UNASSIGN})
 
 
 @dataclass(frozen=True)
@@ -173,6 +175,10 @@ SYSTEM_EXPERIMENT_SCHEDULER = AuditActor(id=None, email="system:experiment-sched
 SYSTEM_ROLLOUT_SCHEDULER = AuditActor(id=None, email="system:rollout-scheduler")
 SYSTEM_SAFETY_MONITOR = AuditActor(id=None, email="system:safety-monitor")
 SYSTEM_COGNITO_SYNC = AuditActor(id=None, email="system:cognito-sync")
+#: SSO sign-in changing an existing account's role from its mapped groups.
+#: Written by the modules; reserved here so that every profile reads it the
+#: same way.
+SYSTEM_SSO_SYNC = AuditActor(id=None, email="system:sso-sync")
 
 #: The reserved ``user_email`` values of the system actors.
 SYSTEM_ACTOR_EMAILS: frozenset = frozenset(
@@ -182,6 +188,7 @@ SYSTEM_ACTOR_EMAILS: frozenset = frozenset(
         SYSTEM_ROLLOUT_SCHEDULER,
         SYSTEM_SAFETY_MONITOR,
         SYSTEM_COGNITO_SYNC,
+        SYSTEM_SSO_SYNC,
     )
 )
 

@@ -4,7 +4,23 @@ export type OperatorType =
   | 'greater_than_or_equal' | 'less_than_or_equal'
   | 'in' | 'not_in' | 'regex' | 'is_null' | 'is_not_null'
   | 'semver_eq' | 'semver_gt' | 'semver_lt' | 'semver_gte' | 'semver_lte'
-  | 'geo_within_radius' | 'time_window' | 'array_contains' | 'array_intersects';
+  | 'geo_within_radius' | 'time_window' | 'array_contains' | 'array_intersects'
+  | 'in_segment' | 'not_in_segment';
+
+/**
+ * Segment membership (#440). A condition `{"attribute": "segment", "operator":
+ * "in_segment", "value": "<segment id>"}` asks the server whether the user is a
+ * member; the value is a segment's id, chosen from a list, not typed.
+ */
+export const SEGMENT_OPERATORS: readonly OperatorType[] = ['in_segment', 'not_in_segment'];
+
+/** The attribute a segment condition names. */
+export const SEGMENT_ATTRIBUTE = 'segment';
+
+/** Whether `operator` is one of the two segment operators. */
+export function isSegmentOperator(operator: unknown): boolean {
+  return operator === 'in_segment' || operator === 'not_in_segment';
+}
 
 export type LogicalOperator = 'AND' | 'OR';
 
@@ -77,4 +93,6 @@ export const OPERATOR_LABELS: Record<OperatorType, string> = {
   time_window: 'within time window',
   array_contains: 'array contains',
   array_intersects: 'array intersects',
+  in_segment: 'is in segment',
+  not_in_segment: 'is not in segment',
 };

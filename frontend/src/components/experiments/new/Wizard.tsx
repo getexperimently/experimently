@@ -7,6 +7,7 @@ import { docsUrl } from '@/services/docs';
 import { EXPERIMENT_TYPE_LABELS, METRIC_TYPE_LABELS } from '@/types/experiments';
 import {
   buildCreatePayload,
+  configurationProblems,
   ExperimentFormAction,
   ExperimentFormState,
   FORM_EXPERIMENT_TYPES,
@@ -102,6 +103,7 @@ export function Wizard({ state, dispatch, error, isSubmitting, onCreate, onClear
   const [stepError, setStepError] = useState<string | null>(null);
   const [visitedMax, setVisitedMax] = useState(0);
   const [estimate, setEstimate] = useState<EstimatePanelState>(INITIAL_ESTIMATE_PANEL);
+  const [revealProblems, setRevealProblems] = useState(0);
   const headingRef = useRef<HTMLHeadingElement>(null);
   const firstRunRef = useRef(true);
   const shownRef = useRef<number | null>(null);
@@ -183,6 +185,10 @@ export function Wizard({ state, dispatch, error, isSubmitting, onCreate, onClear
     const problem = validateStep(step, state);
     if (problem) {
       setStepError(problem);
+      // A configuration problem may sit in a closed section: open it and focus it.
+      if (step === 'variants' && configurationProblems(state.variants).some((p) => p !== null)) {
+        setRevealProblems((n) => n + 1);
+      }
       return;
     }
     setStepError(null);
@@ -381,7 +387,11 @@ export function Wizard({ state, dispatch, error, isSubmitting, onCreate, onClear
 
           {step === 'variants' && (
             <>
-              <VariantsEditor variants={state.variants} dispatch={dispatch} />
+              <VariantsEditor
+                variants={state.variants}
+                dispatch={dispatch}
+                revealProblems={revealProblems}
+              />
               <div className="pt-2">
                 <TargetingRuleBuilder
                   value={state.rules}
@@ -398,6 +408,7 @@ export function Wizard({ state, dispatch, error, isSubmitting, onCreate, onClear
                 correctionMethod={state.correctionMethod}
                 dispatch={dispatch}
                 variantCount={state.variants.length}
+                bayesianEnabled={state.bayesianEnabled}
               />
               {/* Saved settings above; the advisory, unsaved estimate below. */}
               <section
@@ -455,6 +466,17 @@ export function Wizard({ state, dispatch, error, isSubmitting, onCreate, onClear
                   {payload.variants.map((v, i) => (
                     <li key={i}>
                       {v.name}: {v.traffic_allocation}%{v.is_control ? ' (control)' : ''}
+                      {v.configuration && (
+                        <>
+                          {', configuration '}
+                          <code
+                            className="font-mono break-all"
+                            data-testid={`review-variant-configuration-${i}`}
+                          >
+                            {JSON.stringify(v.configuration)}
+                          </code>
+                        </>
+                      )}
                     </li>
                   ))}
                 </ul>
@@ -484,6 +506,7 @@ export function Wizard({ state, dispatch, error, isSubmitting, onCreate, onClear
                     payload.confidence_level ?? state.confidenceLevel,
                     payload.correction_method ?? state.correctionMethod,
                   )}
+                  {payload.bayesian_enabled ? ' · Bayesian analysis on' : ''}
                 </p>
               </ReviewRow>
               <ReviewRow title="Estimate" onEdit={() => goTo(3)} editLabel="Edit estimate">

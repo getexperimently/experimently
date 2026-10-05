@@ -517,3 +517,57 @@ class TestOverrideBanditWeights:
         rec = response.json()["recommendation"]
         # Equal 50/50 weights: should be either EXPLORING or CONVERGING, not DEPLOYING
         assert rec in ("EXPLORING", "CONVERGING"), f"Unexpected recommendation: {rec}"
+
+
+class TestBanditStatusForTheDashboard:
+    """What the dashboard's read-only weights panel relies on (#442).
+
+    Every signed-in role reads the panel, so the route must answer a
+    non-superuser ANALYST and VIEWER; and the panel shows "no weights yet"
+    exactly when ``last_updated`` is null, so the route must leave it null
+    before the first update and set it after.
+    """
+
+    @pytest.mark.parametrize(
+        "role", [UserRole.ADMIN, UserRole.DEVELOPER, UserRole.ANALYST, UserRole.VIEWER]
+    )
+    def test_every_role_reads_the_weights(self, client, role):
+        user = _make_user(role=role, is_superuser=False)
+        exp = _make_experiment()
+        state = _make_bandit_state(exp.id, [v.id for v in exp.variants])
+        app.dependency_overrides[deps.get_current_active_user] = lambda: user
+        db_mock = MagicMock()
+        db_mock.query.return_value.filter.return_value.first.side_effect = [exp, state]
+        app.dependency_overrides[deps.get_db] = lambda: db_mock
+        try:
+            response = client.get(f"/api/v1/bandit/{exp.id}")
+        finally:
+            app.dependency_overrides.clear()
+        assert response.status_code == 200, (role, response.text)
+
+    def test_last_updated_is_null_before_the_first_update(self, client, viewer_user):
+        exp = _make_experiment()
+        app.dependency_overrides[deps.get_current_active_user] = lambda: viewer_user
+        db_mock = MagicMock()
+        db_mock.query.return_value.filter.return_value.first.side_effect = [exp, None]
+        app.dependency_overrides[deps.get_db] = lambda: db_mock
+        try:
+            response = client.get(f"/api/v1/bandit/{exp.id}")
+        finally:
+            app.dependency_overrides.clear()
+        assert response.status_code == 200
+        assert response.json()["last_updated"] is None
+
+    def test_last_updated_is_set_after_an_update(self, client, viewer_user):
+        exp = _make_experiment()
+        state = _make_bandit_state(exp.id, [v.id for v in exp.variants])
+        app.dependency_overrides[deps.get_current_active_user] = lambda: viewer_user
+        db_mock = MagicMock()
+        db_mock.query.return_value.filter.return_value.first.side_effect = [exp, state]
+        app.dependency_overrides[deps.get_db] = lambda: db_mock
+        try:
+            response = client.get(f"/api/v1/bandit/{exp.id}")
+        finally:
+            app.dependency_overrides.clear()
+        assert response.status_code == 200
+        assert response.json()["last_updated"] == state.last_computed_at

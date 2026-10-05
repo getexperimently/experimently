@@ -229,6 +229,67 @@ test.describe("Journey: RBAC", () => {
     });
   }
 
+  // Reading a bandit's current weights is allowed to every signed-in role
+  // (`GET /api/v1/bandit/{id}`), and the panel changes nothing, so all four
+  // roles get the same read-only panel. What it shows is compared with the
+  // server's own answer to the page's request, not with a value typed here:
+  // before the first update (`last_updated` null) the panel says so instead
+  // of showing the even split the server fills in.
+  for (const role of ["admin", "developer", "analyst", "viewer"] as const) {
+    test(`${role} reads a bandit's current traffic weights and is offered no change`, async ({ sessions }) => {
+      const page = await (await sessions(role)).newPage();
+      const experiments = new ExperimentsPage(page);
+      const writes: string[] = [];
+      page.on("request", (request) => {
+        const { pathname } = new URL(request.url());
+        if (pathname.startsWith("/api/v1/bandit/") && request.method() !== "GET") {
+          writes.push(`${request.method()} ${pathname}`);
+        }
+      });
+      try {
+        await experiments.goto();
+        await expect(experiments.experimentList).toBeVisible({ timeout: 15_000 });
+        const answer = page.waitForResponse(
+          (response) =>
+            new URL(response.url()).pathname.startsWith("/api/v1/bandit/") &&
+            response.request().method() === "GET",
+          { timeout: 20_000 },
+        );
+        // Seeded ACTIVE with Thompson sampling by seed_demo_data.py.
+        await experiments.clickExperiment("Recommendation Algorithm MAB");
+        const response = await answer;
+        expect(response.status(), `${role} may read the weights`).toBe(200);
+        const body = (await response.json()) as {
+          last_updated: string | null;
+          current_weights: { variant_id: string; current_weight: number }[];
+        };
+
+        const panel = page.getByTestId("bandit-weights");
+        await expect(panel).toBeVisible();
+        await expect(panel.getByTestId("bandit-weights-loading")).toHaveCount(0, { timeout: 15_000 });
+        await expect(panel.getByTestId("bandit-weights-error")).toHaveCount(0);
+        await expect(panel.getByRole("button")).toHaveText(["Refresh"]);
+
+        if (body.last_updated === null) {
+          await expect(panel.getByTestId("bandit-weights-empty")).toBeVisible();
+          await expect(panel.getByTestId("bandit-weights-table")).toHaveCount(0);
+        } else {
+          expect(body.current_weights.length).toBeGreaterThan(0);
+          await expect(panel.getByTestId("bandit-weight-row")).toHaveCount(body.current_weights.length);
+          for (const weight of body.current_weights) {
+            const row = panel.locator(`[data-testid="bandit-weight-row"][data-variant-id="${weight.variant_id}"]`);
+            await expect(row.getByTestId("bandit-weight-share")).toHaveText(
+              `${(weight.current_weight * 100).toFixed(1)}%`,
+            );
+          }
+        }
+        expect(writes, "the panel only reads").toEqual([]);
+      } finally {
+        await page.close();
+      }
+    });
+  }
+
   // The reported path end to end: guided setup redirects to the new
   // experiment's page, and its creator -- an ordinary DEVELOPER -- must be able
   // to open it. `createExperiment` resolves only once the detail has rendered.

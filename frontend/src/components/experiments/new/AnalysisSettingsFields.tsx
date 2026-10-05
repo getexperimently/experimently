@@ -6,6 +6,7 @@ import {
   DEFAULT_CONFIDENCE_LEVEL,
   formatConfidence,
 } from '@/components/results/shared/analysisSettings';
+import { docsUrl } from '@/services/docs';
 import { ExperimentFormAction } from './formState';
 import { wizardInputClass } from './fieldStyles';
 
@@ -35,6 +36,12 @@ function confidenceOptionLabel(level: number): string {
   return level === DEFAULT_CONFIDENCE_LEVEL ? `${text} (recommended)` : text;
 }
 
+export const BAYESIAN_LABEL = 'Also analyse the primary metric with Bayesian statistics';
+export const BAYESIAN_HELP =
+  'The results then also give, for the primary metric, the probability that each variant is the ' +
+  'best, using default priors. The frequentist results and the recommendation are unchanged. ' +
+  'Priors can be changed through the API.';
+
 /** The hint shown when None is chosen with three or more variants. */
 export function noCorrectionHint(variantCount: number, confidenceLevel: number): string {
   const alpha = Number(((1 - confidenceLevel) * 100).toFixed(1));
@@ -49,6 +56,7 @@ interface AnalysisSettingsFieldsProps {
   correctionMethod: CorrectionMethod;
   dispatch: React.Dispatch<ExperimentFormAction>;
   variantCount: number;
+  bayesianEnabled: boolean;
 }
 
 /**
@@ -61,6 +69,7 @@ export function AnalysisSettingsFields({
   correctionMethod,
   dispatch,
   variantCount,
+  bayesianEnabled,
 }: AnalysisSettingsFieldsProps) {
   const showHint = correctionMethod === 'none' && variantCount >= 3;
   return (
@@ -131,6 +140,28 @@ export function AnalysisSettingsFields({
               {noCorrectionHint(variantCount, confidenceLevel)}
             </p>
           )}
+        </div>
+      </div>
+      <div className="flex items-start gap-2">
+        <input
+          id="analysis-bayesian"
+          type="checkbox"
+          checked={bayesianEnabled}
+          onChange={(e) => dispatch({ type: 'setBayesianEnabled', bayesianEnabled: e.target.checked })}
+          aria-describedby="analysis-bayesian-help"
+          className="mt-1"
+          data-testid="analysis-bayesian"
+        />
+        <div>
+          <label htmlFor="analysis-bayesian" className="text-sm font-medium text-slate-700">
+            {BAYESIAN_LABEL}
+          </label>
+          <p id="analysis-bayesian-help" className="text-xs text-slate-600 mt-1">
+            {BAYESIAN_HELP}{' '}
+            <a href={docsUrl('api/bayesian')} className="text-blue-700 underline hover:text-blue-900">
+              How Bayesian analysis works
+            </a>
+          </p>
         </div>
       </div>
     </fieldset>

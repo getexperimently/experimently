@@ -17,10 +17,19 @@ interface AdvancedFormProps {
   error: CreateError | null;
   isSubmitting: boolean;
   onSubmit: (e: React.FormEvent) => void;
+  /** Changed each time a create was refused before sending; see `VariantsEditor`. */
+  revealProblems?: number;
 }
 
 /** Every field of a new experiment on one page, submitted with one button. */
-export function AdvancedForm({ state, dispatch, error, isSubmitting, onSubmit }: AdvancedFormProps) {
+export function AdvancedForm({
+  state,
+  dispatch,
+  error,
+  isSubmitting,
+  onSubmit,
+  revealProblems = 0,
+}: AdvancedFormProps) {
   // The key field is on this page: take the user straight to it.
   // A targeting problem is shown at the rules; anything else the error says goes here.
   const foot = footMessage(error);
@@ -44,7 +53,7 @@ export function AdvancedForm({ state, dispatch, error, isSubmitting, onSubmit }:
 
       {/* Variants */}
       <section className="bg-white rounded-lg border border-slate-200 p-6 space-y-4">
-        <VariantsEditor variants={state.variants} dispatch={dispatch} />
+        <VariantsEditor variants={state.variants} dispatch={dispatch} revealProblems={revealProblems} />
       </section>
 
       {/* Metrics */}
@@ -61,6 +70,7 @@ export function AdvancedForm({ state, dispatch, error, isSubmitting, onSubmit }:
           {state.correctionMethod === 'none'
             ? 'no correction'
             : `${correctionName(state.correctionMethod)} correction`}
+          {state.bayesianEnabled && ', Bayesian analysis on'}
         </summary>
         <div className="mt-4">
           <AnalysisSettingsFields
@@ -68,6 +78,7 @@ export function AdvancedForm({ state, dispatch, error, isSubmitting, onSubmit }:
             correctionMethod={state.correctionMethod}
             dispatch={dispatch}
             variantCount={state.variants.length}
+            bayesianEnabled={state.bayesianEnabled}
           />
         </div>
       </details>

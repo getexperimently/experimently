@@ -9,6 +9,7 @@ import { navigateHard, useLeaveGuard } from '@/components/experiments/new/leaveG
 import {
   buildCreatePayload,
   checkTargeting,
+  configurationProblems,
   createInitialFormState,
   experimentFormReducer,
   validateForm,
@@ -42,6 +43,7 @@ export default function NewExperimentPage() {
   const [state, dispatch] = useReducer(experimentFormReducer, undefined, createInitialFormState);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<CreateError | null>(null);
+  const [revealProblems, setRevealProblems] = useState(0);
   const submittingRef = useRef(false);
   // Cleared synchronously before the page navigates away after a create, so
   // the unsaved-answers warning never fires for work that was saved.
@@ -63,6 +65,9 @@ export default function NewExperimentPage() {
     const problem = validateForm(state.name, state.variants, state.metrics);
     if (problem) {
       setError({ message: problem });
+      if (configurationProblems(state.variants).some((p) => p !== null)) {
+        setRevealProblems((n) => n + 1);
+      }
       return;
     }
 
@@ -172,6 +177,7 @@ export default function NewExperimentPage() {
               error={error}
               isSubmitting={isSubmitting}
               onSubmit={handleAdvancedSubmit}
+              revealProblems={revealProblems}
             />
           </>
         ) : (

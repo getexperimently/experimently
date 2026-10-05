@@ -259,7 +259,8 @@ distribution, so repeated calls agree before the assignment row exists). Users w
 keep it. Variants whose weight is `0` receive no new traffic. Until the first refresh has run, new users are
 split by the variants' `traffic_allocation`.
 
-`POST /api/v1/bandit/{experiment_id}/update` forces an immediate refresh from the dashboard.
+`POST /api/v1/bandit/{experiment_id}/update` forces an immediate refresh. It is an API call: the
+dashboard has no control for it.
 
 ---
 

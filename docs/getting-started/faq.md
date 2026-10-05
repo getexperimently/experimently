@@ -63,10 +63,13 @@ The platform supports a range of statistical approaches:
 | Always-valid confidence intervals | Confidence sequences that are valid at every look |
 | Alpha spending (O'Brien-Fleming, Pocock) | Not computed yet: the response's `alpha_spending` is empty; use the mSPRT, which is valid under continuous monitoring |
 | CUPED | Variance reduction from each user's own events before assignment (API only) |
-| Bayesian (Beta-Binomial) | Posterior credible intervals, Bayes factors, probability of superiority, ROPE |
+| Bayesian (Beta-Binomial) | Posterior credible intervals, Bayes factors, probability of superiority, ROPE (priors and thresholds through the API only) |
 | Multi-armed bandit | Thompson Sampling, UCB1, and Epsilon-Greedy adaptive traffic allocation |
 | Dimensional analysis | Segment-level breakdowns with Bonferroni correction and heterogeneous treatment effect detection |
-| Interaction detection (beta) | Jaccard overlap between experiments; whether one experiment's lift on its primary conversion metric differs across another's arms |
+| Interaction detection (beta) | Jaccard overlap between experiments; whether one experiment's lift on its primary conversion metric differs across another's arms (API only) |
+
+[What the dashboard does, and what is API only](../guides/dashboard-and-api.md) says which of these the
+dashboard shows.
 
 ---
 
@@ -206,7 +209,7 @@ The platform uses a layered role-based access control system with four built-in 
 | **DEVELOPER** | Create and manage experiments, feature flags, and integrations |
 | **ADMIN** | Full access: user management, compliance exports, global settings |
 
-Beyond the four base roles, admins can create **custom roles** with specific per-resource and per-action permissions. They can also grant **direct permission** to a user for a specific resource, with an optional expiry timestamp for temporary access.
+Beyond the four base roles, admins can create **custom roles** with specific per-resource and per-action permissions. They can also grant **direct permission** to a user for a specific resource, with an optional expiry timestamp for temporary access. Both are stored and shown by `GET /api/v1/rbac/users/{user_id}/permissions`, but no permission check reads them yet: what a user can do is decided by their base role ([#891](https://github.com/getexperimently/experimently/issues/891)).
 
 See [RBAC API Reference](../api/rbac.md) for the full role and permission management API.
 

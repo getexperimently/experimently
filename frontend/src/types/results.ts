@@ -81,6 +81,56 @@ export interface MetricResult {
   variants: VariantResult[];
 }
 
+/**
+ * `SRMResult`: the sample-ratio check of assignment counts against the
+ * variants' traffic allocation. `warning` is the server's verdict
+ * (p_value < 0.001); the dashboard never applies a threshold of its own.
+ */
+export interface SrmResult {
+  chi2: number;
+  p_value: number;
+  warning: boolean;
+  /** Expected assignment count per variant id. */
+  expected: Record<string, number>;
+  /** Observed assignment count per variant id. */
+  observed: Record<string, number>;
+}
+
+/** `BayesianDecision`: the Bayesian stopping recommendation. */
+export type BayesianDecision = 'CONTINUE' | 'STOP_WINNER' | 'STOP_EQUIVALENT' | 'STOP_FUTILE';
+
+/** `BayesianPosteriorResult`: a variant's posterior for the primary metric's rate. */
+export interface BayesianPosteriorResult {
+  alpha: number;
+  beta: number;
+  mean: number;
+  credible_interval_lower: number;
+  credible_interval_upper: number;
+}
+
+/** `BayesianVariantResult`. `variant_key` is the variant's name. */
+export interface BayesianVariantResult {
+  variant_key: string;
+  posterior: BayesianPosteriorResult;
+  probability_to_be_best: number;
+  expected_loss: number;
+  bayes_factor?: number | null;
+}
+
+/** `BayesianResultsResponse`. */
+export interface BayesianResultsResponse {
+  is_enabled: boolean;
+  decision?: BayesianDecision | null;
+  variant_results?: BayesianVariantResult[];
+  /**
+   * Larger than a JavaScript number holds exactly, so it is never shown:
+   * JSON.parse rounds it.
+   */
+  seed?: number | null;
+  n_samples?: number | null;
+  engine_version?: string;
+}
+
 export interface ExperimentResultsResponse {
   experiment_id: string;
   experiment_name: string;
@@ -96,6 +146,13 @@ export interface ExperimentResultsResponse {
   sequential_testing?: SequentialTestingResponse | null;
   // Issue #28: Dimensional breakdown (null when not requested)
   breakdown?: DimensionalBreakdownResponse | null;
+  /** Null when Bayesian analysis is off, or when it could not be computed. */
+  bayesian_results?: BayesianResultsResponse | null;
+  /**
+   * Null for a bandit, fewer than two variants, no assignments yet, or a
+   * check that failed on the server. Null is not a pass.
+   */
+  srm?: SrmResult | null;
 }
 
 export interface DailyDataPoint {

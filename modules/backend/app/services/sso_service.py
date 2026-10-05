@@ -43,8 +43,16 @@ from sqlalchemy.orm import Session
 
 from backend.app.core.config import settings as core_settings
 from backend.app.core.logger import get_log_context
+from backend.app.models.audit_log import ActionType, EntityType
 from backend.app.models.user import User, UserRole
 from backend.app.schemas.storable_text import contains_unstorable_text
+from backend.app.services.audit_service import (
+    SYSTEM_SSO_SYNC,
+    AuditService,
+    audit_identity,
+    audit_snapshot,
+    role_value,
+)
 from modules.backend.app.models.sso_config import SSOConfig
 from modules.backend.app.settings import settings
 
@@ -1240,8 +1248,10 @@ def provision_user(
     - An existing user's role changes only when one of their groups matches
       the configuration's ``role_mapping``. A sign-in with no matching group
       leaves the role as it is; to demote someone through SSO, map one of
-      their groups to ``viewer``. ``is_superuser`` is never changed.
-    - A new user gets the mapped role, or ``viewer``.
+      their groups to ``viewer``. ``is_superuser`` is never changed. A change
+      writes one ``role_assign`` audit entry by ``system:sso-sync``.
+    - A new user gets the mapped role, or ``viewer``, and one ``user_create``
+      audit entry by the new account.
 
     Returns the existing or newly-created User object.
     """
@@ -1254,8 +1264,26 @@ def provision_user(
         raise SSORefusal(status.HTTP_409_CONFLICT, EMAIL_AMBIGUOUS_DETAIL, SSO_ACCOUNT)
     if matches:
         existing_user = matches[0]
-        if mapped is not None:
-            existing_user.role = UserRole(mapped)
+        new_role = UserRole(mapped) if mapped is not None else None
+        if new_role is not None and existing_user.role != new_role:
+            # Recorded as ``role_assign`` by ``system:sso-sync``, with the
+            # values read before the change. The entry rides in a savepoint:
+            # if it cannot be written the role change still applies, one
+            # ERROR is logged, and it is not retried (the next sign-in finds
+            # the role already equal and writes nothing).
+            before = role_value(existing_user)
+            existing_user.role = new_role
+            AuditService.record_in_savepoint(
+                db,
+                actor=SYSTEM_SSO_SYNC,
+                action=ActionType.ROLE_ASSIGN,
+                entity_type=EntityType.USER,
+                entity_id=existing_user.id,
+                entity_name=existing_user.username or str(existing_user.id),
+                before=before,
+                after=role_value(existing_user),
+                reason="SSO groups changed",
+            )
             db.commit()
             db.refresh(existing_user)
         return existing_user
@@ -1305,6 +1333,19 @@ def provision_user(
         external_id=external_id,
     )
     db.add(new_user)
+    # The new account's ``user_create`` entry rides in a savepoint: the
+    # account is created even if the entry cannot be written.
+    db.flush()
+    AuditService.record_in_savepoint(
+        db,
+        actor=new_user,
+        action=ActionType.USER_CREATE,
+        entity_type=EntityType.USER,
+        entity_id=new_user.id,
+        entity_name=new_user.username or str(new_user.id),
+        after=audit_identity(audit_snapshot(EntityType.USER, new_user)),
+        reason="first SSO sign-in",
+    )
     db.commit()
     db.refresh(new_user)
     return new_user

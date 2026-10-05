@@ -139,6 +139,8 @@ DOCS_TESTS = (
     "backend/tests/unit/scripts/test_doc_examples.py",
     # docs/self-hosting/kubernetes.md against chart_kind.sh; stdlib only.
     "backend/tests/unit/scripts/test_guide_blocks.py",
+    # Includes test_dashboard_and_api.py, which reads frontend/src as well as
+    # docs/: a docs-only change to its table must still meet the dashboard.
     "backend/tests/unit/docs/",
     "backend/tests/smoke/test_openapi_snapshot.py",
     "backend/tests/smoke/test_version_sources.py",
@@ -471,6 +473,17 @@ class TestBuildJobSteps:
             f"them: add them to DOCS_TESTS and the workflow step, or to "
             f"NOT_DOCS_TESTS with the reason: {unclassified}"
         )
+
+
+def test_the_dashboard_and_api_gate_runs_on_a_docs_only_change():
+    """docs/guides/dashboard-and-api.md is held to frontend/src by this test;
+    a pull request that edits only the table must run it (#442)."""
+    rel = "backend/tests/unit/docs/test_dashboard_and_api.py"
+    assert (REPO_ROOT / rel).is_file(), f"{rel} is gone"
+    assert rel not in NOT_DOCS_TESTS, f"{rel} must run on a docs-only change"
+    assert any(
+        rel == t or (t.endswith("/") and rel.startswith(t)) for t in DOCS_TESTS
+    ), f"{rel} is not in DOCS_TESTS, by path or by directory"
 
 
 # ---------------------------------------------------------------------------

@@ -91,6 +91,7 @@ nav:
   - Safety Monitoring: feature-flags/safety.md
 - A/B Testing & Experiments:
   - Running Experiments: guides/user-guide.md
+  - Dashboard and API: guides/dashboard-and-api.md
   - Statistical Methods: api/sequential-testing.md
   - CUPED Variance Reduction: api/cuped.md
   - Multi-Armed Bandits: api/multi-armed-bandit.md

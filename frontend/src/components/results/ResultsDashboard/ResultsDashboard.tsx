@@ -14,6 +14,8 @@ import { analysedAsRate, rateDescription } from '@/components/results/shared/res
 import { SequentialTestingResponse } from '@/types/sequential';
 import { ExperimentSummary } from './ExperimentSummary';
 import { CorrectedResultsNotice } from './CorrectedResultsNotice';
+import { SrmNotice } from './SrmNotice';
+import { BayesianPanel } from '@/components/results/Bayesian/BayesianPanel';
 import { SampleSizeMeter } from './SampleSizeMeter';
 import { ConversionChart } from '@/components/results/Visualizations/ConversionChart';
 import { TrendChart } from '@/components/results/Visualizations/TrendChart';
@@ -23,6 +25,7 @@ import { BreakdownSelector } from '@/components/results/Breakdowns/BreakdownSele
 import { SegmentComparisonTable } from '@/components/results/Breakdowns/SegmentComparisonTable';
 // EP-058: Real-time WebSocket Streaming Results
 import { LiveResultsPanel } from '@/components/experiments/LiveResultsPanel';
+import { ApiError } from '@/services/api';
 
 interface ResultsDashboardProps {
   experimentId: string;
@@ -34,24 +37,59 @@ export interface StoredAnalysisSettings {
   confidence_level: number;
 }
 
+/** What the results page reads from the experiment itself. */
+interface ExperimentReading {
+  settings: StoredAnalysisSettings | null;
+  /** Undefined when the experiment could not be read. */
+  bayesianEnabled: boolean | undefined;
+}
+
 /**
- * The experiment's stored settings, or null when the experiment cannot be read
- * or does not carry them. Never throws: without them the results are still
- * asked for, and the server uses the stored settings itself.
+ * The experiment's stored settings (null when the experiment cannot be read
+ * or does not carry them) and its Bayesian setting. Never throws: without
+ * them the results are still asked for, and the server uses the stored
+ * settings itself.
  */
-async function loadStoredSettings(experimentId: string): Promise<StoredAnalysisSettings | null> {
+async function readExperiment(experimentId: string): Promise<ExperimentReading> {
   try {
     const experiment = await ExperimentsService.get(experimentId);
+    const bayesianEnabled =
+      typeof experiment?.bayesian_enabled === 'boolean' ? experiment.bayesian_enabled : undefined;
     if (experiment?.correction_method && typeof experiment.confidence_level === 'number') {
       return {
-        correction_method: experiment.correction_method,
-        confidence_level: experiment.confidence_level,
+        settings: {
+          correction_method: experiment.correction_method,
+          confidence_level: experiment.confidence_level,
+        },
+        bayesianEnabled,
       };
     }
+    return { settings: null, bayesianEnabled };
   } catch {
     // Fall through: the results request goes without settings.
   }
-  return null;
+  return { settings: null, bayesianEnabled: undefined };
+}
+
+export const RESULTS_LOAD_FAILED = 'The results could not be loaded.';
+export const RESULTS_NOT_FOUND = 'No results were found for this experiment.';
+export const RESULTS_FORBIDDEN = 'You do not have access to these results.';
+export const RESULTS_SERVER_ERROR =
+  'The server could not compute the results. Try again; if it keeps failing, check the API logs.';
+
+/**
+ * Fixed copy for a failed results load. The server's text is never shown: a
+ * 5xx body can carry a stack trace, and a 4xx detail can be out of date. An
+ * unreachable API keeps its own message, which the dashboard writes itself.
+ */
+export function resultsErrorMessage(e: unknown): string {
+  if (e instanceof ApiError) {
+    if (e.status === 0) return e.message;
+    if (e.status === 404) return RESULTS_NOT_FOUND;
+    if (e.status === 403) return RESULTS_FORBIDDEN;
+    if (e.status >= 500) return RESULTS_SERVER_ERROR;
+  }
+  return RESULTS_LOAD_FAILED;
 }
 
 type Tab = 'overview' | 'trends' | 'sample-size' | 'sequential' | 'breakdowns' | 'live';
@@ -100,6 +138,7 @@ export function ResultsDashboard({ experimentId }: ResultsDashboardProps) {
   const [breakdownLoading, setBreakdownLoading] = useState(false);
   // The settings every results request sends (D49), once the experiment is read.
   const [stored, setStored] = useState<StoredAnalysisSettings | null>(null);
+  const [bayesianEnabled, setBayesianEnabled] = useState<boolean | undefined>(undefined);
 
   const fetchSampleSize = useCallback(async (overrides: SampleSizeOverrides = {}) => {
     // Only the latest request may write state, so a slow answer for an
@@ -136,8 +175,9 @@ export function ResultsDashboard({ experimentId }: ResultsDashboardProps) {
       // The dashboard sends the experiment's stored correction and confidence
       // level. If the experiment cannot be read, the results are still asked
       // for, with no settings, and the server uses the stored ones.
-      const resultsRequest = loadStoredSettings(experimentId).then((settings) => {
+      const resultsRequest = readExperiment(experimentId).then(({ settings, bayesianEnabled: b }) => {
         setStored(settings);
+        setBayesianEnabled(b);
         return settings
           ? ResultsService.getResults(experimentId, settings)
           : ResultsService.getResults(experimentId);
@@ -162,7 +202,7 @@ export function ResultsDashboard({ experimentId }: ResultsDashboardProps) {
         }
       }
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to load results');
+      setError(resultsErrorMessage(e));
     } finally {
       setLoading(false);
     }
@@ -206,7 +246,7 @@ export function ResultsDashboard({ experimentId }: ResultsDashboardProps) {
         data-testid="error-state"
         role="alert"
       >
-        <p className="text-red-600 font-medium">Failed to load results: {error}</p>
+        <p className="text-red-600 font-medium">{error}</p>
         <button
           onClick={fetchAll}
           className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
@@ -241,6 +281,7 @@ export function ResultsDashboard({ experimentId }: ResultsDashboardProps) {
         metrics={results.metrics}
         correctionMethod={results.correction_method}
       />
+      <SrmNotice srm={results.srm} metrics={results.metrics} />
 
       {/* Tab navigation */}
       <nav
@@ -305,6 +346,11 @@ export function ResultsDashboard({ experimentId }: ResultsDashboardProps) {
                 </section>
               </>
             )}
+            <BayesianPanel
+              bayesian={results.bayesian_results}
+              bayesianEnabled={bayesianEnabled}
+              srmWarning={results.srm?.warning === true}
+            />
           </div>
         )}
 

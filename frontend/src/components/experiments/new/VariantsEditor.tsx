@@ -1,15 +1,69 @@
-import React from 'react';
-import { allocationTotalOf, ExperimentFormAction, VariantFormData } from './formState';
+import React, { useEffect, useState } from 'react';
+import {
+  allocationTotalOf,
+  configurationProblems,
+  ExperimentFormAction,
+  VariantFormData,
+} from './formState';
 import { smallInputClass } from './fieldStyles';
+
+export const CONFIGURATION_TOGGLE = 'Configuration (JSON, optional)';
+export const CONFIGURATION_HELP =
+  'Your app receives this object with the assignment, for example to set the button colour. ' +
+  'Leave it empty if the variant name is enough.';
+export const CONFIGURATION_PLACEHOLDER = '{"button_color": "green"}';
 
 interface VariantsEditorProps {
   variants: VariantFormData[];
   dispatch: React.Dispatch<ExperimentFormAction>;
+  /**
+   * Changed by the caller each time Next or Create was refused. Every row
+   * whose configuration has a problem then opens, and the first one's field
+   * takes focus, so a problem never sits in a closed section.
+   */
+  revealProblems?: number;
 }
 
+const hasText = (v: VariantFormData) => (v.configuration_text ?? '').trim() !== '';
+
 /** The variants heading, running allocation total and one row per variant. The caller supplies the section. */
-export function VariantsEditor({ variants, dispatch }: VariantsEditorProps) {
+export function VariantsEditor({ variants, dispatch, revealProblems = 0 }: VariantsEditorProps) {
   const allocationTotal = allocationTotalOf(variants);
+  const problems = configurationProblems(variants);
+  // Which configuration sections are open. A row that already has text starts
+  // open, so switching between guided setup and the single-page form shows it.
+  const [open, setOpen] = useState<boolean[]>(() => variants.map(hasText));
+  const [focusRow, setFocusRow] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (revealProblems === 0) return;
+    const current = configurationProblems(variants);
+    const first = current.findIndex((p) => p !== null);
+    if (first < 0) return;
+    setOpen((prev) => variants.map((_, i) => Boolean(prev[i]) || current[i] !== null));
+    setFocusRow(first);
+    // Runs when the caller asks; the variants are read as they stand.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [revealProblems]);
+
+  useEffect(() => {
+    if (focusRow === null) return;
+    document.getElementById(`variant-configuration-${focusRow}`)?.focus();
+    setFocusRow(null);
+  }, [focusRow, open]);
+
+  const toggle = (index: number) =>
+    setOpen((prev) => variants.map((_, i) => (i === index ? !prev[i] : Boolean(prev[i]))));
+
+  const addVariant = () => {
+    setOpen((prev) => [...variants.map((_, i) => Boolean(prev[i])), false]);
+    dispatch({ type: 'addVariant' });
+  };
+
+  const removeVariant = (index: number) => {
+    setOpen((prev) => variants.map((_, i) => Boolean(prev[i])).filter((_, i) => i !== index));
+    dispatch({ type: 'removeVariant', index });
+  };
 
   return (
     <>
@@ -28,7 +82,7 @@ export function VariantsEditor({ variants, dispatch }: VariantsEditorProps) {
         </div>
         <button
           type="button"
-          onClick={() => dispatch({ type: 'addVariant' })}
+          onClick={addVariant}
           className="text-sm text-blue-600 hover:text-blue-800 font-medium"
           data-testid="add-variant"
         >
@@ -89,11 +143,19 @@ export function VariantsEditor({ variants, dispatch }: VariantsEditorProps) {
                 />
                 Control
               </label>
+              <ConfigurationField
+                index={index}
+                variant={variant}
+                problem={problems[index]}
+                open={Boolean(open[index])}
+                onToggle={() => toggle(index)}
+                dispatch={dispatch}
+              />
             </div>
             {variants.length > 1 && (
               <button
                 type="button"
-                onClick={() => dispatch({ type: 'removeVariant', index })}
+                onClick={() => removeVariant(index)}
                 className="text-red-400 hover:text-red-600 text-sm mt-1"
                 data-testid={`remove-variant-${index}`}
                 aria-label="Remove variant"
@@ -105,5 +167,77 @@ export function VariantsEditor({ variants, dispatch }: VariantsEditorProps) {
         ))}
       </div>
     </>
+  );
+}
+
+interface ConfigurationFieldProps {
+  index: number;
+  variant: VariantFormData;
+  problem: string | null;
+  open: boolean;
+  onToggle: () => void;
+  dispatch: React.Dispatch<ExperimentFormAction>;
+}
+
+/**
+ * One variant's configuration: a button that shows or hides a JSON field.
+ * The text is kept as typed and checked as it changes; the problem is shown
+ * under the field and blocks Next and Create.
+ */
+function ConfigurationField({ index, variant, problem, open, onToggle, dispatch }: ConfigurationFieldProps) {
+  const fieldId = `variant-configuration-${index}`;
+  const regionId = `variant-configuration-region-${index}`;
+  const helpId = `variant-configuration-help-${index}`;
+  const errorId = `variant-configuration-error-${index}`;
+  const label = variant.name.trim() || `variant ${index + 1}`;
+  const set = hasText(variant);
+  return (
+    <div>
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-expanded={open}
+        aria-controls={regionId}
+        className="text-xs font-medium text-blue-700 hover:text-blue-900 underline focus:outline-none focus:ring-2 focus:ring-blue-600 rounded"
+        data-testid={`variant-configuration-toggle-${index}`}
+      >
+        {CONFIGURATION_TOGGLE}
+        {!open && set && (
+          <span className="text-slate-600 no-underline" data-testid={`variant-configuration-set-${index}`}>
+            {problem ? ': needs fixing' : ': set'}
+          </span>
+        )}
+      </button>
+      {open && (
+        <div id={regionId} className="mt-2 space-y-1">
+          <label htmlFor={fieldId} className="block text-xs font-medium text-slate-700">
+            Configuration (JSON) for {label}
+          </label>
+          <textarea
+            id={fieldId}
+            name={`variant_configuration_${index}`}
+            value={variant.configuration_text ?? ''}
+            onChange={(e) =>
+              dispatch({ type: 'changeVariant', index, field: 'configuration_text', value: e.target.value })
+            }
+            rows={4}
+            spellCheck={false}
+            placeholder={CONFIGURATION_PLACEHOLDER}
+            aria-invalid={problem ? true : undefined}
+            aria-describedby={problem ? `${helpId} ${errorId}` : helpId}
+            className={`w-full font-mono ${smallInputClass} ${problem ? 'border-red-600' : ''}`}
+            data-testid={fieldId}
+          />
+          <p id={helpId} className="text-xs text-slate-600">
+            {CONFIGURATION_HELP}
+          </p>
+          {problem && (
+            <p id={errorId} className="text-xs text-red-700" data-testid={`variant-configuration-error-${index}`}>
+              {problem}
+            </p>
+          )}
+        </div>
+      )}
+    </div>
   );
 }
