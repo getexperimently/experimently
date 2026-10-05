@@ -27,6 +27,11 @@ this file pins that shape, because each way it can go wrong is green:
 * a summary whose checker allows more than the benchmark skip, or whose
   results loop accepts more than ``success`` (V4).
 
+``core-build`` in ``pr-qa-gate.yml`` runs the same suite against the core
+tree through ``scripts/core_build.sh`` and is armed the same way (#899): the
+``redis`` service, the password-protected Redis started by hand, and both
+``EXPERIMENTLY_REQUIRE_*`` variables on the step that runs the script.
+
 The summary's two ``run:`` scripts are executed here, over reports written by
 real pytest running the shard plugin, the way test_dashboard_deploy_wiring.py
 runs a deploy step's script.
@@ -178,6 +183,181 @@ def test_the_suite_step_runs_the_whole_suite():
 )
 def test_narrowing_flags_are_recognised(tokens, narrowed):
     assert bool(_narrowing_flags(tokens)) is narrowed
+
+
+# ---------------------------------------------------------------------------
+# core-build: the same suite against the core tree (#899)
+# ---------------------------------------------------------------------------
+
+GATE = wg.WORKFLOWS / "pr-qa-gate.yml"
+CORE_JOB = "core-build"
+CORE_STEP = "core build"
+AUTH_STEP = "Start a password-protected Redis"
+REQUIRE = ("EXPERIMENTLY_REQUIRE_REDIS", "EXPERIMENTLY_REQUIRE_REDIS_AUTH")
+
+
+def _core_job() -> Dict[str, Any]:
+    jobs = wg.load(GATE).get("jobs") or {}
+    assert CORE_JOB in jobs, f"{GATE.name} has no `{CORE_JOB}` job: {sorted(jobs)}"
+    return jobs[CORE_JOB]
+
+
+def _core_step(name: str) -> Dict[str, Any]:
+    steps = [s for s in _steps(_core_job()) if s.get("name") == name]
+    assert len(steps) == 1, [s.get("name") for s in _steps(_core_job())]
+    return steps[0]
+
+
+def test_core_build_has_the_redis_service():
+    """core_build.sh runs backend/tests/integration in the core copy; without
+    the service the 57 cache and flag-read tests skipped there, unseen."""
+    services = _core_job().get("services") or {}
+    assert "redis" in services, (
+        f"`{CORE_JOB}` lost its `redis` service: services are {sorted(services)}"
+    )
+    redis = services["redis"]
+    assert str(redis.get("image", "")).startswith("redis:"), redis
+    assert "6379:6379" in [str(p) for p in redis.get("ports") or []], redis
+
+
+def test_core_build_starts_the_password_protected_redis_first():
+    """The seven tests in test_redis_password_auth.py read
+    REDIS_AUTH_TEST_PORT/_PASSWORD, which this step writes to GITHUB_ENV, so
+    it has to run before the build step and under the same condition."""
+    names = [s.get("name") for s in _steps(_core_job())]
+    assert names.index(AUTH_STEP) < names.index(CORE_STEP), names
+    auth, build = _core_step(AUTH_STEP), _core_step(CORE_STEP)
+    assert auth.get("if") == build.get("if"), (auth.get("if"), build.get("if"))
+    run = auth["run"]
+    assert "--requirepass" in run, run
+    assert "-p 6380:6379" in run, run
+    for line in ("REDIS_AUTH_TEST_PORT=6380", "REDIS_AUTH_TEST_PASSWORD=${password}"):
+        assert line in run, (line, run)
+    assert '>> "$GITHUB_ENV"' in run, run
+
+
+def test_core_build_requires_both_redis_servers():
+    """On the step that runs core_build.sh, whose pytest sessions inherit its
+    environment, and on no wider scope. Not EXPERIMENTLY_REQUIRE_EDITABLE:
+    the job has no editable install, so test_the_integration_job_is_armed
+    (test_core_tree_isolation.py) would fail."""
+    build = _core_step(CORE_STEP)
+    env = build.get("env") or {}
+    assert {k: env.get(k) for k in REQUIRE} == dict.fromkeys(REQUIRE, "1"), env
+    assert "EXPERIMENTLY_REQUIRE_EDITABLE" not in env, env
+    # The default step list, which includes `integration`; a `--steps` that
+    # left it out would leave the variables nothing to arm.
+    assert _tokens(build["run"]) == ["scripts/core_build.sh", "--profile", "core"]
+    workflow = wg.load(GATE)
+    for where, scope in (
+        ("the workflow", workflow.get("env") or {}),
+        (f"job {CORE_JOB}", _core_job().get("env") or {}),
+    ):
+        assert not set(REQUIRE) & set(scope), f"{where} sets {sorted(scope)}"
+        assert "EXPERIMENTLY_REQUIRE_EDITABLE" not in scope, where
+
+
+def test_core_build_s_pytest_sessions_inherit_the_environment():
+    """The variables reach the copy only because pytest_session runs pytest
+    with the caller's environment; an `env -i` there would drop them and the
+    Redis tests would skip again."""
+    script = (REPO_ROOT / "scripts" / "core_build.sh").read_text(encoding="utf-8")
+    body = re.search(r"^pytest_session\(\) \{\n(.*?)^\}", script, re.S | re.M)
+    assert body, "scripts/core_build.sh has no pytest_session()"
+    code = "\n".join(
+        line for line in body.group(1).splitlines() if not line.strip().startswith("#")
+    )
+    assert '"$PYTHON" -m pytest' in code, code
+    # `env -i`, `env -u NAME`, or `env - ...`: each starts the pytest without
+    # some or all of the caller's variables.
+    assert not re.search(r"(^|[\s;&|(])env\s+-", code), code
+
+
+def test_core_build_selects_its_steps_by_no_variable():
+    """scripts/core_build.sh reads CORE_BUILD_STEPS as `--steps`: set to every
+    step but `integration`, it would leave the Redis variables nothing to arm
+    while the command line above still looks like the default list."""
+    workflow = wg.load(GATE)
+    for where, scope in (
+        ("the workflow", workflow.get("env") or {}),
+        (f"job {CORE_JOB}", _core_job().get("env") or {}),
+        (f"step {CORE_STEP!r}", _core_step(CORE_STEP).get("env") or {}),
+    ):
+        assert "CORE_BUILD_STEPS" not in scope, f"{where} sets CORE_BUILD_STEPS"
+
+
+#: pytest options that run fewer tests than the paths given select, beyond the
+#: `-m`/`-k` that `_narrowing_flags` finds. Matched as the whole token or as
+#: `--opt=value`.
+NARROWING_LONG_OPTIONS = (
+    "--deselect",
+    "--ignore",
+    "--ignore-glob",
+    "--lf",
+    "--last-failed",
+    "--sw",
+    "--stepwise",
+    "--sw-skip",
+    "--stepwise-skip",
+    "--co",
+    "--collect-only",
+    "--collectonly",
+    "--keyword",
+)
+
+
+def _script_narrowing(tokens: List[str]) -> List[str]:
+    long = [
+        token
+        for token in tokens
+        if any(
+            token == option or token.startswith(option + "=")
+            for option in NARROWING_LONG_OPTIONS
+        )
+    ]
+    return _narrowing_flags(tokens) + long
+
+
+def _shell_function(name: str) -> List[str]:
+    """The words of a function in scripts/core_build.sh, comments removed."""
+    script = (REPO_ROOT / "scripts" / "core_build.sh").read_text(encoding="utf-8")
+    body = re.search(rf"^{re.escape(name)}\(\) \{{\n(.*?)^\}}", script, re.S | re.M)
+    assert body, f"scripts/core_build.sh has no {name}()"
+    # A subshell's closing `)` sticks to the last word (`--lf)`).
+    return [t.rstrip(")") for t in _tokens(body.group(1))]
+
+
+@pytest.mark.parametrize("function", ["step_integration", "pytest_session"])
+def test_core_build_runs_the_whole_integration_suite(function):
+    """The integration step hands pytest_session the suite and nothing that
+    selects a subset, and pytest_session adds nothing that does either: a
+    `-k "not redis"` in either would deselect the tests this job arms."""
+    tokens = _shell_function(function)
+    if function == "step_integration":
+        assert tokens[:2] == ["pytest_session", "backend/tests/integration"], tokens
+    else:
+        # The words after `pytest`: the `-m` of `python -m pytest` is not one.
+        tokens = _pytest_args(tokens)
+        assert tokens[0] == "$@", tokens
+    assert not _script_narrowing(tokens), (
+        f"{function}() narrows the run with {_script_narrowing(tokens)}: {tokens}"
+    )
+
+
+@pytest.mark.parametrize(
+    "tokens, narrowed",
+    [
+        (["-p", "no:cov", "-q", "--tb=short"], False),
+        (["-k", "not redis"], True),
+        (["--deselect", "a.py::t"], True),
+        (["--ignore=backend/tests/integration/api"], True),
+        (["--ignore-glob", "*redis*"], True),
+        (["--lf"], True),
+        (["--collect-only"], True),
+    ],
+)
+def test_script_narrowing_is_recognised(tokens, narrowed):
+    assert bool(_script_narrowing(tokens)) is narrowed
 
 
 # ---------------------------------------------------------------------------

@@ -20,8 +20,10 @@ not classified here fails until it is:
   content (``DOCS_TESTS``);
 * ``full-build``: every step but the printed reason ``docs_only != 'true'``,
   and no docs tests;
-* the two jobs share their runner, timeout, services, environment and every
-  step they both have, as the matrix legs did by construction;
+* the two jobs share their runner, timeout, Postgres service, environment
+  and every step they both have, as the matrix legs did by construction;
+  core-build alone has the ``redis`` service its integration session needs
+  (#899);
 * ``_platform.yml``: a ``skip`` input, every step's condition starting with
   ``!inputs.skip`` inside ``${{ }}`` (a bare leading ``!`` is a YAML tag);
 * the three sources of the required check names;
@@ -72,6 +74,7 @@ CORE_BUILD_STEPS: Dict[str, Optional[str]] = {
     "Set up Node.js": NOT_DOCS,
     "Install backend dependencies": NOT_DOCS,
     "Install gitleaks": NOT_DOCS,
+    "Start a password-protected Redis": NOT_DOCS,
     "core build": NOT_DOCS,
 }
 
@@ -400,8 +403,14 @@ class TestBuildJobSteps:
             sorted(core),
             sorted(full),
         )
-        for key in sorted(keys):
+        for key in sorted(keys - {"services"}):
             assert core[key] == full[key], f"{key} differs between the jobs"
+        # The one difference: core-build's integration session needs Redis
+        # (#899), and full-build runs no pytest session.
+        core_services = dict(core["services"])
+        assert sorted(core_services) == ["postgres", "redis"], sorted(core_services)
+        core_services.pop("redis")
+        assert core_services == full["services"], "the Postgres services differ"
         assert core["timeout-minutes"] == 60
         assert core["needs"] == "changes"
 

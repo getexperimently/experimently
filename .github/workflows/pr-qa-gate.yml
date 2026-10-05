@@ -495,6 +495,20 @@ jobs:
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
+      # For the Redis-backed integration tests (the experiment cache, the flag
+      # reads after every writer), as in integration-tests.yml. Core-build
+      # only: full-build runs no pytest session. With the two
+      # EXPERIMENTLY_REQUIRE_* variables on the `core build` step a missing
+      # Redis fails those tests instead of skipping them (#899).
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
     env:
       APP_ENV: test
       TESTING: 'true'
@@ -576,8 +590,41 @@ jobs:
           tar -xzf /tmp/gitleaks.tar.gz -C /usr/local/bin gitleaks
           gitleaks version
 
+      # A second Redis that requires a password, for
+      # backend/tests/integration/test_redis_password_auth.py, started the
+      # same way as in integration-tests.yml: a service container takes no
+      # command. The password is generated per run and handed to the tests
+      # through GITHUB_ENV.
+      - name: Start a password-protected Redis
+        if: needs.changes.outputs.docs_only != 'true'
+        run: |
+          password="$(openssl rand -hex 16)"
+          echo "::add-mask::${password}"
+          docker run -d --name redis-auth -p 6380:6379 redis:7-alpine \
+            redis-server --requirepass "${password}"
+          for _ in $(seq 1 30); do
+            if docker exec redis-auth redis-cli --no-auth-warning -a "${password}" ping | grep -q PONG; then
+              {
+                echo "REDIS_AUTH_TEST_PORT=6380"
+                echo "REDIS_AUTH_TEST_PASSWORD=${password}"
+              } >> "$GITHUB_ENV"
+              exit 0
+            fi
+            sleep 1
+          done
+          docker logs redis-auth
+          exit 1
+
+      # core_build.sh runs every pytest session in the copy with this
+      # environment, so the integration session gets both variables: a Redis
+      # test that skips there is a failure. No EXPERIMENTLY_REQUIRE_EDITABLE:
+      # this job has no editable install, so test_the_integration_job_is_armed
+      # keeps its skip here.
       - name: core build
         if: needs.changes.outputs.docs_only != 'true'
+        env:
+          EXPERIMENTLY_REQUIRE_REDIS: "1"
+          EXPERIMENTLY_REQUIRE_REDIS_AUTH: "1"
         run: scripts/core_build.sh --profile core
 
   # The full profile: the same sequence minus the pytest sessions (above), and
