@@ -206,19 +206,14 @@ class TestAlwaysValidCI:
 
         The pre-#231 interval also shrank here (0.084 -> 0.078) while stalling
         at 0.0774 however much data arrived, so ``<`` alone proved nothing:
-        the widths are pinned to the closed form (#231).
+        the widths are pinned (#231).  Since #854 the variance is
+        Agresti-Caffo; the widths are literals computed outside the service
+        (exact fractions for V, 50-digit decimals for the rest):
+
+        * 10/100 vs 15/100: V = 2377/1061208, half-width 0.214846539951513;
+        * 100/1000 vs 150/1000: V = 109751/503006004, half-width 0.045272734838509.
         """
         service = _make_service()
-
-        def closed_form_width(c_s, c_n, t_s, t_n, tau_squared=0.001, alpha=0.05):
-            p_c, p_t = c_s / c_n, t_s / t_n
-            v = p_c * (1 - p_c) / c_n + p_t * (1 - p_t) / t_n
-            return 2 * math.sqrt(
-                v
-                * (v + tau_squared)
-                / tau_squared
-                * (2 * math.log(1 / alpha) + math.log((v + tau_squared) / v))
-            )
 
         cs_small = service.compute_always_valid_ci(
             control_successes=10,
@@ -232,12 +227,8 @@ class TestAlwaysValidCI:
             treatment_successes=150,
             treatment_total=1000,
         )
-        assert cs_small.width == pytest.approx(
-            closed_form_width(10, 100, 15, 100), rel=1e-9
-        )
-        assert cs_large.width == pytest.approx(
-            closed_form_width(100, 1000, 150, 1000), rel=1e-9
-        )
+        assert cs_small.width == pytest.approx(2 * 0.214846539951513, rel=1e-9)
+        assert cs_large.width == pytest.approx(2 * 0.045272734838509, rel=1e-9)
         assert cs_large.width < cs_small.width
         # A hundred times the data: the width keeps falling (old: stalled).
         cs_huge = service.compute_always_valid_ci(

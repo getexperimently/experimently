@@ -10,6 +10,17 @@ Before #231 the half-width was ``sqrt(V + tau^2) * sqrt(2 ln(1/alpha))``, which
 never falls below ``sqrt(tau^2 * 2 ln 20) = 0.0774`` and so stopped narrowing,
 and which disagreed with ``can_stop`` on 79 of 40,000 looks.
 
+Since #854, V is the Agresti-Caffo variance of the difference: one success and
+one failure are added to each arm, ``p~ = (x + 1) / (n + 2)``, and
+``V = p~_c (1 - p~_c) / (n_c + 2) + p~_t (1 - p~_t) / (n_t + 2)``.  The
+expected half-widths below are literals: each was computed once outside the
+service, with exact fractions for V and 50-digit ``decimal`` arithmetic for the
+logarithms and the square root, and the exact V is given beside it so the
+number can be re-derived by hand.  They are not recomputed from a formula
+typed into this file, so a test cannot agree with the service by sharing its
+mistake.  ``test_sequential_unequal_arms.py`` holds the coverage gates at
+unequal splits.
+
 The gates come in pairs, because an infinitely wide interval passes every
 coverage and false-positive gate: 231a/231b pin the width (closed form, and
 that it narrows), 231c pins the agreement with the stop decision, and 231d/231e
@@ -144,22 +155,29 @@ def test_the_bounds_are_the_binomial_quantiles():
 def test_cs_half_width_closed_form():
     """231a: at 10k per arm, p = 0.1, the half-width is the mixture closed form.
 
-    The pre-#231 formula gave 0.0781 here.
+    1,000 of 10,000 in each arm: p~ = 1001/10002, so
+    V = 2 p~ (1 - p~) / 10002 = 9010001/500300060004 (about 1.8009e-5), and the
+    half-width is 0.013557851680358.  The pre-#231 formula gave 0.0781 here,
+    and the plug-in V = 2 (0.1)(0.9) / 10000 of #231 to #854 gave 0.0135547.
     """
-    variance = 2 * 0.1 * 0.9 / 10_000
-    expected = closed_form_half_width(variance, TAU_SQUARED, ALPHA)
-    assert expected == pytest.approx(0.0135547, abs=5e-8)
-    assert _half_width_at(10_000) == pytest.approx(expected, rel=1e-9)
+    assert _half_width_at(10_000) == pytest.approx(0.013557851680358, rel=1e-9)
 
 
 @pytest.mark.parametrize(
-    ("n_per_arm", "rate"),
-    [(1_000, 0.1), (3_000, 0.02), (50_000, 0.5), (10_000_000, 0.1)],
+    ("n_per_arm", "rate", "expected"),
+    [
+        # x = 100 per arm:     V = 91001/503006004
+        (1_000, 0.1, 0.040998093600704),
+        # x = 60 per arm:      V = 179401/13527018004
+        (3_000, 0.02, 0.011780646825829),
+        # x = 25,000 per arm:  V = 1/100004 (p~ = 1/2 exactly)
+        (50_000, 0.5, 0.010350003952168),
+        # x = 1,000,000:       V = 9000010000001/500000300000060000004
+        (10_000_000, 0.1, 0.000551819546292),
+    ],
 )
-def test_cs_half_width_closed_form_across_sizes(n_per_arm, rate):
-    """231a, at other sizes and base rates."""
-    variance = 2 * rate * (1 - rate) / n_per_arm
-    expected = closed_form_half_width(variance, TAU_SQUARED, ALPHA)
+def test_cs_half_width_closed_form_across_sizes(n_per_arm, rate, expected):
+    """231a, at other sizes and base rates (literals; see the module docstring)."""
     assert _half_width_at(n_per_arm, rate) == pytest.approx(expected, rel=1e-9)
 
 
@@ -238,19 +256,93 @@ def test_cs_anytime_coverage():
         (0, 0, 0, 0),  # no data
         (0, 0, 5, 100),  # empty control arm
         (5, 100, 0, 0),  # empty treatment arm
-        (0, 500, 0, 500),  # V = 0: nobody converts
-        (500, 500, 500, 500),  # V = 0: everybody converts
-        (0, 500, 500, 500),  # V = 0 with the largest possible difference
     ],
 )
-def test_no_finite_interval_without_variance(counts):
-    """n = 0 or V = 0: the interval is [-1, 1] and the mSPRT cannot stop."""
+def test_no_finite_interval_without_data(counts):
+    """n = 0 in an arm: the interval is [-1, 1] and the mSPRT cannot stop."""
     service = SequentialTestingService()
     cs = service.compute_always_valid_ci(*counts, alpha=ALPHA, tau_squared=TAU_SQUARED)
     msprt = service.compute_msprt(*counts, tau_squared=TAU_SQUARED, alpha=ALPHA)
     assert (cs.lower, cs.upper, cs.width) == (-1.0, 1.0, 2.0)
     assert cs.sample_size == counts[1] + counts[3]
+    assert msprt.lambda_ratio == 1.0
     assert msprt.can_stop is False
+
+
+#: 0 or 500 of 500 in an arm: p~ = 1/502 or 501/502, so each arm contributes
+#: (501/502^2) / 502 and V = 501/63253004 (about 7.9206e-6) in all three
+#: cases below.  Half-width 0.009301626884454 (literal; module docstring).
+_ALL_OR_NOTHING_HALF_WIDTH = 0.009301626884454
+
+
+@pytest.mark.regression
+@pytest.mark.parametrize(
+    ("counts", "lower", "upper", "can_stop"),
+    [
+        # Nobody converts in either arm: a narrow interval around 0, no stop.
+        (
+            (0, 500, 0, 500),
+            -_ALL_OR_NOTHING_HALF_WIDTH,
+            _ALL_OR_NOTHING_HALF_WIDTH,
+            False,
+        ),
+        # Everybody converts in both arms: the same.
+        (
+            (500, 500, 500, 500),
+            -_ALL_OR_NOTHING_HALF_WIDTH,
+            _ALL_OR_NOTHING_HALF_WIDTH,
+            False,
+        ),
+        # 0 of 500 against 500 of 500: the largest possible difference, which
+        # can now stop.  The upper end is clipped to 1.
+        ((0, 500, 500, 500), 1.0 - _ALL_OR_NOTHING_HALF_WIDTH, 1.0, True),
+    ],
+)
+def test_all_or_nothing_arms_get_a_finite_interval(counts, lower, upper, can_stop):
+    """#854: with no variation inside either arm the interval is finite.
+
+    The plug-in variance used before #854 is 0 here, so the interval was
+    [-1, 1] and the mSPRT could never stop, even at 0/500 against 500/500.
+    The Agresti-Caffo variance is positive for any counts.
+    """
+    service = SequentialTestingService()
+    cs = service.compute_always_valid_ci(*counts, alpha=ALPHA, tau_squared=TAU_SQUARED)
+    msprt = service.compute_msprt(*counts, tau_squared=TAU_SQUARED, alpha=ALPHA)
+    assert cs.lower == pytest.approx(lower, rel=1e-9)
+    assert cs.upper == pytest.approx(upper, rel=1e-9)
+    assert cs.sample_size == 1_000
+    assert msprt.can_stop is can_stop
+    assert msprt.can_stop == (not (cs.lower <= 0.0 <= cs.upper))
+
+
+@pytest.mark.regression
+@pytest.mark.parametrize(
+    "counts",
+    [
+        # 1% against 99% at 100 per arm.
+        (1, 100, 99, 100),
+        # A large, real experiment: 10% against 11% at ten million per arm,
+        # |Z| about 72.
+        (1_000_000, 10_000_000, 1_100_000, 10_000_000),
+    ],
+)
+def test_overwhelming_difference_stays_finite_and_stops(counts):
+    """#854: the evidence ratio stays a finite float however strong the evidence.
+
+    ``exp(tau^2 Z^2 / (2 (V + tau^2)))`` does not fit in a double once the
+    exponent passes about 709.78 (|Z| above about 38 when V is much smaller
+    than tau^2).  The ratio is computed in log space and capped at the largest
+    finite double, which is still far above 1/alpha, so the test stops and the
+    interval excludes 0.
+    """
+    service = SequentialTestingService()
+    msprt = service.compute_msprt(*counts, tau_squared=TAU_SQUARED, alpha=ALPHA)
+    cs = service.compute_always_valid_ci(*counts, alpha=ALPHA, tau_squared=TAU_SQUARED)
+    assert math.isfinite(msprt.lambda_ratio)
+    assert msprt.lambda_ratio == pytest.approx(1.7976931348622732e308, rel=1e-12)
+    assert msprt.can_stop is True
+    assert 0.0 < msprt.always_valid_p_value < ALPHA
+    assert msprt.can_stop == (not (cs.lower <= 0.0 <= cs.upper))
 
 
 # ---------------------------------------------------------------------------
@@ -260,16 +352,17 @@ def test_no_finite_interval_without_variance(counts):
 
 @pytest.mark.regression
 def test_small_sample_interval_is_clipped_to_the_proportion_range():
-    """At p = 0.5 with 10 per arm the half-width is about 3.92: the interval is [-1, 1].
+    """At p = 0.5 with 10 per arm the half-width is about 3.27: the interval is [-1, 1].
 
     A difference of proportions cannot leave [-1, 1]. Before the clip this
-    look was reported as roughly [-3.92, 3.92], which the dashboard drew raw.
-    The clipped interval must still be the whole range (a wide interval must
-    not look narrow) and must still contain 0, as ``can_stop`` is false.
+    look was reported as roughly [-3.92, 3.92] (plug-in variance), which the
+    dashboard drew raw.  The clipped interval must still be the whole range (a
+    wide interval must not look narrow) and must still contain 0, as
+    ``can_stop`` is false.  Agresti-Caffo: p~ = 6/12 in each arm, V = 1/24.
     """
     service = SequentialTestingService()
-    raw_half_width = closed_form_half_width(2 * 0.25 / 10, TAU_SQUARED, ALPHA)
-    assert raw_half_width > 3.9  # not vacuous: the unclipped interval leaves [-1, 1]
+    raw_half_width = closed_form_half_width(1 / 24, TAU_SQUARED, ALPHA)
+    assert raw_half_width > 3.2  # not vacuous: the unclipped interval leaves [-1, 1]
     cs = service.compute_always_valid_ci(
         5, 10, 5, 10, alpha=ALPHA, tau_squared=TAU_SQUARED
     )
@@ -281,14 +374,18 @@ def test_small_sample_interval_is_clipped_to_the_proportion_range():
 
 @pytest.mark.regression
 def test_clip_is_one_sided_when_only_one_end_leaves_the_range():
-    """1/10 against 9/10: the upper end is clipped to 1, the lower end is not."""
+    """2/20 against 18/20: the upper end is clipped to 1, the lower end is not.
+
+    p~_c = 3/22, p~_t = 19/22, V = 57/5324, half-width 0.872983362597160
+    (literal; module docstring), so the raw interval is 0.8 -/+ that:
+    [-0.072983362597160, 1.672983362597160].
+    """
     service = SequentialTestingService()
-    variance = 0.1 * 0.9 / 10 + 0.9 * 0.1 / 10
-    half_width = closed_form_half_width(variance, TAU_SQUARED, ALPHA)
+    half_width = 0.872983362597160
     cs = service.compute_always_valid_ci(
-        1, 10, 9, 10, alpha=ALPHA, tau_squared=TAU_SQUARED
+        2, 20, 18, 20, alpha=ALPHA, tau_squared=TAU_SQUARED
     )
     assert 0.8 + half_width > 1.0 > 0.8 - half_width > -1.0  # not vacuous
     assert cs.upper == 1.0
-    assert cs.lower == pytest.approx(0.8 - half_width, rel=1e-12)
+    assert cs.lower == pytest.approx(-0.072983362597160, rel=1e-9)
     assert cs.width == pytest.approx(cs.upper - cs.lower, rel=1e-12)

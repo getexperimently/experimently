@@ -61,13 +61,19 @@ SUFFICIENT_STATS_FINGERPRINTS: Dict[str, Dict[str, str]] = {
         "cuped_metric_result": "29e33befe849a6cc36fd462b5d4e1f2a361efcff2f695a38c612653c11363f67",
         "mean_metric_result": "ad119bc6bfff1ec62f70b7499e7c7eb29341f3a12df69587935128964e03125c",
     },
+    # #854: the sequential route only.  These three are 1.3.0's.
+    "1.4.0": {
+        "binomial_metric_result": "c65e109491f6e0968e0f5f8e248fcad9f571826960095622cf76e813516eba8a",
+        "cuped_metric_result": "29e33befe849a6cc36fd462b5d4e1f2a361efcff2f695a38c612653c11363f67",
+        "mean_metric_result": "ad119bc6bfff1ec62f70b7499e7c7eb29341f3a12df69587935128964e03125c",
+    },
 }
 
 #: Engine versions that have shipped in a release.  A function new in this
 #: release is pinned under a later version only, never added to one of these
 #: (a new key under a released version passes every hash, which is how a
 #: changed engine could keep a released version number).
-RELEASED_ENGINE_VERSIONS = ("1.1.0", "1.2.0")
+RELEASED_ENGINE_VERSIONS = ("1.1.0", "1.2.0", "1.3.0")
 
 _CONTROL = "ffffffff-0000-4000-8000-000000000002"
 _TREATMENT_1 = "00000000-0000-4000-8000-000000000001"
@@ -211,19 +217,38 @@ def test_sufficient_stats_fingerprint(function):
     )
 
 
-def test_cuped_metric_result_is_pinned_under_no_released_version():
+#: The release that introduced ``cuped_metric_result`` (#217, v0.21.0).
+CUPED_FIRST_VERSION = "1.3.0"
+
+
+def _key(version):
+    return tuple(int(part) for part in version.split("."))
+
+
+def test_cuped_metric_result_is_pinned_only_from_the_version_that_added_it():
     """#217 changed CUPED's numbers after 1.2.0 shipped, so it bumped the
-    engine: ``cuped_metric_result`` is in no released version's dict, and it
-    is pinned under the running version."""
+    engine to 1.3.0 and pinned ``cuped_metric_result`` there.
+
+    The rule: CUPED is absent from every version released before #217 (1.1.0
+    and 1.2.0), and present under 1.3.0 and under the running version.  1.3.0
+    shipped in v0.21.0, so it is in ``RELEASED_ENGINE_VERSIONS``; its CUPED
+    entry is the one that shipped, not a key added afterwards.
+    """
+    assert CUPED_FIRST_VERSION in RELEASED_ENGINE_VERSIONS
     for version in RELEASED_ENGINE_VERSIONS:
-        assert "cuped_metric_result" not in SUFFICIENT_STATS_FINGERPRINTS[version], (
-            f"cuped_metric_result is pinned under {version}, which has shipped"
-        )
+        pinned = "cuped_metric_result" in SUFFICIENT_STATS_FINGERPRINTS[version]
+        if _key(version) < _key(CUPED_FIRST_VERSION):
+            assert not pinned, (
+                f"cuped_metric_result is pinned under {version}, which shipped "
+                f"before #217"
+            )
+        else:
+            assert pinned, f"cuped_metric_result is missing from {version}"
     assert "cuped_metric_result" in SUFFICIENT_STATS_FINGERPRINTS[ENGINE_VERSION]
 
-    def _key(version):
-        return tuple(int(part) for part in version.split("."))
 
+def test_running_version_is_not_older_than_a_released_one():
+    """``ENGINE_VERSION`` never goes back below a version that has shipped."""
     assert _key(ENGINE_VERSION) >= max(map(_key, RELEASED_ENGINE_VERSIONS))
 
 

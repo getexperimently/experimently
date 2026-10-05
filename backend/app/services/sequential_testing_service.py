@@ -19,11 +19,16 @@ which stays valid however often the results are read.
 
 import logging
 import math
+import sys
 from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
+
+# log of the largest finite double: the mSPRT evidence ratio is capped here so
+# it always serialises as a finite JSON number.
+_LOG_FLOAT_MAX = math.log(sys.float_info.max)
 
 
 # ---------------------------------------------------------------------------
@@ -189,27 +194,27 @@ class SequentialTestingService:
         p_t = treatment_successes / treatment_total
         delta = p_t - p_c
 
-        # Pooled variance of the difference in proportions
-        V_n = p_c * (1 - p_c) / control_total + p_t * (1 - p_t) / treatment_total
-
-        if V_n <= 0:
-            # Degenerate case (all 0s or all 1s in both groups)
-            return MSPRTResult(
-                lambda_ratio=1.0,
-                always_valid_p_value=1.0,
-                can_stop=False,
-                evidence_strength=EvidenceStrength.INCONCLUSIVE,
-                boundary=boundary,
-            )
+        # Agresti-Caffo variance of the difference (#854): positive for any
+        # counts with n > 0, and the same V the confidence sequence uses.
+        V_n = self.difference_variance(
+            control_successes, control_total, treatment_successes, treatment_total
+        )
 
         Z_n = delta / math.sqrt(V_n)
 
         # mSPRT lambda: mixture likelihood ratio with Gaussian(0, tau^2) prior
         # Lambda_n = sqrt(V_n / (V_n + tau^2)) * exp(tau^2 * Z_n^2 / (2*(V_n + tau^2)))
+        #
+        # Computed in log space and capped at the largest finite double before
+        # exp: an overwhelming difference (|Z| above about 38 once V is much
+        # smaller than tau^2) would otherwise not fit in a float. The cap moves
+        # nothing that was finite before, and the capped value is still above
+        # 1/alpha for any usable alpha, so it can stop.
         ratio = V_n / (V_n + tau_squared)
-        lambda_ratio = math.sqrt(ratio) * math.exp(
-            tau_squared * Z_n**2 / (2.0 * (V_n + tau_squared))
+        log_lambda = 0.5 * math.log(ratio) + tau_squared * Z_n**2 / (
+            2.0 * (V_n + tau_squared)
         )
+        lambda_ratio = math.exp(min(log_lambda, _LOG_FLOAT_MAX))
 
         can_stop = lambda_ratio >= boundary
         always_valid_p = min(1.0, 1.0 / lambda_ratio)
@@ -239,8 +244,9 @@ class SequentialTestingService:
         The interval is the inversion of the same normal-mixture mSPRT that
         ``compute_msprt`` runs (Johari et al. 2017; Howard et al. 2021): it is
         every effect delta for which the mixture likelihood ratio of the data
-        against delta stays below 1/alpha.  With the plug-in variance V of the
-        difference in proportions and the mixing variance tau^2 that gives
+        against delta stays below 1/alpha.  With the Agresti-Caffo variance V
+        of the difference in proportions (``difference_variance``) and the
+        mixing variance tau^2 that gives
 
             delta_hat +/- sqrt( V (V + tau^2) / tau^2
                                 * (2 ln(1/alpha) + ln((V + tau^2) / V)) )
@@ -251,12 +257,18 @@ class SequentialTestingService:
         the interval keeps narrowing as data arrives.  The result is
         intersected with [-1, 1], the range of a difference in proportions.
 
-        When there is no data in an arm (n = 0) or the plug-in variance is 0
-        (within each arm, all 0s or all 1s), nothing bounds the effect: the
+        The centre is the observed difference delta_hat; only the variance is
+        Agresti-Caffo.  The plug-in variance p(1-p)/n used before #854 is too
+        small when one arm is small and its rate low (it is 0 for an arm with
+        no conversions), so the interval was too narrow and A/A experiments
+        were stopped far more often than alpha at unequal splits.  The
+        Agresti-Caffo variance is positive for any counts, so an arm with all
+        0s or all 1s still gets a finite interval.
+
+        When there is no data in an arm (n = 0), nothing bounds the effect: the
         interval is the whole range a difference in proportions can take,
-        [-1, 1].
-        ``compute_msprt`` reports Lambda = 1 (cannot stop) in the same cases,
-        so the two still agree.
+        [-1, 1].  ``compute_msprt`` reports Lambda = 1 (cannot stop) in the
+        same case, so the two still agree.
 
         Args:
             control_successes: Number of successes in control group.
@@ -284,11 +296,9 @@ class SequentialTestingService:
         p_t = treatment_successes / treatment_total
         delta_hat = p_t - p_c
 
-        V_n = p_c * (1 - p_c) / control_total + p_t * (1 - p_t) / treatment_total
-
-        if V_n <= 0:
-            # ln((V + tau^2) / V) is infinite: no finite interval.
-            return unbounded
+        V_n = self.difference_variance(
+            control_successes, control_total, treatment_successes, treatment_total
+        )
 
         margin = self.confidence_sequence_half_width(V_n, tau_squared, alpha)
 
@@ -306,6 +316,28 @@ class SequentialTestingService:
             upper=upper,
             width=width,
             sample_size=sample_size,
+        )
+
+    @staticmethod
+    def difference_variance(
+        control_successes: int,
+        control_total: int,
+        treatment_successes: int,
+        treatment_total: int,
+    ) -> float:
+        """Agresti-Caffo variance of ``p_t - p_c``, for n > 0 in both arms.
+
+        One success and one failure are added to each arm,
+        ``p~ = (x + 1) / (n + 2)``, and the variance is
+        ``p~_c (1 - p~_c) / (n_c + 2) + p~_t (1 - p~_t) / (n_t + 2)``,
+        which is positive for any counts.  ``compute_msprt`` and
+        ``compute_always_valid_ci`` both use it, so 0 lies outside the
+        interval exactly when ``can_stop`` is true.
+        """
+        p_c = (control_successes + 1) / (control_total + 2)
+        p_t = (treatment_successes + 1) / (treatment_total + 2)
+        return p_c * (1 - p_c) / (control_total + 2) + p_t * (1 - p_t) / (
+            treatment_total + 2
         )
 
     @staticmethod
