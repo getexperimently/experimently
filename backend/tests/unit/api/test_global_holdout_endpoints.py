@@ -472,3 +472,66 @@ class TestCheckUserHoldout:
         response = client.get("/api/v1/holdout/check/user-123")
 
         assert response.status_code == 403
+
+
+# ---------------------------------------------------------------------------
+# Test: the ADMIN routes by role, non-superusers (#904)
+# ---------------------------------------------------------------------------
+
+
+class TestAdminRoutesByRole:
+    """GET /holdout/all, POST /holdout and PUT /holdout/{id} accept ADMIN only.
+
+    Non-superusers throughout: a superuser passes every check.
+    """
+
+    def setup_method(self):
+        app.dependency_overrides.clear()
+
+    def teardown_method(self):
+        app.dependency_overrides.clear()
+
+    def _call(self, role, method, url, **kwargs):
+        app.dependency_overrides[deps.get_current_active_user] = lambda: _make_user(
+            role=role
+        )
+        app.dependency_overrides[deps.get_db] = lambda: MagicMock()
+        with patch(
+            "backend.app.api.v1.endpoints.global_holdout.GlobalHoldoutService"
+        ) as MockService:
+            instance = MockService.return_value
+            instance.list_holdouts.return_value = []
+            instance.count_holdouts.return_value = 0
+            instance.create_holdout.return_value = _make_holdout()
+            instance.get_holdout.return_value = _make_holdout()
+            instance.update_holdout.return_value = _make_holdout()
+            instance.implicitly_deactivated = []
+            return TestClient(app).request(method, url, **kwargs)
+
+    ROUTES = [
+        ("GET", "/api/v1/holdout/all", {}, 200),
+        (
+            "POST",
+            "/api/v1/holdout",
+            {"json": {"name": "h", "holdout_percentage": 5}},
+            201,
+        ),
+        (
+            "PUT",
+            "/api/v1/holdout/00000000-0000-4000-8000-000000000904",
+            {"json": {"name": "h2"}},
+            200,
+        ),
+    ]
+
+    @pytest.mark.regression
+    @pytest.mark.parametrize("method,url,kwargs,success", ROUTES)
+    def test_developer_gets_403(self, method, url, kwargs, success):
+        response = self._call(UserRole.DEVELOPER, method, url, **kwargs)
+        assert response.status_code == 403
+        assert response.json()["detail"] == "Admin permissions required for this action"
+
+    @pytest.mark.parametrize("method,url,kwargs,success", ROUTES)
+    def test_admin_non_superuser_is_accepted(self, method, url, kwargs, success):
+        response = self._call(UserRole.ADMIN, method, url, **kwargs)
+        assert response.status_code == success, response.text
