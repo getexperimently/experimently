@@ -211,8 +211,8 @@ def sample_ratio_check(db: Session, experiment_id: UUID) -> Optional[Dict[str, A
     """The SRM test for an experiment as a plain dict, or ``None``.
 
     ``None`` when the test is undefined (see :func:`compute_srm_for_experiment`)
-    or when it raised: a failed check is logged and must never turn a results
-    computation into an error, so it fails open.
+    or when it, or reading its result, raised: a failed check is logged and
+    must never turn a results computation into an error, so it fails open.
     """
     try:
         result = compute_srm_for_experiment(db, experiment_id)
@@ -225,7 +225,15 @@ def sample_ratio_check(db: Session, experiment_id: UUID) -> Optional[Dict[str, A
         return None
     if result is None:
         return None
-    return result.to_dict()
+    try:
+        return result.to_dict()
+    except Exception as exc:
+        logger.warning(
+            "SRM result for experiment %s could not be read (%s)",
+            experiment_id,
+            type(exc).__name__,
+        )
+        return None
 
 
 #: ``summary.recommendation`` when the sample-ratio check fails (#880).

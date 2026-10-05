@@ -168,8 +168,18 @@ class AnalysisService:
         # A failed sample-ratio check overrides the recommendation (#880).
         # Here rather than in the endpoint, so that /results, the data export
         # and the report, which all read this dict, give the same answer.
+        # Like the check, the rule fails open: if it raises, ``srm`` is None
+        # and the recommendation is the engine's.
         srm = sample_ratio_check(self.db, experiment.id)
-        summary.update(recommendation_under_srm(summary, srm))
+        try:
+            summary.update(recommendation_under_srm(summary, srm))
+        except Exception as exc:
+            logger.warning(
+                "SRM recommendation rule failed for experiment %s (%s)",
+                experiment.id,
+                type(exc).__name__,
+            )
+            srm = None
 
         return {
             "experiment_id": str(experiment_id),

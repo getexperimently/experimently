@@ -430,6 +430,48 @@ class TestSampleRatioCheck:
         assert result["warning"] is True
         assert result["observed"] == {str(a): 6000, str(b): 4000}
 
+    @pytest.mark.unit
+    @pytest.mark.regression
+    def test_a_result_that_cannot_be_read_is_none(self, monkeypatch):
+        """``to_dict`` raising fails open like a failed query (#880)."""
+
+        def broken(_self):
+            raise ValueError("planted")
+
+        monkeypatch.setattr(SRMResult, "to_dict", broken)
+        a, b = uuid.uuid4(), uuid.uuid4()
+        db = TestComputeSrmForExperiment()._db(
+            [(a, 50), (b, 50)], [(a, 6000), (b, 4000)]
+        )
+
+        assert sample_ratio_check(db, uuid.uuid4()) is None
+
+
+class TestAnalysisServiceSrmFailsOpen:
+    @pytest.mark.unit
+    @pytest.mark.regression
+    def test_a_rule_that_raises_leaves_the_engine_recommendation(self, monkeypatch):
+        """The rule raising never fails the results computation (#880):
+        ``srm`` is None and the recommendation is the engine's."""
+        from backend.app.services import analysis_service as analysis_module
+        from backend.tests.unit.services.test_binomial_metric_result_characterisation import (
+            results_output,
+        )
+
+        monkeypatch.setattr(analysis_module, "sample_ratio_check", lambda *_a: None)
+        engine = results_output("three_variants", 0.95, "none", monkeypatch)["summary"]
+
+        def broken(*_a):
+            raise ValueError("planted")
+
+        monkeypatch.setattr(analysis_module, "sample_ratio_check", lambda *_a: _FAILED)
+        monkeypatch.setattr(analysis_module, "recommendation_under_srm", broken)
+        # results_output asserts the output's srm is None.
+        summary = results_output("three_variants", 0.95, "none", monkeypatch)["summary"]
+
+        assert summary == engine
+        assert summary["recommendation"] != "INCONCLUSIVE"
+
 
 # ---------------------------------------------------------------------------
 # The recommendation under a failed sample-ratio check (#880)
