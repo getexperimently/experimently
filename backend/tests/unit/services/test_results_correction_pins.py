@@ -174,6 +174,10 @@ def _results(fixture: _Fixture, variant_ids: List[str], method: str) -> Dict[str
         kwargs["correction_method"] = method
     output = service.get_experiment_results(experiment.id, **kwargs)
     output.pop("computed_at")
+    # As in the characterisation: the sample-ratio check (#880) is not part
+    # of this computation, the fake session cannot answer it, and the pins
+    # came before it.
+    assert output.pop("srm") is None
     return output
 
 
@@ -358,7 +362,7 @@ def superuser_results_client(
         raise RuntimeError("no cache in this test")
 
     monkeypatch.setattr(results_endpoints, "_get_cache_service", no_cache)
-    monkeypatch.setattr(results_endpoints, "_compute_srm", lambda *_a: None)
+    monkeypatch.setattr(analysis_module, "sample_ratio_check", lambda *_a: None)
     monkeypatch.setattr(
         results_endpoints, "_record_results_snapshots", lambda *_a: None
     )

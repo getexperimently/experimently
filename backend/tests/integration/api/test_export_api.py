@@ -266,6 +266,73 @@ class TestExportEqualsResults:
         # 800 exposures, 110 purchases and 210 sign-ups.
         assert rows[0]["total_events"] == 800 + 110 + 210
 
+    @pytest.mark.regression
+    def test_failed_sample_ratio_check_is_inconclusive_in_results_and_export(
+        self, admin_client, db_session, make_ab_experiment
+    ):
+        """600/400 on a 50/50 split fails the sample-ratio check (#880).
+
+        The numbers alone would recommend SHIP_VARIANT: treatment converts
+        70/400 against control's 60/600.  ``/results``, the experiment export
+        and the report all answer INCONCLUSIVE, and the winner is still
+        reported.  The check runs in ``AnalysisService``, which all three
+        read; run only in the results route, the export would still say
+        SHIP_VARIANT.
+        """
+        experiment = make_ab_experiment()
+        control, treatment = _variants(experiment)
+        _seed(db_session, experiment, control, 600, 60)
+        _seed(db_session, experiment, treatment, 400, 70)
+
+        body = _results(admin_client, experiment)
+        summary = body["summary"]
+        assert body["srm"]["warning"] is True
+        assert summary["recommendation"] == "INCONCLUSIVE"
+        assert summary["recommendation_reason"] == (
+            "Sample-ratio mismatch: the observed assignment split does not match "
+            f"the configured traffic allocation (p = {body['srm']['p_value']:.2g}), "
+            "so these results cannot be trusted until the cause is found."
+        )
+        assert summary["has_winner"] is True
+        assert summary["winning_variant_id"] == str(treatment.id)
+
+        rows = [
+            r
+            for r in _export(admin_client, "experiments", experiment).json()
+            if r["experiment_id"] == str(experiment.id)
+        ]
+        assert len(rows) == 1
+        assert rows[0]["recommendation"] == "INCONCLUSIVE"
+        assert rows[0]["winner_variant"] == "treatment"
+
+        report = admin_client.get(f"/api/v1/export/reports/experiments/{experiment.id}")
+        assert report.status_code == 200, report.text
+        assert report.json()["experiments"][0]["recommendation"] == "INCONCLUSIVE"
+
+    @pytest.mark.regression
+    def test_a_bandit_with_the_same_split_keeps_its_recommendation(
+        self, admin_client, db_session, make_ab_experiment
+    ):
+        """A bandit moves traffic on purpose, so it has no sample-ratio check
+        (``srm`` is null), and a null check changes nothing (#880)."""
+        experiment = make_ab_experiment()
+        experiment.optimization_type = "thompson_sampling"
+        db_session.commit()
+        control, treatment = _variants(experiment)
+        _seed(db_session, experiment, control, 600, 60)
+        _seed(db_session, experiment, treatment, 400, 70)
+
+        body = _results(admin_client, experiment)
+        assert body["srm"] is None
+        assert body["summary"]["recommendation"] == "SHIP_VARIANT"
+
+        rows = [
+            r
+            for r in _export(admin_client, "experiments", experiment).json()
+            if r["experiment_id"] == str(experiment.id)
+        ]
+        assert rows[0]["recommendation"] == "SHIP_VARIANT"
+
     def test_no_winner_is_empty_and_recommendation_still_equals_results(
         self, admin_client, db_session, make_ab_experiment
     ):

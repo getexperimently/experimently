@@ -240,7 +240,7 @@ ask the API with `?correction_method=none` (`GET /api/v1/results/{experiment_id}
 | **SHIP VARIANT** | Treatment is significantly better | Deploy the treatment to all users |
 | **KEEP CONTROL** | Control is significantly better | Do not ship the treatment |
 | **CONTINUE TESTING** | Not enough data yet | Wait for more data before deciding |
-| **INCONCLUSIVE** | No meaningful difference detected | Consider whether the change is worth shipping anyway |
+| **INCONCLUSIVE** | The sample-ratio check failed: users were not split the way the traffic allocation says, so the numbers cannot be trusted | Do not ship on these results. Find and fix the cause of the uneven split, then run the experiment again |
 
 #### Metric Comparison Table
 

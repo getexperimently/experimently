@@ -61,7 +61,6 @@ from backend.app.services.power_calculator_service import (
     sample_size_two_proportions,
 )
 from backend.app.services.sequential_testing_service import SequentialTestingService
-from backend.app.services.srm_service import compute_srm_for_experiment
 from backend.app.services.sufficient_stats_analysis import (
     SufficientStatsNotComputed,
     SufficientStatsRefused,
@@ -78,28 +77,23 @@ router = APIRouter()
 # ---------------------------------------------------------------------------
 
 
-def _compute_srm(experiment_id: UUID, db: Session) -> Optional[SRMResult]:
+def _srm_block(
+    experiment_id: UUID, raw: Optional[Dict[str, Any]]
+) -> Optional[SRMResult]:
     """
-    Run the SRM chi-square test for an experiment.
+    The response's ``srm`` block from the check ``AnalysisService`` ran.
 
-    Returns ``None`` when the test is undefined (fewer than two allocated
-    variants, no assignments, or an adaptive/bandit allocation) or when the
-    lookup fails — an SRM check must never turn a results request into an
-    error.
+    The check itself, and the recommendation it overrides, live in the
+    service (``srm_service.sample_ratio_check``), so that the data export
+    reads the same answer as this route (#880).  ``None`` when the check is
+    undefined (fewer than two allocated variants, no assignments, or an
+    adaptive/bandit allocation) or failed, and when the result does not
+    serialise: an SRM check must never turn a results request into an error.
     """
-    try:
-        result = compute_srm_for_experiment(db, experiment_id)
-    except Exception as exc:
-        logger.warning("SRM check failed for experiment %s: %s", experiment_id, exc)
-        try:
-            db.rollback()
-        except Exception:  # pragma: no cover - defensive
-            pass
-        return None
-    if result is None:
+    if raw is None:
         return None
     try:
-        return SRMResult(**result.to_dict())
+        return SRMResult(**raw)
     except Exception as exc:
         logger.warning(
             "SRM result for experiment %s not serialisable: %s", experiment_id, exc
@@ -522,7 +516,7 @@ def get_experiment_results(
             )
 
         # --- P0 statistical credibility: sample-ratio mismatch ---
-        srm_response = _compute_srm(experiment_id, db)
+        srm_response = _srm_block(experiment_id, result.get("srm"))
 
         response = ExperimentResultsResponse(
             experiment_id=result.get("experiment_id", str(experiment_id)),
