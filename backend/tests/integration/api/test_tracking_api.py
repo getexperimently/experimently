@@ -692,6 +692,36 @@ def dashboard_targeted_experiment(db_session, make_experiment):
     _cleanup_experiment_rows(db_session, experiment)
 
 
+DASHBOARD_US_OR_PRO_RULES = {
+    "logical_operator": "OR",
+    "groups": [
+        {
+            "logical_operator": "AND",
+            "conditions": [
+                {"attribute": "country", "operator": "equals", "value": "US"}
+            ],
+        },
+        {
+            "logical_operator": "AND",
+            "conditions": [{"attribute": "plan", "operator": "equals", "value": "pro"}],
+        },
+    ],
+}
+
+
+@pytest.fixture
+def or_targeted_experiment(db_session, make_experiment):
+    """ACTIVE experiment targeting ``country equals US OR plan equals pro``."""
+    experiment = _make_active_experiment(
+        db_session,
+        make_experiment,
+        "or-targeting",
+        targeting_rules=DASHBOARD_US_OR_PRO_RULES,
+    )
+    yield experiment
+    _cleanup_experiment_rows(db_session, experiment)
+
+
 class TestAssignEligibility:
     """``/tracking/assign`` honours the global holdout, mutual exclusion groups
     and experiment targeting rules for *new* users; sticky users bypass all."""
@@ -890,6 +920,39 @@ class TestAssignEligibility:
             },
         )
         _assert_unassigned(resp, dashboard_targeted_experiment, "targeting")
+
+    @pytest.mark.regression
+    def test_or_targeting_enrols_a_user_lacking_the_other_branch_attribute(
+        self, admin_client, or_targeted_experiment, db_session
+    ):
+        """A missing attribute makes only its own condition false (#822): a
+        user with ``plan`` but no ``country`` matches the ``plan`` branch."""
+        pro_user, fr_user = _user(), _user()
+
+        resp = admin_client.post(
+            "/api/v1/tracking/assign",
+            json={
+                "experiment_key": or_targeted_experiment.key,
+                "user_id": pro_user,
+                "context": {"plan": "pro"},
+            },
+        )
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["assigned"] is True
+        assert resp.json()["reason"] == "assigned"
+        assert len(_assignment_rows(db_session, or_targeted_experiment, pro_user)) == 1
+
+        # Neither branch holds: still refused.
+        resp = admin_client.post(
+            "/api/v1/tracking/assign",
+            json={
+                "experiment_key": or_targeted_experiment.key,
+                "user_id": fr_user,
+                "context": {"country": "FR"},
+            },
+        )
+        _assert_unassigned(resp, or_targeted_experiment, "targeting")
+        assert _assignment_rows(db_session, or_targeted_experiment, fr_user) == []
 
     def test_sticky_assignment_bypasses_all_eligibility_checks(
         self,
