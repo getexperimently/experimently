@@ -153,10 +153,16 @@ function fillVariantsAndTargeting() {
   setValue('variant-allocation-1', '30');
   setValue('variant-allocation-2', '50');
   fireEvent.click(screen.getByTestId('variant-control-1'));
+  fireEvent.click(screen.getByTestId('variant-configuration-toggle-2'));
+  setValue('variant-configuration-2', PARITY_CONFIGURATION_TEXT);
   fireEvent.click(screen.getAllByTestId('add-group')[0]);
   setValue('condition-attribute', 'country');
   setValue('condition-value', 'US');
 }
+
+/** Nested, non-ASCII, every JSON value type: what the user types, sent as the object it parses to. */
+const PARITY_CONFIGURATION_TEXT =
+  '{"headline": "Un clic, c’est fait ✓", "layout": {"columns": 1, "steps": ["cart", "pay"]}, "express": true, "discount": 0.15, "badge": null}';
 
 const PARITY_LITERAL = {
   name: 'Checkout redesign',
@@ -173,7 +179,18 @@ const PARITY_LITERAL = {
   variants: [
     { name: 'Current', is_control: false, traffic_allocation: 20 },
     { name: 'Short form', is_control: true, traffic_allocation: 30 },
-    { name: 'One page', is_control: false, traffic_allocation: 50 },
+    {
+      name: 'One page',
+      is_control: false,
+      traffic_allocation: 50,
+      configuration: {
+        headline: 'Un clic, c’est fait ✓',
+        layout: { columns: 1, steps: ['cart', 'pay'] },
+        express: true,
+        discount: 0.15,
+        badge: null,
+      },
+    },
   ],
   metrics: [
     { name: 'Add to cart', event_name: 'add_to_cart', metric_type: 'count', is_primary: false },
@@ -181,12 +198,14 @@ const PARITY_LITERAL = {
   ],
   confidence_level: 0.9,
   correction_method: 'bonferroni',
+  bayesian_enabled: true,
 };
 
 /** Non-default analysis settings, so the parity test proves both views send what was chosen. */
 function chooseAnalysisSettings() {
   setValue('analysis-confidence', '0.9');
   setValue('analysis-correction', 'bonferroni');
+  fireEvent.click(screen.getByTestId('analysis-bayesian'));
 }
 
 async function createThroughAdvanced(): Promise<unknown> {
@@ -232,9 +251,12 @@ describe('guided setup sends exactly the request the single-page form sends', ()
     const guided = wire(await createThroughGuided());
     expect(guided).toStrictEqual(advanced);
     expect(guided).toStrictEqual(PARITY_LITERAL);
+    // Verbatim: the configuration is the object the typed text parses to, in both views.
+    const sent = (advanced as typeof PARITY_LITERAL).variants[2].configuration;
+    expect(sent).toStrictEqual(JSON.parse(PARITY_CONFIGURATION_TEXT));
   });
 
-  it('sends the ten keys of the create request and nothing else', async () => {
+  it('sends the eleven keys of the create request and nothing else', async () => {
     const guided = (await createThroughGuided()) as Record<string, unknown>;
     expect(Object.keys(guided).sort()).toEqual(
       [
@@ -248,6 +270,7 @@ describe('guided setup sends exactly the request the single-page form sends', ()
         'metrics',
         'confidence_level',
         'correction_method',
+        'bayesian_enabled',
       ].sort(),
     );
   });
