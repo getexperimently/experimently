@@ -14,8 +14,12 @@ Then, by reading files only:
 * a ``Dashboard`` row whose witness no page test asserts fails. A test counts
   when it imports a module under ``frontend/src/pages/`` and calls
   ``getByTestId`` / ``findByTestId`` (or the ``All`` forms, which throw when
-  nothing matches) on the witness. That ties the witness to a mounted page,
-  not to a component nothing renders.
+  nothing matches) on the witness, outside any skipped test: a call inside
+  ``it.skip`` / ``test.skip`` / ``describe.skip`` (and their ``.each`` forms),
+  ``xit`` / ``xtest`` / ``xdescribe``, or a comment does not count, and a page
+  test with ``.only`` / ``fit`` / ``fdescribe`` fails outright, because it
+  skips every other test in its file. That ties the witness to a page test
+  that runs, not to a component nothing renders.
 
 A witness is a literal ``data-testid="id"``, asserted as ``"id"``. A witness
 written ``"stem-*"`` is instead the template literal
@@ -164,7 +168,7 @@ def parse_table(text: str) -> List[Tuple[str, str, str]]:
         )
         link = _LINK.fullmatch(guide)
         assert link, f"line {end + 1}: the guide cell is not one link: {guide!r}"
-        rows.append((capability, where, link.group(1)))
+        rows.append((capability, where, link.group(1) + (link.group(2) or "")))
         end += 1
     others = [i + 1 for i in starts if not start <= i < end]
     assert not others, f"a second table (or stray row) at lines {others}"
@@ -201,6 +205,95 @@ def scan(src: Path) -> Tuple[Dict[str, str], Dict[str, str]]:
         elif ".test." in rel and _PAGE_IMPORT.search(text):
             page_tests[rel] = text
     return sources, page_tests
+
+
+_SKIPPED_CALL = re.compile(
+    r"(?:(?:it|test|describe)\.skip|x(?:it|test|describe))(?:\.each)?\s*\("
+)
+_FOCUSED_CALL = re.compile(
+    r"(?<![\w.$])(?:(?:it|test|describe)\.only|f(?:it|describe))(?:\.each)?\s*\("
+)
+_IDENT = re.compile(r"[\w$.]")
+
+
+def _skip_string(text: str, i: int) -> int:
+    """The index just past the string literal opening at text[i]."""
+    quote = text[i]
+    i += 1
+    while i < len(text):
+        char = text[i]
+        if char == "\\":
+            i += 2
+            continue
+        if char == quote or (char == "\n" and quote != "`"):
+            return i + 1
+        i += 1
+    return i
+
+
+def _skip_comment(text: str, i: int) -> int:
+    """The index just past the comment opening at text[i:i + 2]."""
+    if text.startswith("//", i):
+        end = text.find("\n", i)
+        return len(text) if end < 0 else end
+    end = text.find("*/", i + 2)
+    return len(text) if end < 0 else end + 2
+
+
+def _skip_parens(text: str, i: int) -> int:
+    """The index just past the balanced (...) opening at text[i]."""
+    depth = 0
+    while i < len(text):
+        char = text[i]
+        if char in "'\"`":
+            i = _skip_string(text, i)
+            continue
+        if text.startswith(("//", "/*"), i):
+            i = _skip_comment(text, i)
+            continue
+        if char == "(":
+            depth += 1
+        elif char == ")":
+            depth -= 1
+            if depth == 0:
+                return i + 1
+        i += 1
+    return i
+
+
+def live_text(text: str) -> str:
+    """A test file with its comments and skipped tests taken out.
+
+    One linear pass that knows strings, comments and parentheses: a skipped
+    call (``it.skip(...)``, ``xit(...)``, ``describe.skip(...)``, and the
+    ``.each(table)(...)`` forms) is removed through its closing parenthesis.
+    A parenthesis inside a regular-expression literal can unbalance it; the
+    failure is then a missing witness (red), never a skipped one counted.
+    """
+    out: List[str] = []
+    i = 0
+    while i < len(text):
+        char = text[i]
+        if char in "'\"`":
+            end = _skip_string(text, i)
+            out.append(text[i:end])
+            i = end
+            continue
+        if text.startswith(("//", "/*"), i):
+            i = _skip_comment(text, i)
+            continue
+        skipped = None
+        if i == 0 or not _IDENT.match(text[i - 1]):
+            skipped = _SKIPPED_CALL.match(text, i)
+        if skipped:
+            i = _skip_parens(text, skipped.end() - 1)
+            rest = text[i:].lstrip()
+            if skipped.group(0).count(".each") and rest.startswith("("):
+                i = _skip_parens(text, len(text) - len(rest))
+            continue
+        out.append(char)
+        i += 1
+    return "".join(out)
 
 
 def _source_pattern(witness: str) -> re.Pattern:
@@ -255,12 +348,19 @@ def problems(
                 f"frontend/src carries data-testid {stem!r}"
             )
         if where == DASHBOARD and in_source:
-            if not where_witnessed(stem, page_tests, _assert_pattern):
+            live = {rel: live_text(text) for rel, text in page_tests.items()}
+            if not where_witnessed(stem, live, _assert_pattern):
                 found.append(
                     f"{capability!r} says {DASHBOARD} but no test that renders a "
                     f"page under frontend/src/pages/ asserts data-testid {stem!r} "
-                    "(getByTestId / findByTestId)"
+                    "(getByTestId / findByTestId) outside a skipped test"
                 )
+    for rel, text in sorted(page_tests.items()):
+        if _FOCUSED_CALL.search(live_text(text)):
+            found.append(
+                f"{rel} uses .only / fit / fdescribe, which skips every other "
+                "test in the file: remove it"
+            )
     return found
 
 
@@ -295,14 +395,53 @@ def test_each_witness_names_one_capability():
     assert len(stems) == len(set(stems)), "two rows share a witness"
 
 
+_HEADING = re.compile(r"^#{1,6}\s+(.+?)\s*#*\s*$", re.MULTILINE)
+
+
+def slug(heading: str) -> str:
+    """The anchor MkDocs' default slugify and GitHub give a plain heading.
+
+    The same rule as test_dashboard_docs_anchors.py (#887).
+    """
+    text = heading.strip().lower()
+    text = re.sub(r"[^\w\- ]", "", text)
+    return re.sub(r"\s", "-", text)
+
+
+def heading_slugs(path: Path) -> Set[str]:
+    text = path.read_text(encoding="utf-8")
+    text = re.sub(r"^```.*?^```", "", text, flags=re.MULTILINE | re.DOTALL)
+    return {slug(h) for h in _HEADING.findall(text)}
+
+
 def test_every_guide_link_resolves(rows):
-    missing = [
-        target
-        for _, _, target in rows
-        if not target.startswith("https://")
-        and not (PAGE.parent / target).resolve().is_file()
-    ]
-    assert not missing, f"guide links to pages that do not exist: {missing}"
+    """The page exists, and so does the heading a `#fragment` names."""
+    broken = []
+    for _, _, target in rows:
+        if target.startswith("https://"):
+            continue
+        page, _, anchor = target.partition("#")
+        path = (PAGE.parent / page).resolve()
+        if not path.is_file():
+            broken.append(f"{target}: no such page")
+        elif anchor and anchor not in heading_slugs(path):
+            broken.append(f"{target}: no heading in {page} has the anchor #{anchor}")
+    assert not broken, "guide links that do not land:\n" + "\n".join(broken)
+
+
+@pytest.mark.parametrize(
+    "heading, expected",
+    [
+        ("Archived Flags", "archived-flags"),
+        ("Global Holdout", "global-holdout"),
+        (
+            "Sequential Testing — Stop Experiments Early",
+            "sequential-testing--stop-experiments-early",
+        ),
+    ],
+)
+def test_slug_matches_the_rule(heading, expected):
+    assert slug(heading) == expected
 
 
 # ---------------------------------------------------------------------------
@@ -368,6 +507,76 @@ def test_a_per_item_witness(sources, page_tests, expect):
         assert found == []
     else:
         assert any(expect in f for f in found), found
+
+
+_ASSERT = "expect(screen.getByTestId('experiment-clone')).toBeInTheDocument();"
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        f"it.skip('clones', () => {{ {_ASSERT} }});",
+        f"test.skip('clones', () => {{ {_ASSERT} }});",
+        f"xit('clones', () => {{\n  {_ASSERT}\n}});",
+        f"xtest('clones', async () => {{ {_ASSERT} }});",
+        f"describe.skip('clone', () => {{\n  it('a (b) c', () => {{\n    {_ASSERT}\n  }});\n}});",
+        f"xdescribe('clone', () => {{ it('x', () => {{ {_ASSERT} }}); }});",
+        f"it.skip.each([[1], [2]])('row %s', () => {{ {_ASSERT} }});",
+        f"// {_ASSERT}",
+        f"/* {_ASSERT} */",
+    ],
+)
+def test_a_skipped_or_commented_assertion_does_not_count(body):
+    page_test = {
+        "tests/pages/x.test.tsx": "import P from '@/pages/experiments/[id]';\n"
+        "it('runs', () => { expect(1).toBe(1); });\n" + body
+    }
+    found = problems(
+        [("Clone an experiment", DASHBOARD, "x.md")], _PLANTED, _SHIPPED, page_test
+    )
+    assert any("outside a skipped test" in f for f in found), found
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        f"it('clones (it.skip is not called here)', () => {{ {_ASSERT} }});",
+        f"it.skip('other', () => {{ expect(')').toBe(')'); }});\nit('c', () => {{ {_ASSERT} }});",
+        f"it.each([[1]])('row %s', () => {{ {_ASSERT} }});",
+        f"const url = 'http://x';\nit('c', () => {{ {_ASSERT} }});",
+    ],
+)
+def test_a_running_assertion_still_counts(body):
+    page_test = {
+        "tests/pages/x.test.tsx": "import P from '@/pages/experiments/[id]';\n" + body
+    }
+    found = problems(
+        [("Clone an experiment", DASHBOARD, "x.md")], _PLANTED, _SHIPPED, page_test
+    )
+    assert found == [], found
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        "it.only('x', () => {});",
+        "test.only('x', () => {});",
+        "describe.only('x', () => {});",
+        "fit('x', () => {});",
+        "fdescribe('x', () => {});",
+    ],
+)
+def test_a_focused_page_test_fails(body):
+    page_test = {
+        "tests/pages/x.test.tsx": "import P from '@/pages/experiments/[id]';\n"
+        + body
+        + "\n"
+        + _ASSERT
+    }
+    found = problems(
+        [("Clone an experiment", DASHBOARD, "x.md")], _PLANTED, _SHIPPED, page_test
+    )
+    assert any(".only / fit / fdescribe" in f for f in found), found
 
 
 @pytest.mark.parametrize(
