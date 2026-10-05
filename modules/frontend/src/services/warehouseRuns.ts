@@ -8,7 +8,7 @@
  *
  *   start a run                               ADMIN, DEVELOPER
  *   list connections and sources              ADMIN, DEVELOPER, ANALYST
- *   list an experiment's runs, read one run   every role, VIEWER included
+ *   list an experiment's runs, read one run   ADMIN, DEVELOPER, ANALYST (D50)
  *
  * A superuser counts as ADMIN. Everything here is pure except the service
  * object at the bottom.

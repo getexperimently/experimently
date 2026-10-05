@@ -4,7 +4,7 @@ Mounted at ``/api/v1/warehouse/analysis`` behind authentication.  Every route
 is ``x-stability: beta``.  The exact set of routes is pinned by
 ``modules/backend/tests/smoke/test_module_route_table.py``.
 
-Who may do what (founder decisions D11, D25 and D34):
+Who may do what (founder decisions D11, D25, D34 and D50):
 
 =====================================================  =====  =========  =======  ======
 Action                                                  ADMIN  DEVELOPER  ANALYST  VIEWER
@@ -17,13 +17,16 @@ Create, edit, delete, validate, preview assignment src  yes    yes        no    
 Create, edit, validate, preview metric sources          yes    yes        yes      no
 Delete a metric source                                  yes    yes        no       no
 Start a run                                             yes    yes        no       no
-Read runs and results                                   yes    yes        yes      yes
+Read runs, previews and results (D50)                   yes    yes        yes      no
 Read the SQL a run sent (``statements``; D34)           yes    yes        yes      no
 =====================================================  =====  =========  =======  ======
 
 A superuser counts as ADMIN.  A refusal names the role needed and the caller's.
-A VIEWER, or a user with no role, reading a run gets ``statements: null``: the
-kind, dialect, SHA-256 and SQL of every statement are all withheld.
+A run, analysis or preview, is read only by the roles that may read its SQL,
+so every caller who reaches a run also gets ``statements``.  ``run_out`` still
+takes ``include_sql`` from each caller and, when it is false, withholds the
+kind, dialect, SHA-256 and SQL of every statement: that holds if a route's
+roles are ever widened again.
 
 Errors are ``{"detail": {"code": ..., "message": ...}}`` with a code from a
 fixed set.  A request that fails validation is answered with the location and
@@ -1577,7 +1580,7 @@ def list_runs(
     db: Session = Depends(deps.get_db),
     current_user: User = Depends(deps.get_current_active_user),
 ) -> Dict[str, Any]:
-    require(current_user, EVERYONE, "Viewing warehouse analyses")
+    require(current_user, READERS, "Viewing warehouse analyses")
     rows = db.execute(
         select(WarehouseAnalysisRun)
         .where(
@@ -1602,7 +1605,7 @@ def get_run(
     db: Session = Depends(deps.get_db),
     current_user: User = Depends(deps.get_current_active_user),
 ) -> Dict[str, Any]:
-    require(current_user, EVERYONE, "Viewing warehouse analyses")
+    require(current_user, READERS, "Viewing warehouse analyses")
     run = db.get(WarehouseAnalysisRun, run_id)
     if run is None:
         raise _not_found("Warehouse run")

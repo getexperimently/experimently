@@ -163,8 +163,8 @@ class RunOut(BaseModel):
         default=None,
         description=(
             "Each statement the run sent: its kind, dialect, SHA-256 and SQL. "
-            "Returned only to the ADMIN, DEVELOPER and ANALYST roles (a superuser "
-            "counts as ADMIN); for VIEWER, or a user with no role, it is null."
+            "Returned to the ADMIN, DEVELOPER and ANALYST roles (a superuser "
+            "counts as ADMIN), the only roles that may read a run (D34, D50)."
         ),
     )
     #: Present only for a run that succeeded.
