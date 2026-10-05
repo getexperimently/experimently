@@ -107,6 +107,32 @@ VARIANTS = {
     # A conftest that removes items without pytest_deselected. A directory
     # conftest registers after the root plugins, so even its trylast hook runs
     # before the shard's.
+    # The re-review's construction: drop one real item without
+    # pytest_deselected and append one pytest never collected, so the count
+    # of items nets to zero on every shard.
+    "substitute": {
+        "conftest.py": """
+            import pytest
+
+            def _body():
+                pass
+
+            def pytest_collection_modifyitems(items):
+                dropped = items.pop()
+                items.append(
+                    pytest.Function.from_parent(
+                        dropped.parent, name="test_fabricated", callobj=_body
+                    )
+                )
+            """
+    },
+    # The same item listed twice: no new object, but it runs twice.
+    "duplicate_reference": {
+        "conftest.py": """
+            def pytest_collection_modifyitems(items):
+                items.append(items[0])
+            """
+    },
     "conftest_drop": {
         "conftest.py": """
             def pytest_collection_modifyitems(items):
@@ -674,7 +700,7 @@ def test_last_failed_deselection_is_refused_through_pre_deselected(fixtures):
 @pytest.mark.parametrize("variant", ["conftest_drop", "conftest_drop_trylast"])
 def test_items_removed_before_the_shard_hook_are_refused(fixtures, variant):
     """Every shard agrees on the shrunk list and nothing is deselected, so
-    only the ground-truth count from pytest_itemcollected can see it."""
+    only the items pytest_itemcollected saw can show it."""
     reports = fixtures.get(variant)
     docs = [_load(r) for r in reports]
     clean = len(_load(fixtures.get("clean")[0])["collected"])
@@ -682,18 +708,56 @@ def test_items_removed_before_the_shard_hook_are_refused(fixtures, variant):
     assert all(d["pre_deselected"] == 0 for d in docs)
     result = check("--suite", SUITE, "--any-skip", SUITE, *reports)
     assert result.returncode == 1
+    assert all(len(d["unannounced"]) == 5 and not d["fabricated"] for d in docs)
+    found = problems(result)
+    assert len(found) == len(docs), result.stdout
+    for d, line in zip(docs, found, strict=True):
+        assert line.startswith(
+            f"PROBLEM: {SUITE}: shard {d['shard']}: narrowed by unannounced="
+        )
+        assert line.endswith(
+            "(5 collected but gone before the shard hook, never deselected)"
+        )
+
+
+@pytest.mark.regression
+def test_a_fabricated_substitute_is_refused(fixtures):
+    reports = fixtures.get("substitute")
+    docs = [_load(r) for r in reports]
+    clean = _load(fixtures.get("clean")[0])["collected"]
+    assert all(len(d["collected"]) == len(clean) for d in docs), (
+        "the count nets to zero"
+    )
+    gone = sorted(set(clean) - set(docs[0]["collected"]))
+    assert len(gone) == 1
+    result = check("--suite", SUITE, "--any-skip", SUITE, *reports)
+    assert result.returncode == 1
+    fabricated = "tests/test_lf.py::test_fabricated"
     assert problems(result) == [
-        f"PROBLEM: {SUITE}: shard {d['shard']}: narrowed by unannounced_drops=5 "
-        "(items collected but gone before the shard hook, never deselected)"
+        f"PROBLEM: {SUITE}: shard {d['shard']}: narrowed by unannounced=[{gone[0]!r}] "
+        "(1 collected but gone before the shard hook, never deselected), "
+        f"fabricated=[{fabricated!r}] (1 present at the shard hook but never collected)"
         for d in docs
     ]
+
+
+@pytest.mark.regression
+def test_an_item_listed_twice_is_refused(fixtures):
+    reports = fixtures.get("duplicate_reference")
+    docs = [_load(r) for r in reports]
+    assert all(not d["unannounced"] and not d["fabricated"] for d in docs)
+    result = check("--suite", SUITE, "--any-skip", SUITE, *reports)
+    assert result.returncode == 1
+    assert any("collected twice in one session" in p for p in problems(result)), (
+        result.stdout
+    )
 
 
 @pytest.mark.regression
 def test_items_removed_after_the_shard_hook_are_refused(fixtures):
     reports = fixtures.get("wrapper_drop")
     docs = [_load(r) for r in reports]
-    assert all(d["unannounced_drops"] == 0 for d in docs)
+    assert all(not d["unannounced"] and not d["fabricated"] for d in docs)
     result = check("--suite", SUITE, "--any-skip", SUITE, *reports)
     assert result.returncode == 1
     found = problems(result)

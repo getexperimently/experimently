@@ -289,7 +289,7 @@ def test_ordinary_sessions_announce_every_item_they_lose(
         """
     )
     doc = _report_of(pytester, monkeypatch, tmp_path, "-p", "no:cacheprovider", *args)
-    assert doc["unannounced_drops"] == 0
+    assert (doc["unannounced"], doc["fabricated"]) == ([], [])
     assert doc["pre_deselected"] == deselected
     assert len(doc["collected"]) == 10 - deselected
 
@@ -312,8 +312,100 @@ def test_a_conftest_that_drops_items_is_counted(pytester, monkeypatch, tmp_path)
         """
     )
     doc = _report_of(pytester, monkeypatch, tmp_path, "-p", "no:cacheprovider")
-    assert (len(doc["collected"]), doc["unannounced_drops"]) == (7, 3)
-    assert doc["pre_deselected"] == 0
+    assert len(doc["collected"]) == 7
+    assert doc["unannounced"] == [f"test_ten.py::test_n[{n}]" for n in (7, 8, 9)]
+    assert (doc["fabricated"], doc["pre_deselected"]) == ([], 0)
+
+
+# Each conftest drops test_n[9] without pytest_deselected and appends an item
+# pytest never collected, so the count of items is unchanged.
+SUBSTITUTES = {
+    "a new node id": """
+        import pytest
+
+        def _body():
+            pass
+
+        def pytest_collection_modifyitems(items):
+            dropped = items.pop()
+            items.append(
+                pytest.Function.from_parent(
+                    dropped.parent, name="test_fabricated", callobj=_body
+                )
+            )
+        """,
+    "the dropped node id": """
+        import pytest
+
+        def _body(n):
+            pass
+
+        def pytest_collection_modifyitems(items):
+            dropped = items.pop()
+            items.append(
+                pytest.Function.from_parent(
+                    dropped.parent,
+                    name=dropped.name,
+                    callspec=dropped.callspec,
+                    callobj=_body,
+                    originalname=dropped.originalname,
+                )
+            )
+        """,
+}
+
+
+@pytest.mark.regression
+@pytest.mark.parametrize("case", sorted(SUBSTITUTES))
+def test_a_fabricated_substitute_is_recorded(pytester, monkeypatch, tmp_path, case):
+    pytester.makepyfile(
+        test_ten="""
+        import pytest
+
+        @pytest.mark.parametrize("n", range(10))
+        def test_n(n):
+            pass
+        """
+    )
+    pytester.makeconftest(SUBSTITUTES[case])
+    doc = _report_of(pytester, monkeypatch, tmp_path, "-p", "no:cacheprovider")
+    assert len(doc["collected"]) == 10, "the count alone sees nothing"
+    assert doc["unannounced"] == ["test_ten.py::test_n[9]"]
+    fabricated = (
+        "test_ten.py::test_fabricated"
+        if case == "a new node id"
+        else "test_ten.py::test_n[9]"
+    )
+    assert doc["fabricated"] == [fabricated]
+
+
+@pytest.mark.regression
+def test_an_added_item_is_recorded(pytester, monkeypatch, tmp_path):
+    pytester.makepyfile(test_one="def test_a(): pass")
+    pytester.makeconftest(
+        """
+        import pytest
+
+        def _body():
+            pass
+
+        def pytest_collection_modifyitems(items):
+            items.append(
+                pytest.Function.from_parent(items[0].parent, name="test_extra", callobj=_body)
+            )
+        """
+    )
+    doc = _report_of(pytester, monkeypatch, tmp_path, "-p", "no:cacheprovider")
+    assert (doc["unannounced"], doc["fabricated"]) == ([], ["test_one.py::test_extra"])
+
+
+@pytest.mark.regression
+def test_a_disabled_plugin_written_without_a_space_is_recorded(
+    pytester, monkeypatch, tmp_path
+):
+    pytester.makepyfile(test_one="def test_a(): pass")
+    doc = _report_of(pytester, monkeypatch, tmp_path, "-pno:cacheprovider")
+    assert doc["disabled_plugins"] == ["cacheprovider"]
 
 
 @pytest.mark.regression

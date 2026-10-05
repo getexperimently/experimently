@@ -24,18 +24,20 @@ the shards. A report holds:
   ``pre_deselected``, the number of items any other plugin deselected (``-m``,
   ``-k``, ``--deselect``; ``--lf`` on a file named on the command line, which
   deselects after this hook runs). Over a directory ``--lf`` drops the passing
-  tests while collecting instead, so only ``last_failed`` shows it. Also
-  ``unannounced_drops``: items collected (``pytest_itemcollected``, which fires
-  before any ``pytest_collection_modifyitems``) minus the items left when this
-  hook runs minus those deselected before it -- a conftest that does
-  ``del items[...]`` without ``pytest_deselected`` makes it non-zero; and
+  tests while collecting instead, so only ``last_failed`` shows it. Also two
+  lists checked against the items ``pytest_itemcollected`` saw (it fires before
+  any ``pytest_collection_modifyitems``), compared by item object, not count:
+  ``unannounced``, items collected that are neither present at this hook nor
+  deselected before it (a conftest's ``del items[...]``), and ``fabricated``,
+  items present at this hook that were never collected (one a conftest built
+  with ``Function.from_parent`` and appended, even under a real node id); and
   ``disabled_plugins`` (every ``-p no:NAME``, from the command line, ini
   ``addopts`` or ``PYTEST_ADDOPTS``) and ``autoload_disabled``, because
   disabling a plugin that generates tests shrinks every shard alike. N shards
   that each agree on a narrowed set would otherwise prove a partition of the
-  wrong thing. What none of this sees: a plugin that changes which tests are
-  collected without removing items (a generator that yields fewer parameters,
-  a ``collect_ignore`` edit), which is code in the tree, not session options;
+  wrong thing. What none of this sees: a change to the tree itself (a
+  ``collect_ignore`` entry, a deleted file, a generator yielding fewer
+  parameters), which is reviewed as code, not caught here;
 * ``collect_errors``: the node ids of collectors that failed;
 * ``ran``: one record per executed item, from ``pytest_runtest_logreport``:
   ``nodeid``, ``outcome`` (passed, failed, skipped, xfailed, xpassed, error)
@@ -150,9 +152,12 @@ class _ShardSession:
         self._selecting = False
         self.selection_done = False
         self.pre_deselected = 0
-        self.deselected_before_hook = 0
-        self.items_collected = 0
-        self.unannounced_drops = 0
+        # Item objects, not node ids: a Node hashes by its node id but compares
+        # by identity, so a substitute under a real node id is still new.
+        self._itemcollected: set = set()
+        self._deselected_before_hook: set = set()
+        self.unannounced: list[str] = []
+        self.fabricated: list[str] = []
         self.collected: list[str] = []
         self.selected: list[str] = []
         self.collect_errors: list[str] = []
@@ -163,10 +168,10 @@ class _ShardSession:
         if not self._selecting:
             self.pre_deselected += len(items)
             if not self.selection_done:
-                self.deselected_before_hook += len(items)
+                self._deselected_before_hook.update(items)
 
     def pytest_itemcollected(self, item) -> None:
-        self.items_collected += 1
+        self._itemcollected.add(item)
 
     def pytest_collectreport(self, report) -> None:
         if report.failed:
@@ -175,8 +180,11 @@ class _ShardSession:
     @pytest.hookimpl(trylast=True)
     def pytest_collection_modifyitems(self, config, items) -> None:
         self.collected = sorted(item.nodeid for item in items)
-        self.unannounced_drops = (
-            self.items_collected - len(items) - self.deselected_before_hook
+        present = set(items)
+        self.fabricated = sorted(i.nodeid for i in present - self._itemcollected)
+        self.unannounced = sorted(
+            i.nodeid
+            for i in self._itemcollected - present - self._deselected_before_hook
         )
         keep, drop = [], []
         for item in items:
@@ -232,7 +240,8 @@ class _ShardSession:
             ],
             "last_failed": bool(getattr(option, "lf", False)),
             "pre_deselected": self.pre_deselected,
-            "unannounced_drops": self.unannounced_drops,
+            "unannounced": self.unannounced,
+            "fabricated": self.fabricated,
             "disabled_plugins": sorted(
                 str(p)[3:]
                 for p in (getattr(option, "plugins", None) or [])

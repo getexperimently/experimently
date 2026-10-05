@@ -18,7 +18,8 @@ For every ``--suite``, it exits 0 only when all of these hold:
 * the selected lists are non-empty, disjoint, and together equal that list;
 * nothing narrowed any shard (``-m``, ``-k``, ``--deselect``, ``--ignore``,
   ``--ignore-glob``, ``--lf``, an item another plugin deselected, an item
-  removed before the shard hook without being deselected, a ``-p no:NAME``
+  removed before the shard hook without being deselected, an item present
+  there that pytest never collected, a ``-p no:NAME``
   not allowed below, or plugin autoload turned off), and no collector failed;
 * every selected test has exactly one ``ran`` record, nothing else ran, and
   each outcome is passed, xfailed, or skipped with an allowed reason.
@@ -31,10 +32,10 @@ Disabled plugins: ``--allow-disabled-plugin SUITE=NAME`` allows one
 ``-p no:NAME`` (the CI commands pass ``-p no:cov``, so they name ``cov``).
 There is no other narrowing allowance.
 
-What it cannot see: anything that changes which tests are collected without
-removing an item or touching the session's options -- a test generator that
-yields fewer parameters, a ``collect_ignore`` entry, a deleted test file. Those
-are changes to the tree, reviewed as code, and every shard agrees on them.
+What it cannot see: a change to the tree itself -- a ``collect_ignore`` entry,
+a deleted test file, a generator yielding fewer parameters. pytest then never
+collects those tests, every shard agrees, and nothing in the session differs.
+Those are out of scope here and reviewed as code.
 
 Exit status: 0 proven; 1 a rule refused; 2 a usage error, or a report that is
 unreadable, unparsable, truncated or malformed.
@@ -115,9 +116,8 @@ def load_report(path: Path) -> dict:
     _int(doc, "shard", where, 1)
     _int(doc, "of", where, 1)
     _int(doc, "pre_deselected", where, 0)
-    drops = doc.get("unannounced_drops")
-    if isinstance(drops, bool) or not isinstance(drops, int):
-        raise BadReport(f"{where}: 'unannounced_drops' is not an integer")
+    _str_list(doc, "unannounced", where)
+    _str_list(doc, "fabricated", where)
     _str_list(doc, "disabled_plugins", where)
     if not isinstance(doc.get("autoload_disabled"), bool):
         raise BadReport(f"{where}: 'autoload_disabled' is not a boolean")
@@ -174,10 +174,15 @@ def _narrowing(doc: dict, plugins_allowed: set[str]) -> list[str]:
         narrowed.append(
             f"pre_deselected={doc['pre_deselected']} (items another plugin deselected)"
         )
-    if doc["unannounced_drops"]:
+    if doc["unannounced"]:
         narrowed.append(
-            f"unannounced_drops={doc['unannounced_drops']} (items collected but "
-            "gone before the shard hook, never deselected)"
+            f"unannounced={_examples(doc['unannounced'])} ({len(doc['unannounced'])} "
+            "collected but gone before the shard hook, never deselected)"
+        )
+    if doc["fabricated"]:
+        narrowed.append(
+            f"fabricated={_examples(doc['fabricated'])} ({len(doc['fabricated'])} "
+            "present at the shard hook but never collected)"
         )
     disabled = [p for p in doc["disabled_plugins"] if p not in plugins_allowed]
     if disabled:
