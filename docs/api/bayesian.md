@@ -77,7 +77,9 @@ demo experiment hasn't turned Bayesian analysis on.
 ## Turning Bayesian analysis on
 
 Set `bayesian_enabled` to `true` on `POST /api/v1/experiments/` or
-`PUT /api/v1/experiments/{experiment_id}`, and optionally a `bayesian_config`. Turning it on
+`PUT /api/v1/experiments/{experiment_id}`, and optionally a `bayesian_config`. In the dashboard,
+the new-experiment form's **Also analyse the primary metric with Bayesian statistics** checkbox
+sends `bayesian_enabled: true` with no config. Turning it on
 without a config stores the defaults in the table below. This creates an experiment with
 Bayesian analysis on, prints the stored settings, and saves its id in `$BAYES_ID`:
 
