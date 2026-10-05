@@ -22,12 +22,16 @@ You'll need an account with one of the following roles:
 
 | Role | What You Can Do |
 |------|----------------|
-| **ADMIN** | Manage users; create, change, schedule and delete any experiment (scheduling is through the API; [which actions have a screen](dashboard-and-api.md)); all flags |
+| **ADMIN** | Create, change, schedule and delete any experiment (scheduling is through the API; [which actions have a screen](dashboard-and-api.md)); create and manage any feature flag |
 | **DEVELOPER** | Create, change, schedule and delete any experiment (scheduling is through the API; [which actions have a screen](dashboard-and-api.md)); create and manage any feature flag |
 | **ANALYST** | View all experiments, results, and reports, and every feature flag (read-only) |
 | **VIEWER** | View every experiment and its results, and every feature flag (read-only) |
 
-Contact your platform admin to request access or role changes.
+The ADMIN role does not, by itself, open the dashboard's Users, API Keys or Safety settings
+pages, change a flag's per-flag safety config or roll it back, or manage custom Roles: those
+need the separate, superuser account flag (`is_superuser`), which an ADMIN account may or may
+not have. A superuser can do all of the above regardless of role. Contact your platform admin
+to request access, a role change, or superuser access.
 
 ### What the dashboard does not do yet
 

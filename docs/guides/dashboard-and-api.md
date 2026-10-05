@@ -21,6 +21,7 @@ The table lists each capability and where you do it today:
 | Set a flag's targeting rules and rollout percentage | Dashboard | [Creating feature flags](../feature-flags/create.md) |
 | See a flag's rollout schedule and its stages | Dashboard | [Gradual rollouts](../feature-flags/rollouts.md) |
 | Roll a feature flag back from the safety page | Dashboard | [Safety monitoring](../feature-flags/safety.md) |
+| Set a feature flag's per-flag safety config (error-rate and latency thresholds, rollback percentage) | API only | [Safety monitoring](../feature-flags/safety.md#configuring-per-flag-safety) |
 | Manage users and their roles | Dashboard | [Authentication user guide](../auth/auth-user-guide.md) |
 | Change your own password (local sign-in) | Dashboard | [Authentication user guide](../auth/auth-user-guide.md#changing-your-password) |
 | Give each variant a configuration (a JSON payload) when creating an experiment | Dashboard | [Running experiments](user-guide.md) |

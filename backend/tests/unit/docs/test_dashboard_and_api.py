@@ -69,6 +69,11 @@ WITNESSES: Dict[str, str] = {
     "Set a flag's targeting rules and rollout percentage": "flag-targeting-section",
     "See a flag's rollout schedule and its stages": "rollout-schedule-section",
     "Roll a feature flag back from the safety page": "rollback-button",
+    # #916: no screen writes a flag's safety config; the dashboard's only
+    # component for it (FlagSafetyConfig.tsx) is an unrendered stub, not a
+    # page any route reaches.
+    "Set a feature flag's per-flag safety config (error-rate and latency "
+    "thresholds, rollback percentage)": "safety-config-editor",
     "Manage users and their roles": "user-management-page",
     "Change your own password (local sign-in)": "change-password-page",  # #503
     # The #442 slice before launch: B (#882), one toggle per variant.
