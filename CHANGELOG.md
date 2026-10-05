@@ -10,6 +10,13 @@ longer applies and release-please can generate this file directly. Until it
 does, entries below 0.2.2 are hand-written and the links in them are the
 reason why.
 
+## [0.22.1](https://github.com/getexperimently/experimently/compare/v0.22.0...v0.22.1) (2026-10-05)
+
+
+### Bug Fixes
+
+* **warehouse:** BigQuery accepts the analysis query (AVG names its column) ([#901](https://github.com/getexperimently/experimently/issues/901)) ([1d9c557](https://github.com/getexperimently/experimently/commit/1d9c557ec529f731b4f90d057c48c85741fd5de4))
+
 ## [0.22.0](https://github.com/getexperimently/experimently/compare/v0.21.0...v0.22.0) (2026-10-05)
 
 
