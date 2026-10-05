@@ -1,6 +1,6 @@
 /**
  * /warehouse: the connections and sources lists, per role, with connectors
- * disabled, enabled, and as shipped (Snowflake enabled, the others not).
+ * disabled, enabled, and as shipped (Snowflake and BigQuery enabled, Athena not).
  */
 import React from 'react';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
@@ -130,11 +130,11 @@ describe('connectors that are not available', () => {
     expect(screen.queryByTestId('warehouse-no-connector')).not.toBeInTheDocument();
   });
 
-  it('as shipped: Snowflake is available and BigQuery and Amazon Athena are not yet', async () => {
-    setData({ conns: [], enabled: { snowflake: true } });
+  it('as shipped: Snowflake and BigQuery are available and Amazon Athena is not yet', async () => {
+    setData({ conns: [], enabled: { snowflake: true, bigquery: true } });
     renderPage();
     expect(await screen.findByTestId('warehouse-connector-snowflake')).toHaveTextContent('Snowflake: Available');
-    expect(screen.getByTestId('warehouse-connector-bigquery')).toHaveTextContent('BigQuery: Not yet available');
+    expect(screen.getByTestId('warehouse-connector-bigquery')).toHaveTextContent('BigQuery: Available');
     expect(screen.getByTestId('warehouse-connector-athena')).toHaveTextContent('Amazon Athena: Not yet available');
     expect(screen.queryByTestId('warehouse-no-connector')).not.toBeInTheDocument();
     expect(screen.getByTestId('warehouse-new-connection')).toHaveAttribute('href', '/warehouse/connections/new');

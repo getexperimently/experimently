@@ -1,6 +1,6 @@
 # Warehouse analysis (beta)
 
-!!! note "Beta: Snowflake is available"
+!!! note "Beta: Snowflake and BigQuery are available"
     Warehouse analysis runs an experiment's analysis on tables in your own
     data warehouse instead of on events sent to Experimently. The API below is
     part of the **full profile** and every route is `x-stability: beta`: its
@@ -8,8 +8,10 @@
 
     Snowflake is available: its connector passed a check against a real
     Snowflake account on 2026-10-04 (see [Setting up Snowflake](#setting-up-snowflake)).
-    BigQuery and Amazon Athena aren't available yet. Each becomes available
-    only after its own check against a real account, one release at a time.
+    BigQuery is available: its connector passed a check against a real
+    BigQuery project on 2026-10-05 (see [Setting up BigQuery](#setting-up-bigquery)).
+    Amazon Athena isn't available yet; it becomes available only after its
+    own check against a real account.
     `GET /api/v1/warehouse/analysis/connectors` says which are available on
     your deployment; creating a connection of any other type answers
     `422 connector_disabled`.
@@ -112,6 +114,35 @@ good second limit.
 To replace the key, use **Generate a new key**: it shows a statement for
 `RSA_PUBLIC_KEY_2`, and the old key keeps working until a test with the new
 one passes.
+
+## Setting up BigQuery
+
+Experimently signs in to BigQuery with a service-account key you create for
+it, and runs every query as a job in a project you choose.
+
+1. **Create a service account for Experimently** and give it two roles, and
+   nothing more:
+    - **BigQuery Job User** on the project that runs and pays for the
+      queries (the connection's billing project);
+    - **BigQuery Data Viewer** on each dataset analysis reads, granted on the
+      dataset itself. Never grant it on the whole project: the service
+      account can then read every table in it.
+2. **Create a JSON key** for the service account and paste it into the
+   connection form in Warehouse › Connections (ADMIN). It is sent only in the
+   request body and stored encrypted, and it is never shown again. A key
+   whose `token_uri` is not Google's own token endpoint is refused.
+3. **Set the location** to where your datasets are: `US`, `EU`, or a region
+   such as `europe-west2`.
+4. **Set the bytes cap** ("Most data a query may read"). Before each query
+   Experimently runs a dry run: anything that is not a single `SELECT`, or
+   that would read more than the cap, is refused before it runs. The real
+   query is also sent with the cap as its billing limit, so BigQuery stops it
+   rather than bill more.
+5. **Test the connection**, then name tables in full in a source:
+   `project.dataset.table`.
+
+Every job carries the label `experimently: analysis`, so you can find its
+cost in your billing.
 
 ## Who can do what
 

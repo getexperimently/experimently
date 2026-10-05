@@ -120,17 +120,20 @@ describe('connectors that are not available', () => {
     expect(screen.queryByRole('button', { name: /save/i })).not.toBeInTheDocument();
   });
 
-  it('as shipped: Snowflake is chosen, and BigQuery and Amazon Athena cannot be', async () => {
-    svc.listConnectors.mockResolvedValue(connectors({ snowflake: true }));
+  it('as shipped: BigQuery and Snowflake can be chosen, and Amazon Athena cannot be', async () => {
+    svc.listConnectors.mockResolvedValue(connectors({ snowflake: true, bigquery: true }));
     renderPage();
-    const snowflake = await screen.findByRole('radio', { name: 'Snowflake' });
+    const bigquery = await screen.findByRole('radio', { name: 'BigQuery' });
+    expect(bigquery).toBeEnabled();
+    expect(bigquery).toBeChecked();
+    expect(screen.getByTestId('wh-conn-service-account-json')).toBeInTheDocument();
+    const athena = screen.getByRole('radio', { name: 'Amazon Athena' });
+    expect(athena).toBeDisabled();
+    expect(athena).toHaveAccessibleDescription('Not yet available');
+    const snowflake = screen.getByRole('radio', { name: 'Snowflake' });
     expect(snowflake).toBeEnabled();
+    fireEvent.click(snowflake);
     expect(snowflake).toBeChecked();
-    for (const name of ['BigQuery', 'Amazon Athena']) {
-      const radio = screen.getByRole('radio', { name });
-      expect(radio).toBeDisabled();
-      expect(radio).toHaveAccessibleDescription('Not yet available');
-    }
     expect(screen.getByLabelText(/^Account/)).toBeInTheDocument();
     expect(screen.queryByTestId('wh-conn-service-account-json')).not.toBeInTheDocument();
   });

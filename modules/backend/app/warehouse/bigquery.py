@@ -1,8 +1,8 @@
 """The BigQuery connector: a service-account key, the BigQuery REST API, and limits.
 
-Disabled until verified (:mod:`.connectors`): the code is complete, but no
-deployment can use it until a check against a real BigQuery project has
-passed and :data:`~.connectors.ENABLED_CONNECTORS` names it.
+Enabled (:mod:`.connectors`): the check against a real BigQuery project
+passed on 2026-10-05 (run ``wl-bigquery-20261005T150837Z-7782e712``), and
+:data:`~.connectors.ENABLED_CONNECTORS` names it.
 
 Credentials
 -----------

@@ -102,16 +102,16 @@ def test_the_connector_list_follows_the_enabled_set(wh):
     app.dependency_overrides.pop(wa.get_enabled_connectors)
     shipped = viewer.get(f"{WA}/connectors").json()["connectors"]
     assert {c["warehouse_type"]: c["enabled"] for c in shipped} == {
-        "bigquery": False,
+        "bigquery": True,
         "snowflake": True,
         "athena": False,
     }
 
 
-def test_as_shipped_snowflake_is_created_and_the_others_are_422(
-    wh, service_account_pem
+def test_as_shipped_snowflake_and_bigquery_are_created_and_athena_is_422(
+    wh, google, service_account_pem
 ):
-    """With no override, a Snowflake connection is created; BigQuery and Athena are not."""
+    """With no override, Snowflake and BigQuery connections are created; Athena is not."""
     admin = wh.as_("ADMIN")
     app.dependency_overrides.pop(wa.get_enabled_connectors)
     before = wh.db.query(WarehouseConnection).count()
@@ -128,17 +128,16 @@ def test_as_shipped_snowflake_is_created_and_the_others_are_422(
     )
     assert created.status_code == 201, created.text
     assert created.json()["enabled"] is True
-    for body, name in (
-        (bigquery_body(service_account_pem), "BigQuery"),
-        (ATHENA_BODY, "Amazon Athena"),
-    ):
-        refused = admin.post(f"{WA}/connections", json=body)
-        assert refused.status_code == 422
-        assert refused.json()["detail"] == {
-            "code": "connector_disabled",
-            "message": f"{name} isn't available on this deployment yet.",
-        }
-    assert wh.db.query(WarehouseConnection).count() == before + 1
+    created = admin.post(f"{WA}/connections", json=bigquery_body(service_account_pem))
+    assert created.status_code == 201, created.text
+    assert created.json()["enabled"] is True
+    refused = admin.post(f"{WA}/connections", json=ATHENA_BODY)
+    assert refused.status_code == 422
+    assert refused.json()["detail"] == {
+        "code": "connector_disabled",
+        "message": "Amazon Athena isn't available on this deployment yet.",
+    }
+    assert wh.db.query(WarehouseConnection).count() == before + 2
 
 
 def test_bigquery_connection_create_and_test(wh, google, service_account_pem):

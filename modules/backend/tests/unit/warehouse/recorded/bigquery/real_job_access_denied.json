@@ -1,0 +1,61 @@
+{
+  "_provenance": {
+    "source": "real account",
+    "real_run_id": "wl-bigquery-20261005T150837Z-7782e712",
+    "check": "bq_create_refused",
+    "request": {
+      "method": "POST",
+      "path": "/bigquery/v2/projects/acme-analytics/jobs"
+    },
+    "note": "Recorded on a real account by the warehouse_live check, then scrubbed: the project, dataset, service-account email, job id, etag, temporary dataset and table names and the statement text are replaced with this suite's placeholders. Messages are replaced by the sentinel, so the tests can show no vendor text is passed on. Everything else is as BigQuery answered."
+  },
+  "status": 200,
+  "body": {
+    "kind": "bigquery#job",
+    "etag": "AAAAAAAAAAAAAAAAAAAAAA==",
+    "id": "acme-analytics:US.JOBID",
+    "selfLink": "https://bigquery.googleapis.com/bigquery/v2/projects/acme-analytics/jobs/JOBID?location=US",
+    "user_email": "analysis-reader@acme-analytics.iam.gserviceaccount.com",
+    "configuration": {
+      "query": {
+        "query": "...",
+        "priority": "INTERACTIVE",
+        "maximumBytesBilled": "104857600",
+        "useLegacySql": false
+      },
+      "jobTimeoutMs": "60000",
+      "labels": {
+        "experimently": "analysis"
+      },
+      "jobType": "QUERY"
+    },
+    "jobReference": {
+      "projectId": "acme-analytics",
+      "jobId": "JOBID",
+      "location": "US"
+    },
+    "statistics": {
+      "creationTime": "1791212935560",
+      "startTime": "1791212935726",
+      "endTime": "1791212935726",
+      "query": {}
+    },
+    "status": {
+      "errorResult": {
+        "reason": "accessDenied",
+        "message": "UPSTREAM-SENTINEL-bq-4d1e message"
+      },
+      "errors": [
+        {
+          "reason": "accessDenied",
+          "message": "UPSTREAM-SENTINEL-bq-4d1e message"
+        }
+      ],
+      "state": "DONE"
+    },
+    "principal_subject": "serviceAccount:analysis-reader@acme-analytics.iam.gserviceaccount.com",
+    "jobCreationReason": {
+      "code": "REQUESTED"
+    }
+  }
+}

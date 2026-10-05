@@ -26,9 +26,11 @@ from modules.backend.app.services.warehouse_query_builder import (
     AssignmentMapping,
     BuiltQuery,
     MetricMapping,
+    build_diagnostics_query,
     build_metric_query,
 )
 from modules.backend.app.services.warehouse_sufficient_stats import (
+    parse_diagnostics_rows,
     parse_metric_rows,
 )
 from modules.backend.app.warehouse import bigquery as bq
@@ -596,7 +598,7 @@ def test_dry_run_uses_jobs_insert_and_requires_select(key):
 
 def test_bytes_over_cap_refused_before_run(key):
     fake = GoogleFake(happy())
-    small = BigQueryConnection(PROJECT, "US", 1_048_575, 300)
+    small = BigQueryConnection(PROJECT, "US", 30_755_559, 300)
     with pytest.raises(WarehouseError) as err:
         adapter(key, fake, connection=small).run_query(metric_query(), Deadline(600))
     assert err.value.code is C.BYTES_LIMIT
@@ -606,7 +608,7 @@ def test_bytes_over_cap_refused_before_run(key):
 
 def test_bytes_at_the_cap_run(key):
     fake = GoogleFake(happy())
-    exact = BigQueryConnection(PROJECT, "US", 1_048_576, 300)
+    exact = BigQueryConnection(PROJECT, "US", 30_755_560, 300)
     adapter(key, fake, connection=exact, sleeper=lambda s: None).run_query(
         metric_query(), Deadline(600)
     )
@@ -663,9 +665,10 @@ def test_run_query_sends_the_limits_and_returns_the_rows(key):
     assert not [r for r in fake.requests if r.path.endswith("/cancel")]
 
     assert result.job_id == "experimently_job1"
-    assert result.total_bytes_billed == 10_485_760
-    assert result.total_bytes_processed == 1_048_576
-    assert result.elapsed_ms == 2500
+    # The real job's statistics (run wl-bigquery-20261005T150837Z-7782e712).
+    assert result.total_bytes_billed == 31_457_280
+    assert result.total_bytes_processed == 30_755_560
+    assert result.elapsed_ms == 2949
     stats = parse_metric_rows(list(result.rows))
     assert [v.variant for v in stats.variants] == ["control", "treatment"]
     assert stats.k_text == "0.10500000000000001"
@@ -968,3 +971,86 @@ def test_the_deadline_before_any_request_sends_nothing(key):
     assert err.value.code is C.TIME_LIMIT
     assert fake.requests == []
     assert CANCEL_RESERVE_SECONDS > 0
+
+
+# -- answers recorded on a real account (run wl-bigquery-20261005T150837Z-7782e712)
+
+
+def diagnostics_query() -> BuiltQuery:
+    return build_diagnostics_query(
+        BIGQUERY_SQL,
+        AssignmentMapping(
+            table=("acme-data", "events", "exposures"),
+            unit_id="user_id",
+            experiment_key="experiment",
+            variant="variant",
+            exposed_at="exposed_at",
+        ),
+        "checkout-test",
+        AnalysisWindow(
+            start=datetime(2026, 9, 1, tzinfo=timezone.utc),
+            end=datetime(2026, 9, 15, tzinfo=timezone.utc),
+        ),
+    )
+
+
+def test_real_table_columns_are_read(key):
+    fake = GoogleFake(happy(table=["real_table_get"]))
+    columns = adapter(key, fake).table_columns(
+        ("acme-data", "events", "exposures"), Deadline(30)
+    )
+    assert columns == (
+        ("user_id", "STRING"),
+        ("experiment_key", "STRING"),
+        ("variant", "STRING"),
+        ("exposed_at", "TIMESTAMP"),
+    )
+
+
+def test_real_metric_results_are_read_and_parsed(key):
+    fake = GoogleFake(happy(results=["real_query_results_metric"]))
+    result = adapter(key, fake, sleeper=lambda s: None).run_query(
+        metric_query(), Deadline(600)
+    )
+    stats = parse_metric_rows(list(result.rows))
+    assert [v.variant for v in stats.variants] == ["control", "treatment"]
+    assert [v.n for v in stats.variants] == [200_000, 200_000]
+    assert [v.n_converted for v in stats.variants] == [100_514, 100_260]
+    assert stats.k_text == "0.50193499999999193"
+
+
+def test_real_diagnostics_results_are_read_and_parsed(key):
+    fake = GoogleFake(happy(results=["real_query_results_diagnostics"]))
+    result = adapter(key, fake, sleeper=lambda s: None).run_query(
+        diagnostics_query(), Deadline(600)
+    )
+    diagnostics = parse_diagnostics_rows(list(result.rows))
+    assert diagnostics.units == 400_000
+    assert diagnostics.multi_variant_units == 0
+
+
+@pytest.mark.parametrize(
+    "answer, code",
+    [
+        ("real_job_access_denied", C.PERMISSION_DENIED),
+        ("real_job_bytes_billed_limit", C.BYTES_LIMIT),
+    ],
+)
+def test_a_real_job_that_failed_on_insert_is_reported_by_its_reason(
+    key, caplog, answer, code
+):
+    """BigQuery answered both refusals as a finished job with an ``errorResult``."""
+    caplog.set_level(logging.DEBUG)
+    fake = GoogleFake(happy(insert=[answer]))
+    with pytest.raises(WarehouseError) as err:
+        adapter(key, fake, sleeper=lambda s: None).run_query(
+            metric_query(), Deadline(600)
+        )
+    assert err.value.code is code
+    for surface in (
+        str(err.value),
+        err.value.message,
+        _formatted(err.value),
+        caplog.text,
+    ):
+        assert SENTINEL not in surface
