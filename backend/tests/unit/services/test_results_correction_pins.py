@@ -98,6 +98,12 @@ ONE_TREATMENT_PINS: Dict[str, Dict[str, str]] = {
         "three_variants_one_null_p": (
             "3dbc690054ecb0b00c537bf44c67879e95f2457e432db20eb18b596dd79e3641"
         ),
+    },  # 1.4.0 (#854) changes the sequential route only.
+    "1.4.0": {
+        "two_variants": "ecd8090f0b63152209a0fc370137017fb3026ee0a629665302efc1206e33abbe",
+        "three_variants_one_null_p": (
+            "3dbc690054ecb0b00c537bf44c67879e95f2457e432db20eb18b596dd79e3641"
+        ),
     },
 }
 

@@ -36,6 +36,9 @@ export const NAV_ITEMS: NavItem[] = [
   { label: 'Docs', href: '/docs', testId: 'nav-docs' },
 ];
 
+/** The page where a local-sign-in user changes their own password. */
+export const CHANGE_PASSWORD_PATH = '/account/password';
+
 export function isNavActive(pathname: string, href: string): boolean {
   return pathname === href || pathname.startsWith(`${href}/`);
 }
@@ -351,6 +354,17 @@ export function AppShell({ children }: AppShellProps) {
                     {USER_ROLE_LABELS[user.role]}
                   </span>
                 </div>
+                {/* Only local sign-in has a password the API can change; under
+                    any other provider the route answers 404. */}
+                {user.auth_provider === 'local' && (
+                  <Link
+                    href={CHANGE_PASSWORD_PATH}
+                    data-testid="change-password-link"
+                    className="px-3 py-1.5 rounded-md text-sm font-medium text-slate-600 hover:bg-slate-50 hover:text-slate-900"
+                  >
+                    Change password
+                  </Link>
+                )}
                 <button
                   type="button"
                   data-testid="logout-button"

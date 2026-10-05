@@ -22,6 +22,7 @@ The table lists each capability and where you do it today:
 | See a flag's rollout schedule and its stages | Dashboard | [Gradual rollouts](../feature-flags/rollouts.md) |
 | Roll a feature flag back from the safety page | Dashboard | [Safety monitoring](../feature-flags/safety.md) |
 | Manage users and their roles | Dashboard | [Authentication user guide](../auth/auth-user-guide.md) |
+| Change your own password (local sign-in) | Dashboard | [Authentication user guide](../auth/auth-user-guide.md#changing-your-password) |
 | Give each variant a configuration (a JSON payload) when creating an experiment | Dashboard | [Running experiments](user-guide.md) |
 | Turn on Bayesian analysis when creating an experiment | Dashboard | [Bayesian analysis](../api/bayesian.md) |
 | See on the experiment page whether Bayesian analysis is on | Dashboard | [Bayesian analysis](../api/bayesian.md) |

@@ -35,7 +35,7 @@ import numpy as np
 
 #: Bumped whenever a change alters numbers a client could have persisted
 #: (sampling strategy, estimator, default priors, thresholds).
-ENGINE_VERSION: str = "1.3.0"
+ENGINE_VERSION: str = "1.4.0"
 
 #: Mask that keeps the derived seed inside the signed 64-bit range.
 _SEED_MASK = (1 << 63) - 1

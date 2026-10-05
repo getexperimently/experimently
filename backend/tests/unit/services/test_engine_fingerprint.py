@@ -61,6 +61,10 @@ ENGINE_FINGERPRINTS: Dict[str, str] = {
     # ``cuped_metric_result`` (pinned in test_sufficient_stats_fingerprint.py).
     # ``CupedService``, the path this dataset runs, is unchanged.
     "1.3.0": "4860dd07b1052f1f47329d61cc5fa72f58a1721177f07bb1e912d00754a0a2c3",
+    # 1.4.0 is #854: the sequential mSPRT and confidence sequence use the
+    # Agresti-Caffo variance of the difference instead of the plug-in one,
+    # which moves the ``msprt``, ``cs`` and ``analysis`` outputs below.
+    "1.4.0": "003234aa770b7f48e4d42ee0e718895523371c24251dadb6e46dc8355b7e346c",
 }
 
 # Two ids where the control sorts AFTER the treatment, so an engine that

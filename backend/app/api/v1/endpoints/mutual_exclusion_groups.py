@@ -8,7 +8,7 @@ Routes:
     GET    /api/v1/mutual-exclusion-groups                                — list groups
     POST   /api/v1/mutual-exclusion-groups                                — create group (DEVELOPER+)
     GET    /api/v1/mutual-exclusion-groups/{group_id}                     — get group
-    PUT    /api/v1/mutual-exclusion-groups/{group_id}                     — update group (DEVELOPER+)
+    PUT    /api/v1/mutual-exclusion-groups/{group_id}                     — update group (DEVELOPER+; a status change ADMIN)
     DELETE /api/v1/mutual-exclusion-groups/{group_id}                     — archive group (ADMIN)
     POST   /api/v1/mutual-exclusion-groups/{group_id}/experiments         — add experiment
     DELETE /api/v1/mutual-exclusion-groups/{group_id}/experiments/{eid}   — remove experiment
@@ -24,7 +24,7 @@ from backend.app.api import deps
 from backend.app.core.permissions import Action, ResourceType, check_permission
 from backend.app.models.audit_log import ActionType, EntityType
 from backend.app.models.experiment import Experiment
-from backend.app.models.user import User
+from backend.app.models.user import User, UserRole
 from backend.app.schemas.mutual_exclusion_group import (
     AddExperimentToGroupRequest,
     MutualExclusionGroupCreate,
@@ -60,12 +60,22 @@ def _require_developer(user: User) -> None:
 
 
 def _require_admin(user: User) -> None:
-    """Raise 403 if user is not an ADMIN / superuser."""
-    if not check_permission(user, ResourceType.EXPERIMENT, Action.DELETE):
+    """Raise 403 unless the user is an ADMIN or a superuser.
+
+    The role itself is checked, not a permission from the role matrix: no
+    resource/action pair there is held by ADMIN alone (DEVELOPER also holds
+    EXPERIMENT DELETE).
+    """
+    if not (user.is_superuser or user.role == UserRole.ADMIN):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Admin permissions required for this action",
         )
+
+
+def _status_value(stored) -> str:
+    """The stored status as its string value (the column holds a model enum)."""
+    return getattr(stored, "value", stored)
 
 
 def _record(db: Session, user: User, action: ActionType, group_id, name, **values):
@@ -190,7 +200,13 @@ def get_group(
     "/{group_id}",
     response_model=MutualExclusionGroupResponse,
     summary="Update a mutual exclusion group",
-    description="Update a mutual exclusion group. Requires DEVELOPER or ADMIN role.",
+    description=(
+        "Update a mutual exclusion group's name, description or traffic "
+        "allocation. Requires DEVELOPER or ADMIN role. Changing status "
+        "(archiving or unarchiving) requires ADMIN role, as archiving through "
+        "DELETE does; sending the group's current status is accepted from a "
+        "DEVELOPER."
+    ),
     tags=["Mutual Exclusion Groups"],
 )
 def update_group(
@@ -199,15 +215,21 @@ def update_group(
     db: Session = Depends(deps.get_db),
     current_user: User = Depends(deps.get_current_active_user),
 ) -> MutualExclusionGroupResponse:
-    """Update an existing mutual exclusion group."""
+    """Update an existing mutual exclusion group.
+
+    Order: DEVELOPER check, then 404, then a status change needs ADMIN.
+    """
     _require_developer(current_user)
     service = MutualExclusionService(db)
     existing = service.get_group(group_id)
-    before = (
-        audit_snapshot(EntityType.MUTUAL_EXCLUSION_GROUP, existing)
-        if existing is not None
-        else {}
-    )
+    if existing is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Mutual exclusion group {group_id} not found",
+        )
+    if data.status is not None and data.status.value != _status_value(existing.status):
+        _require_admin(current_user)
+    before = audit_snapshot(EntityType.MUTUAL_EXCLUSION_GROUP, existing)
     group = service.update_group(
         group_id=group_id,
         name=data.name,

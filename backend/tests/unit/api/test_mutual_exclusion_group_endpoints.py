@@ -579,3 +579,100 @@ class TestRemoveExperimentFromGroup:
             )
 
         assert response.status_code == 400
+
+
+# ---------------------------------------------------------------------------
+# Test: archiving needs ADMIN, through DELETE or a PUT status change (#904)
+# ---------------------------------------------------------------------------
+
+
+class TestArchiveNeedsAdmin:
+    """Non-superusers throughout: a superuser passes every check."""
+
+    def setup_method(self):
+        app.dependency_overrides.clear()
+
+    def teardown_method(self):
+        app.dependency_overrides.clear()
+
+    def _call(self, role, method, url, stored=MutualExclusionGroupStatus.ACTIVE, **kw):
+        app.dependency_overrides[deps.get_current_active_user] = lambda: _make_user(
+            role=role
+        )
+        app.dependency_overrides[deps.get_db] = lambda: MagicMock()
+        with patch(
+            "backend.app.api.v1.endpoints.mutual_exclusion_groups.MutualExclusionService"
+        ) as MockService:
+            instance = MockService.return_value
+            instance.get_group.return_value = _make_group(status=stored)
+            instance.update_group.return_value = _make_group(status=stored)
+            instance.archive_group.return_value = _make_group(
+                status=MutualExclusionGroupStatus.ARCHIVED
+            )
+            return TestClient(app).request(method, url, **kw)
+
+    @pytest.mark.regression
+    def test_developer_cannot_archive_by_delete(self):
+        response = self._call(
+            UserRole.DEVELOPER,
+            "DELETE",
+            f"/api/v1/mutual-exclusion-groups/{uuid.uuid4()}",
+        )
+        assert response.status_code == 403
+
+    def test_admin_non_superuser_archives_by_delete(self):
+        response = self._call(
+            UserRole.ADMIN, "DELETE", f"/api/v1/mutual-exclusion-groups/{uuid.uuid4()}"
+        )
+        assert response.status_code == 200, response.text
+
+    @pytest.mark.regression
+    @pytest.mark.parametrize(
+        "stored,sent",
+        [
+            (MutualExclusionGroupStatus.ACTIVE, "archived"),
+            (MutualExclusionGroupStatus.ARCHIVED, "active"),
+        ],
+    )
+    def test_developer_cannot_change_status_by_put(self, stored, sent):
+        response = self._call(
+            UserRole.DEVELOPER,
+            "PUT",
+            f"/api/v1/mutual-exclusion-groups/{uuid.uuid4()}",
+            stored=stored,
+            json={"status": sent},
+        )
+        assert response.status_code == 403
+        assert response.json()["detail"] == "Admin permissions required for this action"
+
+    def test_developer_may_send_the_unchanged_status(self):
+        response = self._call(
+            UserRole.DEVELOPER,
+            "PUT",
+            f"/api/v1/mutual-exclusion-groups/{uuid.uuid4()}",
+            json={"name": "Renamed", "status": "active"},
+        )
+        assert response.status_code == 200, response.text
+
+    def test_admin_non_superuser_changes_status_by_put(self):
+        response = self._call(
+            UserRole.ADMIN,
+            "PUT",
+            f"/api/v1/mutual-exclusion-groups/{uuid.uuid4()}",
+            json={"status": "archived"},
+        )
+        assert response.status_code == 200, response.text
+
+    def test_put_on_a_missing_group_is_404(self):
+        app.dependency_overrides[deps.get_current_active_user] = lambda: _make_user()
+        app.dependency_overrides[deps.get_db] = lambda: MagicMock()
+        with patch(
+            "backend.app.api.v1.endpoints.mutual_exclusion_groups.MutualExclusionService"
+        ) as MockService:
+            MockService.return_value.get_group.return_value = None
+            response = TestClient(app).put(
+                f"/api/v1/mutual-exclusion-groups/{uuid.uuid4()}",
+                json={"status": "archived"},
+            )
+        assert response.status_code == 404
+        MockService.return_value.update_group.assert_not_called()

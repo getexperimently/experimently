@@ -31,6 +31,10 @@ with the advisory `at_risk`, which is not evidence that there is no effect.
 
 The `always_valid_p_value` can be interpreted like a standard p-value at any point without inflating Type I error.
 
+`lambda_ratio` is computed in log space and capped at the largest finite double
+(about 1.8 × 10³⁰⁸), so an overwhelming difference, such as 10% against 11% with
+ten million users per arm, still reports a finite number and can stop.
+
 ### Always-Valid Confidence Intervals (Confidence Sequences)
 
 A confidence sequence is a confidence interval that is valid at every sample size simultaneously. The interval shrinks as more data is collected. Use this when you want a continuous view of the effect size range, not just a stop/continue decision.
@@ -43,19 +47,38 @@ of Johari et al. 2017 and Howard et al. 2021), on the difference in conversion r
 estimate ± sqrt( V (V + τ²) / τ² · (2 ln(1/α) + ln((V + τ²) / V)) )
 ```
 
-where V is the variance of the estimated difference. Because the interval and the
-stop decision share V, τ² and α, they cannot disagree: 0 is outside the interval
-exactly when `can_stop` is `true`. At a 10% conversion rate, α = 0.05 and the default
-τ² = 0.001, the half-width is about 0.041 at 1,000 users per arm, 0.0136 at 10,000
-and 0.00055 at 10 million. Early on it is wider than a fixed-horizon interval: that
-is the price of being valid however often you look. A difference in rates cannot
-leave `[-1, 1]`, so the interval is clipped to that range: with 10 users per arm at
-a 50% rate the formula gives about ±3.92, and the response reports `[-1, 1]`.
-Clipping changes neither the stop decision nor coverage, because 0 and the true
-difference always lie inside `[-1, 1]`. While an arm has no users, or
-the estimated variance is zero (within each arm every user has the same outcome),
-nothing bounds the effect and the interval is `[-1, 1]`, the whole range of a
-difference in rates; `can_stop` is then `false`.
+where the estimate is the observed difference in rates and V is the Agresti-Caffo
+variance of that difference: one conversion and one non-conversion are added to each
+arm, `p̃ = (conversions + 1) / (users + 2)`, and
+`V = p̃_c (1 − p̃_c) / (n_c + 2) + p̃_t (1 − p̃_t) / (n_t + 2)`. The mSPRT uses the
+same V. Because the interval and the stop decision share V, τ² and α, they cannot
+disagree: 0 is outside the interval exactly when `can_stop` is `true`. At a 10%
+conversion rate, α = 0.05 and the default τ² = 0.001, the half-width is about 0.041
+at 1,000 users per arm, 0.0136 at 10,000 and 0.00055 at 10 million. Early on it is
+wider than a fixed-horizon interval: that is the price of being valid however often
+you look. A difference in rates cannot leave `[-1, 1]`, so the interval is clipped to
+that range: with 10 users per arm at a 50% rate the formula gives about ±3.27, and
+the response reports `[-1, 1]`. Clipping changes neither the stop decision nor
+coverage, because 0 and the true difference always lie inside `[-1, 1]`. While an
+arm has no users, nothing bounds the effect: the interval is `[-1, 1]`, the whole
+range of a difference in rates, and `can_stop` is `false`. An arm in which every
+user has the same outcome (nobody converts, or everybody does) still gets a finite
+interval: 0 of 500 against 0 of 500 gives about ±0.0093 around 0 and cannot stop,
+while 0 of 500 against 500 of 500 can.
+
+**Unequal splits.** Before engine version 1.4.0
+([#854](https://github.com/getexperimently/experimently/issues/854)) V was the
+plug-in variance `p (1 − p) / n` per arm. With one small, low-rate arm that is too
+small (it is 0 while the arm has no conversions), so the interval was too narrow
+and A/A experiments were told `stop_for_effect` far more often than α: about one in
+five at a 9:1 split and a 1% rate. With the Agresti-Caffo variance, measured over
+4,000 simulated experiments read 20 times each, the interval held the true
+difference at every look on 96.7% of them at 9:1 and 98.2% at 4:1 (1% rate, 100
+users per look in the small arm), and on 95.4% at 9:1 when the true rates were 1%
+and 3%. It is not exact for every design: when the small arm has 1/20 to 1/100 of
+the traffic and 10 to 50 users per look, at rates of 2% to 5%, coverage measured
+0.93 to 0.95, with or without a real effect, so an A/A experiment there can be told
+it may stop about 6% of the time instead of 5%.
 
 ### Alpha Spending (not computed yet)
 

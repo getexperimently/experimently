@@ -30,7 +30,8 @@ EXPECTED = {
     "test_bayesian_stop_winner.py": 13,
     "test_collection_count.py": 2,
     "test_multiple_comparison_reference.py": 21,
-    "test_sequential_confidence_sequence.py": 18,
+    "test_sequential_confidence_sequence.py": 20,
+    "test_sequential_unequal_arms.py": 12,
 }
 
 # Assembled so that this file does not match its own check.
