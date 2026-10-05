@@ -107,6 +107,7 @@ Stable operations changed this way, before any user depended on them:
 | `GET /api/v1/results/{experiment_id}`, `GET /api/v1/experiments/{experiment_id}/results`, `GET /api/v1/export/experiments`, `GET /api/v1/export/reports/experiments/{experiment_id}` | #880 | When the sample-ratio check fails (`srm` is present and `srm.warning` is `true`), `summary.recommendation` is `INCONCLUSIVE`, whatever it would otherwise be, `CONTINUE_TESTING` included, and `recommendation_reason` names the mismatch and its p-value; the export's `recommendation` column says the same. `has_winner`, `winning_variant_id`, the Bayesian `decision` and the sequential results are unchanged. When `srm` is `null` (a bandit, fewer than two variants, no assignments, or a check that could not run) the recommendation is unchanged. The OpenAPI document does not change. |
 | `DELETE /api/v1/feature-flags/{flag_id}` | #855 | Deleting a flag keeps the events tagged with it: they stay, with `feature_flag_id` null and every other field unchanged, an experiment tag included. They used to be deleted with the flag. Everything else the delete removes is unchanged, and the response is still 204. The OpenAPI document changes only in the operation's description. |
 | `GET /api/v1/holdout/all`, `POST /api/v1/holdout`, `PUT /api/v1/holdout/{holdout_id}`, `DELETE /api/v1/mutual-exclusion-groups/{group_id}`, `PUT /api/v1/mutual-exclusion-groups/{group_id}` | #904 | These operations accept the roles their documentation states. Listing, creating and updating holdouts and archiving a group with `DELETE` need ADMIN or a superuser; a DEVELOPER now answers 403 on them. Changing a group's `status` with `PUT` (archiving or unarchiving) needs ADMIN too, as archiving does; a DEVELOPER may still change a group's name, description and traffic allocation, and may send its current `status` back. ADMIN and superusers are unchanged. The OpenAPI document changes only in the description of `PUT /api/v1/mutual-exclusion-groups/{group_id}`. See [Mutual Exclusion Groups & Global Holdout](mutual-exclusion-groups.md#permissions). |
+| `GET /api/v1/results/{experiment_id}/sequential` | #854 | The confidence sequence and `can_stop` use the Agresti-Caffo variance of the difference in rates instead of the plug-in one, so the interval keeps its coverage when the arms are split unequally. Some experiments that showed `can_stop: true` and `recommended_action: "stop_for_effect"` (mostly with one small, low-rate arm) now show `false` and `"continue"`, a few at equal splits stop slightly later, and a very few, mostly with rates near 50%, stop slightly earlier; an arm in which every user has the same outcome now gets a finite interval instead of `[-1, 1]`. `lambda_ratio` is capped at the largest finite double (about 1.8e308), so an overwhelming difference reports a finite number and can stop. The response's fields are unchanged and `analysis_status` stays `beta`. The engine version becomes 1.4.0; the OpenAPI document changes only in the `engine_version` default of the responses that carry it (bandit, Bayesian, variance reduction). See [Sequential Testing](sequential-testing.md#always-valid-confidence-intervals-confidence-sequences). |
 
 ## Deprecated operations
 
@@ -134,9 +135,10 @@ one is a breaking change.
 
 One route carries `analysis_status: "beta"` while staying `x-stability:
 stable`: the sequential analysis (`GET /api/v1/results/{id}/sequential`).
-Its shape is settled (dashboards read it) and the fix to its numbers
-(#231) changes values, not fields, so the two fields were added to it
-optionally. Its entry is in the same table.
+Its shape is settled (dashboards read it) and the fixes to its numbers
+(#231, #854) change values, not fields, so the two fields were added to it
+optionally. A fix that changes its numbers gets a row in the table of
+changed stable operations above, as #854 does.
 
 ## Profiles
 

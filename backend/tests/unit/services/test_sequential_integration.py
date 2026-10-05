@@ -211,8 +211,12 @@ class TestEdgeCases:
         assert not result.msprt_result.can_stop
 
     def test_zero_conversions_both_groups(self, service, default_config):
-        """When neither group has any conversions, V_n = 0 so the degenerate
-        branch should fire and return inconclusive."""
+        """Neither group converts: no stop, and a finite interval around 0.
+
+        Before #854 the plug-in variance was 0 here, so Lambda was 1 and the
+        interval [-1, 1].  The Agresti-Caffo variance is positive, so the
+        interval is finite and Lambda = sqrt(V / (V + tau^2)) < 1.
+        """
         result = service.run_sequential_analysis(
             control_successes=0,
             control_total=500,
@@ -220,9 +224,10 @@ class TestEdgeCases:
             treatment_total=500,
             config=default_config,
         )
-        assert result.msprt_result.lambda_ratio == 1.0
-        assert result.msprt_result.evidence_strength == EvidenceStrength.INCONCLUSIVE
         assert not result.msprt_result.can_stop
+        assert result.recommended_action == "continue"
+        cs = result.confidence_sequence
+        assert -1.0 < cs.lower <= 0.0 <= cs.upper < 1.0
 
     def test_equal_conversion_rates_large_sample(self, service, default_config):
         """Equal conversion rates with large samples: lambda should stay below

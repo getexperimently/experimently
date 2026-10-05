@@ -17,6 +17,8 @@ These run the real ``SequentialTestingService``; only the database reads are
 patched, with known per-arm counts.
 """
 
+import json
+import math
 import re
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -330,3 +332,32 @@ def test_appended_sentences_follow_the_base_notice(client):
     assert body["analysis_notice"].startswith(base + " ")
     assert "The stored alpha 0.5" in body["analysis_notice"]
     assert "'always_valid' is an alias of 'msprt'" in body["analysis_notice"]
+
+
+# ---------------------------------------------------------------------------
+# An overwhelming difference
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.regression
+@pytest.mark.parametrize(
+    "counts",
+    [
+        (1, 100, 99, 100),
+        (1_000_000, 10_000_000, 1_100_000, 10_000_000),
+    ],
+)
+def test_overwhelming_difference_answers_a_finite_lambda(client, counts):
+    """#854: the response carries a finite number for ``lambda_ratio``.
+
+    The evidence ratio is capped at the largest finite double.  An unbounded
+    ``inf`` would serialise as JSON ``null``, which the schema (a required
+    ``number``) and the dashboard (``lambda_ratio.toFixed``) do not accept.
+    """
+    response = _get(client, _experiment({}), counts=counts)
+    assert response.status_code == 200, response.text
+    msprt = json.loads(response.text)["msprt_result"]
+    assert isinstance(msprt["lambda_ratio"], float)
+    assert math.isfinite(msprt["lambda_ratio"])
+    assert msprt["can_stop"] is True
+    assert response.json()["recommended_action"] == "stop_for_effect"
