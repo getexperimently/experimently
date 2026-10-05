@@ -135,10 +135,6 @@ jobs:
           docker logs redis-auth
           exit 1
 
-      - name: G-f hold (scratch only)
-        if: matrix.shard == 4
-        run: sleep 300
-
       - name: Run integration tests
         env:
           APP_ENV: test
