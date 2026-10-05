@@ -13,6 +13,8 @@ import {
   ExperimentStatus,
   METRIC_TYPE_LABELS,
   MetricType,
+  OPTIMIZATION_TYPE_LABELS,
+  OptimizationType,
   experimentStatusColor,
   experimentStatusLabel,
   experimentTypeLabel,
@@ -63,6 +65,25 @@ function formatDate(value: string | null | undefined): string {
   if (!value) return '—';
   const d = new Date(value);
   return Number.isNaN(d.getTime()) ? value : d.toLocaleString();
+}
+
+/**
+ * The traffic algorithm of an adaptive experiment in words, or null for a
+ * fixed split (or none given). An algorithm this page does not know is shown
+ * as the API names it rather than hidden.
+ */
+export function algorithmLabel(optimizationType: string | null | undefined): string | null {
+  if (!optimizationType || optimizationType === 'fixed') return null;
+  return OPTIMIZATION_TYPE_LABELS[optimizationType as OptimizationType] ?? optimizationType;
+}
+
+/**
+ * A variant's configuration as the page shows it: indented JSON, rendered as
+ * text (never as markup), or null when the variant has none.
+ */
+export function formatConfiguration(configuration: unknown): string | null {
+  if (configuration === null || configuration === undefined) return null;
+  return JSON.stringify(configuration, null, 2);
 }
 
 function shortId(id: string): string {
@@ -197,6 +218,7 @@ export default function ExperimentDetailPage() {
   const resultsAvailable = status !== 'draft';
   const showRoleNote = !mayChange && statusActions.length > 0;
   const primaryMetric = experiment.metrics.find((m) => m.is_primary) ?? experiment.metrics[0];
+  const algorithm = algorithmLabel(experiment.optimization_type);
 
   return (
     <div className="flex-1 bg-slate-50" data-testid="experiment-detail">
@@ -227,19 +249,22 @@ export default function ExperimentDetailPage() {
               <dl className="mt-3 flex flex-wrap gap-x-6 gap-y-1 text-sm text-slate-600">
                 <div className="flex items-center gap-1.5">
                   <dt className="text-slate-400">Key</dt>
-                  <dd className="font-mono text-slate-800" data-testid="experiment-key">
-                    {experiment.key ?? '—'}
+                  {/* The Copy button sits inside the dd: a dl may hold only dt and dd groups. */}
+                  <dd className="flex items-center gap-1.5">
+                    <span className="font-mono text-slate-800" data-testid="experiment-key">
+                      {experiment.key ?? '—'}
+                    </span>
+                    {experiment.key && (
+                      <button
+                        type="button"
+                        onClick={() => void copyKey()}
+                        className="text-xs text-blue-600 hover:underline"
+                        data-testid="copy-experiment-key"
+                      >
+                        {copied ? 'Copied' : 'Copy'}
+                      </button>
+                    )}
                   </dd>
-                  {experiment.key && (
-                    <button
-                      type="button"
-                      onClick={() => void copyKey()}
-                      className="text-xs text-blue-600 hover:underline"
-                      data-testid="copy-experiment-key"
-                    >
-                      {copied ? 'Copied' : 'Copy'}
-                    </button>
-                  )}
                 </div>
                 <div className="flex items-center gap-1.5">
                   <dt className="text-slate-400">Type</dt>
@@ -254,6 +279,18 @@ export default function ExperimentDetailPage() {
                         ? 'no correction'
                         : correctionName(experiment.correction_method)}
                     </dd>
+                  </div>
+                )}
+                {typeof experiment.bayesian_enabled === 'boolean' && (
+                  <div className="flex items-center gap-1.5">
+                    <dt className="text-slate-400">Bayesian analysis</dt>
+                    <dd data-testid="experiment-bayesian">{experiment.bayesian_enabled ? 'On' : 'Off'}</dd>
+                  </div>
+                )}
+                {algorithm && (
+                  <div className="flex items-center gap-1.5">
+                    <dt className="text-slate-400">Traffic algorithm</dt>
+                    <dd data-testid="experiment-algorithm">{algorithm}</dd>
                   </div>
                 )}
                 <div className="flex items-center gap-1.5">
@@ -409,34 +446,55 @@ export default function ExperimentDetailPage() {
               <table className="w-full text-sm" data-testid="variants-table">
                 <thead className="bg-slate-50 border-b border-slate-200">
                   <tr>
-                    <th className="text-left px-5 py-2.5 text-slate-600 font-medium">Name</th>
-                    <th className="text-right px-5 py-2.5 text-slate-600 font-medium">Allocation</th>
-                    <th className="text-left px-5 py-2.5 text-slate-600 font-medium">Role</th>
+                    <th scope="col" className="text-left px-5 py-2.5 text-slate-600 font-medium">Name</th>
+                    <th scope="col" className="text-right px-5 py-2.5 text-slate-600 font-medium">Allocation</th>
+                    <th scope="col" className="text-left px-5 py-2.5 text-slate-600 font-medium">Role</th>
+                    <th scope="col" className="text-left px-5 py-2.5 text-slate-600 font-medium">Configuration</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
-                  {experiment.variants.map((variant) => (
-                    <tr key={variant.id} data-testid="variant-row">
-                      <td className="px-5 py-3">
-                        <div className="font-medium text-slate-800">{variant.name}</div>
-                        {variant.description && (
-                          <div className="text-xs text-slate-400 mt-0.5">{variant.description}</div>
-                        )}
-                      </td>
-                      <td className="px-5 py-3 text-right text-slate-700 tabular-nums">
-                        {variant.traffic_allocation}%
-                      </td>
-                      <td className="px-5 py-3">
-                        {variant.is_control ? (
-                          <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
-                            Control
-                          </span>
-                        ) : (
-                          <span className="text-xs text-slate-400">Treatment</span>
-                        )}
-                      </td>
-                    </tr>
-                  ))}
+                  {experiment.variants.map((variant, index) => {
+                    const configuration = formatConfiguration(variant.configuration);
+                    return (
+                      <tr key={variant.id} data-testid="variant-row">
+                        <td className="px-5 py-3">
+                          <div className="font-medium text-slate-800">{variant.name}</div>
+                          {variant.description && (
+                            <div className="text-xs text-slate-400 mt-0.5">{variant.description}</div>
+                          )}
+                        </td>
+                        <td className="px-5 py-3 text-right text-slate-700 tabular-nums">
+                          {variant.traffic_allocation}%
+                        </td>
+                        <td className="px-5 py-3">
+                          {variant.is_control ? (
+                            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                              Control
+                            </span>
+                          ) : (
+                            <span className="text-xs text-slate-400">Treatment</span>
+                          )}
+                        </td>
+                        <td className="px-5 py-3 align-top">
+                          {configuration === null ? (
+                            <span className="text-slate-400" data-testid={`variant-configuration-none-${index}`}>
+                              <span aria-hidden="true">—</span>
+                              <span className="sr-only">None</span>
+                            </span>
+                          ) : (
+                            // Text only: React escapes it, so a configuration holding markup shows as written.
+                            <pre
+                              tabIndex={0}
+                              className="max-h-40 max-w-xs overflow-auto whitespace-pre-wrap break-all rounded bg-slate-50 p-2 font-mono text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-600"
+                              data-testid={`variant-configuration-view-${index}`}
+                            >
+                              {configuration}
+                            </pre>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             )}

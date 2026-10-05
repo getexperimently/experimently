@@ -1,7 +1,9 @@
 import React from 'react';
-import { TargetingRules, TargetingRuleGroup, LogicalOperator } from '@/types/targeting';
+import { TargetingRules, TargetingRuleGroup, LogicalOperator, isSegmentOperator } from '@/types/targeting';
 import { createEmptyGroup, createEmptyRules, OperatorOptions } from '@/utils/targeting';
+import { useSegmentList } from '@/hooks/useSegmentList';
 import { RuleGroupCard } from './RuleGroupCard';
+import { SegmentPickerContext } from './SegmentPicker';
 
 interface TargetingRuleBuilderProps {
   value: TargetingRules | null;
@@ -10,6 +12,8 @@ interface TargetingRuleBuilderProps {
   className?: string;
   /** Which operators the condition dropdowns offer; see `OperatorOptions`. */
   operatorOptions?: OperatorOptions;
+  /** What the builder says with no groups; flag and experiment rules match everyone then. */
+  emptyText?: string;
 }
 
 export function TargetingRuleBuilder({
@@ -18,12 +22,29 @@ export function TargetingRuleBuilder({
   readOnly = false,
   className = '',
   operatorOptions,
+  emptyText = 'No targeting rules — all users will match',
 }: TargetingRuleBuilderProps) {
   const rules = value ?? createEmptyRules();
 
   const totalConditions = rules.groups.reduce(
     (sum, group) => sum + group.conditions.length,
     0
+  );
+
+  // Segment rows need the segments; they are loaded once a condition uses a
+  // segment operator, so a ruleset without one makes no request.
+  const segmentConditions = rules.groups.flatMap((group) =>
+    group.conditions.filter((condition) => isSegmentOperator(condition.operator)),
+  );
+  const segmentList = useSegmentList(
+    operatorOptions?.allowSegments !== false && segmentConditions.length > 0,
+  );
+  const usedSegments = Array.from(
+    new Set(
+      segmentConditions
+        .map((condition) => condition.value)
+        .filter((value): value is string => typeof value === 'string' && value !== ''),
+    ),
   );
 
   const handleRootLogicalOperatorChange = (op: LogicalOperator) => {
@@ -45,6 +66,7 @@ export function TargetingRuleBuilder({
   };
 
   return (
+    <SegmentPickerContext.Provider value={{ list: segmentList, used: usedSegments }}>
     <div className={`space-y-4 ${className}`}>
       {/* Header row */}
       <div className="flex items-center justify-between">
@@ -93,7 +115,7 @@ export function TargetingRuleBuilder({
       {rules.groups.length === 0 && (
         <div className="rounded-lg border-2 border-dashed border-slate-200 p-6 text-center">
           <p className="text-sm text-slate-500 mb-3">
-            No targeting rules — all users will match
+            {emptyText}
           </p>
           {!readOnly && (
             <button
@@ -159,5 +181,6 @@ export function TargetingRuleBuilder({
         </div>
       )}
     </div>
+    </SegmentPickerContext.Provider>
   );
 }

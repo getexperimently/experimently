@@ -214,7 +214,13 @@ export class ExperimentsPage {
   async createExperimentAdvanced(
     name: string,
     key: string,
-    options: { description?: string; metricEventName?: string } = {},
+    options: {
+      description?: string;
+      metricEventName?: string;
+      /** JSON text typed into each variant's configuration field, by variant index. */
+      configurations?: Record<number, string>;
+      bayesian?: boolean;
+    } = {},
   ): Promise<string> {
     await this.gotoNew();
     await this.nameInput.fill(name);
@@ -224,6 +230,15 @@ export class ExperimentsPage {
     }
     if (options.metricEventName) {
       await this.metricEventInputs.first().fill(options.metricEventName);
+    }
+    for (const [index, text] of Object.entries(options.configurations ?? {})) {
+      await this.page.getByTestId(`variant-configuration-toggle-${index}`).click();
+      await this.page.getByTestId(`variant-configuration-${index}`).fill(text);
+    }
+    if (options.bayesian) {
+      // Inside the collapsed "Analysis settings" section.
+      await this.page.getByTestId("analysis-settings-summary").click();
+      await this.page.getByTestId("analysis-bayesian").check();
     }
     await this.submitButton.click();
     return this.landOnDetail();
