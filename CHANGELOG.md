@@ -10,6 +10,41 @@ longer applies and release-please can generate this file directly. Until it
 does, entries below 0.2.2 are hand-written and the links in them are the
 reason why.
 
+## [0.22.0](https://github.com/getexperimently/experimently/compare/v0.21.0...v0.22.0) (2026-10-05)
+
+
+### Features
+
+* **audit:** a Cognito sign-in is recorded ([#895](https://github.com/getexperimently/experimently/issues/895)) ([708d4e8](https://github.com/getexperimently/experimently/commit/708d4e836a8295b85c1e658bc8b645cc227dcbf6))
+* **audit:** module changes are recorded: roles, workspace members, SSO sign-in and accounts ([#884](https://github.com/getexperimently/experimently/issues/884)) ([3c4fd48](https://github.com/getexperimently/experimently/commit/3c4fd486eb1a8770718ca00cb37a394a051e092c))
+* **dashboard:** a bandit experiment's page shows its current traffic weights ([#885](https://github.com/getexperimently/experimently/issues/885)) ([7051cb7](https://github.com/getexperimently/experimently/commit/7051cb7611c5ac3de79198cabaf4675c6035d749))
+* **dashboard:** a Segments page, CSV upload of user ids, and a segment picker in targeting rules ([#881](https://github.com/getexperimently/experimently/issues/881)) ([e92e43c](https://github.com/getexperimently/experimently/commit/e92e43c438738121d30e8a4889083643ef956094))
+* **dashboard:** clone an experiment, and edit or delete a draft ([#890](https://github.com/getexperimently/experimently/issues/890)) ([c804bdc](https://github.com/getexperimently/experimently/commit/c804bdc31fceb14cb57a0c3240571934d62efa6d))
+* **dashboard:** results show the sample-ratio check and the Bayesian analysis ([#887](https://github.com/getexperimently/experimently/issues/887)) ([54fcfb6](https://github.com/getexperimently/experimently/commit/54fcfb6e1d1d1f4a676f40b45ed3c492855b4a9b))
+* **dashboard:** set each variant's configuration, and turn on Bayesian analysis, when creating an experiment ([#882](https://github.com/getexperimently/experimently/issues/882)) ([b057fa1](https://github.com/getexperimently/experimently/commit/b057fa117b1c54ecd1b0fba2c0759fd8083545f4))
+* **deploy:** a rollback ends with one verdict line, chosen by a written precedence table ([#875](https://github.com/getexperimently/experimently/issues/875)) ([2988c8a](https://github.com/getexperimently/experimently/commit/2988c8a50ed9829ba88edbf707b3f118c0eed8d5))
+* **holdout:** results for a holdout (beta) ([#866](https://github.com/getexperimently/experimently/issues/866)) ([a3f04eb](https://github.com/getexperimently/experimently/commit/a3f04eb313d3995800176fa618c483113a2b48c3))
+* **interactions:** remove GET /interactions/{a}/{b}/novelty, which never computed a result; novelty detection is not offered ([ee1d2e1](https://github.com/getexperimently/experimently/commit/ee1d2e15e1e5f6ea4489d9fa855158056286ceb3))
+* **interactions:** test whether two overlapping experiments' effects interact (beta) ([ee1d2e1](https://github.com/getexperimently/experimently/commit/ee1d2e15e1e5f6ea4489d9fa855158056286ceb3))
+* **site:** the footer names who built it and links the repository ([#867](https://github.com/getexperimently/experimently/issues/867)) ([ed3e4aa](https://github.com/getexperimently/experimently/commit/ed3e4aa36f914035fe1cca1231bd4b5cb355c4e1))
+* **targeting:** flags and experiments can target a segment ([#871](https://github.com/getexperimently/experimently/issues/871)) ([6d4c7c3](https://github.com/getexperimently/experimently/commit/6d4c7c34befafdd9c77596f6336a1403c9dc1d95))
+* **warehouse:** Snowflake is available, after a passing check against a real account ([#877](https://github.com/getexperimently/experimently/issues/877)) ([290f0aa](https://github.com/getexperimently/experimently/commit/290f0aac2a11e47f9a7595f962b86302a1a45d50))
+
+
+### Bug Fixes
+
+* **results:** the recommendation is INCONCLUSIVE when the sample-ratio check fails ([#883](https://github.com/getexperimently/experimently/issues/883)) ([6c6ec1d](https://github.com/getexperimently/experimently/commit/6c6ec1dda29bba66c212445e693d1a8ebad55a16))
+* **warehouse:** VIEWER no longer reads warehouse analyses or previews (D50) ([#886](https://github.com/getexperimently/experimently/issues/886)) ([0a5ba71](https://github.com/getexperimently/experimently/commit/0a5ba711df457d3ccd022c90d1293b59d6f1fdd7))
+
+
+### Documentation
+
+* **dashboard:** one table says what the dashboard does and what is API-only, and a check keeps it true ([#889](https://github.com/getexperimently/experimently/issues/889)) ([781c2d9](https://github.com/getexperimently/experimently/commit/781c2d9b1d6c857068ca6707fa2b1cd87739eab3))
+* **guide:** ADMIN and DEVELOPER may schedule and delete any experiment ([#878](https://github.com/getexperimently/experimently/issues/878)) ([0c56351](https://github.com/getexperimently/experimently/commit/0c56351794958ef49a792408719797a32baa59cb))
+* **rbac:** custom roles and direct grants are stored and shown; no permission check reads them yet ([#893](https://github.com/getexperimently/experimently/issues/893)) ([d7e4c03](https://github.com/getexperimently/experimently/commit/d7e4c036fc6cfb350a355cfb7110ff010f5c234b))
+* **sdk:** the JavaScript SDK installs from npm ([#868](https://github.com/getexperimently/experimently/issues/868)) ([a900cce](https://github.com/getexperimently/experimently/commit/a900ccec4deecb2d2f3089d36e998f46791c546b))
+* **sdk:** the OpenFeature provider's README says it is not on npm yet ([#879](https://github.com/getexperimently/experimently/issues/879)) ([02acfcc](https://github.com/getexperimently/experimently/commit/02acfcc293114f5d1e92bcf2282fc1978ba43c46))
+
 ## [0.21.0](https://github.com/getexperimently/experimently/compare/v0.20.0...v0.21.0) (2026-10-04)
 
 
