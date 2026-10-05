@@ -572,29 +572,56 @@ clear_schema_cache()
 
 ## CI/CD
 
-The platform runs integration tests in GitHub Actions via `.github/workflows/integration-tests.yml`:
+The platform runs integration tests in GitHub Actions via `.github/workflows/integration-tests.yml`.
+The suite runs in four parallel shards, each a full job with its own Postgres and Redis.
+A test belongs to shard `i` when `sha256(node id) % 4 == i - 1` (`backend/tests/shard.py`).
+A summary job keeps the required check name `integration-tests`. It is green only when
+every shard succeeded and `scripts/check_test_shards.py` shows that the shards between them
+ran every collected test exactly once, with no skip other than the benchmark one. An abridged excerpt:
 
 ```yaml
-services:
-  postgres:
-    image: postgres:14
-    env:
-      POSTGRES_DB: experimentation_test
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
-    ports: ["5432:5432"]
-  redis:
-    image: redis:7
-    ports: ["6379:6379"]
+jobs:
+  shard:
+    name: integration-tests (shard ${{ matrix.shard }})
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+    services:
+      postgres:
+        image: postgres:15-alpine
+      redis:
+        image: redis:7-alpine
+    steps:
+      - name: Run integration tests
+        env:
+          EXPERIMENTLY_TEST_SHARD: ${{ matrix.shard }}/${{ strategy.job-total }}
+          EXPERIMENTLY_TEST_SHARD_REPORT: ${{ runner.temp }}/shard-integration-${{ matrix.shard }}.json
+        run: python -m pytest backend/tests/integration/ -v --tb=short
+      - name: Run E2E workflow tests
+        if: matrix.shard == 1
+        run: python -m pytest backend/tests/e2e/ -v --tb=short -m "e2e"
+      - name: Run contract tests
+        if: matrix.shard == 1
+        run: python -m pytest backend/tests/contract/ -v --tb=short -m "contract"
 
-steps:
-  - name: Run integration tests
-    run: |
-      source venv/bin/activate
-      export APP_ENV=test TESTING=true
-      python -m pytest backend/tests/integration/database/ -v
-      python -m pytest backend/tests/integration/api/ -v
-      python -m pytest backend/tests/contract/ -v
+  integration-tests:
+    needs: shard
+    if: always()
+    steps:
+      - name: Every test ran in exactly one shard
+        run: |
+          python3 scripts/check_test_shards.py \
+            --suite backend/tests/integration \
+            --allow-skip 'backend/tests/integration=absolute-timing benchmark; set RUN_BENCHMARKS=1 to run it' \
+            "$RUNNER_TEMP/shard-reports"
+```
+
+To run one shard locally, set the same two variables. The report path must be absolute,
+and the file must not exist yet:
+
+```bash
+EXPERIMENTLY_TEST_SHARD=2/4 EXPERIMENTLY_TEST_SHARD_REPORT="$PWD/shard-integration-2.json" python -m pytest backend/tests/integration/ -q
 ```
 
 ---

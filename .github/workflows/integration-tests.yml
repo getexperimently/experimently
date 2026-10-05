@@ -25,8 +25,24 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  integration-tests:
+  # The suite in four pieces, each a full job with its own services. A test
+  # belongs to piece `i` when sha256(its node id) % 4 == i-1
+  # (backend/tests/shard.py), so the pieces need no durations file and a new
+  # test moves no other. The required check is the `integration-tests` job
+  # below, not these.
+  shard:
+    name: integration-tests (shard ${{ matrix.shard }})
     runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      # One red shard must not cancel the others: the summary needs every
+      # shard's report to say which tests failed and that the rest ran.
+      fail-fast: false
+      matrix:
+        # The one hand-typed list. The total is `strategy.job-total`, never
+        # typed: a repeated or missing number leaves a shard number with no
+        # report, and the summary refuses that.
+        shard: [1, 2, 3, 4]
 
     services:
       postgres:
@@ -137,15 +153,24 @@ jobs:
           # cache, and the flag reads after every writer, #630) skip without
           # it, and here a skip is a failure.
           EXPERIMENTLY_REQUIRE_REDIS: "1"
+          # This step's slice of the suite, and where it records what it
+          # collected, selected and ran. On this step only: in the job's env
+          # it would also slice the e2e and contract runs below and drop three
+          # quarters of them. The report is outside the checkout, under a
+          # name unique to the shard.
+          EXPERIMENTLY_TEST_SHARD: ${{ matrix.shard }}/${{ strategy.job-total }}
+          EXPERIMENTLY_TEST_SHARD_REPORT: ${{ runner.temp }}/shard-integration-${{ matrix.shard }}.json
         run: |
           # No marker filter: 30 of the integration files carry no marker and were
           # silently deselected (570 of 1462 tests, including every regression test
           # for the tracking API, results engine, bandits and assignment eligibility).
           python -m pytest backend/tests/integration/ -v \
             --tb=short \
-            --junit-xml=test-results/integration.xml
+            --junit-xml="test-results/integration-${{ matrix.shard }}.xml"
 
+      # Unsharded, in shard 1 only, gated by their own exit status as before.
       - name: Run E2E workflow tests
+        if: matrix.shard == 1
         env:
           APP_ENV: test
           TESTING: "true"
@@ -163,6 +188,7 @@ jobs:
             --junit-xml=test-results/e2e.xml
 
       - name: Run contract tests
+        if: matrix.shard == 1
         env:
           APP_ENV: test
           TESTING: "true"
@@ -179,10 +205,87 @@ jobs:
             -m "contract" \
             --junit-xml=test-results/contract.xml
 
+      # Names unique to the shard, and `overwrite`, because artifacts are
+      # immutable and a re-run of one shard uploads the same name again.
       - name: Upload test results
         uses: actions/upload-artifact@v7
         if: always()
         with:
-          name: test-results
+          name: test-results-${{ matrix.shard }}
           path: test-results/
+          overwrite: true
           retention-days: 30
+
+      # Even when the suite failed: the summary reads every shard's report.
+      - name: Upload the shard report
+        uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: shard-report-integration-${{ matrix.shard }}
+          path: ${{ runner.temp }}/shard-integration-${{ matrix.shard }}.json
+          if-no-files-found: warn
+          overwrite: true
+          retention-days: 30
+
+  # The required check, under its id (no `name:`), as the single job reported
+  # it before the split. Green only when every shard succeeded and the shards
+  # between them ran every collected integration test exactly once.
+  #
+  # `always()`, like the three other required summaries (Release Gate
+  # Summary, SDK Unit Tests and the scan workflow's), so that it always reports
+  # an explicit result and a failure names what failed. `!cancelled()` would fail
+  # closed too -- on a cancelled run it reports `cancelled`, not `skipped` --
+  # but says nothing. The cost of `always()`: when a newer push supersedes a
+  # pull request's run, the old run holds the concurrency group until this job
+  # has queued and run.
+  integration-tests:
+    needs: shard
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      # No report at all is the checker's to judge (it fails), so a download
+      # that finds nothing must not end the job before it.
+      - name: Collect the shard reports
+        uses: actions/download-artifact@v8
+        continue-on-error: true
+        with:
+          pattern: shard-report-integration-*
+          path: ${{ runner.temp }}/shard-reports
+
+      - name: Every shard passed
+        env:
+          # The whole `needs` object, as Release Gate Summary reads it; a
+          # matrix job's result covers all its legs. Only `success` passes:
+          # failure, cancelled (a timeout too) and skipped are all red.
+          RESULTS: ${{ toJSON(needs) }}
+        run: |
+          set -euo pipefail
+          printf '%s\n' "$RESULTS" | jq -r 'to_entries[] | "\(.key)=\(.value.result)"' > results.txt
+          test -s results.txt || { printf '::error::needs produced no results\n'; exit 1; }
+          failed=0
+          while IFS='=' read -r job result; do
+            printf '  %s: %s\n' "$job" "$result"
+            case "$result" in
+              success) ;;
+              *) printf '::error::%s: %s\n' "$job" "$result"; failed=1 ;;
+            esac
+          done < results.txt
+          if [ "$failed" -ne 0 ]; then
+            printf '::error::integration tests failed\n'
+            exit 1
+          fi
+
+      # Even after a failed shard, so the log says which tests failed and
+      # whether the rest ran. The one skip allowed is the benchmark, which
+      # runs only with RUN_BENCHMARKS=1 (backend/tests/benchmark_gate.py).
+      - name: Every test ran in exactly one shard
+        if: always()
+        run: |
+          python3 scripts/check_test_shards.py \
+            --suite backend/tests/integration \
+            --allow-skip 'backend/tests/integration=absolute-timing benchmark; set RUN_BENCHMARKS=1 to run it' \
+            "$RUNNER_TEMP/shard-reports"
