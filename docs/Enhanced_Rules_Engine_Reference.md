@@ -379,9 +379,11 @@ pattern cannot be evaluated for this context), it does not guess: the flag answe
 `enabled: false` with `reason: "error"` and the experiment does not enrol the user
 (`reason: "targeting"`), whichever of the two operators the condition uses. Flags that use a
 segment are always evaluated by the server, never by an SDK's local evaluation.
-A segment condition requires nothing from the context, but on experiments every other attribute a
-rule names is required (#822): a user who lacks an attribute used only in another `OR` branch is
-not enrolled even when the segment branch matches, while a flag would match them.
+A segment condition requires nothing from the context. A user who lacks an attribute is not
+refused outright: on experiments, as on flags, they fail only the conditions on that attribute
+(`is_null` passes), so another `OR` branch can still enrol them, and they match a `NOT` group on
+that attribute (a user with no `country` matches `NOT (country equals US)`, but not
+`country not_equals US`). Users already assigned to an experiment keep their assignment.
 
 See [Segments](guides/segments.md#target-a-flag-or-an-experiment-at-a-segment).
 

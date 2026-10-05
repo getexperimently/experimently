@@ -283,12 +283,10 @@ class RulesEvaluationService:
             # Validate each attribute
             for attr_name, attr_info in required_attributes.items():
                 if attr_name not in user_context:
-                    # Check if attribute is required
-                    if attr_info.get("required", False):
-                        return AttributeValidationResult(
-                            is_valid=False,
-                            error_message=f"Required attribute '{attr_name}' not found in user context",
-                        )
+                    # An absent attribute is never a refusal of the whole
+                    # ruleset: it makes only its own condition false
+                    # (``is_null`` true), as on flags, and the evaluator then
+                    # composes AND, OR and NOT (#822).
                     continue
 
                 # Validate attribute type and value
@@ -701,7 +699,7 @@ class RulesEvaluationService:
     def _extract_required_attributes(
         self, targeting_rules: TargetingRules
     ) -> Dict[str, Dict[str, Any]]:
-        """Extract all attributes used in targeting rules."""
+        """Extract every attribute used in targeting rules, with its declared type."""
         attributes = {}
 
         def extract_from_group(group: RuleGroup):
@@ -709,13 +707,14 @@ class RulesEvaluationService:
                 if condition.operator in SEGMENT_OPERATORS:
                     # Membership is not a context attribute: a segment
                     # condition is answered from the resolved membership, so
-                    # it requires nothing from the context (#440). Only the
-                    # condition is skipped; a customer attribute that is
-                    # itself called ``segment`` stays required.
+                    # it is not a context attribute (#440). Only the condition
+                    # is skipped; a customer attribute that is itself called
+                    # ``segment`` is still type-checked when present.
                     continue
+                # No "required" marker: an absent attribute makes only its own
+                # condition false (#822), so presence is not checked here.
                 attributes[condition.attribute] = {
                     "type": condition.attribute_type,
-                    "required": True,  # All attributes in conditions are considered required
                 }
 
             if group.groups:

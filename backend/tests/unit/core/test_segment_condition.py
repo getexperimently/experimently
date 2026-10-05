@@ -193,8 +193,8 @@ def test_segment_attribute_with_equals():
     assert _flag_matches(rules, {"segment": "enterprise"}) is True
     assert _flag_matches(rules, {"segment": "smb"}) is False
     assert _experiment_matches(rules, {"segment": "enterprise"}) is True
-    # On experiments an attribute a condition names is required (#822); only
-    # segment conditions are exempt, not the attribute name "segment".
+    # A user without the attribute "segment" fails this condition (it is a
+    # context attribute, not a segment condition), as on flags (#822).
     assert _experiment_matches(rules, {"country": "US"}) is False
 
 

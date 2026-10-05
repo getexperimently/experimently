@@ -54,7 +54,9 @@ def test_the_three_references_carry_the_same_paragraph():
         '(`reason: "targeting"`)',
         "whichever of the two operators the condition uses",
         "always evaluated by the server",
-        "(#822)",
+        "they fail only the conditions on that attribute",
+        "a user with no `country` matches `NOT (country equals US)`",
+        "keep their assignment",
     ):
         assert fact in text, fact
 
