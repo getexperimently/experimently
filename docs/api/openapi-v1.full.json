@@ -20589,7 +20589,7 @@
     },
     "/api/v1/auth/token": {
       "post": {
-        "description": "OAuth2 compatible token login, get an access token for future requests.\n\nWith ``AUTH_PROVIDER=local`` the form's ``username`` field is the user's\ne-mail address and the response has the same shape as ``/login`` (this is\nwhat makes Swagger's *Authorize* button work).  With ``cognito`` the\ncredentials are forwarded to the user pool.",
+        "description": "OAuth2 compatible token login, get an access token for future requests.\n\nWith ``AUTH_PROVIDER=local`` the form's ``username`` field is the user's\ne-mail address and the response has the same shape as ``/login`` (this is\nwhat makes Swagger's *Authorize* button work).  With ``cognito`` the\ncredentials are forwarded to the user pool; a successful sign-in of a\nuser who already has an account writes ``user_login`` with the provider\n``cognito``.",
         "operationId": "login_api_v1_auth_token_post",
         "requestBody": {
           "content": {

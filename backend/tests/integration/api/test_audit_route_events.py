@@ -14,26 +14,35 @@ in a session of the test's own:
   insert refused, the change is kept and one ERROR without values is logged;
 * a superuser's change to a user's role, superuser flag or active status is
   written together with its entry or not at all; user changes record the
-  superuser flag.
+  superuser flag;
+* a Cognito sign-in through ``POST /auth/token`` (against a moto user pool,
+  never AWS) writes ``user_login`` with the provider ``cognito`` when the
+  identity has an account, and nothing when it has none or is refused.
 """
 
 from __future__ import annotations
 
 import json
 import logging
+import os
 import uuid
 from datetime import datetime, timedelta, timezone
+from unittest.mock import patch
 
+import boto3
 import pytest
 from fastapi.testclient import TestClient
+from moto import mock_cognitoidp
 from sqlalchemy import text
 from sqlalchemy.orm import sessionmaker
 
 from backend.app.api import deps
+from backend.app.api.v1.endpoints import auth as auth_endpoints
 from backend.app.api.v1.endpoints.auth import create_local_access_token
 from backend.app.core.config import settings
 from backend.app.core.metrics import audit_write_failures_total
 from backend.app.main import app
+from backend.app.middleware import rate_limiter
 from backend.app.models.api_key import APIKey
 from backend.app.models.audit_log import AuditLog
 from backend.app.models.bandit_state import BanditState
@@ -45,6 +54,7 @@ from backend.app.models.rollout_schedule import RolloutSchedule
 from backend.app.models.segment import Segment
 from backend.app.models.user import User, UserRole
 from backend.app.services.audit_service import AuditService
+from backend.app.services.cognito_accounts import cognito_external_id
 
 pytestmark = [pytest.mark.integration, pytest.mark.requires_db]
 
@@ -1064,6 +1074,167 @@ def test_failed_sign_in_writes_nothing(client, fresh, developer):
     )
     assert response.status_code == 401
     assert w.rows() == []
+
+
+# --- G3 and G5: Cognito sign-in -------------------------------------------------
+
+
+@pytest.fixture
+def cognito_pool(monkeypatch):
+    """``AUTH_PROVIDER=cognito`` against a moto user pool; no AWS call is made.
+
+    Yields ``add_user(username, email)``, which creates a confirmed user in the
+    pool with the password ``PASSWORD`` and returns its Cognito ``sub``.
+    """
+    for name in ("AWS_PROFILE", "AWS_DEFAULT_PROFILE", "AWS_SESSION_TOKEN"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("AWS_ACCESS_KEY_ID", "testing")
+    monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "testing")
+    monkeypatch.setenv("AWS_CONFIG_FILE", os.devnull)
+    monkeypatch.setenv("AWS_SHARED_CREDENTIALS_FILE", os.devnull)
+    monkeypatch.setenv("AWS_EC2_METADATA_DISABLED", "true")
+    monkeypatch.setenv("AWS_REGION", "us-east-1")
+    monkeypatch.setattr(settings, "AUTH_PROVIDER", "cognito")
+    allow_all = {"return_value": (True, 999)}
+    with (
+        mock_cognitoidp(),
+        patch.object(rate_limiter.RedisRateLimiter, "is_allowed", **allow_all),
+        patch.object(rate_limiter.SlidingWindowRateLimiter, "is_allowed", **allow_all),
+    ):
+        idp = boto3.client("cognito-idp", region_name="us-east-1")
+        pool_id = idp.create_user_pool(PoolName=f"{P}-pool")["UserPool"]["Id"]
+        client_id = idp.create_user_pool_client(
+            UserPoolId=pool_id,
+            ClientName=f"{P}-client",
+            ExplicitAuthFlows=["ALLOW_USER_PASSWORD_AUTH", "ALLOW_REFRESH_TOKEN_AUTH"],
+            GenerateSecret=False,
+        )["UserPoolClient"]["ClientId"]
+        monkeypatch.setenv("COGNITO_USER_POOL_ID", pool_id)
+        monkeypatch.setenv("COGNITO_CLIENT_ID", client_id)
+
+        def add_user(username, email):
+            idp.admin_create_user(
+                UserPoolId=pool_id,
+                Username=username,
+                UserAttributes=[{"Name": "email", "Value": email}],
+                MessageAction="SUPPRESS",
+            )
+            idp.admin_set_user_password(
+                UserPoolId=pool_id, Username=username, Password=PASSWORD, Permanent=True
+            )
+            attributes = idp.admin_get_user(UserPoolId=pool_id, Username=username)[
+                "UserAttributes"
+            ]
+            return next(a["Value"] for a in attributes if a["Name"] == "sub")
+
+        yield add_user
+
+
+def _cognito_account(db_session, add_user):
+    """A user in the pool whose account is linked to it, as an administrator
+    links one (``external_id = "cognito:<sub>"``, no local password)."""
+    user = _make_user(db_session, UserRole.DEVELOPER)
+    sub = add_user(user.username, user.email)
+    user.external_id = cognito_external_id(sub)
+    user.hashed_password = None
+    db_session.commit()
+    return user
+
+
+def _cognito_sign_in(client, username, password=PASSWORD):
+    return client.post(
+        f"{V1}/auth/token", data={"username": username, "password": password}
+    )
+
+
+def test_cognito_sign_in_with_an_account_is_recorded(
+    client, fresh, db_session, cognito_pool
+):
+    user = _cognito_account(db_session, cognito_pool)
+    w = Written(fresh)
+    response = _cognito_sign_in(client, user.username)
+    assert response.status_code == 200, response.text
+    row = _one(w, "user_login", "user", user.id, user)
+    assert row.entity_name == user.username
+    assert _values(row) == (None, {"provider": "cognito"})
+    assert row.reason is None
+    tokens = [response.json()[k] for k in ("access_token", "id_token", "refresh_token")]
+    for column in (row.old_value, row.new_value, row.reason, row.entity_name):
+        assert PASSWORD not in (column or "")
+        for token in tokens:
+            assert token not in (column or "")
+
+
+def test_cognito_sign_in_without_an_account_writes_nothing(
+    client, fresh, db_session, cognito_pool
+):
+    """No account is linked to the identity: no entry, and no account made."""
+    username = f"{P}_unlinked_{uuid.uuid4().hex[:8]}"
+    cognito_pool(username, f"{username}@example.com")
+    w = Written(fresh)
+    response = _cognito_sign_in(client, username)
+    assert response.status_code == 200, response.text
+    assert w.rows() == []
+    session = fresh()
+    try:
+        assert session.query(User).filter(User.username == username).count() == 0
+    finally:
+        session.close()
+
+
+def test_failed_cognito_sign_in_writes_nothing(client, fresh, db_session, cognito_pool):
+    user = _cognito_account(db_session, cognito_pool)
+    w = Written(fresh)
+    response = _cognito_sign_in(client, user.username, password="Wrong-Passw0rd")
+    assert response.status_code == 401
+    assert w.rows() == []
+
+
+def test_cognito_token_for_another_pool_writes_nothing(
+    client, fresh, db_session, cognito_pool, monkeypatch
+):
+    """The token's issuer is not the configured pool: every request with it is
+    refused, so the sign-in is not taken for the account's."""
+    user = _cognito_account(db_session, cognito_pool)
+    monkeypatch.setenv("COGNITO_USER_POOL_ID", "us-east-1_AnotherPool")
+    w = Written(fresh)
+    response = _cognito_sign_in(client, user.username)
+    assert response.status_code == 200, response.text
+    assert w.rows() == []
+
+
+def test_cognito_sign_in_succeeds_when_the_entry_cannot_be_written(
+    client, fresh, db_session, cognito_pool, audit_insert_refused, caplog
+):
+    user = _cognito_account(db_session, cognito_pool)
+    caplog.set_level(logging.INFO)
+    failures = audit_write_failures_total._value.get()
+    w = Written(fresh)
+    response = _cognito_sign_in(client, user.username)
+    assert response.status_code == 200, response.text
+    assert response.json()["access_token"]
+    assert w.rows() == []
+    assert len(_audit_errors(caplog)) == 1
+    assert audit_write_failures_total._value.get() == failures + 1
+    _assert_no_values_logged(caplog, "ae221 refused", user.email, user.username)
+
+
+def test_cognito_sign_in_succeeds_when_the_account_cannot_be_looked_up(
+    client, fresh, db_session, cognito_pool, monkeypatch, caplog
+):
+    user = _cognito_account(db_session, cognito_pool)
+
+    def broken(db, auth_service, access_token):
+        raise RuntimeError("ae221 lookup refused")
+
+    monkeypatch.setattr(auth_endpoints, "_cognito_account", broken)
+    caplog.set_level(logging.INFO)
+    w = Written(fresh)
+    response = _cognito_sign_in(client, user.username)
+    assert response.status_code == 200, response.text
+    assert w.rows() == []
+    assert len(_audit_errors(caplog)) == 1
+    _assert_no_values_logged(caplog, "ae221 lookup refused", user.email, user.username)
 
 
 # --- G4: no request text the allow-list does not name -------------------------

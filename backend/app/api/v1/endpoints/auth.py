@@ -56,6 +56,7 @@ from backend.app.services.auth_service import (
     CognitoTokenRefused,
     log_token_refused,
 )
+from backend.app.services.cognito_accounts import cognito_external_id
 from backend.app.services.local_auth_service import (
     AccountLockedError,
     InvalidCredentialsError,
@@ -183,6 +184,65 @@ def _issue_local_login(db: Session, email: str, password: str) -> LoginResponse:
         after={"provider": "local"},
     )
     return response
+
+
+def _cognito_account(
+    db: Session, auth_service: CognitoAuthService, access_token: Any
+) -> Optional[User]:
+    """The account linked to the Cognito user an access token was issued to,
+    found as ``resolve_cognito_user`` finds it (``external_id =
+    "cognito:<sub>"``), or ``None``. Nothing is created or changed.
+
+    Cognito issued the token in answer to this request's own sign-in call, so
+    its claims are read as ``get_user_with_groups`` reads them once
+    ``GetUser`` has accepted a token: the issuer and app client are compared
+    with configuration, and the signature is not verified again. A token that
+    fails that comparison is refused on every request, and has no account.
+    """
+    try:
+        claims = auth_service._check_token_audience(access_token)
+    except CognitoTokenRefused:
+        return None
+    sub = claims.get("sub")
+    if not isinstance(sub, str) or not sub.strip():
+        return None
+    return (
+        db.query(User)
+        .filter(User.external_id == cognito_external_id(sub.strip()))
+        .first()
+    )
+
+
+def _record_cognito_login(
+    db: Session, auth_service: CognitoAuthService, access_token: Any
+) -> None:
+    """Write ``user_login`` for a Cognito sign-in whose account exists.
+
+    Called only after Cognito has accepted the credentials. A sign-in with no
+    linked account writes nothing: the account is created by the first
+    request made with the token, which writes ``user_create``. As for the
+    local sign-in, the entry is written after the sign-in has succeeded and
+    records the provider only; if the account cannot be looked up or the entry
+    cannot be written, one ERROR line is logged and the sign-in still succeeds.
+    """
+    try:
+        user = _cognito_account(db, auth_service, access_token)
+    except Exception as exc:
+        AuditService._write_failed(
+            db, ActionType.USER_LOGIN, EntityType.USER, None, exc
+        )
+        return
+    if user is None:
+        return
+    AuditService.record_after_commit(
+        db,
+        actor=user,
+        action=ActionType.USER_LOGIN,
+        entity_type=EntityType.USER,
+        entity_id=user.id,
+        entity_name=user.username or str(user.id),
+        after={"provider": "cognito"},
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -315,7 +375,9 @@ def login(
     With ``AUTH_PROVIDER=local`` the form's ``username`` field is the user's
     e-mail address and the response has the same shape as ``/login`` (this is
     what makes Swagger's *Authorize* button work).  With ``cognito`` the
-    credentials are forwarded to the user pool.
+    credentials are forwarded to the user pool; a successful sign-in of a
+    user who already has an account writes ``user_login`` with the provider
+    ``cognito``.
     """
     if _is_local_provider():
         return _issue_local_login(db, form_data.username, form_data.password)
@@ -326,13 +388,14 @@ def login(
             username=form_data.username,
             password=form_data.password,
         )
-        return response
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail=str(e),
             headers={"WWW-Authenticate": "Bearer"},
         )
+    _record_cognito_login(db, auth_service, response.get("access_token"))
+    return response
 
 
 @router.post(
