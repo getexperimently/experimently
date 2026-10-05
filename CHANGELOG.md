@@ -10,6 +10,23 @@ longer applies and release-please can generate this file directly. Until it
 does, entries below 0.2.2 are hand-written and the links in them are the
 reason why.
 
+## [0.23.0](https://github.com/getexperimently/experimently/compare/v0.22.1...v0.23.0) (2026-10-05)
+
+
+### Features
+
+* **dashboard:** a page to change your own password ([#912](https://github.com/getexperimently/experimently/issues/912)) ([ba93aab](https://github.com/getexperimently/experimently/commit/ba93aabc42173d5ef414fab22c9ecb91e5fbfdb8))
+* **warehouse:** BigQuery is available, after a passing check against a real account ([#906](https://github.com/getexperimently/experimently/issues/906)) ([bc977ff](https://github.com/getexperimently/experimently/commit/bc977ff6109986f0aa558411e514de7c19ed04f4))
+
+
+### Bug Fixes
+
+* **api:** the API reference pages render (/api/v1/docs, /api/v1/redoc) ([#911](https://github.com/getexperimently/experimently/issues/911)) ([b401db1](https://github.com/getexperimently/experimently/commit/b401db1314501546b7075333228fd511d6819bb3))
+* **flags:** deleting a feature flag keeps its events ([#907](https://github.com/getexperimently/experimently/issues/907)) ([bcb6c3c](https://github.com/getexperimently/experimently/commit/bcb6c3c2a11f4d03d4e06e1c572ba8c3f0ad504c))
+* **holdout:** holdout and exclusion-group admin routes accept ADMIN only, as documented ([#910](https://github.com/getexperimently/experimently/issues/910)) ([6cf1bc3](https://github.com/getexperimently/experimently/commit/6cf1bc35a1b9bf78f32bc8bb485d0047db726880))
+* **results:** the sequential interval keeps its coverage when arms are split unequally ([#913](https://github.com/getexperimently/experimently/issues/913)) ([06d91a7](https://github.com/getexperimently/experimently/commit/06d91a71768603d4514b947e790af88695237939))
+* **targeting:** a missing attribute makes only its own condition false on experiments ([#914](https://github.com/getexperimently/experimently/issues/914)) ([8512163](https://github.com/getexperimently/experimently/commit/851216319ea6afc44553f3eacc09673b7d174be0))
+
 ## [0.22.1](https://github.com/getexperimently/experimently/compare/v0.22.0...v0.22.1) (2026-10-05)
 
 
