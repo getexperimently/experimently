@@ -37,7 +37,7 @@ y AS (
   FROM per_unit
 ),
 k AS (
-  SELECT AVG(y) AS k FROM y
+  SELECT AVG(y.y) AS k FROM y
 ),
 diag AS (
   SELECT (SELECT COUNT(*) FROM events) AS metric_rows_in_window,
