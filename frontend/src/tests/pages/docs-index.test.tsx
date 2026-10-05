@@ -64,6 +64,13 @@ describe('/docs hub entries for methods that do not work yet', () => {
     expect(links[0].textContent ?? '').toMatch(/\bnot\b/i);
   });
 
+  it('links the table of what the dashboard does and what is API only (#442)', () => {
+    const { getAllByRole } = render(<DocsIndex />);
+    const table = getAllByRole('link').filter((a) => /^Dashboard and API/.test(a.textContent ?? ''));
+    expect(table).toHaveLength(1);
+    expect(table[0].getAttribute('href')).toMatch(/guides\/dashboard-and-api/);
+  });
+
   it('lists the Kubernetes (Helm) self-hosting guide', () => {
     const { getAllByRole } = render(<DocsIndex />);
     const helm = getAllByRole('link').filter((a) => /^Kubernetes \(Helm\)/.test(a.textContent ?? ''));

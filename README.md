@@ -12,7 +12,8 @@ An experimentation platform that enables teams to make data-driven decisions thr
 
 ### Key Capabilities
 
-- **A/B Testing & Multivariate Experiments**: Statistical rigor with Bayesian and Frequentist analysis
+- **A/B Testing & Multivariate Experiments**: Frequentist, sequential (mSPRT) and Bayesian analysis
+  in the API; [which of them the dashboard shows](docs/guides/dashboard-and-api.md)
 - **Advanced Feature Flags**: Targeting, gradual rollouts, and automated safety monitoring
 - **Enhanced Rules Engine**: 20+ operators including semantic versioning, geo-distance, time windows
 - **Real-time Analytics**: High-throughput event collection and comprehensive metrics
