@@ -178,11 +178,12 @@ See `demo/streampulse/README.md`.
 **What to show:**
 - Navigate to `/experiments` → click **Recommendation Algorithm MAB**
 - Show: 3 variants (algo_v1, v2, v3), Thompson Sampling, ACTIVE
-- Show the traffic allocation chart — algo_v2 is getting more traffic
+- Scroll to **Current traffic weights** — algo_v2 has the largest share of new traffic
   - "This started at 33/33/34%. Thompson Sampling has noticed v2 performs better (9% click rate vs 5–6%) and is routing more traffic there automatically."
   - "No one made that decision. The algorithm did."
-- Watch the live updates — traffic percentages shifting
+- Press **Refresh** to see the latest weights. The panel does not update by itself; `setup-local.sh` recomputes the weights every minute (`BANDIT_UPDATE_INTERVAL_MINUTES`, 5 by default)
   - "While we're talking, the platform is learning and reallocating."
+- The dashboard shows the current weights only. It has no chart of how they changed over time
 
 **Key talking points:**
 - MAB for optimization problems where you can't wait for a winner

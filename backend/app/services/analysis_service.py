@@ -33,6 +33,10 @@ from backend.app.services.event_matching import (
     count_converting_users_any,
     first_conversion_times,
 )
+from backend.app.services.srm_service import (
+    recommendation_under_srm,
+    sample_ratio_check,
+)
 from backend.app.services.sufficient_stats_analysis import (
     BinomialVariant,
     adjusted_p_values,
@@ -161,6 +165,21 @@ class AnalysisService:
         summary.update(
             self._summarise_decision(experiment, metrics, sample_size_adequate)
         )
+        # A failed sample-ratio check overrides the recommendation (#880).
+        # Here rather than in the endpoint, so that /results, the data export
+        # and the report, which all read this dict, give the same answer.
+        # Like the check, the rule fails open: if it raises, ``srm`` is None
+        # and the recommendation is the engine's.
+        srm = sample_ratio_check(self.db, experiment.id)
+        try:
+            summary.update(recommendation_under_srm(summary, srm))
+        except Exception as exc:
+            logger.warning(
+                "SRM recommendation rule failed for experiment %s (%s)",
+                experiment.id,
+                type(exc).__name__,
+            )
+            srm = None
 
         return {
             "experiment_id": str(experiment_id),
@@ -182,6 +201,8 @@ class AnalysisService:
             "metrics": metrics,
             "summary": summary,
             "bayesian_results": bayesian_results,
+            # The sample-ratio check behind the recommendation, or None.
+            "srm": srm,
         }
 
     # ------------------------------------------------------------------

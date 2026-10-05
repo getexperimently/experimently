@@ -256,6 +256,10 @@ def results_output(
         include_bayesian=False,
     )
     output.pop("computed_at")
+    # The sample-ratio check (#880) is not part of this computation either:
+    # the fake session cannot answer it, so it is null and the summary is
+    # the engine's.  It came after these hashes, which are pinned without it.
+    assert output.pop("srm") is None
     return output
 
 
