@@ -20,6 +20,7 @@
   "mutual_exclusion_group_create",
   "mutual_exclusion_group_update",
   "role_assign",
+  "role_unassign",
   "safety_rollback",
   "segment_archive",
   "segment_create",

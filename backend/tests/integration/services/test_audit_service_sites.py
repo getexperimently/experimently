@@ -920,12 +920,14 @@ def test_a_refused_entry_still_applies_the_role_change(
 # --- system actors --------------------------------------------------------------
 
 
-def test_the_reserved_actors_are_exactly_four():
+def test_the_reserved_actors_are_exactly_five():
+    # The fifth, system:sso-sync, is written by the modules' SSO sign-in.
     assert SYSTEM_ACTOR_EMAILS == {
         EXPERIMENT_SCHEDULER,
         ROLLOUT_SCHEDULER,
         SAFETY_MONITOR,
         COGNITO_SYNC,
+        "system:sso-sync",
     }
 
 
