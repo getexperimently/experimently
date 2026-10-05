@@ -233,6 +233,30 @@ results use the experiment's correction, and that earlier versions showed them u
 a variant marked significant then may not be significant now. To see the uncorrected numbers,
 ask the API with `?correction_method=none` (`GET /api/v1/results/{experiment_id}`).
 
+#### Sample Ratio Check
+
+The results page compares how many users each variant received with its traffic allocation (a
+chi-square test of the assignment counts). If they differ by more than chance allows
+(p < 0.001), a notice above the tabs says so, with each variant's users and the number expected.
+The recommendation is then **INCONCLUSIVE**, and a "Leading" variant and the Bayesian analysis
+carry a warning. A mismatch usually means assignment or tracking is broken, so do not use the
+numbers for a decision until you find out why.
+
+When the split matches, one line below the summary card says so, with the check's p-value.
+Nothing is shown for a bandit, which moves traffic on purpose, for an experiment with no users
+yet, or when the check could not be run; that is not a pass. The API returns the check as `srm`
+in `GET /api/v1/results/{experiment_id}`.
+
+#### Bayesian Analysis
+
+For an experiment with Bayesian analysis on, the end of the **Overview** tab shows a Bayesian
+analysis of the primary metric: its decision (*Continue*, *Stop: a winner is clear*, *Stop: the
+variants are equivalent* or *Stop: a meaningful difference is unlikely*) and, for each variant,
+the chance it is the best, the expected loss, the posterior mean and the credible interval. It is
+a second analysis and does not change the recommendation. When Bayesian analysis is on but the
+results carry none, a line says it could not be computed. The method is described in
+[Bayesian analysis](../api/bayesian.md).
+
 #### Recommendation Meanings
 
 | Recommendation | Meaning | Action |
