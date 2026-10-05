@@ -7,11 +7,11 @@ This guide explains how to access and use the API documentation for the experime
 The API documentation is available in two formats:
 
 1. **Swagger UI**: Interactive documentation where you can try out API endpoints
-   - URL: `/docs`
+   - URL: `/api/v1/docs`
    - Best for: Developers who want to test API endpoints directly
 
 2. **ReDoc**: Clean, responsive documentation with better navigation
-   - URL: `/redoc`
+   - URL: `/api/v1/redoc`
    - Best for: Reviewing API structure and understanding request/response formats
 
 > **Note**: In production environments, these documentation endpoints may be disabled for security reasons.

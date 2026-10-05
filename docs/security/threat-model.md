@@ -329,7 +329,7 @@ D
 
 | Control | Where | What It Does |
 |---------|-------|--------------|
-| Security headers | `backend/app/middleware/security_middleware.py` | HSTS (1yr + preload), CSP (`default-src 'none'`), X-Frame-Options: DENY, X-Content-Type-Options: nosniff, Referrer-Policy, Permissions-Policy |
+| Security headers | `backend/app/middleware/security_middleware.py` | HSTS (1yr + preload), CSP (`default-src 'none'`, except the two API reference pages, which allow the jsdelivr assets they load), X-Frame-Options: DENY, X-Content-Type-Options: nosniff, Referrer-Policy, Permissions-Policy |
 | Dashboard CSP | `frontend/nginx.conf` | The dashboard's nginx sets its own Content-Security-Policy (`default-src 'self'`, `frame-ancestors 'none'`, `connect-src` from `CSP_CONNECT_SRC`) |
 | CORS allowlist | `main.py` + `settings.cors_allowed_origins` | Only configured origins (in development and test, the local apps when none is configured) may read responses cross-origin; credentials are never allowed cross-origin |
 | RBAC enforcement | `backend/app/core/permissions.py` | Role matrix applied to all endpoints via `check_permission()` |
