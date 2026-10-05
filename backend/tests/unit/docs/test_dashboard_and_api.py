@@ -78,7 +78,8 @@ WITNESSES: Dict[str, str] = {
     "See on the experiment page whether Bayesian analysis is on": "experiment-bayesian",
     # #440's Segments page (#881).
     "Segments: list, create, and upload a list of user ids": "new-segment-btn",
-    # The rest of the #442 slice: A (#887), D (#885), and C, still to come.
+    # The rest of the #442 slice: A (#887), D (#885), and C, still to come
+    # (A and D merged; C flips its three rows).
     "The sample-ratio check on the results page": "srm-notice",  # A
     "Bayesian results: chance to be best, expected loss and credible intervals": (
         "bayesian-panel"  # A

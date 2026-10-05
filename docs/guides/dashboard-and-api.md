@@ -26,9 +26,9 @@ The table lists each capability and where you do it today:
 | Turn on Bayesian analysis when creating an experiment | Dashboard | [Bayesian analysis](../api/bayesian.md) |
 | See on the experiment page whether Bayesian analysis is on | Dashboard | [Bayesian analysis](../api/bayesian.md) |
 | Segments: list, create, and upload a list of user ids | Dashboard | [Segments](segments.md) |
-| The sample-ratio check on the results page | API only | [Running experiments](user-guide.md) |
-| Bayesian results: chance to be best, expected loss and credible intervals | API only | [Bayesian analysis](../api/bayesian.md) |
-| See a bandit experiment's current traffic weights | API only | [Multi-armed bandits](../api/multi-armed-bandit.md) |
+| The sample-ratio check on the results page | Dashboard | [Running experiments](user-guide.md) |
+| Bayesian results: chance to be best, expected loss and credible intervals | Dashboard | [Bayesian analysis](../api/bayesian.md) |
+| See a bandit experiment's current traffic weights | Dashboard | [Multi-armed bandits](../api/multi-armed-bandit.md) |
 | Clone an experiment | API only | [API endpoints](../api/endpoints.md) |
 | Delete a draft experiment | API only | [API endpoints](../api/endpoints.md) |
 | Edit a draft experiment's name, description and hypothesis | API only | [API endpoints](../api/endpoints.md) |
