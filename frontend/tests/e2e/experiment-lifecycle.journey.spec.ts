@@ -326,6 +326,78 @@ test.describe("Journey: experiment lifecycle", () => {
     await expect(experiments.actions.locator("button")).toHaveCount(0);
     // Results stay reachable for an archived experiment.
     await expect(experiments.resultsLink).toBeVisible();
+    // Clone is still offered, outside experiment-actions (#442).
+    await expect(adminPage.getByTestId("experiment-manage").getByTestId("experiment-clone")).toBeVisible();
+    await expect(adminPage.getByTestId("experiment-edit-details")).toHaveCount(0);
+    await expect(adminPage.getByTestId("experiment-delete")).toHaveCount(0);
+  });
+
+  // #442: a draft's name, description and hypothesis are edited in place, an
+  // experiment is cloned, and a draft is deleted after a confirmation in the
+  // page. The draft is this test's own, so the shared one above is untouched.
+  test("edit a draft's name, clone it, then delete the clone", async ({ adminPage }) => {
+    const experiments = new ExperimentsPage(adminPage);
+    const name = `E2E Manage ${STAMP}`;
+    const id = await experiments.createExperimentAdvanced(name, `e2e_manage_${STAMP}`, {
+      metricEventName: "purchase",
+    });
+    expect(id).toMatch(/^[0-9a-f-]{36}$/);
+
+    // The controls sit outside experiment-actions, whose draft buttons are
+    // unchanged: Start only.
+    const manage = adminPage.getByTestId("experiment-manage");
+    await expect(manage).toBeVisible();
+    await expect(experiments.actions.locator("button")).toHaveCount(1);
+    await expect(experiments.startButton).toBeVisible();
+    await expect(experiments.actions.getByTestId("experiment-clone")).toHaveCount(0);
+
+    // Edit the name: the PUT carries the name and nothing else.
+    const renamed = `${name} renamed`;
+    await manage.getByTestId("experiment-edit-details").click();
+    await adminPage.getByTestId("manage-edit-name").fill(renamed);
+    const put = adminPage.waitForRequest(
+      (request) =>
+        request.method() === "PUT" && new URL(request.url()).pathname === `/api/v1/experiments/${id}`,
+    );
+    await adminPage.getByTestId("manage-edit-save").click();
+    expect((await put).postDataJSON()).toEqual({ name: renamed });
+    await expect(adminPage.getByTestId("manage-saved")).toBeVisible();
+    await expect(experiments.detailName).toHaveText(renamed);
+
+    // Stored, and the variants and metric are still there after a reload.
+    await adminPage.reload();
+    await expect(experiments.detailName).toHaveText(renamed);
+    await expect(experiments.variantsTable.getByTestId("variant-row")).toHaveCount(2);
+    await expect(experiments.metricsList.getByTestId("metric-row")).toHaveCount(1);
+
+    // Clone: the page moves to the new experiment, whose name the server chose.
+    await manage.getByTestId("experiment-clone").click();
+    await adminPage.waitForURL(
+      (url) => /\/experiments\/[0-9a-f-]{36}$/.test(url.pathname) && !url.pathname.endsWith(id),
+      { timeout: 15_000 },
+    );
+    const cloneId = new URL(adminPage.url()).pathname.split("/").pop() ?? "";
+    expect(cloneId).not.toBe(id);
+    await expect(experiments.detailName).toHaveText(`Copy of ${renamed}`, { timeout: 15_000 });
+    await experiments.expectStatus("draft");
+
+    // Delete the clone: asked in the page, never through a browser dialog.
+    let dialogs = 0;
+    adminPage.on("dialog", (dialog) => {
+      dialogs += 1;
+      void dialog.dismiss();
+    });
+    await adminPage.getByTestId("experiment-delete").click();
+    await expect(adminPage.getByTestId("manage-delete-confirm")).toBeVisible();
+    await adminPage.getByTestId("manage-delete-yes").click();
+    await adminPage.waitForURL(/\/experiments$/, { timeout: 15_000 });
+    expect(dialogs).toBe(0);
+
+    await experiments.gotoExperiment(cloneId);
+    await expect(experiments.notFound).toBeVisible({ timeout: 15_000 });
+    // The source draft is untouched.
+    await experiments.gotoExperiment(id);
+    await expect(experiments.detailName).toHaveText(renamed, { timeout: 15_000 });
   });
 
   test("an unknown experiment id shows the 404 view", async ({ adminPage }) => {

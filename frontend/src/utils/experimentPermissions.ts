@@ -32,9 +32,11 @@ export function canCreateExperiment(
  * DEVELOPER do. Who created the experiment is not part of the question, so an
  * ANALYST or VIEWER is refused on an experiment they own as well.
  *
- * Schedule uses the same check. Delete checks EXPERIMENT DELETE instead, which
- * ADMIN and DEVELOPER also hold; the dashboard offers neither, and this helper
- * does not answer for them.
+ * Schedule uses the same check; the dashboard does not offer it. Delete checks
+ * EXPERIMENT DELETE instead, which exactly the same roles hold, so the
+ * page's "Edit details" and "Delete draft" both use this helper
+ * (`backend/tests/unit/core/test_dashboard_experiment_roles.py` keeps the
+ * role lists here equal to `permissions.py`).
  */
 const ROLES_THAT_CAN_CHANGE = ['ADMIN', 'DEVELOPER'] as const;
 
