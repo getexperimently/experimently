@@ -173,7 +173,80 @@ def test_needs_are_transitively_closed(workflow, job_id, job, jobs):
     )
 
 
+#: (workflow, summary job id) -> the steps that may carry `continue-on-error`,
+#: by exact name. The integration summary's download is one on purpose: no
+#: report at all is the checker's to judge, so a download that finds nothing
+#: must not end the job before it.
+CONTINUE_ON_ERROR_STEPS = {
+    ("integration-tests.yml", "integration-tests"): {"Collect the shard reports"},
+}
+
+
+def continue_on_error(
+    workflow: str, job_id: str, job: Dict[str, Any], allowed: Dict[Any, Set[str]]
+) -> List[str]:
+    """Where a summary carries `continue-on-error` it is not allowed. On the
+    job it makes the required check green whatever happened; on a step that
+    reads results or runs a checker it turns that step's red into green. Any
+    value counts, `false` included: an expression can make it true."""
+    problems = []
+    if "continue-on-error" in job:
+        problems.append(f"job: continue-on-error: {job['continue-on-error']!r}")
+    exempt = allowed.get((workflow, job_id), set())
+    for step in job.get("steps") or []:
+        if "continue-on-error" in step and step.get("name") not in exempt:
+            problems.append(
+                f"step {step.get('name') or step.get('uses') or step.get('run')!r}: "
+                f"continue-on-error: {step['continue-on-error']!r}"
+            )
+    return problems
+
+
+@pytest.mark.regression
+@pytest.mark.parametrize("workflow, job_id, job, jobs", SUMMARIES, ids=IDS)
+def test_summary_carries_no_continue_on_error(workflow, job_id, job, jobs):
+    problems = continue_on_error(workflow, job_id, job, CONTINUE_ON_ERROR_STEPS)
+    assert not problems, f"{workflow} {job_id}: " + "; ".join(problems)
+
+
+def test_every_continue_on_error_exception_is_still_there():
+    """An exception names a step that exists and still has the flag, so a
+    renamed step cannot leave a stale name that exempts its replacement."""
+    by_key = {(w, j): job for w, j, job, _ in SUMMARIES}
+    for key, names in CONTINUE_ON_ERROR_STEPS.items():
+        assert key in by_key, key
+        steps = {s.get("name"): s for s in by_key[key].get("steps") or []}
+        for name in names:
+            assert "continue-on-error" in steps.get(name, {}), (key, name)
+
+
 # The checks themselves, against the defects they exist for.
+
+
+@pytest.mark.regression
+@pytest.mark.parametrize("where", ["job", "results", "checker", "download-renamed"])
+def test_continue_on_error_on_a_summary_is_refused(where):
+    job = {
+        "needs": "shard",
+        "if": "always()",
+        "steps": [
+            {"name": "Collect the shard reports", "continue-on-error": True},
+            {"name": "Every shard passed", "run": "true"},
+            {"name": "Every test ran in exactly one shard", "run": "true"},
+        ],
+    }
+    if where == "job":
+        job["continue-on-error"] = True
+    elif where == "results":
+        job["steps"][1]["continue-on-error"] = True
+    elif where == "checker":
+        job["steps"][2]["continue-on-error"] = "${{ true }}"
+    else:
+        job["steps"][0]["name"] = "Collect reports"
+    allowed = {
+        ("integration-tests.yml", "integration-tests"): {"Collect the shard reports"}
+    }
+    assert continue_on_error("integration-tests.yml", "integration-tests", job, allowed)
 
 
 def test_a_typed_list_is_refused():
@@ -311,6 +384,8 @@ jobs:
         "${{ failure() || cancelled() }}",
         "${{ failure() }}",
         "${{ !success() }}",
+        "${{ ALWAYS() }}",
+        "${{ Failure() }}",
     ],
 )
 def test_a_job_after_failure_on_any_status_function_is_refused(tmp_path, cond):
@@ -325,7 +400,7 @@ def test_a_job_after_failure_on_any_status_function_is_refused(tmp_path, cond):
         "    steps: [{run: pytest}]\n"
     )
     path = _workflow(tmp_path, text)
-    assert not wg.RUNS_AFTER_FAILURE.search(cond) or "cancelled" in cond
+    assert wg.CAN_RUN_AFTER_FAILURE.search(cond)
     assert wg.r3_workflows([path], ["integration-tests"], _no_classified) == [path]
     assert wg.unselected_runs_after_failure(
         path, ["integration-tests"], _no_classified
@@ -372,3 +447,17 @@ def test_a_notifier_outside_the_scope_is_left_alone(tmp_path):
         encoding="utf-8",
     )
     assert wg.r3_workflows([path], ["integration-tests"], _no_classified) == []
+
+
+@pytest.mark.regression
+def test_an_upper_case_summary_condition_is_still_a_summary(tmp_path):
+    """GitHub reads `ALWAYS()` as `always()`. A case-sensitive selector did
+    not select such a summary, so none of its checks applied."""
+    path = _workflow(
+        tmp_path, UNNAMED_TYPED.format(if_line="    if: ${{ ALWAYS() }}\n")
+    )
+    found = wg.select_summaries([path], ["integration-tests"], _no_classified)
+    assert [(w, j) for w, j, _, _ in found] == [
+        ("integration-tests.yml", "integration-tests")
+    ]
+    assert reads_all_needs(found[0][2])

@@ -426,8 +426,10 @@ def head_commit_producers(
 # Summary jobs: found by the check name they report
 # --------------------------------------------------------------------------
 
-#: An `if:` under which a job runs after one of its needs failed.
-RUNS_AFTER_FAILURE = re.compile(r"always\(\)|!\s*cancelled\(\)")
+#: An `if:` under which a job runs after one of its needs failed. GitHub's
+#: expression functions are case-insensitive (`ALWAYS()` is `always()`), so
+#: both patterns are too.
+RUNS_AFTER_FAILURE = re.compile(r"always\(\)|!\s*cancelled\(\)", re.I)
 
 #: Any `if:` that CAN run a job after a failed need: one that calls a status
 #: function other than a plain ``success()`` -- ``failure()``, ``cancelled()``
@@ -435,7 +437,7 @@ RUNS_AFTER_FAILURE = re.compile(r"always\(\)|!\s*cancelled\(\)")
 #: Wider than RUNS_AFTER_FAILURE on purpose: R3 reads this one, so a job on
 #: ``success() || failure()`` is not a summary that escaped every check.
 CAN_RUN_AFTER_FAILURE = re.compile(
-    r"\b(?:always|failure|cancelled)\s*\(\s*\)|!\s*success\s*\(\s*\)"
+    r"\b(?:always|failure|cancelled)\s*\(\s*\)|!\s*success\s*\(\s*\)", re.I
 )
 
 #: The only `if:` a required summary may have. Anything added to it (a
