@@ -87,6 +87,7 @@ INVENTORY = {
     ("POST", f"{V1}/auth/refresh"): COGNITO_ACCOUNT,
     ("POST", f"{V1}/auth/reset-password"): COGNITO_ACCOUNT,
     ("POST", f"{V1}/auth/signup"): COGNITO_ACCOUNT,
+    # Local, and Cognito when the identity already has an account.
     ("POST", f"{V1}/auth/token"): Audited(A.USER_LOGIN),
     # --- bandits -------------------------------------------------------------
     ("POST", f"{V1}/bandit/{{experiment_id}}/update"): NotAudited(

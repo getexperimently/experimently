@@ -5,20 +5,18 @@ records the changes people make through the API: creating, changing and deleting
 flags and experiments, turning flags on and off, starting, pausing and completing
 experiments, rollout schedule changes, API keys, holdouts, mutual exclusion groups,
 segments, creating and deleting users, changes to a user's role, superuser flag or active
-status, signing in with a password, and safety rollbacks. In the full profile it also
-records custom roles assigned and revoked, a workspace member's role changes, and single
-sign-on (SSO) sign-ins. [Action Types](#action-types) lists every action and when it is
-written.
+status, signing in with a password or through Cognito (`POST /auth/token`; a sign-in
+through the Cognito Hosted UI does not pass through the API and is not recorded), and
+safety rollbacks. In the full profile it also records custom roles assigned and revoked, a
+workspace member's role changes, and single sign-on (SSO) sign-ins.
+[Action Types](#action-types) lists every action and when it is written.
 
 It also records the changes the platform makes on its own: scheduled experiment starts and
 ends, rollout stages the rollout scheduler starts, rollbacks the safety monitor makes, a
 user's first Cognito or SSO sign-in, and role changes Cognito group sync and SSO sign-in
 make. Those role changes are written by a
-[system actor](#changes-the-platform-makes-on-its-own). Signing in through Cognito is not
-written as `user_login` yet
-([#221](https://github.com/getexperimently/experimently/issues/221)). The Quick Start's
-demo data includes a history written by the seed script, in the form the platform writes
-it.
+[system actor](#changes-the-platform-makes-on-its-own). The Quick Start's demo data
+includes a history written by the seed script, in the form the platform writes it.
 
 Creating, changing and deleting a feature flag or an experiment is also recorded in a
 separate table, the compliance audit trail, which `GET /api/v1/compliance/audit-events`
@@ -301,6 +299,7 @@ an API key, or a request body.
 | `role_assign` | `user` | A superuser changes a user's role or superuser flag (`PATCH /admin/users/{id}`, `PUT /admin/users/{id}`, `PUT /users/{id}`); `old_value` and `new_value` are `{"role", "is_superuser"}` |
 | `user_activate`, `user_deactivate` | `user` | The same routes change a user's active status |
 | `user_login` | `user` | Signing in with a password (`POST /auth/login`, or `POST /auth/token` with `AUTH_PROVIDER=local`); `new_value` is `{"provider": "local"}` |
+| `user_login` | `user` | Signing in through Cognito (`POST /auth/token` with the Cognito provider) as a user who already has an account; `new_value` is `{"provider": "cognito"}`. A user's first Cognito sign-in writes no `user_login`: their account is created by the first request they make with the token, which writes `user_create`. A sign-in through the Cognito Hosted UI does not pass through this API and writes nothing |
 | `safety_rollback` | `feature_flag` | A safety rollback, manual (`POST /safety/feature-flags/{id}/rollback`, by the calling user) or by the safety monitor. `new_value` is `{"trigger_type", "previous_percentage", "new_percentage", "deactivated", "paused_schedules"}`; `reason` is the rollback's reason. It appears in the flag's history |
 | `experiment_start`, `experiment_complete` | `experiment` | The experiment scheduler starts an experiment at its start date or scheduled resume, or completes it at its end date (also when `POST /experiments/schedules/process` runs it). `reason` is `scheduled start`, `scheduled resume` or `scheduled end` |
 | `feature_flag_update` | `feature_flag` | The rollout scheduler starts a rollout stage and sets the flag's rollout percentage. `reason` is `rollout schedule stage started` |
@@ -330,10 +329,12 @@ once the problem is fixed writes it once.
 
 `ActionType` also defines `user_update`, `user_logout`, `permission_grant`,
 `permission_revoke` and `safety_config_update`. You can filter on them, but nothing in this
-release writes them (`role_unassign` is written only with the modules installed)
-([#221](https://github.com/getexperimently/experimently/issues/221)). Entries written by
-an earlier release for `PATCH /admin/users/{id}` are `user_update`, with the role and
-active status before and after.
+release writes them (`role_unassign` is written only with the modules installed).
+Granting and revoking a direct permission are not recorded because no permission check
+reads direct grants yet
+([#891](https://github.com/getexperimently/experimently/issues/891)). Entries written by an
+earlier release for `PATCH /admin/users/{id}` are `user_update`, with the role and active
+status before and after.
 
 ### Changes the platform makes on its own
 
