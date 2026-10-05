@@ -11,6 +11,7 @@ Covered:
 * parity: each user gets what N single ``POST /api/v1/tracking/assign`` calls
   give, over holdout, mutual exclusion (hashed and sibling-held), targeting,
   bandit, sticky and plain users; the same Assignment rows; no view events;
+  and for an experiment targeted at a segment (#440);
 * the order of the list changes nobody's answer; a resend adds no rows;
 * the bandit weights are read once per request, and the statements per user
   are exact;
@@ -50,6 +51,12 @@ from backend.app.models.holdout_population import HoldoutPopulation
 from backend.app.models.mutual_exclusion_group import (
     MutualExclusionGroup,
     MutualExclusionGroupStatus,
+)
+from backend.app.models.segment import (
+    Segment,
+    SegmentKind,
+    SegmentMember,
+    SegmentStatus,
 )
 from backend.app.models.user import User, UserRole
 from backend.app.services.assignment_service import AssignmentService
@@ -347,6 +354,45 @@ def everything(db_session, make_experiment):
             db_session.commit()
 
 
+@pytest.fixture
+def segment_experiment(db_session, make_experiment, admin_user, no_holdout):
+    """An experiment targeted at an id-list segment of five members (#440)."""
+    members = _users(5, "member")
+    segment = Segment(
+        name=f"batch-segment-{uuid.uuid4().hex[:8]}",
+        kind=SegmentKind.ID_LIST.value,
+        status=SegmentStatus.ACTIVE,
+        owner_id=admin_user.id,
+    )
+    db_session.add(segment)
+    db_session.commit()
+    for member in members:
+        db_session.add(SegmentMember(segment_id=segment.id, member_id=member))
+    db_session.commit()
+    experiment = _experiment(
+        db_session,
+        make_experiment,
+        "segment",
+        targeting_rules={
+            "groups": [
+                {
+                    "conditions": [
+                        {
+                            "attribute": "segment",
+                            "operator": "in_segment",
+                            "value": str(segment.id),
+                        }
+                    ]
+                }
+            ]
+        },
+    )
+    yield {"experiment": experiment, "members": members, "segment": str(segment.id)}
+    _cleanup(db_session, [experiment.id])
+    db_session.query(Segment).filter(Segment.id == segment.id).delete()
+    db_session.commit()
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -513,6 +559,52 @@ class TestParity:
         for _v, _a, reason in single.values():
             expected_counts[reason] += 1
         assert body["counts"] == expected_counts
+
+    def test_segment_targeted_users(
+        self, client, headers, segment_experiment, session_factory
+    ):
+        """#440: the batch gives a segment-targeted experiment's users exactly
+        what single calls give, and both give the right answer: an id-list
+        member is assigned, a non-member is refused, and a non-member whose
+        context carries a member's ``user_id`` or a ``$segments`` list is
+        refused too."""
+        exp, members = segment_experiment["experiment"], segment_experiment["members"]
+        outsiders = _users(6, "out")
+        user_ids = members + outsiders
+        contexts = {user_id: {"country": "US"} for user_id in user_ids}
+        contexts[outsiders[0]] = {"user_id": members[0]}
+        contexts[outsiders[1]] = {"user": {"user_id": members[0]}}
+        contexts[outsiders[2]] = {"$segments": [segment_experiment["segment"]]}
+
+        single = {}
+        for user_id in user_ids:
+            resp = client.post(
+                SINGLE_URL,
+                json={
+                    "experiment_key": exp.key,
+                    "user_id": user_id,
+                    "context": contexts[user_id],
+                },
+                headers=headers,
+            )
+            assert resp.status_code == 200, resp.text
+            data = resp.json()
+            single[user_id] = (data["variant_id"], data["assigned"], data["reason"])
+        single_rows = _assignment_rows(session_factory, exp)
+
+        _reset_to(session_factory, exp, [])
+        batch = _answers(
+            client.post(URL, json=_body(exp, user_ids, contexts), headers=headers)
+        )
+
+        assert {u: single[u][1:] for u in members} == dict.fromkeys(
+            members, (True, "assigned")
+        )
+        assert {u: single[u][1:] for u in outsiders} == dict.fromkeys(
+            outsiders, (False, "targeting")
+        )
+        assert batch == single
+        assert _assignment_rows(session_factory, exp) == single_rows
 
     def test_the_order_of_the_list_changes_no_answer(
         self, client, headers, everything, session_factory

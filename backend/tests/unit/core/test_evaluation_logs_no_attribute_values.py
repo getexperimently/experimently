@@ -220,6 +220,11 @@ ENGINE_CASES = {
     # Not implemented on the flag path: the condition never matches.
     OperatorType.PERCENTAGE_BUCKET: [Case(MARKER, 50, expect=ONCE)],
     OperatorType.JSON_PATH: [Case(MARKER, "$.a", expect=ONCE)],
+    # Answered from resolved membership before any attribute is read
+    # (segment_condition_holds); apply_operator never sees a value for them
+    # (test_segment_condition.py), so there is no value to log.
+    OperatorType.IN_SEGMENT: [],
+    OperatorType.NOT_IN_SEGMENT: [],
 }
 
 #: The operators RulesEvaluationService implements itself (experiment targeting).

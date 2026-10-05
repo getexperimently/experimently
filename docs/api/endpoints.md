@@ -1219,7 +1219,8 @@ conditions, each condition an `attribute`, an `operator` and a `value`.
   `greater_than_or_equal`, `less_than_or_equal`, `in`, `not_in`, `regex`,
   `is_null`, `is_not_null`, `semver_eq`, `semver_gt`, `semver_lt`,
   `semver_gte`, `semver_lte`, `geo_within_radius`, `time_window`,
-  `array_contains` and `array_intersects`.
+  `array_contains`, `array_intersects`, `in_segment` and `not_in_segment`
+  (below).
 - An experiment's rules may carry a top-level `rollout_percentage`, a number
   from 0 to 100: that share of the users who match is admitted. Which users
   is decided by the rules' top-level `id` (text, at most 100 characters):
@@ -1238,6 +1239,28 @@ conditions, each condition an `attribute`, an `operator` and a `value`.
   any other `id` is copied.
 - `null`, `{}` and `{"groups": []}` mean no targeting: every user is eligible.
 
+**`in_segment`, `not_in_segment`.** `{"attribute": "segment", "operator": "in_segment", "value": "<segment id>"}`.
+One segment per condition; to match any of several, put one condition per segment in an `OR`
+group. A ruleset can use at most 10 different segments. A user is a member of an ID-list segment
+when the user the flag or experiment is evaluated for (the request's `user_id`) is in its list,
+and of a rules segment when the attributes sent with the request match its rules; in a segment's
+rules, `user_id` is that same user, whatever the context says. Membership is decided by the
+server from its own records: nothing in the context you send makes a user a member. A condition
+on the attribute `segment` with any other operator, such as `equals`, compares the context value
+as before. Saving rules that name a segment that is unknown, inactive or archived, or whose rules
+are not valid, answers 422, and a segment condition in a native `default_rule` (returned without
+its conditions being evaluated) is refused. When the server cannot decide a user's membership of
+a segment the rules name (a flag unarchived after its segment was archived, a segment rule whose
+pattern cannot be evaluated for this context), it does not guess: the flag answers
+`enabled: false` with `reason: "error"` and the experiment does not enrol the user
+(`reason: "targeting"`), whichever of the two operators the condition uses. Flags that use a
+segment are always evaluated by the server, never by an SDK's local evaluation.
+A segment condition requires nothing from the context, but on experiments every other attribute a
+rule names is required (#822): a user who lacks an attribute used only in another `OR` branch is
+not enrolled even when the segment branch matches, while a flag would match them.
+
+See [Segments](../guides/segments.md#target-a-flag-or-an-experiment-at-a-segment).
+
 `POST /api/v1/experiments/` and `PUT /api/v1/experiments/{experiment_id}` answer
 422 for experiment rules that would not be applied as written: a list of rules, a flat object such as
 `{"country": ["US"]}`, an unknown key, `groups` together with `rules`,
@@ -1248,7 +1271,9 @@ operator with more than 1,000 values. The message names the place, for example
 submitted value.
 
 Cloning an experiment copies its stored rules as they are, without this check,
-so an experiment created before the check keeps rules it would now refuse.
+so an experiment created before the check keeps rules it would now refuse. The
+one exception is a segment: a clone whose rules name a segment that is not
+active, or whose rules are not valid, answers 409 and creates nothing.
 
 `POST /api/v1/feature-flags/` and `PUT /api/v1/feature-flags/{flag_id}` answer
 422 for flag rules on the same terms. A flag's rules are also refused for a
@@ -2174,8 +2199,8 @@ POST /api/v1/safety/feature-flags/{flag_id}/rollback      — Manual rollback (?
 POST   /api/v1/segments                  — Create segment (DEVELOPER+)
 GET    /api/v1/segments                  — List segments (?status=active|inactive|archived)
 GET    /api/v1/segments/{id}             — Get segment
-PUT    /api/v1/segments/{id}             — Update segment (DEVELOPER+)
-DELETE /api/v1/segments/{id}             — Archive segment: sets status archived (DEVELOPER+)
+PUT    /api/v1/segments/{id}             — Update segment (DEVELOPER+; 409: in use, below)
+DELETE /api/v1/segments/{id}             — Archive segment: sets status archived (DEVELOPER+; 409: in use)
 POST   /api/v1/segments/{id}/evaluate    — Is this user context a member? (409: stored rules not valid)
 POST   /api/v1/segments/bulk-evaluate    — One user context against up to 50 segments
 GET    /api/v1/segments/{id}/experiments — Experiments and flags whose rules mention the segment's id
@@ -2203,7 +2228,8 @@ and are checked when saved:
 
 The operators are the flag operators listed under
 [Add targeting rules](../feature-flags/create.md#add-targeting-rules) (`equals`, `in`,
-`regex`, `semver_gte`, ...). A segment needs at least one group, and every group at least
+`regex`, `semver_gte`, ...), except `in_segment` and `not_in_segment`: a segment cannot
+refer to a segment. A segment needs at least one group, and every group at least
 one condition. It holds at most 20 groups, 50 conditions, 10 `regex` conditions and 1,000
 list values in total. `POST` and `PUT /api/v1/segments` answer 422 for anything else, with
 `loc` `["body", "rules"]` and a fixed message naming the place and the reason, for example
@@ -2225,6 +2251,21 @@ Assignment does not store a context today, so the answer is usually
 estimate from, which is not the same as 0%. The preview also refuses, before any query,
 `regex` conditions times `sample_size` above 500 and conditions plus groups times
 `sample_size` above 50,000, at `loc` `["query", "sample_size"]`.
+
+**A segment in use cannot be archived or made inactive.** Flags and experiments target a
+segment with `in_segment` / `not_in_segment` ([Targeting Rules](#targeting-rules)).
+`DELETE /api/v1/segments/{id}`, and a `PUT` that sets `status` to `inactive` or `archived`,
+answer 409 and change nothing while a flag that is not archived (a disabled one included), or
+an experiment that is draft, active or paused, has a rule naming the segment:
+
+```json
+{"detail": {"code": "segment_in_use",
+            "message": "This segment is used by 1 feature flag and 2 experiments. Remove it from their targeting rules first.",
+            "feature_flags": [{"id": "...", "key": "checkout-v2", "name": "Checkout v2"}],
+            "experiments": [{"id": "...", "key": "pricing-page", "name": "Pricing page", "status": "paused"}]}}
+```
+
+A stored row that mentions the segment's id but whose rules cannot be read is listed too.
 
 #### Upgrading: segment rules
 

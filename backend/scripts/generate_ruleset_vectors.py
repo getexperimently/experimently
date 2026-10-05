@@ -87,6 +87,7 @@ from backend.app.models.feature_flag import (
     FeatureFlagStatus,
 )
 from backend.app.schemas.targeting_rule import Condition, RuleGroup
+from backend.app.services import feature_flag_service
 from backend.app.services.feature_flag_service import (
     FeatureFlagService,
 )
@@ -107,6 +108,7 @@ from backend.app.services.sdk_ruleset import (
     canonical_json,
     is_portable_number,
 )
+from backend.app.services.segment_membership import SegmentMemberships
 
 VECTORS_PATH = REPO_ROOT / "tests" / "sdk-contract" / "ruleset-vectors.json"
 
@@ -274,6 +276,7 @@ def build_corpus() -> Corpus:
     _context_shape_flags(corpus)
     _unicode_flags(corpus)
     _remote_flags(corpus)
+    _segment_flags(corpus)
     return corpus
 
 
@@ -645,6 +648,51 @@ def _remote_flags(corpus: Corpus) -> None:
     corpus.case("op-array-contains", USER, {"tags": ["a", "b"]})
 
 
+#: The segment the segment flags name, and who is a member of it. Membership
+#: lives on the server (#440), so the generator answers it from this table
+#: through :func:`stub_memberships`, never from a database.
+VECTOR_SEGMENT = "5e9a1c00-0000-4000-8000-000000000440"
+VECTOR_SEGMENT_MEMBERS = {VECTOR_SEGMENT: frozenset({USER})}
+#: A segment id the table does not know: membership is unavailable.
+VECTOR_UNKNOWN_SEGMENT = "5e9a1c00-0000-4000-8000-00000000dead"
+
+
+def _segment_flags(corpus: Corpus) -> None:
+    """Flags that use a segment: always remote, the SDKs ask the server."""
+    flags = [
+        ("segment-in", dashboard(cond("segment", "in_segment", VECTOR_SEGMENT))),
+        (
+            "segment-not-in",
+            dashboard(cond("segment", "not_in_segment", VECTOR_SEGMENT)),
+        ),
+        (
+            "segment-unknown",
+            dashboard(cond("segment", "in_segment", VECTOR_UNKNOWN_SEGMENT)),
+        ),
+    ]
+    for key, rules in flags:
+        corpus.flag(key, rules)
+        # USER is a member; user-7 is not, whatever its context says.
+        corpus.case(key, USER, None)
+        corpus.case(key, "user-7", None)
+        corpus.case(key, "user-7", {"$segments": [VECTOR_SEGMENT]})
+
+
+def stub_memberships(db, user_id, context, segment_ids) -> SegmentMemberships:
+    """The resolver's answer from :data:`VECTOR_SEGMENT_MEMBERS`.
+
+    Stands in for ``resolve_segment_memberships`` explicitly: the generator
+    has no database, and must not rely on what a resolver given none does.
+    """
+    asked = frozenset(segment_ids)
+    known = asked & frozenset(VECTOR_SEGMENT_MEMBERS)
+    return SegmentMemberships(
+        members=frozenset(s for s in known if user_id in VECTOR_SEGMENT_MEMBERS[s]),
+        evaluated=asked,
+        unavailable=asked - known,
+    )
+
+
 # ---------------------------------------------------------------------------
 # Evaluation
 # ---------------------------------------------------------------------------
@@ -673,6 +721,9 @@ def server_answer(
     with (
         mock.patch.object(MetricsService, "record_flag_evaluation"),
         mock.patch.object(MetricsService, "log_error"),
+        mock.patch.object(
+            feature_flag_service, "resolve_segment_memberships", stub_memberships
+        ),
     ):
         result = FeatureFlagService(db=None).evaluate_flag_detailed(
             flag, user_id, context

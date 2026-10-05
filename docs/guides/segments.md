@@ -133,6 +133,83 @@ curl -s -X POST localhost:8000/api/v1/segments/$SEGMENT/members/remove \
 
 It prints `{"removed":1,"not_members":1,"member_count":25003}`: `cust-999` was not a member.
 
+## Target a flag or an experiment at a segment
+
+A targeting condition names the segment by id: `{"attribute": "segment", "operator":
+"in_segment", "value": "<segment id>"}`, or `not_in_segment` for everyone else. This creates
+a flag that is on only for the segment's members (its rollout outside the segment is 0%):
+
+```{.bash exec}
+FLAG=pilot-banner-$(date +%s)
+jq -n --arg key "$FLAG" --arg segment "$SEGMENT" '{
+  key: $key, name: "Pilot banner", is_active: true, rollout_percentage: 0,
+  targeting_rules: {groups: [{conditions: [
+    {attribute: "segment", operator: "in_segment", value: $segment}]}]}}' \
+  | curl -s -X POST localhost:8000/api/v1/feature-flags/ \
+    -H "Authorization: Bearer $TOKEN" \
+    -H 'content-type: application/json' \
+    --data-binary @- | jq -r .status
+```
+<!-- expect: active -->
+
+It prints `active`. Evaluating it takes an API key. `cust-001` is in the list and `cust-999` is
+not:
+
+```{.bash exec}
+KEY=$(curl -s -X POST localhost:8000/api/v1/api-keys \
+  -H "Authorization: Bearer $TOKEN" \
+  -H 'content-type: application/json' \
+  -d '{"name": "Segments guide"}' | jq -r .key)
+
+for USER in cust-001 cust-999; do
+  printf '%s ' "$USER"
+  curl -s -X POST localhost:8000/api/v1/feature-flags/evaluate/$FLAG \
+    -H "X-API-Key: $KEY" \
+    -H 'content-type: application/json' \
+    -d "{\"user_id\": \"$USER\"}" | jq -c '{enabled, reason}'
+done
+```
+<!-- expect: cust-001 {"enabled":true,"reason":"targeting_rule"} -->
+<!-- expect: cust-999 {"enabled":false,"reason":"rollout"} -->
+
+It prints one line per user: `cust-001` gets `{"enabled":true,"reason":"targeting_rule"}`, and
+`cust-999` falls through to the 0% rollout, `{"enabled":false,"reason":"rollout"}`.
+
+An experiment takes the same condition in its `targeting_rules`; a user who is not a member
+gets the control variant with `assigned: false` and `reason: "targeting"`.
+
+- **The server decides membership.** For an ID list, the user is the `user_id` the flag or the
+  assignment is evaluated for; a `user_id` (or anything else) in the context you send does not
+  make a user a member.
+- **At most 10 segments per ruleset**, one per condition; put several conditions in an `OR`
+  group to match any of them.
+- **Saving rules that name a segment that is unknown, inactive or archived answers `422`.** If
+  the server cannot decide membership when the flag is evaluated (the flag was unarchived after
+  its segment was archived, say), the flag answers `{"enabled": false, "reason": "error"}` and
+  the experiment does not enrol the user, for `in_segment` and `not_in_segment` alike.
+- **SDKs that evaluate flags locally ask the server** about a flag that uses a segment: see
+  [Local evaluation](../sdk/local-evaluation.md).
+
+The full rule is in the
+[API reference](../api/endpoints.md#targeting-rules).
+
+## Archive a segment
+
+A segment that a flag or an experiment still uses cannot be archived or made inactive: it
+answers `409` and lists them. A flag counts until it is archived, and an experiment until it is
+completed or archived, because until then its rules can still be evaluated.
+
+```{.bash exec}
+curl -s -X DELETE localhost:8000/api/v1/segments/$SEGMENT \
+  -H "Authorization: Bearer $TOKEN" | jq -c '{code: .detail.code, flags: (.detail.feature_flags | length)}'
+```
+<!-- expect: {"code":"segment_in_use","flags":1} -->
+
+It prints `{"code":"segment_in_use","flags":1}`. The full answer is
+`{"detail": {"code": "segment_in_use", "message", "feature_flags": [{"id", "key", "name"}],
+"experiments": [{"id", "key", "name", "status"}]}}`. Remove the segment from those rules, or
+archive the flag, then archive the segment.
+
 ## Limits
 
 | Limit | Value |
@@ -141,6 +218,7 @@ It prints `{"removed":1,"not_members":1,"member_count":25003}`: `cust-999` was n
 | Characters per ID | 1 to 255 |
 | IDs per segment | 1,000,000 |
 | Who can change members | ADMIN and DEVELOPER (ANALYST and VIEWER get `403`) |
+| Segments per targeting ruleset | 10 |
 
 Each add or remove writes one `segment_update` entry to the audit log with the counts, never
 the IDs. A rules segment answers `409` on the member routes, and so does an archived one.

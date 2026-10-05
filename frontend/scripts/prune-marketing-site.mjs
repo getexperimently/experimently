@@ -27,6 +27,7 @@ const PLATFORM_ONLY = [
   'admin',
   'experiments',
   'feature-flags',
+  'segments',
   'results',
   'workspaces',
   'warehouse',

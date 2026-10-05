@@ -153,3 +153,39 @@ def test_stability_md_lists_the_kind_change():
         "/api/v1/segments/{segment_id}/preview",
     ):
         assert f"{path}`" in row, path
+
+
+@pytest.mark.parametrize(
+    "path, method",
+    [
+        ("/api/v1/segments/{segment_id}", "delete"),
+        ("/api/v1/segments/{segment_id}", "put"),
+    ],
+)
+def test_archive_and_update_document_the_in_use_409(snapshot, path, method):
+    """#440 PR C: a segment that targeting uses cannot be archived or deactivated."""
+    responses = snapshot["paths"][path][method]["responses"]
+    assert "409" in responses
+    assert "segment_in_use" in responses["409"]["description"]
+
+
+def test_stability_md_lists_segment_targeting():
+    """PR C's row: the stable operations whose answers segment targeting changed."""
+    text = STABILITY.read_text(encoding="utf-8")
+    row = next(
+        (line for line in text.splitlines() if "| #440 (segment targeting) |" in line),
+        None,
+    )
+    assert row is not None, "docs/api/stability.md has no #440 segment targeting row"
+    for fact in ("`in_segment`", "`not_in_segment`", "segment_in_use", "409", "422"):
+        assert fact in row, fact
+    for operation in (
+        "`DELETE /api/v1/segments/{segment_id}`",
+        "`PUT /api/v1/segments/{segment_id}`",
+        "`POST /api/v1/feature-flags/`",
+        "`PUT /api/v1/feature-flags/{flag_id}`",
+        "`POST /api/v1/experiments/`",
+        "`PUT /api/v1/experiments/{experiment_id}`",
+        "`POST /api/v1/experiments/{experiment_id}/clone`",
+    ):
+        assert operation in row, operation

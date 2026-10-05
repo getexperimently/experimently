@@ -29,6 +29,8 @@ from backend.app.services.srm_service import (
     SRMResult,
     compute_srm,
     compute_srm_for_experiment,
+    recommendation_under_srm,
+    sample_ratio_check,
 )
 
 # ---------------------------------------------------------------------------
@@ -346,27 +348,24 @@ def client(mock_db):
 
 
 class TestResultsEndpointSrm:
+    """The route forwards the check ``AnalysisService`` ran (#880)."""
+
     @pytest.mark.unit
     def test_srm_block_present_and_warning_on_mismatch(self, client, mock_db):
         srm = compute_srm(
             {str(CONTROL_UUID): 6000, str(TREATMENT_UUID): 4000},
             {str(CONTROL_UUID): 50, str(TREATMENT_UUID): 50},
         )
-        with (
-            patch.object(
-                AnalysisService, "get_experiment_results", return_value=_results_dict()
-            ),
-            patch(
-                "backend.app.api.v1.endpoints.results.compute_srm_for_experiment",
-                return_value=srm,
-            ) as mock_srm,
+        payload = _results_dict()
+        payload["srm"] = srm.to_dict()
+        with patch.object(
+            AnalysisService, "get_experiment_results", return_value=payload
         ):
             response = client.get(
                 f"/api/v1/results/{EXPERIMENT_UUID}", params={"use_cache": "false"}
             )
 
         assert response.status_code == 200, response.text
-        mock_srm.assert_called_once()
         block = response.json()["srm"]
         assert block["warning"] is True
         assert block["chi2"] == pytest.approx(400.0)
@@ -379,14 +378,10 @@ class TestResultsEndpointSrm:
 
     @pytest.mark.unit
     def test_srm_null_when_undefined(self, client):
-        with (
-            patch.object(
-                AnalysisService, "get_experiment_results", return_value=_results_dict()
-            ),
-            patch(
-                "backend.app.api.v1.endpoints.results.compute_srm_for_experiment",
-                return_value=None,
-            ),
+        payload = _results_dict()
+        payload["srm"] = None
+        with patch.object(
+            AnalysisService, "get_experiment_results", return_value=payload
         ):
             response = client.get(
                 f"/api/v1/results/{EXPERIMENT_UUID}", params={"use_cache": "false"}
@@ -397,15 +392,11 @@ class TestResultsEndpointSrm:
         assert response.json()["srm"] is None
 
     @pytest.mark.unit
-    def test_srm_failure_never_fails_the_response(self, client):
-        with (
-            patch.object(
-                AnalysisService, "get_experiment_results", return_value=_results_dict()
-            ),
-            patch(
-                "backend.app.api.v1.endpoints.results.compute_srm_for_experiment",
-                side_effect=RuntimeError("db down"),
-            ),
+    def test_unserialisable_srm_never_fails_the_response(self, client):
+        payload = _results_dict()
+        payload["srm"] = {"chi2": "not a number"}
+        with patch.object(
+            AnalysisService, "get_experiment_results", return_value=payload
         ):
             response = client.get(
                 f"/api/v1/results/{EXPERIMENT_UUID}", params={"use_cache": "false"}
@@ -414,6 +405,126 @@ class TestResultsEndpointSrm:
         assert response.status_code == 200, response.text
         assert response.json()["srm"] is None
 
+
+class TestSampleRatioCheck:
+    """The best-effort wrapper ``AnalysisService`` calls."""
+
+    @pytest.mark.unit
+    def test_failure_is_none_and_rolls_back(self):
+        db = MagicMock()
+        db.query.side_effect = RuntimeError("db down")
+
+        assert sample_ratio_check(db, uuid.uuid4()) is None
+        db.rollback.assert_called_once()
+
+    @pytest.mark.unit
+    def test_result_is_the_plain_dict(self):
+        a, b = uuid.uuid4(), uuid.uuid4()
+        db = TestComputeSrmForExperiment()._db(
+            [(a, 50), (b, 50)], [(a, 6000), (b, 4000)]
+        )
+
+        result = sample_ratio_check(db, uuid.uuid4())
+
+        assert result is not None
+        assert result["warning"] is True
+        assert result["observed"] == {str(a): 6000, str(b): 4000}
+
+    @pytest.mark.unit
+    @pytest.mark.regression
+    def test_a_result_that_cannot_be_read_is_none(self, monkeypatch):
+        """``to_dict`` raising fails open like a failed query (#880)."""
+
+        def broken(_self):
+            raise ValueError("planted")
+
+        monkeypatch.setattr(SRMResult, "to_dict", broken)
+        a, b = uuid.uuid4(), uuid.uuid4()
+        db = TestComputeSrmForExperiment()._db(
+            [(a, 50), (b, 50)], [(a, 6000), (b, 4000)]
+        )
+
+        assert sample_ratio_check(db, uuid.uuid4()) is None
+
+
+class TestAnalysisServiceSrmFailsOpen:
+    @pytest.mark.unit
+    @pytest.mark.regression
+    def test_a_rule_that_raises_leaves_the_engine_recommendation(self, monkeypatch):
+        """The rule raising never fails the results computation (#880):
+        ``srm`` is None and the recommendation is the engine's."""
+        from backend.app.services import analysis_service as analysis_module
+        from backend.tests.unit.services.test_binomial_metric_result_characterisation import (
+            results_output,
+        )
+
+        monkeypatch.setattr(analysis_module, "sample_ratio_check", lambda *_a: None)
+        engine = results_output("three_variants", 0.95, "none", monkeypatch)["summary"]
+
+        def broken(*_a):
+            raise ValueError("planted")
+
+        monkeypatch.setattr(analysis_module, "sample_ratio_check", lambda *_a: _FAILED)
+        monkeypatch.setattr(analysis_module, "recommendation_under_srm", broken)
+        # results_output asserts the output's srm is None.
+        summary = results_output("three_variants", 0.95, "none", monkeypatch)["summary"]
+
+        assert summary == engine
+        assert summary["recommendation"] != "INCONCLUSIVE"
+
+
+# ---------------------------------------------------------------------------
+# The recommendation under a failed sample-ratio check (#880)
+# ---------------------------------------------------------------------------
+
+_FAILED = compute_srm({"a": 600, "b": 400}, {"a": 50, "b": 50}).to_dict()
+_PASSED = compute_srm({"a": 505, "b": 495}, {"a": 50, "b": 50}).to_dict()
+
+
+class TestRecommendationUnderSrm:
+    @pytest.mark.unit
+    @pytest.mark.regression
+    @pytest.mark.parametrize(
+        "engine", ["SHIP_VARIANT", "KEEP_CONTROL", "CONTINUE_TESTING"]
+    )
+    def test_failed_check_is_inconclusive_whatever_the_engine_said(self, engine):
+        summary = {
+            "has_winner": True,
+            "winning_variant_id": "b",
+            "recommendation": engine,
+            "recommendation_reason": "the engine's reason",
+        }
+
+        out = recommendation_under_srm(summary, _FAILED)
+
+        assert out == {
+            "recommendation": "INCONCLUSIVE",
+            "recommendation_reason": (
+                "Sample-ratio mismatch: the observed assignment split does not "
+                "match the configured traffic allocation (p = 2.5e-10), so these "
+                "results cannot be trusted until the cause is found."
+            ),
+        }
+        assert _FAILED["p_value"] == pytest.approx(2.54e-10, rel=1e-2)
+
+    @pytest.mark.unit
+    @pytest.mark.regression
+    def test_null_check_changes_nothing(self):
+        """A bandit, no assignments or a check that raised: fails open."""
+        summary = {"recommendation": "SHIP_VARIANT", "recommendation_reason": "r"}
+
+        assert recommendation_under_srm(summary, None) == summary
+
+    @pytest.mark.unit
+    @pytest.mark.regression
+    def test_passed_check_changes_nothing(self):
+        assert _PASSED["warning"] is False
+        summary = {"recommendation": "SHIP_VARIANT", "recommendation_reason": "r"}
+
+        assert recommendation_under_srm(summary, _PASSED) == summary
+
+
+class TestSrmCacheRoundTrip:
     @pytest.mark.unit
     def test_srm_survives_cache_round_trip(self):
         srm = compute_srm({"a": 6000, "b": 4000}, {"a": 50, "b": 50})

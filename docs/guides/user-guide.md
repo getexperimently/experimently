@@ -22,8 +22,8 @@ You'll need an account with one of the following roles:
 
 | Role | What You Can Do |
 |------|----------------|
-| **ADMIN** | Manage users; create experiments and change any experiment, but schedule and delete only your own; all flags |
-| **DEVELOPER** | Create experiments and change any experiment, but schedule and delete only your own; create and manage any feature flag |
+| **ADMIN** | Manage users; create, change, schedule and delete any experiment (schedule and delete through the API; the dashboard has no control for them yet); all flags |
+| **DEVELOPER** | Create, change, schedule and delete any experiment (schedule and delete through the API; the dashboard has no control for them yet); create and manage any feature flag |
 | **ANALYST** | View all experiments, results, and reports, and every feature flag (read-only) |
 | **VIEWER** | View every experiment and its results, and every feature flag (read-only) |
 
@@ -93,6 +93,22 @@ For multivariate tests, add more variants:
 | Green Button | — | 33% |
 | Red Button | — | 33% |
 
+Each variant can also carry a **configuration**: a JSON object your app receives with the
+assignment, so code can read values instead of branching on the variant's name. Open
+**Configuration (JSON, optional)** under the variant and type an object, for example:
+
+```json
+{"button_color": "green", "button_text": "Buy now"}
+```
+
+Leave it empty when the variant name is enough; the variant then has no configuration (`null`,
+not `{}`). The form refuses anything that is not a JSON object, such as a list, a string or text
+that does not parse, and shows the problem under the field; **Next** and **Create Experiment**
+open the field and move to it. The dashboard accepts up to 16,384 bytes (UTF-8) per
+configuration; the API accepts larger ones. `POST /api/v1/tracking/assign`, which the SDKs
+call, returns the configuration as saved, and the experiment's page shows it in the variants
+table.
+
 Only want to test on specific users? Add targeting rules on the same step:
 
 - Country is in [US, CA]
@@ -119,7 +135,12 @@ cannot be changed after it starts:
   chance of even one false winner at 5% and needs more users. The correction applies to the
   variants of each metric, not across metrics.
 
-The single-page form has the same two settings in a collapsed **Analysis settings** section,
+Below them, **Also analyse the primary metric with Bayesian statistics** is off by default. Turned
+on, the results also carry a Bayesian analysis of the primary metric (the probability that each
+variant is the best) with default priors; the frequentist results and the recommendation do not
+change. To set the priors, see [Bayesian analysis](../api/bayesian.md).
+
+The single-page form has the same settings in a collapsed **Analysis settings** section,
 whose title shows the current values.
 
 Then, optionally, the estimate. Enter your baseline conversion rate and the smallest change
@@ -132,9 +153,9 @@ the experiment needs more users than it says.
 
 **Step 5: Review and create**
 
-Check the summary, including the **Analysis** row (for example "95% confidence ·
-Benjamini-Hochberg correction"), use **Edit** to go back to any step, then press **Create
-Experiment**.
+Check the summary, including each variant's configuration and the **Analysis** row (for example
+"95% confidence · Benjamini-Hochberg correction", with "· Bayesian analysis on" when it is on),
+use **Edit** to go back to any step, then press **Create Experiment**.
 The experiment is created as a draft and you land on its page.
 
 **Then: start the experiment**
@@ -212,6 +233,30 @@ results use the experiment's correction, and that earlier versions showed them u
 a variant marked significant then may not be significant now. To see the uncorrected numbers,
 ask the API with `?correction_method=none` (`GET /api/v1/results/{experiment_id}`).
 
+#### Sample Ratio Check
+
+The results page compares how many users each variant received with its traffic allocation (a
+chi-square test of the assignment counts). If they differ by more than chance allows
+(p < 0.001), a notice above the tabs says so, with each variant's users and the number expected.
+The recommendation is then **INCONCLUSIVE**, and a "Leading" variant and the Bayesian analysis
+carry a warning. A mismatch usually means assignment or tracking is broken, so do not use the
+numbers for a decision until you find out why.
+
+When the split matches, one line below the summary card says so, with the check's p-value.
+Nothing is shown for a bandit, which moves traffic on purpose, for an experiment with no users
+yet, or when the check could not be run; that is not a pass. The API returns the check as `srm`
+in `GET /api/v1/results/{experiment_id}`.
+
+#### Bayesian Analysis
+
+For an experiment with Bayesian analysis on, the end of the **Overview** tab shows a Bayesian
+analysis of the primary metric: its decision (*Continue*, *Stop: a winner is clear*, *Stop: the
+variants are equivalent* or *Stop: a meaningful difference is unlikely*) and, for each variant,
+the chance it is the best, the expected loss, the posterior mean and the credible interval. It is
+a second analysis and does not change the recommendation. When Bayesian analysis is on but the
+results carry none, a line says it could not be computed. The method is described in
+[Bayesian analysis](../api/bayesian.md).
+
 #### Recommendation Meanings
 
 | Recommendation | Meaning | Action |
@@ -219,7 +264,7 @@ ask the API with `?correction_method=none` (`GET /api/v1/results/{experiment_id}
 | **SHIP VARIANT** | Treatment is significantly better | Deploy the treatment to all users |
 | **KEEP CONTROL** | Control is significantly better | Do not ship the treatment |
 | **CONTINUE TESTING** | Not enough data yet | Wait for more data before deciding |
-| **INCONCLUSIVE** | No meaningful difference detected | Consider whether the change is worth shipping anyway |
+| **INCONCLUSIVE** | The sample-ratio check failed: users were not split the way the traffic allocation says, so the numbers cannot be trusted | Do not ship on these results. Find and fix the cause of the uneven split, then run the experiment again |
 
 #### Metric Comparison Table
 
@@ -562,6 +607,12 @@ A bandit experiment automatically shifts traffic toward the better-performing va
 **When to use it:** Short-lived promotions, content recommendations, or situations where you have many variants to test quickly.
 
 Set `optimization_type` to `thompson_sampling`, `ucb1`, or `epsilon_greedy` when creating an experiment. See the [Multi-Armed Bandit Guide](../api/multi-armed-bandit.md).
+
+A bandit experiment's page has a **Current traffic weights** panel: each variant's share of new
+users, with its pulls, successes and conversion rate, and when the weights were last computed.
+Every role can read it, and nothing in it changes the experiment. It loads once and again when you
+press **Refresh**. Before the first update it says so, and new users follow each variant's
+starting allocation until then. The dashboard shows the current weights only, with no history.
 
 ---
 

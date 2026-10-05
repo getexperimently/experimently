@@ -49,7 +49,7 @@ export const WAREHOUSE_ACTIONS = {
   previewAssignmentSource: { text: 'Previewing an assignment source', roles: EDITORS },
   previewMetricSource: { text: 'Previewing a metric source', roles: READERS },
   startRun: { text: 'Starting a warehouse analysis', roles: EDITORS },
-  viewRuns: { text: 'Viewing warehouse analyses', roles: EVERYONE },
+  viewRuns: { text: 'Viewing warehouse analyses', roles: READERS },
 } as const satisfies Record<string, WarehouseAction>;
 
 export type WarehouseActionName = keyof typeof WAREHOUSE_ACTIONS;

@@ -498,6 +498,21 @@ class ExperimentWizardService:
                 "payload": payload,
             }
 
+        # Every segment the rules name exists and is active (#440), as on
+        # POST /api/v1/experiments/.
+        from backend.app.services.segment_membership import (
+            segment_reference_problem,
+        )
+
+        problem = segment_reference_problem(db, payload.get("targeting_rules"))
+        if problem is not None:
+            return {
+                "success": False,
+                "persisted": False,
+                "errors": [f"targeting_rules: {problem}"],
+                "payload": payload,
+            }
+
         try:
             created = ExperimentService(db).create_experiment(
                 obj_in=obj_in, user_id=user_id

@@ -56,6 +56,12 @@ class OperatorType(str, Enum):
     PERCENTAGE_BUCKET = "percentage_bucket"  # User falls within percentage bucket
     JSON_PATH = "json_path"  # Extract and compare JSON path value
     ARRAY_LENGTH = "array_length"  # Compare array length
+    # Segment membership (#440). The condition's attribute is ``segment`` and
+    # its value a segment id; membership is decided by the server before the
+    # rules are evaluated (``rules_engine.segment_condition_holds``), never by
+    # an attribute in the context.
+    IN_SEGMENT = "in_segment"
+    NOT_IN_SEGMENT = "not_in_segment"
 
 
 class AttributeType(str, Enum):

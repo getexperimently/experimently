@@ -211,6 +211,31 @@ Deploy refuses to create a deployment for one that does not
 ([Deploy refused an API revision that would run migrations on start](#deploy-refused-an-api-revision-that-would-run-migrations-on-start)).
 Rollback does not check its target: that is this command.
 
+### Rolling back past segment targeting
+
+Releases before segment targeting (#440) cannot read a targeting rule that
+uses `in_segment` or `not_in_segment`: to them, the rules of a flag or an
+experiment that uses one are rules the server cannot read, so they apply no
+rules at all. On such a release a segment-targeted flag is served at its
+global rollout percentage, a segment-targeted experiment admits every user,
+and `GET /api/v1/sdk/ruleset` lists the flag as `"evaluation": "local"` with
+no rules, so SDKs that evaluate locally serve the global rollout too -- and
+keep doing so from the ruleset they cached, until they refresh it from a
+release that has segment targeting.
+
+- **Before rolling the API back past that release**, remove segment
+  conditions from flags and experiments, or disable the flags that use them,
+  and pause the experiments that use them.
+- **After an automatic rollback past it** (an alarm in the canary, when the
+  old and the new release serve side by side, or after the traffic shift),
+  disable segment-targeted flags and pause segment-targeted experiments at
+  once. Turn them back on when the API is again on a release with segment
+  targeting and the SDKs have refreshed their rulesets (every 30 seconds by
+  default).
+
+`GET /api/v1/segments/{segment_id}/experiments` lists the flags and
+experiments whose rules mention a segment.
+
 ### Step 1: Find the Previous Task Definition ARN
 
 > **Two producers write to this family, and only one of them is runnable.**
@@ -646,6 +671,10 @@ revision that served before it. There is nothing to roll back for the API.
    dependency's. Compare the alarm's timeline with the release's and the
    dependency's, write down what you find, and change the alarm (in
    `infrastructure/cdk/stacks/fargate_service_stack.py`) before redeploying.
+9. **Segment targeting.** If the release that served before the deploy has no
+   segment targeting, disable segment-targeted flags and pause
+   segment-targeted experiments now
+   ([Rolling back past segment targeting](#rolling-back-past-segment-targeting)).
 
 ## Fix forward while an alarm is firing
 

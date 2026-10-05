@@ -26,7 +26,10 @@ from backend.app.core.log_once import EVALUATION_NOTES
 from backend.app.core.pattern_match import PatternUnevaluable, report_unevaluable
 from backend.app.core.rule_compiler import RuleCompiler
 from backend.app.core.rules_engine import (
+    SEGMENT_OPERATORS,
+    SegmentMembershipUnavailable,
     UserContext,
+    segment_condition_holds,
 )
 from backend.app.core.rules_engine import (
     apply_operator as base_apply_operator,
@@ -222,6 +225,11 @@ class RulesEvaluationService:
 
                 self.evaluation_metrics.append(metrics)
                 self.performance_stats["evaluation_time"].append(evaluation_time)
+
+        except SegmentMembershipUnavailable:
+            # The caller decides what an undecidable segment means (experiment
+            # assignment refuses, and logs the segment ids once).
+            raise
 
         except PatternUnevaluable as exc:
             # A pattern condition could not be evaluated: the whole ruleset is
@@ -474,6 +482,12 @@ class RulesEvaluationService:
         self, condition: Condition, user_context: UserContext
     ) -> bool:
         """Evaluate a condition with enhanced operators."""
+        # A segment condition is answered from the resolved membership,
+        # before (and instead of) any attribute lookup, as on the flag path.
+        segment_answer = segment_condition_holds(condition, user_context)
+        if segment_answer is not None:
+            return segment_answer
+
         attribute = condition.attribute
         operator = condition.operator
         expected_value = condition.value
@@ -692,6 +706,13 @@ class RulesEvaluationService:
 
         def extract_from_group(group: RuleGroup):
             for condition in group.conditions:
+                if condition.operator in SEGMENT_OPERATORS:
+                    # Membership is not a context attribute: a segment
+                    # condition is answered from the resolved membership, so
+                    # it requires nothing from the context (#440). Only the
+                    # condition is skipped; a customer attribute that is
+                    # itself called ``segment`` stays required.
+                    continue
                 attributes[condition.attribute] = {
                     "type": condition.attribute_type,
                     "required": True,  # All attributes in conditions are considered required

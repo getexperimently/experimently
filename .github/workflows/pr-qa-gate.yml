@@ -23,16 +23,17 @@ jobs:
   # leaves every one of them missing and the pull request blocked for ever.
   #
   # A job-level `if:` is enough ONLY for a plain job, whose skipped check keeps
-  # its name and is accepted. It is NOT enough for the two below that
-  # protection names by an expanded or called name: skipped before its matrix
-  # expands, `profile-build` reports once as the literal
-  # `${{ matrix.profile }}-build` and never as `core-build`/`full-build`; a
-  # skipped reusable-workflow caller reports as `SDK Live Contract` and never
-  # as `SDK Live Contract / sdk-live-contract (core)`. That is what left #133
-  # (docs/auth/sso.md only) BLOCKED with every check that ran green. So those
-  # two always run, and every one of their steps is conditioned instead: the
-  # checks report under their real names, in seconds, and on a docs-only
-  # change the core leg still runs the tests that pin docs/ content.
+  # its name and is accepted. It is NOT enough for a job that protection names
+  # by an expanded or called name: a skipped reusable-workflow caller reports
+  # as `SDK Live Contract` and never as
+  # `SDK Live Contract / sdk-live-contract (core)`, and a matrix skipped before
+  # it expands reports its unexpanded name -- `core-build` and `full-build`
+  # were the matrix `${{ matrix.profile }}-build` until #869. That is what left
+  # #133 (docs/auth/sso.md only) BLOCKED with every check that ran green. So
+  # `sdk-live-contract`, `core-build` and `full-build` always run, and every
+  # one of their steps is conditioned instead: the checks report under their
+  # real names, in seconds, and on a docs-only change core-build still runs
+  # the tests that pin docs/ content.
   # backend/tests/unit/infrastructure/test_docs_only_gate.py pins all of it.
   #
   # The classification is scripts/classify_changes.py (docs/ except docs/api/,
@@ -44,15 +45,14 @@ jobs:
   # request, docs-only included. Neither is where docs content is REQUIRED to
   # pass: Doc Examples is not a required check, and Docs has no pull_request
   # trigger at all (documentation merges without a site-build gate; founder,
-  # 2026-09-24). The required home of the docs tests is profile-build's core
-  # leg below.
+  # 2026-09-24). The required home of the docs tests is core-build below.
   #
   # A classifier that fails runs EVERYTHING. A job whose `needs:` failed is
   # skipped, and protection accepts a skipped check, so the plain
   # `docs_only != 'true'` form turned a crashed classifier into a green gate
   # with nothing run. Every classified job is instead
   #   ${{ !cancelled() && (needs.changes.result != 'success' || <its lane>) }}
-  # and the two jobs below that must never skip are `${{ !cancelled() }}`.
+  # and the three jobs below that must never skip are `${{ !cancelled() }}`.
   # `!cancelled()` would also run a job after ANY of its needs failed, so
   # every one of them needs `changes` alone. The step collects the file list
   # and the verdict into variables first and writes one checked line last:
@@ -465,28 +465,22 @@ jobs:
   # The same sequence as `make core-build` / `make full-build`; the step that
   # failed is named in the last line of the log.
   #
+  # Two jobs, `core-build` and `full-build`, each reporting under its job id
+  # (the required check names). They were one `profile-build` matrix until
+  # #869; the steps are what each leg ran, with the profile written out. The
+  # environment and the Postgres service are the same in both and are kept
+  # the same by backend/tests/unit/infrastructure/test_docs_only_gate.py.
+  #
   # No classification `if:` at job level, only `!cancelled()` (see the
-  # `changes` job): on a docs-only change every
-  # step below is skipped except the reason and, in the core leg only, the
-  # tests that pin docs/ content -- which is why a docs-only pull request
-  # still starts both legs and their Postgres service.
-  profile-build:
+  # `changes` job): on a docs-only change every step below is skipped except
+  # the reason and, in core-build only, the tests that pin docs/ content --
+  # which is why a docs-only pull request still starts both jobs and their
+  # Postgres service.
+  core-build:
     needs: changes
     if: ${{ !cancelled() }}
-    # The check name stays `core-build` / `full-build`: an explicit `name:`
-    # replaces the default `profile-build (core)` spelling, so the required
-    # status checks keep working.
-    name: ${{ matrix.profile }}-build
     runs-on: ubuntu-latest
     timeout-minutes: 60
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - profile: core
-            steps: ''
-          - profile: full
-            steps: '--steps copy,strip,reuse,secrets,import,bootstrap,frontend,licences'
     services:
       postgres:
         image: postgres:16
@@ -520,18 +514,14 @@ jobs:
       - name: Docs-only change
         if: needs.changes.outputs.docs_only == 'true'
         run: |
-          echo "docs-only change: the ${{ matrix.profile }} profile build is not needed and every build step below is skipped."
-          if [ "${{ matrix.profile }}" = 'core' ]; then
-            echo "The core leg still runs the tests that pin docs/ content."
-          fi
+          echo "docs-only change: the core profile build is not needed and every build step below is skipped."
+          echo "The core leg still runs the tests that pin docs/ content."
 
-      # The tree, for the build or (core leg, docs-only) for the docs tests.
+      # The tree and Python: for the build, or on a docs-only change for the
+      # docs tests, so no condition.
       - uses: actions/checkout@v7
-        if: needs.changes.outputs.docs_only != 'true' || matrix.profile == 'core'
 
-      # Python likewise.
       - name: Set up Python
-        if: needs.changes.outputs.docs_only != 'true' || matrix.profile == 'core'
         uses: actions/setup-python@v7
         with:
           python-version: '3.11'
@@ -546,11 +536,11 @@ jobs:
       # readers are here and why the others are not is pinned, with reasons,
       # in backend/tests/unit/infrastructure/test_docs_only_gate.py.
       - name: Install backend dependencies (docs tests)
-        if: needs.changes.outputs.docs_only == 'true' && matrix.profile == 'core'
+        if: needs.changes.outputs.docs_only == 'true'
         run: pip install -r backend/requirements.txt
 
       - name: Docs content tests
-        if: needs.changes.outputs.docs_only == 'true' && matrix.profile == 'core'
+        if: needs.changes.outputs.docs_only == 'true'
         run: >-
           python -m pytest -p no:cov -q --tb=short
           backend/tests/unit/scripts/test_doc_examples.py
@@ -578,12 +568,87 @@ jobs:
         if: needs.changes.outputs.docs_only != 'true'
         run: pip install -r backend/requirements.txt "reuse==${REUSE_VERSION}" "pip-licenses==${PIP_LICENSES_VERSION}"
 
+      - name: Install gitleaks
+        if: needs.changes.outputs.docs_only != 'true'
+        run: |
+          curl -fsSL -o /tmp/gitleaks.tar.gz \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          tar -xzf /tmp/gitleaks.tar.gz -C /usr/local/bin gitleaks
+          gitleaks version
+
+      - name: core build
+        if: needs.changes.outputs.docs_only != 'true'
+        run: scripts/core_build.sh --profile core
+
+  # The full profile: the same sequence minus the pytest sessions (above), and
+  # no docs tests -- core-build runs those.
+  full-build:
+    needs: changes
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: experimentation
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      APP_ENV: test
+      TESTING: 'true'
+      POSTGRES_SERVER: localhost
+      POSTGRES_HOST: localhost
+      POSTGRES_PORT: '5432'
+      POSTGRES_DB: experimentation
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      GITLEAKS_VERSION: '8.30.1'
+      # Same versions as core-build's (see there).
+      REUSE_VERSION: '6.2.0'
+      PIP_LICENSES_VERSION: '5.5.5'
+    steps:
+      - name: Docs-only change
+        if: needs.changes.outputs.docs_only == 'true'
+        run: |
+          echo "docs-only change: the full profile build is not needed and every build step below is skipped."
+
+      - uses: actions/checkout@v7
+        if: needs.changes.outputs.docs_only != 'true'
+
+      - name: Set up Python
+        if: needs.changes.outputs.docs_only != 'true'
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Set up Node.js
+        if: needs.changes.outputs.docs_only != 'true'
+        uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install backend dependencies
+        if: needs.changes.outputs.docs_only != 'true'
+        run: pip install -r backend/requirements.txt "reuse==${REUSE_VERSION}" "pip-licenses==${PIP_LICENSES_VERSION}"
+
       # The modules import packages backend/requirements.txt deliberately does
       # not carry (python3-saml, authlib, and the defusedxml/requests the SSO
       # service needs); without this the licence step would report them as
       # "pinned but not installed here".
       - name: Install module dependencies
-        if: needs.changes.outputs.docs_only != 'true' && matrix.profile == 'full'
+        if: needs.changes.outputs.docs_only != 'true'
         run: pip install -r modules/requirements.txt -r modules/requirements-test.txt
 
       - name: Install gitleaks
@@ -594,9 +659,9 @@ jobs:
           tar -xzf /tmp/gitleaks.tar.gz -C /usr/local/bin gitleaks
           gitleaks version
 
-      - name: ${{ matrix.profile }} build
+      - name: full build
         if: needs.changes.outputs.docs_only != 'true'
-        run: scripts/core_build.sh --profile ${{ matrix.profile }} ${{ matrix.steps }}
+        run: scripts/core_build.sh --profile full --steps copy,strip,reuse,secrets,import,bootstrap,frontend,licences
 
   # Live SDK contract: every SDK's contract_smoke against a real backend.
   # Proves the SDKs call endpoints the backend actually serves (the golden-vector
@@ -624,8 +689,9 @@ jobs:
         python openfeature-python js openfeature edge react react-native
         go java android ruby php dotnet
 
-  # Five fail-hard browser journeys (login, experiment lifecycle, feature flag,
-  # RBAC, admin panel) driven through the dashboard a self-hoster actually gets:
+  # Seven fail-hard browser journeys (login, experiment lifecycle, feature flag,
+  # RBAC, admin panel, segments, results checks) driven through the dashboard a
+  # self-hoster actually gets:
   # the Next.js static export, served the way the nginx image serves it
   # (tests/e2e/static-server.mjs — same origin, /api proxied), against a real
   # API on a freshly bootstrapped and seeded database with local auth and the

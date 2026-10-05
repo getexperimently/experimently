@@ -21,7 +21,9 @@ from sqlalchemy.orm import Session
 
 from backend.app.api import deps
 from backend.app.api.deps import get_db
+from backend.app.models.audit_log import ActionType, EntityType
 from backend.app.models.user import User, UserRole
+from backend.app.services.audit_service import AuditActor, AuditService
 from modules.backend.app.schemas.rbac import (
     AssignRoleRequest,
     CustomRoleCreate,
@@ -134,14 +136,21 @@ def assign_role(
 ):
     """Assign a custom role to a user. ADMIN only. Idempotent."""
     _require_admin(current_user)
+    actor = AuditActor.of(current_user)
     try:
+        user_id = UUID(data.user_id)
+        already = RBACService.has_role(db, user_id, data.role_name)
         RBACService.assign_role(
-            db, UUID(data.user_id), data.role_name, current_user.id, data.reason
+            db, user_id, data.role_name, current_user.id, data.reason
         )
         db.commit()
-        return {"status": "assigned", "user_id": data.user_id, "role": data.role_name}
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
+    if not already:
+        _record_custom_role(
+            db, actor, ActionType.ROLE_ASSIGN, user_id, data.role_name, assigned=True
+        )
+    return {"status": "assigned", "user_id": data.user_id, "role": data.role_name}
 
 
 @router.post("/roles/revoke", status_code=200)
@@ -152,12 +161,53 @@ def revoke_role(
 ):
     """Revoke a custom role from a user. ADMIN only."""
     _require_admin(current_user)
+    actor = AuditActor.of(current_user)
     try:
-        RBACService.revoke_role(db, UUID(data.user_id), data.role_name)
+        user_id = UUID(data.user_id)
+        removed = RBACService.revoke_role(db, user_id, data.role_name)
         db.commit()
-        return {"status": "revoked", "user_id": data.user_id, "role": data.role_name}
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
+    if removed:
+        _record_custom_role(
+            db, actor, ActionType.ROLE_UNASSIGN, user_id, data.role_name, assigned=False
+        )
+    return {"status": "revoked", "user_id": data.user_id, "role": data.role_name}
+
+
+def _record_custom_role(
+    db: Session,
+    actor: AuditActor,
+    action: ActionType,
+    user_id: UUID,
+    role_name: str,
+    *,
+    assigned: bool,
+) -> None:
+    """The audit entry for a committed custom-role assignment or revocation.
+
+    Written after the change commits: a failed entry is logged and does not
+    undo it. Only an actual change is recorded, so an assignment that was
+    already there, or a revocation of one that was not, writes nothing.
+    """
+    try:
+        target = db.get(User, user_id)
+        name = (target.username if target is not None else None) or str(user_id)
+    except Exception:
+        db.rollback()
+        name = str(user_id)
+    value = {"custom_role": role_name}
+    AuditService.record_after_commit(
+        db,
+        actor=actor,
+        action=action,
+        entity_type=EntityType.USER,
+        entity_id=user_id,
+        entity_name=name,
+        before=None if assigned else value,
+        after=value if assigned else None,
+        reason="custom role assigned" if assigned else "custom role revoked",
+    )
 
 
 @router.get("/users/{user_id}/permissions", response_model=EffectivePermissionsResponse)
