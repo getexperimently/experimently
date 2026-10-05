@@ -207,7 +207,7 @@ class SequentialTestingService:
         #
         # Computed in log space and capped at the largest finite double before
         # exp: an overwhelming difference (|Z| above about 38 once V is much
-        # smaller than tau^2) would otherwise not fit in a float. The cap moves
+        # smaller than tau^2) would otherwise not fit in a float. The cap cuts
         # nothing that was finite before, and the capped value is still above
         # 1/alpha for any usable alpha, so it can stop.
         ratio = V_n / (V_n + tau_squared)
