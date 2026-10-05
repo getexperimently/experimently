@@ -21,13 +21,14 @@ each flag and shown, but owning a flag does not let an Analyst or Viewer change 
 
 Each role has a specific set of permissions that determine what actions they can perform on various resources.
 
-**The Admin role is not a superuser.** Managing user accounts, API keys, global safety
-settings, a flag's per-flag safety config (error-rate and latency thresholds, rollback
-percentage) and its rollback, and custom Roles are gated on the separate `is_superuser`
-account flag, not on a role -- an Admin without it is refused each of these the same as any
-other role. The dashboard's Users, API Keys, Safety settings and Roles pages, and the
-per-flag safety config and rollback actions, all require a superuser. The table below is the
-role matrix only; it does not grant any of the superuser-gated actions above.
+**The Admin role is not a superuser.** Managing user accounts (`/api/v1/admin/users`),
+global safety settings, and a flag's per-flag safety config (error-rate and latency
+thresholds, rollback percentage) and its rollback are gated on the separate `is_superuser`
+account flag, not on a role: an Admin without it is refused these the same as any other role.
+The dashboard's Users, API Keys, Safety settings and Roles pages also require a superuser.
+Through the API, the Admin role alone may list and delete other users' API keys
+(`GET /api/v1/api-keys?all=true`, `DELETE /api/v1/api-keys/{id}`) and manage custom Roles;
+only the dashboard pages for those need the superuser flag.
 
 ## Resources and Actions
 

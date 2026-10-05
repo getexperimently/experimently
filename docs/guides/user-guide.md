@@ -27,10 +27,11 @@ You'll need an account with one of the following roles:
 | **ANALYST** | View all experiments, results, and reports, and every feature flag (read-only) |
 | **VIEWER** | View every experiment and its results, and every feature flag (read-only) |
 
-The ADMIN role does not, by itself, open the dashboard's Users, API Keys or Safety settings
-pages, change a flag's per-flag safety config or roll it back, or manage custom Roles: those
-need the separate, superuser account flag (`is_superuser`), which an ADMIN account may or may
-not have. A superuser can do all of the above regardless of role. Contact your platform admin
+The ADMIN role does not, by itself, open the dashboard's Users, API Keys, Safety settings
+or Roles pages, manage user accounts, or change a flag's per-flag safety config or roll it
+back: those need the separate, superuser account flag (`is_superuser`), which an ADMIN account
+may or may not have. Through the API, the ADMIN role alone may manage other users' API keys and
+custom Roles ([details](../rbac/README.md)). A superuser can do all of the above regardless of role. Contact your platform admin
 to request access, a role change, or superuser access.
 
 ### What the dashboard does not do yet
