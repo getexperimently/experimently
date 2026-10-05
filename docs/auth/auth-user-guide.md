@@ -114,9 +114,13 @@ these works:
 
 ### Changing Your Password
 
-The dashboard has no password form yet. With the default `local` provider, change your
-own password through the API with `POST /api/v1/users/me/password`, sending your current
-password and the new one; see
+With the default `local` provider, choose **Change password**, next to **Log out** at the top
+of the dashboard. The page (`/account/password`) asks for your current password and the new one
+twice. The link is not shown under `cognito`, where the password lives in the user pool. An
+account created through single sign-on has no password of its own, and the page says so.
+
+Through the API, send your current password and the new one to
+`POST /api/v1/users/me/password`; see
 [Change Your Own Password](../api/auth.md#change-your-own-password) for a runnable example.
 
 - A wrong current password is refused with `403` and counts toward the same limit as

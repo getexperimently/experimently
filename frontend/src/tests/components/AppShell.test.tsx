@@ -184,6 +184,29 @@ describe('AppShell', () => {
     expect(screen.getByRole('button', { name: 'Log out' })).toBeVisible();
   });
 
+  it('offers Change password to a local sign-in user, opening /account/password', async () => {
+    signInAs(makeUser({ auth_provider: 'local' }));
+    renderShell();
+    const link = await screen.findByTestId('change-password-link');
+    expect(link).toHaveTextContent('Change password');
+    expect(link).toHaveAttribute('href', '/account/password');
+  });
+
+  it('hides Change password from a user who does not sign in locally', async () => {
+    // Under any other provider the route answers 404, so the item would only
+    // lead to an error.
+    for (const provider of ['cognito', 'sso', '']) {
+      localStorage.clear();
+      mockFetch.mockReset();
+      signInAs(makeUser({ auth_provider: provider }));
+      const view = renderShell();
+      await waitFor(() => expect(screen.getByTestId('user-menu')).toBeInTheDocument());
+      expect(screen.getByTestId('logout-button')).toBeInTheDocument();
+      expect(screen.queryByTestId('change-password-link')).not.toBeInTheDocument();
+      view.unmount();
+    }
+  });
+
   it('falls back to username when full_name is empty', () => {
     expect(displayName(makeUser({ full_name: null }))).toBe('admin');
     expect(displayName(makeUser({ full_name: '  ' }))).toBe('admin');

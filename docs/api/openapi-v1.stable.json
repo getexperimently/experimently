@@ -22308,7 +22308,7 @@
         ]
       },
       "put": {
-        "description": "Update a mutual exclusion group. Requires DEVELOPER or ADMIN role.",
+        "description": "Update a mutual exclusion group's name, description or traffic allocation. Requires DEVELOPER or ADMIN role. Changing status (archiving or unarchiving) requires ADMIN role, as archiving through DELETE does; sending the group's current status is accepted from a DEVELOPER.",
         "operationId": "update_group_api_v1_mutual_exclusion_groups__group_id__put",
         "parameters": [
           {

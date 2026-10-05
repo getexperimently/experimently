@@ -32,7 +32,7 @@ from sqlalchemy.orm import Session
 from backend.app.api import deps
 from backend.app.core.permissions import Action, ResourceType, check_permission
 from backend.app.models.audit_log import ActionType, EntityType
-from backend.app.models.user import User
+from backend.app.models.user import User, UserRole
 from backend.app.schemas.global_holdout import (
     GlobalHoldoutCreate,
     GlobalHoldoutListResponse,
@@ -75,8 +75,13 @@ def _require_developer(user: User) -> None:
 
 
 def _require_admin(user: User) -> None:
-    """Raise 403 if user is not an ADMIN / superuser."""
-    if not check_permission(user, ResourceType.EXPERIMENT, Action.DELETE):
+    """Raise 403 unless the user is an ADMIN or a superuser.
+
+    The role itself is checked, not a permission from the role matrix: no
+    resource/action pair there is held by ADMIN alone (DEVELOPER also holds
+    EXPERIMENT DELETE).
+    """
+    if not (user.is_superuser or user.role == UserRole.ADMIN):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Admin permissions required for this action",

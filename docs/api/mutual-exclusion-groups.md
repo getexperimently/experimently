@@ -162,6 +162,10 @@ It prints the member experiments' `id`, `name` and `status`:
 
 Update group name, description, or traffic allocation. Requires DEVELOPER or ADMIN role.
 
+Changing `status` (`"archived"` or `"active"`) requires ADMIN role, as archiving with `DELETE`
+does; a DEVELOPER gets `403`. Sending the group's current `status` back, as a form that sends every
+field does, is accepted from a DEVELOPER.
+
 ---
 
 ### DELETE /api/v1/mutual-exclusion-groups/{group_id}
@@ -323,9 +327,9 @@ curl -s "localhost:8000/api/v1/holdout/$HOLDOUT_ID/results?metric=purchase" \
 |--------|-------------|
 | List groups / view holdout | DEVELOPER |
 | Read holdout results | VIEWER |
-| Create / update groups | DEVELOPER |
+| Create / update groups (name, description, traffic allocation) | DEVELOPER |
 | Add/remove experiments from groups | DEVELOPER |
-| Archive groups / manage holdout | ADMIN |
+| Archive or unarchive groups (`DELETE`, or `status` on `PUT`) / list, create and update holdouts | ADMIN |
 
 ---
 
