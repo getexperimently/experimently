@@ -31,6 +31,7 @@ export interface NavItem {
 export const NAV_ITEMS: NavItem[] = [
   { label: 'Experiments', href: '/experiments', testId: 'nav-experiments' },
   { label: 'Feature Flags', href: '/feature-flags', testId: 'nav-feature-flags' },
+  { label: 'Segments', href: '/segments', testId: 'nav-segments' },
   { label: 'Admin', href: '/admin', testId: 'nav-admin', superuser: true },
   { label: 'Docs', href: '/docs', testId: 'nav-docs' },
 ];

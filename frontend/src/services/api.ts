@@ -117,6 +117,8 @@ export interface ApiErrorInit {
   cause?: unknown;
   /** The response's `X-Request-ID`, when the API sent one. */
   requestId?: string;
+  /** The response's `Retry-After` in whole seconds, when it sent one (a 429). */
+  retryAfter?: number;
 }
 
 /**
@@ -133,6 +135,7 @@ export class ApiError extends Error {
   readonly detail: unknown;
   readonly code?: string;
   readonly requestId?: string;
+  readonly retryAfter?: number;
 
   constructor(init: ApiErrorInit) {
     super(init.message ?? messageForDetail(init.status, init.detail));
@@ -142,6 +145,7 @@ export class ApiError extends Error {
     const code = detailCode(init.detail);
     if (code) this.code = code;
     if (init.requestId) this.requestId = init.requestId;
+    if (init.retryAfter !== undefined) this.retryAfter = init.retryAfter;
     if (init.cause !== undefined) {
       (this as { cause?: unknown }).cause = init.cause;
     }
@@ -323,6 +327,17 @@ function readRequestId(response: LooseResponse): string | undefined {
 }
 
 /**
+ * `Retry-After` in whole seconds. Only the delta-seconds form is read (what
+ * the API's rate limiter sends); an HTTP date or anything else is ignored.
+ */
+function readRetryAfter(response: LooseResponse): number | undefined {
+  const headers = response.headers;
+  if (!headers || typeof headers.get !== 'function') return undefined;
+  const value = headers.get('retry-after');
+  return value && /^\d{1,6}$/.test(value.trim()) ? Number(value.trim()) : undefined;
+}
+
+/**
  * Copy for a 5xx whose body says nothing useful (the API's plain-text
  * "Internal Server Error", or a proxy's page). The server answered, so this is
  * deliberately not the "can't reach the API" message.
@@ -466,7 +481,7 @@ async function failureFrom(
     }
   }
 
-  return new ApiError({ status, detail, message, requestId });
+  return new ApiError({ status, detail, message, requestId, retryAfter: readRetryAfter(response) });
 }
 
 /** A downloaded file: its text and the response headers. */

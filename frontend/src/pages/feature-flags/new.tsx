@@ -135,7 +135,7 @@ export default function NewFeatureFlagPage() {
                 className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-400"
                 data-testid="flag-key-input"
               />
-              <p className="text-xs text-slate-400 mt-1">
+              <p className="text-xs text-slate-600 mt-1">
                 Auto-generated from name. Used in SDK calls.
               </p>
             </div>
@@ -183,7 +183,7 @@ export default function NewFeatureFlagPage() {
                 className="w-full accent-blue-600"
                 data-testid="rollout-percentage"
               />
-              <div className="flex justify-between text-xs text-slate-400 mt-1">
+              <div className="flex justify-between text-xs text-slate-600 mt-1">
                 <span>0%</span>
                 <span>100%</span>
               </div>

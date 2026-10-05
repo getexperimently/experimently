@@ -4,8 +4,11 @@ import {
   OperatorType,
   COMMON_ATTRIBUTES,
   OPERATOR_LABELS,
+  SEGMENT_ATTRIBUTE,
+  isSegmentOperator,
 } from '@/types/targeting';
 import { getOperatorsForAttribute, OperatorOptions } from '@/utils/targeting';
+import { SegmentPicker } from './SegmentPicker';
 
 interface ConditionRowProps {
   condition: TargetingCondition;
@@ -33,8 +36,12 @@ export function ConditionRow({
   operatorOptions,
 }: ConditionRowProps) {
   const availableOperators = getOperatorsForAttribute(condition.attribute, operatorOptions);
-  const showValueInput = !NO_VALUE_OPERATORS.includes(condition.operator);
+  // The operator, not the attribute, decides what kind of row this is: a
+  // context attribute called `segment` compared with `equals` is a text row.
+  const isSegmentRow = isSegmentOperator(condition.operator);
+  const showValueInput = !isSegmentRow && !NO_VALUE_OPERATORS.includes(condition.operator);
   const isMultiValue = MULTI_VALUE_OPERATORS.includes(condition.operator);
+  const segmentsOffered = operatorOptions?.allowSegments !== false;
 
   const handleAttributeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const newAttribute = e.target.value;
@@ -43,12 +50,20 @@ export function ConditionRow({
     const newOperator = newOperators.includes(condition.operator)
       ? condition.operator
       : newOperators[0];
-    onChange({ ...condition, attribute: newAttribute, operator: newOperator });
+    // A segment id is not a text value, and text is not a segment id.
+    const kindChanged = isSegmentOperator(newOperator) !== isSegmentOperator(condition.operator);
+    onChange({
+      ...condition,
+      attribute: newAttribute,
+      operator: newOperator,
+      value: kindChanged ? '' : condition.value,
+    });
   };
 
   const handleOperatorChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const newOperator = e.target.value as OperatorType;
-    const newValue = NO_VALUE_OPERATORS.includes(newOperator) ? null : condition.value;
+    const kindChanged = isSegmentOperator(newOperator) !== isSegmentOperator(condition.operator);
+    const newValue = NO_VALUE_OPERATORS.includes(newOperator) ? null : kindChanged ? '' : condition.value;
     onChange({ ...condition, operator: newOperator, value: newValue });
   };
 
@@ -81,6 +96,7 @@ export function ConditionRow({
             {attr.label}
           </option>
         ))}
+        {segmentsOffered && <option value={SEGMENT_ATTRIBUTE}>Segment</option>}
       </datalist>
 
       {/* Operator dropdown */}
@@ -99,7 +115,17 @@ export function ConditionRow({
         ))}
       </select>
 
-      {/* Value input (hidden for is_null / is_not_null) */}
+      {/* A segment condition's value is a segment, chosen from a list */}
+      {isSegmentRow && (
+        <SegmentPicker
+          label={label}
+          value={typeof condition.value === 'string' ? condition.value : ''}
+          onChange={(segmentId) => onChange({ ...condition, value: segmentId })}
+          readOnly={readOnly}
+        />
+      )}
+
+      {/* Value input (hidden for is_null / is_not_null and segment rows) */}
       {showValueInput && (
         <input
           data-testid="condition-value"
@@ -119,7 +145,7 @@ export function ConditionRow({
           data-testid="condition-remove"
           type="button"
           onClick={onRemove}
-          className="flex-shrink-0 w-6 h-6 flex items-center justify-center rounded text-red-500 hover:bg-red-50 hover:text-red-700 transition-colors"
+          className="flex-shrink-0 w-6 h-6 flex items-center justify-center rounded text-red-700 hover:bg-red-50 hover:text-red-800 transition-colors"
           aria-label="Remove condition"
         >
           &times;

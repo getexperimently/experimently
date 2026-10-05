@@ -106,10 +106,11 @@ const CORE_CALLS = [
   'services/results.ts GET /api/v1/results/{experiment_id}',
   'services/results.ts GET /api/v1/results/{experiment_id}/daily',
   'services/results.ts GET /api/v1/results/{experiment_id}/sample-size',
+  'services/segments.ts GET /api/v1/segments',
 ];
 const FULL_CALLS = [...CORE_CALLS, 'modules/frontend/src/services/sso.ts GET /api/v1/auth/sso/login'].sort();
 const EXPECTED_CALLS = PROFILE === 'core' ? [...CORE_CALLS].sort() : FULL_CALLS;
-const EXPECTED_COUNT = PROFILE === 'core' ? 13 : 14;
+const EXPECTED_COUNT = PROFILE === 'core' ? 14 : 15;
 
 /** Beta operations a call targets; unread keys there are warnings. */
 const EXPECTED_BETA_TARGETS = PROFILE === 'core' ? [] : ['GET /api/v1/auth/sso/login'];

@@ -51,6 +51,7 @@ export const PLATFORM_ONLY_PREFIXES: readonly string[] = [
   'admin',
   'experiments',
   'feature-flags',
+  'segments',
   'results',
   'workspaces',
   'warehouse',
