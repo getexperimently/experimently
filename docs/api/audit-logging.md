@@ -5,14 +5,17 @@ records the changes people make through the API: creating, changing and deleting
 flags and experiments, turning flags on and off, starting, pausing and completing
 experiments, rollout schedule changes, API keys, holdouts, mutual exclusion groups,
 segments, creating and deleting users, changes to a user's role, superuser flag or active
-status, signing in with a password, and safety rollbacks. [Action Types](#action-types)
-lists every action and when it is written.
+status, signing in with a password, and safety rollbacks. In the full profile it also
+records custom roles assigned and revoked, a workspace member's role changes, and single
+sign-on (SSO) sign-ins. [Action Types](#action-types) lists every action and when it is
+written.
 
 It also records the changes the platform makes on its own: scheduled experiment starts and
 ends, rollout stages the rollout scheduler starts, rollbacks the safety monitor makes, a
-user's first Cognito sign-in, and role changes Cognito group sync makes. Those entries are
-written by a [system actor](#changes-the-platform-makes-on-its-own). Signing in through
-Cognito or single sign-on is not written as `user_login` yet
+user's first Cognito or SSO sign-in, and role changes Cognito group sync and SSO sign-in
+make. Those role changes are written by a
+[system actor](#changes-the-platform-makes-on-its-own). Signing in through Cognito is not
+written as `user_login` yet
 ([#221](https://github.com/getexperimently/experimently/issues/221)). The Quick Start's
 demo data includes a history written by the seed script, in the form the platform writes
 it.
@@ -304,14 +307,30 @@ an API key, or a request body.
 | `user_create` | `user` | A user's first Cognito sign-in creates their account. The actor is the new user; `reason` is `first sign-in` |
 | `role_assign` | `user` | Cognito group sync (`SYNC_ROLES_ON_LOGIN`) changes a user's role or superuser flag when they sign in; `old_value` and `new_value` are `{"role", "is_superuser"}` |
 
+With the modules installed (the full profile), these are written too:
+
+| Action Type | Entity | Written when |
+|-------------|--------|--------------|
+| `role_assign` | `user` | `POST /rbac/roles/assign` gives a user a custom role they did not hold; `new_value` is `{"custom_role"}`, `reason` is `custom role assigned` |
+| `role_unassign` | `user` | `POST /rbac/roles/revoke` takes away a custom role the user held; `old_value` is `{"custom_role"}`, `reason` is `custom role revoked` |
+| `role_assign` | `user` | `PUT /workspaces/{id}/members/{user_id}` changes a member's workspace role; `old_value` and `new_value` are `{"workspace_id", "workspace_role"}`, `reason` is `workspace role changed` |
+| `user_login` | `user` | An SSO sign-in: the SAML ACS (`POST /auth/sso/saml/{config_id}/acs`), the dashboard's `POST /auth/sso/exchange`, or the OIDC callback when it answers with a token; `new_value` is `{"provider": "sso"}` |
+| `user_create` | `user` | A user's first SSO sign-in creates their account. The actor is the new user; `reason` is `first SSO sign-in` |
+| `role_assign` | `user` | An SSO sign-in changes an existing user's role from a mapped group; `old_value` and `new_value` are `{"role", "is_superuser"}` (SSO never changes the superuser flag, so it is the same in both), `reason` is `SSO groups changed` |
+
+A request that changes nothing (a custom role already held, a workspace role or SSO role
+already equal) writes no entry. Assigning a direct permission, defining a custom role,
+adding or removing a workspace member, invites, SSO configuration and the other module
+routes write none.
+
 User changes record the superuser flag. A change to a user's role, superuser flag or
 active status is saved together with its entry: if the entry cannot be written, the
 change is refused with a `500` and nothing is saved, and sending the same request again
 once the problem is fixed writes it once.
 
 `ActionType` also defines `user_update`, `user_logout`, `permission_grant`,
-`permission_revoke`, `role_unassign` and `safety_config_update`. You can filter on them,
-but nothing in this release writes them
+`permission_revoke` and `safety_config_update`. You can filter on them, but nothing in this
+release writes them (`role_unassign` is written only with the modules installed)
 ([#221](https://github.com/getexperimently/experimently/issues/221)). Entries written by
 an earlier release for `PATCH /admin/users/{id}` are `user_update`, with the role and
 active status before and after.
@@ -327,6 +346,7 @@ these reserved values:
 | `system:rollout-scheduler` | The rollout scheduler: each rollout stage it starts |
 | `system:safety-monitor` | The safety monitor: each automatic rollback |
 | `system:cognito-sync` | Cognito group sync: each role or superuser flag change |
+| `system:sso-sync` | SSO sign-in (full profile): each role change from a mapped group |
 
 An entry is automatic only when `user_id` is empty **and** `user_email` is one of these
 values. Deleting a user also empties `user_id` on their entries, but keeps their own
@@ -358,8 +378,9 @@ Whether a change is kept when its entry cannot be written depends on where it is
 | A safety rollback, manual or by the safety monitor | The rollback is kept; there is no entry |
 | The experiment scheduler | The start or end is kept; there is no entry, and **it is not written later** |
 | The rollout scheduler | The stage does not start and the rollout percentage does not change; the next run tries both again |
-| A first Cognito sign-in | The account is created; there is no entry |
+| A first Cognito or SSO sign-in | The account is created; there is no entry |
 | Cognito group sync | The role change is kept and the request succeeds; there is no entry, and **it is not written later**: the next request finds the role already changed and writes nothing |
+| SSO sign-in changing a role | The role change is kept and the sign-in succeeds; there is no entry, and **it is not written later**: the next sign-in finds the role already changed and writes nothing |
 
 Each entry that cannot be written logs one ERROR line from the API:
 

@@ -23,6 +23,10 @@ describe('audit action labels (#221)', () => {
     expect(new Set(grouped).size).toBe(grouped.length);
   });
 
+  it('labels a removed custom role', () => {
+    expect(actionLabel('role_unassign')).toBe('Role removed');
+  });
+
   it('shows an unknown type as itself', () => {
     expect(actionLabel('user_update')).toBe('user_update');
   });
@@ -65,6 +69,15 @@ describe('actorLabel: "(automatic)" only for the platform\'s own actors (#221)',
     );
     expect(actorLabel({ user_id: null, user_email: 'system:experiment-scheduler' })).toBe(
       'Experiment scheduler (automatic)',
+    );
+  });
+
+  it('marks the SSO sign-in role change as SSO sync', () => {
+    expect(actorLabel({ user_id: null, user_email: 'system:sso-sync' })).toBe(
+      'SSO sync (automatic)',
+    );
+    expect(actorLabel({ user_id: 'u-1', user_email: 'system:sso-sync' })).toBe(
+      'system:sso-sync',
     );
   });
 

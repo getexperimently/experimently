@@ -47,6 +47,7 @@ export const ACTIONS: Readonly<Record<string, { label: string; group: ActionGrou
   user_activate: { label: 'User reactivated', group: 'Users and access' },
   user_deactivate: { label: 'User deactivated', group: 'Users and access' },
   role_assign: { label: 'Role changed', group: 'Users and access' },
+  role_unassign: { label: 'Role removed', group: 'Users and access' },
   user_login: { label: 'Signed in', group: 'Users and access' },
   api_key_create: { label: 'API key created', group: 'Users and access' },
   api_key_revoke: { label: 'API key revoked', group: 'Users and access' },
@@ -112,6 +113,7 @@ export const SYSTEM_ACTORS: Readonly<Record<string, string>> = {
   'system:rollout-scheduler': 'Rollout scheduler',
   'system:safety-monitor': 'Safety monitor',
   'system:cognito-sync': 'Cognito sync',
+  'system:sso-sync': 'SSO sync',
 };
 
 /**
