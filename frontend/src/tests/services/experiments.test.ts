@@ -128,6 +128,35 @@ describe('ExperimentsService.update', () => {
   });
 });
 
+describe('ExperimentsService.updateDetails', () => {
+  it('sends PUT with exactly the body it is given', async () => {
+    mockOk({ id: 'abc' });
+    await ExperimentsService.updateDetails('abc', { name: 'Renamed', hypothesis: null });
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+    const [url, init] = mockFetch.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe(`${BASE}/api/v1/experiments/abc`);
+    expect(init.method).toBe('PUT');
+    expect(JSON.parse(init.body as string)).toEqual({ name: 'Renamed', hypothesis: null });
+  });
+});
+
+describe('ExperimentsService.clone', () => {
+  it('sends POST to /clone with no body and returns the new experiment', async () => {
+    mockOk({ id: 'new-id', name: 'Copy of X', status: 'draft' });
+    const created = await ExperimentsService.clone('abc');
+    const [url, init] = mockFetch.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe(`${BASE}/api/v1/experiments/abc/clone`);
+    expect(init.method).toBe('POST');
+    expect(init.body).toBeUndefined();
+    expect(created.id).toBe('new-id');
+  });
+
+  it('throws on error', async () => {
+    mockError(403, 'Forbidden');
+    await expect(ExperimentsService.clone('abc')).rejects.toThrow('Forbidden');
+  });
+});
+
 describe('ExperimentsService.delete', () => {
   // Regression (#603): the route requires `experiment_key` (the id itself);
   // without it every call answered 422.

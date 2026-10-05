@@ -29,9 +29,9 @@ The table lists each capability and where you do it today:
 | The sample-ratio check on the results page | Dashboard | [Running experiments](user-guide.md) |
 | Bayesian results: chance to be best, expected loss and credible intervals | Dashboard | [Bayesian analysis](../api/bayesian.md) |
 | See a bandit experiment's current traffic weights | Dashboard | [Multi-armed bandits](../api/multi-armed-bandit.md) |
-| Clone an experiment | API only | [API endpoints](../api/endpoints.md) |
-| Delete a draft experiment | API only | [API endpoints](../api/endpoints.md) |
-| Edit a draft experiment's name, description and hypothesis | API only | [API endpoints](../api/endpoints.md) |
+| Clone an experiment | Dashboard | [API endpoints](../api/endpoints.md) |
+| Delete a draft experiment | Dashboard | [API endpoints](../api/endpoints.md) |
+| Edit a draft experiment's name, description and hypothesis | Dashboard | [API endpoints](../api/endpoints.md) |
 | Change a draft experiment's variants or metrics | API only | [API endpoints](../api/endpoints.md) |
 | Schedule an experiment's start and end dates | API only | [Running experiments](user-guide.md) |
 | Create or edit a rollout schedule and its stages | API only | [Gradual rollouts](../feature-flags/rollouts.md) |

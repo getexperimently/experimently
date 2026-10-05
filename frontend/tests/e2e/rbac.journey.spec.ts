@@ -212,6 +212,8 @@ test.describe("Journey: RBAC", () => {
           await expect(button).toHaveCount(0);
         }
         await expect(experiments.actions.locator("button")).toHaveCount(0);
+        // No clone, edit or delete either (#442).
+        await expect(page.getByTestId("experiment-manage")).toHaveCount(0);
         const note = page.getByTestId("experiment-role-note");
         await expect(note).toBeVisible();
         await expect(note).toContainText("requires the ADMIN or DEVELOPER role");
@@ -316,6 +318,41 @@ test.describe("Journey: RBAC", () => {
       await experiments.gotoGuided();
       await expect(experiments.guided).toBeVisible({ timeout: 15_000 });
       await expect(experiments.notAllowed).toHaveCount(0);
+    } finally {
+      await page.close();
+    }
+  });
+
+  // #442, D33: a DEVELOPER may clone an experiment someone else owns (the
+  // seeded ones belong to the admin), and delete the draft that makes.
+  test("developer clones an experiment it does not own, then deletes the clone", async ({ sessions }) => {
+    const page = await (await sessions("developer")).newPage();
+    const experiments = new ExperimentsPage(page);
+    try {
+      await experiments.goto();
+      await expect(experiments.experimentList).toBeVisible({ timeout: 15_000 });
+      // Seeded COMPLETED and owned by the admin; no other journey opens it, so
+      // a clone left behind by a failed attempt cannot be picked up by name.
+      await experiments.clickExperiment("Homepage Hero Copy Test");
+      await experiments.expectStatus("completed");
+      const sourceUrl = new URL(page.url()).pathname;
+
+      const manage = page.getByTestId("experiment-manage");
+      await expect(manage.getByTestId("experiment-clone")).toBeVisible();
+      await expect(manage.getByTestId("experiment-edit-details")).toHaveCount(0);
+      await expect(manage.getByTestId("experiment-delete")).toHaveCount(0);
+
+      await manage.getByTestId("experiment-clone").click();
+      await page.waitForURL((url) => url.pathname !== sourceUrl && /\/experiments\/[0-9a-f-]{36}$/.test(url.pathname), {
+        timeout: 15_000,
+      });
+      await expect(experiments.detailName).toHaveText("Copy of Homepage Hero Copy Test", { timeout: 15_000 });
+      await experiments.expectStatus("draft");
+
+      await page.getByTestId("experiment-delete").click();
+      await page.getByTestId("manage-delete-yes").click();
+      await page.waitForURL(/\/experiments$/, { timeout: 15_000 });
+      await expect(page.getByTestId("manage-error")).toHaveCount(0);
     } finally {
       await page.close();
     }

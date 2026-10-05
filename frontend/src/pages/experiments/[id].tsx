@@ -3,6 +3,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/router';
 import { PageTitle } from '@/components/PageTitle';
 import { BanditWeightsSection } from '@/components/experiments/BanditWeightsSection';
+import { ExperimentManageSection } from '@/components/experiments/ExperimentManageSection';
 import { TargetingSection } from '@/components/experiments/TargetingSection';
 import WarehouseAnalysisSection from '@modules/components/warehouse/runs/WarehouseAnalysisSection';
 import { useAuth } from '@/contexts/AuthContext';
@@ -406,6 +407,8 @@ export default function ExperimentDetailPage() {
               {actionError}
             </div>
           )}
+
+          <ExperimentManageSection experiment={experiment} user={user} onSaved={setExperiment} />
 
           {(experiment.description || experiment.hypothesis) && (
             <div className="mt-5 pt-5 border-t border-slate-100 grid gap-4 sm:grid-cols-2">
