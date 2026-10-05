@@ -112,16 +112,35 @@ class RBACService:
         return assignment
 
     @staticmethod
-    def revoke_role(db: Session, user_id: UUID, role_name: str) -> None:
-        """Revoke a custom role from a user. No error if not assigned."""
+    def has_role(db: Session, user_id: UUID, role_name: str) -> bool:
+        """Whether the user holds the custom role (False if the role does not exist)."""
+        return (
+            db.query(UserCustomRole)
+            .join(CustomRole, UserCustomRole.role_id == CustomRole.id)
+            .filter(UserCustomRole.user_id == user_id, CustomRole.name == role_name)
+            .first()
+            is not None
+        )
+
+    @staticmethod
+    def revoke_role(db: Session, user_id: UUID, role_name: str) -> int:
+        """Revoke a custom role from a user. No error if not assigned.
+
+        Returns how many assignments were removed: 0 or 1.
+        """
         role = db.query(CustomRole).filter(CustomRole.name == role_name).first()
         if not role:
             raise ValueError(f"Role '{role_name}' not found")
-        db.query(UserCustomRole).filter(
-            UserCustomRole.user_id == user_id,
-            UserCustomRole.role_id == role.id,
-        ).delete()
+        removed = (
+            db.query(UserCustomRole)
+            .filter(
+                UserCustomRole.user_id == user_id,
+                UserCustomRole.role_id == role.id,
+            )
+            .delete()
+        )
         db.flush()
+        return removed
 
     @staticmethod
     def grant_direct_permission(

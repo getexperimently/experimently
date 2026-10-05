@@ -1,5 +1,12 @@
+import { TextEncoder as NodeTextEncoder } from 'util';
 import {
   buildCreatePayload,
+  CONFIGURATION_MAX_BYTES,
+  CONFIGURATION_NOT_JSON,
+  CONFIGURATION_NOT_OBJECT,
+  configurationTooLong,
+  parseConfiguration,
+  utf8ByteLength,
   checkMetrics,
   checkName,
   checkVariants,
@@ -35,6 +42,7 @@ describe('INITIAL_FORM_STATE', () => {
       metrics: [{ name: 'Conversion', event_name: 'conversion', metric_type: 'conversion', is_primary: true }],
       confidenceLevel: 0.95,
       correctionMethod: 'benjamini_hochberg',
+      bayesianEnabled: false,
     });
   });
 
@@ -366,5 +374,143 @@ describe('buildCreatePayload', () => {
     const p = buildCreatePayload(s);
     expect(p.targeting_rules).toBe(rules);
     expect(p.variants[1].traffic_allocation).toBe(0);
+  });
+});
+
+// --- variant configuration (#442) ---------------------------------------------
+
+/** A JSON object of exactly `bytes` UTF-8 bytes whose last character is `last`. */
+function objectOfBytes(bytes: number, last: string): string {
+  const head = '{"a":"';
+  const tail = '"}';
+  const lastBytes = utf8ByteLength(last);
+  return head + 'x'.repeat(bytes - head.length - tail.length - lastBytes) + last + tail;
+}
+
+describe('utf8ByteLength', () => {
+  it.each([
+    ['', 0],
+    ['abc', 3],
+    ['é', 2],
+    ['✓', 3],
+    ['😀', 4],
+    ['a😀é', 7],
+    ['\ud800', 3], // a lone surrogate is sent as U+FFFD
+  ])('%j is %i bytes', (text, bytes) => {
+    expect(utf8ByteLength(text)).toBe(bytes);
+  });
+
+  it('agrees with Node’s UTF-8 encoder', () => {
+    const encoder = new NodeTextEncoder();
+    for (const text of ['plain', 'Café ✓', '😀😀', '{"k":"日本語"}']) {
+      expect(utf8ByteLength(text)).toBe(encoder.encode(text).length);
+    }
+  });
+});
+
+describe('parseConfiguration', () => {
+  it('reads blank and whitespace as no configuration', () => {
+    expect(parseConfiguration(undefined)).toEqual({ ok: true, value: undefined });
+    expect(parseConfiguration('')).toEqual({ ok: true, value: undefined });
+    expect(parseConfiguration('  \n\t')).toEqual({ ok: true, value: undefined });
+  });
+
+  it('accepts any JSON object, including {} and nesting', () => {
+    expect(parseConfiguration('{}')).toEqual({ ok: true, value: {} });
+    expect(parseConfiguration(' {"a": {"b": [1, 2]}, "c": null} ')).toEqual({
+      ok: true,
+      value: { a: { b: [1, 2] }, c: null },
+    });
+  });
+
+  it.each([
+    ['[]', CONFIGURATION_NOT_OBJECT],
+    ['[1, 2]', CONFIGURATION_NOT_OBJECT],
+    ['"blue"', CONFIGURATION_NOT_OBJECT],
+    ['1', CONFIGURATION_NOT_OBJECT],
+    ['true', CONFIGURATION_NOT_OBJECT],
+    ['null', CONFIGURATION_NOT_OBJECT],
+    ['{"a": 1,}', CONFIGURATION_NOT_JSON],
+    ["{'a': 1}", CONFIGURATION_NOT_JSON],
+    ['{"a": 1', CONFIGURATION_NOT_JSON],
+    ['blue', CONFIGURATION_NOT_JSON],
+  ])('refuses %s', (text, problem) => {
+    expect(parseConfiguration(text)).toEqual({ ok: false, problem });
+  });
+
+  it('never shows the parser’s own message', () => {
+    const result = parseConfiguration('{"a": 1,}');
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.problem).not.toMatch(/unexpected|token|position|SyntaxError/i);
+    }
+  });
+
+  describe('the byte limit is counted in UTF-8 bytes, not characters', () => {
+    it('accepts exactly CONFIGURATION_MAX_BYTES bytes', () => {
+      const text = objectOfBytes(CONFIGURATION_MAX_BYTES, 'x');
+      expect(utf8ByteLength(text)).toBe(CONFIGURATION_MAX_BYTES);
+      expect(parseConfiguration(text).ok).toBe(true);
+    });
+
+    it('accepts exactly the limit when it ends in a two-byte character', () => {
+      const text = objectOfBytes(CONFIGURATION_MAX_BYTES, 'é');
+      expect(utf8ByteLength(text)).toBe(CONFIGURATION_MAX_BYTES);
+      expect(text.length).toBe(CONFIGURATION_MAX_BYTES - 1);
+      expect(parseConfiguration(text).ok).toBe(true);
+    });
+
+    it('refuses one byte over, even when it is fewer characters than the limit', () => {
+      // The last 'x' of an exact-limit text becomes 'é': one byte more, the same character count.
+      const exact = objectOfBytes(CONFIGURATION_MAX_BYTES, 'x');
+      const over = exact.slice(0, -3) + 'é' + exact.slice(-2);
+      expect(over.length).toBe(CONFIGURATION_MAX_BYTES);
+      expect(utf8ByteLength(over)).toBe(CONFIGURATION_MAX_BYTES + 1);
+      expect(parseConfiguration(over)).toEqual({
+        ok: false,
+        problem: configurationTooLong(CONFIGURATION_MAX_BYTES + 1),
+      });
+    });
+
+    it('says the limit is the dashboard’s and that the API accepts more', () => {
+      expect(configurationTooLong(16_385)).toBe(
+        'This configuration is 16,385 bytes. The dashboard accepts up to 16,384 bytes; the API accepts larger ones.',
+      );
+    });
+  });
+});
+
+describe('variant configuration in validation and the payload', () => {
+  const withConfig = (texts: (string | undefined)[]) =>
+    apply(texts.map((value, index) => ({ type: 'changeVariant', index, field: 'configuration_text', value: value ?? '' }) as ExperimentFormAction));
+
+  it('checkVariants names the variant and the problem, after the allocation check', () => {
+    const s = withConfig(['', '[1]']);
+    expect(checkVariants(s.variants)).toBe(
+      `The configuration of “Treatment” needs fixing: ${CONFIGURATION_NOT_OBJECT}`,
+    );
+    const both = apply([{ type: 'changeVariant', index: 0, field: 'traffic_allocation', value: 10 }], s);
+    expect(checkVariants(both.variants)).toMatch(/add up to 100%/);
+    expect(validateStep('variants', s)).toBe(checkVariants(s.variants));
+  });
+
+  it('sends each configuration as the object typed, and leaves the key out when blank', () => {
+    const typed = '{"copy": "Café ✓", "layout": {"columns": 2, "tags": ["a", "b"]}, "on": true, "ratio": 1.5, "none": null}';
+    const p = buildCreatePayload(withConfig(['   ', typed]));
+    expect('configuration' in p.variants[0]).toBe(false);
+    expect(p.variants[1].configuration).toStrictEqual(JSON.parse(typed));
+    expect(typeof p.variants[1].configuration).toBe('object');
+  });
+
+  it('sends {} as {}, not as no configuration', () => {
+    expect(buildCreatePayload(withConfig(['{}'])).variants[0].configuration).toStrictEqual({});
+  });
+
+  it('sends bayesian_enabled: true only when it is turned on', () => {
+    const off = buildCreatePayload(createInitialFormState());
+    expect('bayesian_enabled' in off).toBe(false);
+    const on = buildCreatePayload(apply([{ type: 'setBayesianEnabled', bayesianEnabled: true }]));
+    expect(on.bayesian_enabled).toBe(true);
+    expect('bayesian_config' in on).toBe(false);
   });
 });

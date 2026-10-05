@@ -133,14 +133,27 @@ test.describe("Journey: experiment lifecycle", () => {
 
   test("the single-page form at ?advanced still creates an experiment", async ({ adminPage }) => {
     const experiments = new ExperimentsPage(adminPage);
+    // A nested, non-ASCII configuration on the treatment, and Bayesian analysis on (#442).
+    const configuration = { headline: "Été ✓", layout: { columns: 2 }, express: true };
     const id = await experiments.createExperimentAdvanced(
       `E2E Advanced ${STAMP}`,
       `e2e_advanced_${STAMP}`,
-      { metricEventName: "purchase" },
+      {
+        metricEventName: "purchase",
+        configurations: { 1: JSON.stringify(configuration) },
+        bayesian: true,
+      },
     );
     expect(id).toMatch(/^[0-9a-f-]{36}$/);
     await expect(experiments.detailName).toHaveText(`E2E Advanced ${STAMP}`);
     await experiments.expectStatus("draft");
+
+    // The page shows what the API stored, read back from GET /experiments/{id}.
+    await expect(adminPage.getByTestId("variant-configuration-none-0")).toBeVisible();
+    const shown = await adminPage.getByTestId("variant-configuration-view-1").textContent();
+    expect(JSON.parse(shown ?? "")).toEqual(configuration);
+    await expect(adminPage.getByTestId("experiment-bayesian")).toHaveText("On");
+    await expect(adminPage.getByTestId("experiment-algorithm")).toHaveCount(0);
   });
 
   test("creates a draft experiment and lands on its detail page", async ({ adminPage }) => {
@@ -157,6 +170,9 @@ test.describe("Journey: experiment lifecycle", () => {
     await expect(experiments.detailKey).toHaveText(EXPERIMENT_KEY);
     await experiments.expectStatus("draft");
     await expect(experiments.variantsTable.getByTestId("variant-row")).toHaveCount(2);
+    // Guided setup with no configuration typed and Bayesian analysis left off.
+    await expect(adminPage.getByTestId("variant-configuration-none-1")).toBeVisible();
+    await expect(adminPage.getByTestId("experiment-bayesian")).toHaveText("Off");
     await expect(experiments.metricsList.getByTestId("metric-row")).toHaveCount(1);
     await expect(experiments.detail.getByTestId("experiment-description")).toContainText(
       "Automated E2E lifecycle experiment",

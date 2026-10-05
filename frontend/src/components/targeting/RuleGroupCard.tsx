@@ -93,7 +93,7 @@ export function RuleGroupCard({
               data-testid="remove-group"
               type="button"
               onClick={onRemove}
-              className="text-xs text-red-500 hover:text-red-700 px-2 py-0.5 rounded hover:bg-red-50 transition-colors border border-red-200"
+              className="text-xs text-red-700 hover:text-red-800 px-2 py-0.5 rounded hover:bg-red-50 transition-colors border border-red-200"
               aria-label="Remove group"
             >
               Remove Group

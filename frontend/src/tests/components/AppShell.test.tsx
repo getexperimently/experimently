@@ -130,15 +130,17 @@ describe('AppShell', () => {
     await waitFor(() => expect(screen.getByTestId('user-menu')).toBeInTheDocument());
   });
 
-  it('shows Experiments, Feature Flags, Admin and Docs for an ADMIN', async () => {
+  it('shows Experiments, Feature Flags, Segments, Admin and Docs for an ADMIN', async () => {
     signInAs(makeUser());
     renderShell();
     await waitFor(() => expect(screen.getByTestId('user-menu')).toBeInTheDocument());
     const nav = screen.getByRole('navigation', { name: 'Primary' });
     expect(nav).toHaveTextContent('Experiments');
     expect(nav).toHaveTextContent('Feature Flags');
+    expect(nav).toHaveTextContent('Segments');
     expect(nav).toHaveTextContent('Admin');
     expect(nav).toHaveTextContent('Docs');
+    expect(screen.getByTestId('nav-segments')).toHaveAttribute('href', '/segments');
     expect(screen.getByTestId('nav-admin')).toHaveAttribute('href', '/admin');
     expect(screen.getByTestId('nav-experiments')).toHaveAttribute('aria-current', 'page');
   });
@@ -236,6 +238,7 @@ describe('AppShell', () => {
       expect(NAV_ITEMS.map((i) => i.href)).toEqual([
         '/experiments',
         '/feature-flags',
+        '/segments',
         '/admin',
         '/docs',
       ]);
@@ -432,6 +435,6 @@ describe('AppShell', () => {
     expect(isNavActive('/experiments/[id]', '/experiments')).toBe(true);
     expect(isNavActive('/experiments-archive', '/experiments')).toBe(false);
     expect(isNavActive('/feature-flags', '/experiments')).toBe(false);
-    expect(NAV_ITEMS.map((i) => i.label)).toEqual(['Experiments', 'Feature Flags', 'Admin', 'Docs']);
+    expect(NAV_ITEMS.map((i) => i.label)).toEqual(['Experiments', 'Feature Flags', 'Segments', 'Admin', 'Docs']);
   });
 });

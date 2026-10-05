@@ -29,6 +29,12 @@ export interface VariantFormData {
   description: string;
   traffic_allocation: number;
   is_control: boolean;
+  /**
+   * The variant's configuration as typed: a JSON object, sent as
+   * `configuration`. Absent or blank means the variant has none, and the key
+   * is left out of the request.
+   */
+  configuration_text?: string;
 }
 
 export interface MetricFormData {
@@ -52,6 +58,8 @@ export interface ExperimentFormState {
   /** How the results will be judged (#580); saved with the experiment. */
   confidenceLevel: number;
   correctionMethod: CorrectionMethod;
+  /** Also analyse the primary metric with Bayesian statistics (#216); saved with the experiment. */
+  bayesianEnabled: boolean;
 }
 
 const DEFAULT_VARIANTS: VariantFormData[] = [
@@ -77,6 +85,7 @@ export function createInitialFormState(): ExperimentFormState {
     metrics: DEFAULT_METRICS,
     confidenceLevel: DEFAULT_CONFIDENCE_LEVEL,
     correctionMethod: DEFAULT_CORRECTION_METHOD,
+    bayesianEnabled: false,
   };
 }
 
@@ -98,6 +107,87 @@ export function allocationTotalOf(variants: VariantFormData[]): number {
   return variants.reduce((sum, v) => sum + (Number(v.traffic_allocation) || 0), 0);
 }
 
+// --- variant configuration ---------------------------------------------------
+
+/**
+ * The most a configuration may be, in UTF-8 bytes, in this form. The API takes
+ * larger ones (it limits only the whole request), so this is the dashboard's
+ * own limit for a payload sent to every assigned user, not the API's.
+ */
+export const CONFIGURATION_MAX_BYTES = 16_384;
+
+export const CONFIGURATION_NOT_JSON =
+  'This is not valid JSON. Check for a missing quote, comma or brace.';
+export const CONFIGURATION_NOT_OBJECT =
+  'The configuration must be a JSON object in braces, like {"color": "blue"}.';
+
+/** The words for a configuration over `CONFIGURATION_MAX_BYTES`. */
+export function configurationTooLong(bytes: number): string {
+  return (
+    `This configuration is ${bytes.toLocaleString('en-US')} bytes. The dashboard accepts up to ` +
+    `${CONFIGURATION_MAX_BYTES.toLocaleString('en-US')} bytes; the API accepts larger ones.`
+  );
+}
+
+/**
+ * The length of `text` in UTF-8 bytes, as it is sent. Counted by code point:
+ * `.length` counts UTF-16 units, so "é" would count 1 instead of 2 and an
+ * emoji 2 instead of 4. A lone surrogate counts 3, as the encoder sends
+ * U+FFFD in its place.
+ */
+export function utf8ByteLength(text: string): number {
+  let bytes = 0;
+  for (let i = 0; i < text.length; i += 1) {
+    const unit = text.charCodeAt(i);
+    if (unit < 0x80) bytes += 1;
+    else if (unit < 0x800) bytes += 2;
+    else if (unit >= 0xd800 && unit <= 0xdbff && i + 1 < text.length) {
+      const low = text.charCodeAt(i + 1);
+      if (low >= 0xdc00 && low <= 0xdfff) {
+        bytes += 4;
+        i += 1;
+      } else {
+        bytes += 3;
+      }
+    } else bytes += 3;
+  }
+  return bytes;
+}
+
+export type ConfigurationParse =
+  | { ok: true; value: Record<string, unknown> | undefined }
+  | { ok: false; problem: string };
+
+/**
+ * A variant's configuration text read the way the API will: blank is none
+ * (`value` undefined); otherwise it must be a JSON object within
+ * `CONFIGURATION_MAX_BYTES`. Arrays, strings, numbers, booleans and `null`
+ * are refused here because the API refuses them too (422).
+ */
+export function parseConfiguration(text: string | undefined): ConfigurationParse {
+  if (text === undefined || text.trim() === '') return { ok: true, value: undefined };
+  const bytes = utf8ByteLength(text);
+  if (bytes > CONFIGURATION_MAX_BYTES) return { ok: false, problem: configurationTooLong(bytes) };
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    return { ok: false, problem: CONFIGURATION_NOT_JSON };
+  }
+  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    return { ok: false, problem: CONFIGURATION_NOT_OBJECT };
+  }
+  return { ok: true, value: parsed as Record<string, unknown> };
+}
+
+/** Each variant's configuration problem, or null where there is none. */
+export function configurationProblems(variants: VariantFormData[]): (string | null)[] {
+  return variants.map((v) => {
+    const result = parseConfiguration(v.configuration_text);
+    return result.ok ? null : result.problem;
+  });
+}
+
 // --- validation --------------------------------------------------------------
 //
 // `validateForm` is the client-side mirror of the `ExperimentCreate`
@@ -117,6 +207,11 @@ export function checkVariants(variants: VariantFormData[]): string | null {
   if (!variants.some((v) => v.is_control)) return 'One variant must be marked as control.';
   const total = allocationTotalOf(variants);
   if (total !== 100) return `Variant allocations must add up to 100% (currently ${total}%).`;
+  const problems = configurationProblems(variants);
+  const first = problems.findIndex((p) => p !== null);
+  if (first >= 0) {
+    return `The configuration of “${variants[first].name.trim()}” needs fixing: ${problems[first]}`;
+  }
   return null;
 }
 
@@ -211,12 +306,20 @@ export function buildCreatePayload(state: ExperimentFormState): CreateExperiment
     hypothesis: hypothesis.trim() || undefined,
     experiment_type: type,
     targeting_rules: rules.groups.length > 0 ? (rules as unknown as Record<string, unknown>) : null,
-    variants: variants.map((v) => ({
-      name: v.name.trim(),
-      description: v.description.trim() || undefined,
-      is_control: v.is_control,
-      traffic_allocation: Number(v.traffic_allocation) || 0,
-    })),
+    variants: variants.map((v) => {
+      const variant: CreateExperimentRequest['variants'][number] = {
+        name: v.name.trim(),
+        description: v.description.trim() || undefined,
+        is_control: v.is_control,
+        traffic_allocation: Number(v.traffic_allocation) || 0,
+      };
+      // Validation refuses a bad configuration before this is called; blank is none.
+      const configuration = parseConfiguration(v.configuration_text);
+      if (configuration.ok && configuration.value !== undefined) {
+        variant.configuration = configuration.value;
+      }
+      return variant;
+    }),
     metrics: metrics.map((m) => ({
       name: m.name.trim(),
       event_name: m.event_name.trim(),
@@ -226,6 +329,7 @@ export function buildCreatePayload(state: ExperimentFormState): CreateExperiment
     confidence_level: state.confidenceLevel,
     correction_method: state.correctionMethod,
   };
+  if (state.bayesianEnabled) payload.bayesian_enabled = true;
   return payload;
 }
 
@@ -240,6 +344,7 @@ export type ExperimentFormAction =
   | { type: 'setRules'; rules: TargetingRules }
   | { type: 'setConfidenceLevel'; confidenceLevel: number }
   | { type: 'setCorrectionMethod'; correctionMethod: CorrectionMethod }
+  | { type: 'setBayesianEnabled'; bayesianEnabled: boolean }
   | { type: 'addVariant' }
   | { type: 'removeVariant'; index: number }
   | {
@@ -279,6 +384,8 @@ export function experimentFormReducer(
       return { ...state, confidenceLevel: action.confidenceLevel };
     case 'setCorrectionMethod':
       return { ...state, correctionMethod: action.correctionMethod };
+    case 'setBayesianEnabled':
+      return { ...state, bayesianEnabled: action.bayesianEnabled };
 
     case 'addVariant':
       return {

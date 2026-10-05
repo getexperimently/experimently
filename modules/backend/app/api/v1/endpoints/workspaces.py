@@ -14,7 +14,9 @@ from sqlalchemy.orm import Session
 
 from backend.app.api.deps import get_current_active_user, get_current_user, get_db
 from backend.app.core.security import oauth2_scheme
+from backend.app.models.audit_log import ActionType, EntityType
 from backend.app.models.user import User
+from backend.app.services.audit_service import AuditActor, AuditService
 from modules.backend.app.models.workspace import (
     Workspace,
     WorkspaceInvite,
@@ -341,6 +343,8 @@ def update_member_role(
     if payload.role == "OWNER" or target_is_owner:
         _require_owner_for_owner_role(db, workspace_id, current_user.id)
 
+    actor = AuditActor.of(current_user)
+    old_role = target.role.value if target is not None else None
     try:
         member = workspace_service.update_member_role(
             db, workspace_id, user_id, payload.role
@@ -352,7 +356,25 @@ def update_member_role(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
         )
 
-    return _member_to_response(member)
+    response = _member_to_response(member)
+    if old_role is not None and old_role != member.role.value:
+        # After the change has committed: a failed entry is logged and does
+        # not undo it. Only an actual change is recorded.
+        AuditService.record_after_commit(
+            db,
+            actor=actor,
+            action=ActionType.ROLE_ASSIGN,
+            entity_type=EntityType.USER,
+            entity_id=user_id,
+            entity_name=response.username or str(user_id),
+            before={"workspace_id": str(workspace_id), "workspace_role": old_role},
+            after={
+                "workspace_id": str(workspace_id),
+                "workspace_role": member.role.value,
+            },
+            reason="workspace role changed",
+        )
+    return response
 
 
 @router.delete(
