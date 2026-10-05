@@ -186,6 +186,24 @@ describe('empty: before the first update', () => {
     expect(screen.queryByTestId('bandit-weights-table')).toBeNull();
     expect(screen.getByTestId('bandit-weights').textContent).not.toContain('33.3%');
   });
+
+  it('no sentence claims new users follow current weights before there are any', async () => {
+    mockedApiFetch.mockResolvedValue(NEVER_UPDATED);
+    renderSection();
+    await screen.findByTestId('bandit-weights-empty');
+    const text = screen.getByTestId('bandit-weights').textContent ?? '';
+    // BANDIT_EMPTY says new users follow the starting allocation; nothing else
+    // in the panel may say they follow the (not yet computed) weights.
+    expect(text).not.toMatch(/follows? (these|the|current)[^.]{0,20}weights/i);
+    expect(text).not.toMatch(/new users follow/i);
+  });
+
+  it('once weights exist, the panel says new users follow them', async () => {
+    mockedApiFetch.mockResolvedValue(UPDATED);
+    renderSection();
+    await screen.findByTestId('bandit-weights-table');
+    expect(screen.getByTestId('bandit-weights').textContent).toMatch(/new users follow the weights below/i);
+  });
 });
 
 describe('errors show fixed copy, never the server text', () => {

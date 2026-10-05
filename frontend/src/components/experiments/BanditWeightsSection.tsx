@@ -8,10 +8,14 @@ import { Experiment } from '@/types/experiments';
  * failure reads the same, so a stack trace or a stale message never reaches
  * the page.
  */
+/** True in every state, so it is shown in every state. */
 export const BANDIT_INTRO =
-  'Traffic moves toward the better-performing variant automatically. The Allocation column ' +
-  'is the starting split; new users follow these weights. People already in the experiment ' +
-  'keep their variant.';
+  'Traffic moves toward the better-performing variant automatically. People already in the ' +
+  'experiment keep their variant.';
+
+/** Shown only once weights exist: before then new users follow the starting allocation. */
+export const BANDIT_FOLLOWS =
+  'The Allocation column is the starting split; new users follow the weights below.';
 
 export const BANDIT_EMPTY =
   'No weights yet. Weights appear after the first update; until then new users are split by ' +
@@ -122,6 +126,9 @@ export function BanditWeightsSection({ experiment }: { experiment: Experiment })
 
       {loaded && !neverUpdated && (
         <>
+          <p className="text-sm text-slate-600 mb-3" data-testid="bandit-weights-follows">
+            {BANDIT_FOLLOWS}
+          </p>
           <div className="overflow-x-auto">
             <table className="w-full text-sm" data-testid="bandit-weights-table">
               <thead className="bg-slate-50 border-b border-slate-200">
