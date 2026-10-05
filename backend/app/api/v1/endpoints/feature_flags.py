@@ -652,7 +652,8 @@ async def delete_feature_flag(
     ADMIN and DEVELOPER may delete any flag; ANALYST and VIEWER may not.
 
     Deleting a feature flag has the following effects:
-    - The feature flag and all its related data are permanently removed
+    - The feature flag and its related data are permanently removed, except
+      its events: those are kept, with `feature_flag_id` set to null
     - An audit record of the deletion is written (if that fails, the delete still stands)
 
     **Note**: This operation cannot be undone. For active feature flags, consider

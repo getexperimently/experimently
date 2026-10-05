@@ -111,9 +111,10 @@ class FeatureFlag(Base, BaseModel):
         back_populates="feature_flag",
         cascade="all, delete-orphan",
     )
-    events = relationship(
-        "Event", back_populates="feature_flag", cascade="all, delete-orphan"
-    )
+    # Deleting a flag keeps its events (#855). The events.feature_flag_id FK
+    # is ON DELETE SET NULL; passive_deletes leaves that to the database, so
+    # the ORM neither deletes the events nor loads them to clear the column.
+    events = relationship("Event", back_populates="feature_flag", passive_deletes=True)
     reports = relationship(
         "Report", back_populates="feature_flag", cascade="all, delete"
     )
