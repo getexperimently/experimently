@@ -608,6 +608,12 @@ A bandit experiment automatically shifts traffic toward the better-performing va
 
 Set `optimization_type` to `thompson_sampling`, `ucb1`, or `epsilon_greedy` when creating an experiment. See the [Multi-Armed Bandit Guide](../api/multi-armed-bandit.md).
 
+A bandit experiment's page has a **Current traffic weights** panel: each variant's share of new
+users, with its pulls, successes and conversion rate, and when the weights were last computed.
+Every role can read it, and nothing in it changes the experiment. It loads once and again when you
+press **Refresh**. Before the first update it says so, and new users follow each variant's
+starting allocation until then. The dashboard shows the current weights only, with no history.
+
 ---
 
 ### Interaction Detection — Are Your Experiments Interfering?
