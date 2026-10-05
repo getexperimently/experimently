@@ -19322,7 +19322,7 @@
     },
     "/api/v1/feature-flags/{flag_id}": {
       "delete": {
-        "description": "Delete a feature flag.\n\nThis endpoint deletes an existing feature flag. Access is by role:\nADMIN and DEVELOPER may delete any flag; ANALYST and VIEWER may not.\n\nDeleting a feature flag has the following effects:\n- The feature flag and all its related data are permanently removed\n- An audit record of the deletion is written (if that fails, the delete still stands)\n\n**Note**: This operation cannot be undone. For active feature flags, consider\nchanging the status to 'archived' instead.\n\nReturns:\n    None: No content, feature flag was successfully deleted\n\nRaises:\n    HTTPException 403: If the user doesn't have permission to delete this feature flag\n    HTTPException 404: If the feature flag doesn't exist",
+        "description": "Delete a feature flag.\n\nThis endpoint deletes an existing feature flag. Access is by role:\nADMIN and DEVELOPER may delete any flag; ANALYST and VIEWER may not.\n\nDeleting a feature flag has the following effects:\n- The feature flag and its related data are permanently removed, except\n  its events: those are kept, with `feature_flag_id` set to null\n- An audit record of the deletion is written (if that fails, the delete still stands)\n\n**Note**: This operation cannot be undone. For active feature flags, consider\nchanging the status to 'archived' instead.\n\nReturns:\n    None: No content, feature flag was successfully deleted\n\nRaises:\n    HTTPException 403: If the user doesn't have permission to delete this feature flag\n    HTTPException 404: If the feature flag doesn't exist",
         "operationId": "delete_feature_flag_api_v1_feature_flags__flag_id__delete",
         "parameters": [
           {
