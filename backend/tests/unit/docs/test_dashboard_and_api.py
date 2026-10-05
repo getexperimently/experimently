@@ -70,6 +70,7 @@ WITNESSES: Dict[str, str] = {
     "See a flag's rollout schedule and its stages": "rollout-schedule-section",
     "Roll a feature flag back from the safety page": "rollback-button",
     "Manage users and their roles": "user-management-page",
+    "Change your own password (local sign-in)": "change-password-page",  # #503
     # The #442 slice before launch: B (#882), one toggle per variant.
     "Give each variant a configuration (a JSON payload) when creating an experiment": (
         "variant-configuration-toggle-*"
