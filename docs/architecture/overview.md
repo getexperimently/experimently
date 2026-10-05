@@ -355,6 +355,6 @@ The following capabilities were added after the initial platform release. See th
 | Guided experiment builder (#27, #376) | Guided setup in the dashboard (browser-only, 5 steps, same create request as the form); a separate 5-step draft-and-submit API | [experiment-wizard.md](../guides/experiment-wizard.md) |
 | AI Experiment Design (#23) | Claude API–powered design suggestions, results interpretation, MCP server | [mcp-server.md](../mcp-server.md) |
 | Audit Logging & Bulk Toggle (P1-B) | Immutable audit trail, SSE real-time stream, bulk flag operations | [audit-logging.md](../api/audit-logging.md) |
-| RBAC Post-MVP (P2-A) | Custom roles, direct permission grants, effective permissions resolution | [rbac.md](../api/rbac.md) |
+| RBAC Post-MVP (P2-A) | Custom roles, direct permission grants, effective permissions view (stored and shown; no permission check reads them yet, #891) | [rbac.md](../api/rbac.md) |
 | Slack / Email Alerting (EP-030) | Event-driven notifications via Slack Block Kit and SendGrid/SMTP | [alerting.md](../api/alerting.md) |
 | Admin UI (EP-029) | React admin panel for users, roles, audit logs, notifications, and resource management | — |

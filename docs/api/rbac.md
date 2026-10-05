@@ -5,15 +5,24 @@
 
 ## Overview
 
-The RBAC (Role-Based Access Control) system in the experimentation platform combines three layers to determine what a user can do:
+The RBAC (Role-Based Access Control) module stores three layers of permissions for a user:
 
 1. **Base Role** — One of four built-in system roles assigned to every user (`admin`, `developer`, `analyst`, `viewer`). Defined as the static `ROLE_PERMISSIONS` dict in `backend/app/core/permissions.py`.
 2. **Custom Roles** — DB-backed roles with configurable per-resource/action permission sets. An admin can create any number of custom roles and assign them to users.
-3. **Direct Permission Grants** — Per-user, per-resource grants that bypass role membership. Supports optional expiry timestamps for temporary grants.
+3. **Direct Permission Grants** — Per-user, per-resource grants made without assigning a role. Supports optional expiry timestamps for temporary grants.
+
+!!! warning "Only the base role decides what a user can do"
+    Today every route checks the base role, through `check_permission()` in
+    `backend/app/core/permissions.py`, which does not read custom roles or direct grants.
+    Custom roles and direct grants are stored, and shown by
+    `GET /api/v1/rbac/users/{user_id}/permissions`, but no permission check reads them:
+    assigning a custom role or granting a permission changes nothing a user can do.
+    Whether to make them take effect or remove them is tracked in
+    [#891](https://github.com/getexperimently/experimently/issues/891).
 
 ### Effective Permissions Resolution
 
-When checking if a user has a given permission, the system merges all three layers in order:
+`GET /api/v1/rbac/users/{user_id}/permissions` merges all three layers to build the set it shows. No permission check uses this set (see the note above):
 
 ```
 effective_permissions(user) =
@@ -22,9 +31,11 @@ effective_permissions(user) =
     ∪ union(grant.permissions for each valid direct grant for user)
 ```
 
-Superusers (`is_superuser=True`) bypass all checks and have full access to every resource and action.
+Superusers (`is_superuser=True`) pass every permission check and have full access to every resource and action.
 
 ### Permission Resolution Precedence
+
+These rules describe the set the endpoint shows:
 
 - Permissions are **additive** — a permission granted by any layer is granted overall.
 - There is no deny mechanism; a higher layer cannot revoke a permission given by a lower layer.
@@ -312,7 +323,7 @@ Revoke a custom role from a user. **ADMIN only.**
 GET /api/v1/rbac/users/{user_id}/permissions
 ```
 
-Returns the fully resolved permission set for a user, merging base role + custom roles + valid direct grants.
+Returns the fully resolved permission set for a user, merging base role + custom roles + valid direct grants. This is a display: routes check only the base role, so a custom role or direct grant listed here does not let the user do anything their base role does not.
 
 **Access control:** Users can view their own permissions. Admins can view any user's permissions.
 
@@ -367,7 +378,7 @@ curl -H "Authorization: Bearer $ADMIN_TOKEN" \
 POST /api/v1/rbac/users/{user_id}/grant
 ```
 
-Grant a specific resource permission directly to a user, bypassing role assignment. Supports optional expiry for temporary grants. **ADMIN only.**
+Grant a specific resource permission directly to a user, without assigning a role. The grant is stored and shown by Get Effective Permissions; no permission check reads it yet ([#891](https://github.com/getexperimently/experimently/issues/891)). Supports optional expiry for temporary grants. **ADMIN only.**
 
 **Request Body**
 
@@ -446,7 +457,7 @@ Revoke all direct permission grants for a user+resource combination. **ADMIN onl
 
 ### Create a "Read-Only Experiments" Custom Role
 
-This is the most common use case: a user who should be able to see experiments and results but never create or modify them.
+This defines and assigns a role for a user who should see experiments and results but never create or modify them. The role is stored and shown; it does not change what the user can do, which their base role decides ([#891](https://github.com/getexperimently/experimently/issues/891)). Today, to keep a user read-only, give them the `viewer` or `analyst` base role.
 
 Step 1: Create the role:
 
@@ -487,7 +498,7 @@ curl -H "Authorization: Bearer $ADMIN_TOKEN" \
 
 ### Grant a Temporary Export Permission
 
-Allow a data analyst to export data for a week-long audit without permanently changing their role:
+This records a week-long export grant for a data analyst without changing their role. The grant is stored and shown by Get Effective Permissions, but no permission check reads it: it does **not** let the analyst export anything their base role does not already allow ([#891](https://github.com/getexperimently/experimently/issues/891)). To let someone export today, give them a base role that holds the permission.
 
 ```bash
 curl -X POST "http://localhost:8000/api/v1/rbac/users/analyst-uuid/grant" \
@@ -502,7 +513,7 @@ curl -X POST "http://localhost:8000/api/v1/rbac/users/analyst-uuid/grant" \
   }'
 ```
 
-After `expires_at`, the direct grant is automatically excluded from the effective permissions calculation without requiring manual cleanup.
+After `expires_at`, the direct grant is automatically excluded from the set Get Effective Permissions shows, without requiring manual cleanup.
 
 To revoke early:
 
@@ -512,7 +523,9 @@ curl -X DELETE \
   -H "Authorization: Bearer $ADMIN_TOKEN"
 ```
 
-### Check What a User Can Do
+### Show a User's Stored Permissions
+
+This shows the merged set. What the user can actually do is decided by their base role alone (see [Overview](#overview)).
 
 ```bash
 curl -H "Authorization: Bearer $ADMIN_TOKEN" \
@@ -522,14 +535,14 @@ curl -H "Authorization: Bearer $ADMIN_TOKEN" \
 
 ---
 
-## Service API (Internal)
+## Service API
 
-The `RBACService` in `modules/backend/app/services/rbac_service.py` can be used directly in other services:
+The `RBACService` in `modules/backend/app/services/rbac_service.py` provides these methods. `get_effective_permissions` builds the set the Get Effective Permissions endpoint returns. `check_effective_permission` is not called by any route ([#891](https://github.com/getexperimently/experimently/issues/891)):
 
 ```python
 from modules.backend.app.services.rbac_service import RBACService
 
-# Check if user can perform an action (merges all layers)
+# Would the merged set allow this action? No route calls this.
 can_do_it = RBACService.check_effective_permission(
     db, user, resource="experiment", action="create"
 )
@@ -539,7 +552,7 @@ effective = RBACService.get_effective_permissions(db, user)
 print(effective.permissions)  # {"experiment": ["create", "list", "read", ...], ...}
 ```
 
-`check_effective_permission` is an additive alternative to `check_permission()` from `permissions.py`. It does NOT modify the existing static check — it checks custom roles and direct grants in addition to the base role.
+`check_effective_permission` checks custom roles and direct grants in addition to the base role, but no route calls it. Routes call `check_permission()` from `backend/app/core/permissions.py`, which reads only the base role.
 
 ---
 
