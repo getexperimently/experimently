@@ -12,8 +12,20 @@ Full documentation: [`docs/sdk/openfeature.md`](../../docs/sdk/openfeature.md).
 
 ## Install
 
+**Not yet published.** `@getexperimently/openfeature-provider` is not on npm yet, so this fails
+today (`@getexperimently/js-sdk` and `@openfeature/server-sdk` are on npm):
+
 ```bash
 npm install @openfeature/server-sdk @getexperimently/openfeature-provider
+```
+
+Build it from a clone of this repository instead (the provider's build also builds `sdk/js`):
+
+```bash
+git clone https://github.com/getexperimently/experimently.git
+npm --prefix experimently/sdk/js ci
+npm --prefix experimently/sdk/openfeature ci
+npm --prefix experimently/sdk/openfeature run build
 ```
 
 `@getexperimently/js-sdk` is installed with it; `@openfeature/server-sdk` is a peer dependency your app provides.
