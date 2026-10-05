@@ -18,6 +18,7 @@ in core-build's copy of the tree.
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 import pytest
@@ -26,6 +27,7 @@ from backend.app.models.audit_log import ActionType
 from backend.app.modules_loader import require_modules_or_absent
 from backend.app.services.audit_service import (
     MODULES_ONLY_ACTION_TYPES,
+    SYSTEM_ACTOR_EMAILS,
     WRITTEN_ACTION_TYPES,
 )
 
@@ -41,6 +43,8 @@ ACTION_TYPES_JSON = (
     / "audit"
     / "action-types.json"
 )
+
+ACTION_LABELS_TS = ACTION_TYPES_JSON.with_name("actionLabels.ts")
 
 
 def problems(written, offered, modules_only, *, full):
@@ -88,6 +92,19 @@ def test_the_list_matches_what_this_profile_writes():
         written |= modules_only
     found = problems(written, _offered(), modules_only, full=full)
     assert found == [], f"profile={'full' if full else 'core'}: {found}"
+
+
+def test_every_reserved_actor_has_a_dashboard_name():
+    """The dashboard marks an entry "(automatic)" only for the reserved
+    actors it names (``SYSTEM_ACTORS`` in ``actionLabels.ts``): each reserved
+    ``user_email`` the API writes has a name there, and nothing else does."""
+    source = ACTION_LABELS_TS.read_text(encoding="utf-8")
+    block = source.split("export const SYSTEM_ACTORS", 1)[1].split("};", 1)[0]
+    named = set(re.findall(r"'(system:[a-z-]+)':", block))
+    assert named == set(SYSTEM_ACTOR_EMAILS), (
+        f"no dashboard name: {sorted(set(SYSTEM_ACTOR_EMAILS) - named)}; "
+        f"named but not reserved: {sorted(named - set(SYSTEM_ACTOR_EMAILS))}"
+    )
 
 
 # The rule itself, with each defect planted: both directions fail, in both
