@@ -10,6 +10,19 @@ longer applies and release-please can generate this file directly. Until it
 does, entries below 0.2.2 are hand-written and the links in them are the
 reason why.
 
+## [0.23.1](https://github.com/getexperimently/experimently/compare/v0.23.0...v0.23.1) (2026-10-05)
+
+
+### Bug Fixes
+
+* **dashboard:** the Audit Log page opens for every role the audit API serves ([#925](https://github.com/getexperimently/experimently/issues/925)) ([e4fcf3e](https://github.com/getexperimently/experimently/commit/e4fcf3e00aed41c735a524d3dda732c71ad23401))
+* **results:** the results response carries the sequential block when sequential testing is enabled ([#928](https://github.com/getexperimently/experimently/issues/928)) ([4001db7](https://github.com/getexperimently/experimently/commit/4001db7e9e2f4bc3b702dcaac9414f1d1e478f58))
+
+
+### Documentation
+
+* **rbac:** the role tables say which actions need a superuser ([#924](https://github.com/getexperimently/experimently/issues/924)) ([242fd79](https://github.com/getexperimently/experimently/commit/242fd796c2292578c6ccffd29d725fb37403d444))
+
 ## [0.23.0](https://github.com/getexperimently/experimently/compare/v0.22.1...v0.23.0) (2026-10-05)
 
 
