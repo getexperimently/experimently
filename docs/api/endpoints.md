@@ -1986,6 +1986,8 @@ Returns mSPRT analysis, always-valid confidence intervals, an early stopping rec
 
 **Query params:** `alpha` (above 0 and at most 0.2; overrides the experiment's stored `sequential_testing_config.alpha`, default `0.05`)
 
+`GET /api/v1/results/{experiment_id}` and `GET /api/v1/experiments/{experiment_id}/results` embed the same analysis, at the stored `alpha`, as `sequential_testing`: `null` when sequential testing is off or the analysis could not be computed, and cached with the results ([In the results response](sequential-testing.md#in-the-results-response)).
+
 ---
 
 ### Sample Size

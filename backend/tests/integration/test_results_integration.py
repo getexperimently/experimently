@@ -460,6 +460,9 @@ class TestResultsEndpointCacheBehavior:
         experiment = mock_db.query.return_value.filter.return_value.first.return_value
         experiment.correction_method = "none"
         experiment.confidence_level = 0.95
+        # A bare MagicMock attribute is truthy: without this the route would
+        # try to compute the embedded sequential block (#922) from mocks.
+        experiment.sequential_testing_enabled = False
         mock_user = _make_mock_user(is_superuser=True)
 
         def override_get_db():

@@ -532,7 +532,7 @@ def get_experiment_results(
             computed_at=result.get("computed_at", datetime.now(timezone.utc)),
             summary=summary_data,
             metrics=metrics_data,
-            sequential_testing=result.get("sequential_testing"),
+            sequential_testing=_embedded_sequential(experiment, db),
             breakdown=breakdown_response,
             bayesian_results=result.get("bayesian_results"),
             srm=srm_response,
@@ -570,9 +570,11 @@ def _record_results_snapshots(db: Session, response: ExperimentResultsResponse) 
     Write the ``analysis_snapshots`` rows for one fresh results computation.
 
     One ``frequentist`` row carries the whole response; when the experiment
-    has Bayesian analysis enabled a second ``bayesian`` row records the seed
-    and sample count that produced the posteriors.  Cache hits do not reach
-    this function, so a row means the numbers were actually recomputed.
+    has Bayesian analysis enabled a ``bayesian`` row records the seed and
+    sample count that produced the posteriors, and when it has sequential
+    testing enabled a ``sequential`` row records the embedded sequential
+    block.  Cache hits do not reach this function, so a row means the numbers
+    were actually recomputed.
     """
     try:
         payload = response.model_dump(mode="json")
@@ -598,6 +600,18 @@ def _record_results_snapshots(db: Session, response: ExperimentResultsResponse) 
             engine_version=bayesian.engine_version,
             seed=bayesian.seed,
             n_samples=bayesian.n_samples,
+            as_of=response.computed_at,
+        )
+
+    # The dashboard reads the embedded block instead of calling /sequential
+    # when it is present, so the sequential row is written here too (#922).
+    # It is the same (experiment, kind, UTC day) row /sequential writes.
+    if response.sequential_testing is not None:
+        record_snapshot(
+            db,
+            response.experiment_id,
+            AnalysisKind.SEQUENTIAL,
+            payload.get("sequential_testing") or {},
             as_of=response.computed_at,
         )
 
@@ -1128,53 +1142,18 @@ def _stored_sequential_alpha(config: Dict[str, Any]) -> Tuple[float, Optional[st
     )
 
 
-# ---------------------------------------------------------------------------
-# Endpoint 5 — GET /{experiment_id}/sequential (EP-021)
-# ---------------------------------------------------------------------------
-
-
-@router.get(
-    "/{experiment_id}/sequential",
-    response_model=SequentialTestingResponse,
-)
-def get_sequential_results(
-    experiment_id: UUID,
-    alpha: Optional[float] = Query(
-        default=None,
-        gt=0.0,
-        le=SEQUENTIAL_ALPHA_MAX,
-        description=(
-            "Significance level for this request, above 0 and at most 0.2. "
-            "Overrides the experiment's stored sequential_testing_config.alpha "
-            "(default 0.05). The mSPRT boundary is 1/alpha."
-        ),
-    ),
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user),
+def _compute_sequential_response(
+    experiment: Experiment, db: Session, alpha: Optional[float]
 ) -> SequentialTestingResponse:
     """
-    Get sequential testing analysis for an experiment (EP-021).
+    The sequential analysis of *experiment*, as ``/sequential`` serves it.
 
-    Returns the mSPRT evidence ratio, an always-valid confidence interval,
-    the evidence trajectory for charting, a recommended action
-    (stop_for_effect or continue) and the advisory ``at_risk`` flag.
-    ``alpha_spending`` is always empty: no planned-looks table is computed.
-
-    The significance level is the ``alpha`` query parameter, else the stored
-    ``sequential_testing_config.alpha``, else 0.05.
-
-    Only available for experiments with sequential_testing_enabled=True.
+    *alpha* is the per-request significance level; ``None`` uses the stored
+    ``sequential_testing_config.alpha``, else 0.05.  It neither checks that
+    sequential testing is enabled nor records a snapshot: the callers do.
+    Shared by ``GET /{experiment_id}/sequential`` and the block embedded in
+    ``GET /{experiment_id}`` (#922), so the two cannot disagree.
     """
-    experiment = _get_experiment_for_sequential(experiment_id, db)
-    if not experiment:
-        raise HTTPException(status_code=404, detail="Experiment not found")
-
-    if not experiment.sequential_testing_enabled:
-        raise HTTPException(
-            status_code=404,
-            detail="Sequential testing is not enabled for this experiment",
-        )
-
     # Extract config
     config: Dict[str, Any] = dict(experiment.sequential_testing_config or {})
     tau_squared = config.get("tau_squared", 0.001)
@@ -1274,7 +1253,7 @@ def get_sequential_results(
         # a ga label carries no notice, and these sentences must not create one.
         notice = " ".join([notice, *notices]) if notice else None
 
-    response = SequentialTestingResponse(
+    return SequentialTestingResponse(
         method=analysis.method.value,
         msprt_result=msprt_data,
         confidence_sequence=cs_data,
@@ -1288,6 +1267,82 @@ def get_sequential_results(
         analysis_status=status,
         analysis_notice=notice,
     )
+
+
+def _embedded_sequential(
+    experiment: Any, db: Session
+) -> Optional[SequentialTestingResponse]:
+    """
+    The ``sequential_testing`` block of a results response (#922).
+
+    ``None`` when the experiment does not have sequential testing enabled, and
+    when the analysis fails: a failure is logged as a warning and never turns
+    the results request into an error.  It runs in a savepoint, so a failed
+    query leaves the request's session usable.
+    """
+    if not getattr(experiment, "sequential_testing_enabled", False):
+        return None
+    try:
+        with db.begin_nested():
+            return _compute_sequential_response(experiment, db, alpha=None)
+    except Exception as exc:
+        logger.warning(
+            "Sequential analysis for results of experiment %s failed (%s); "
+            "sequential_testing is null",
+            getattr(experiment, "id", None),
+            type(exc).__name__,
+        )
+        return None
+
+
+# ---------------------------------------------------------------------------
+# Endpoint 5 — GET /{experiment_id}/sequential (EP-021)
+# ---------------------------------------------------------------------------
+
+
+@router.get(
+    "/{experiment_id}/sequential",
+    response_model=SequentialTestingResponse,
+)
+def get_sequential_results(
+    experiment_id: UUID,
+    alpha: Optional[float] = Query(
+        default=None,
+        gt=0.0,
+        le=SEQUENTIAL_ALPHA_MAX,
+        description=(
+            "Significance level for this request, above 0 and at most 0.2. "
+            "Overrides the experiment's stored sequential_testing_config.alpha "
+            "(default 0.05). The mSPRT boundary is 1/alpha."
+        ),
+    ),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+) -> SequentialTestingResponse:
+    """
+    Get sequential testing analysis for an experiment (EP-021).
+
+    Returns the mSPRT evidence ratio, an always-valid confidence interval,
+    the evidence trajectory for charting, a recommended action
+    (stop_for_effect or continue) and the advisory ``at_risk`` flag.
+    ``alpha_spending`` is always empty: no planned-looks table is computed.
+
+    The significance level is the ``alpha`` query parameter, else the stored
+    ``sequential_testing_config.alpha``, else 0.05.
+
+    Only available for experiments with sequential_testing_enabled=True.
+    """
+    experiment = _get_experiment_for_sequential(experiment_id, db)
+    if not experiment:
+        raise HTTPException(status_code=404, detail="Experiment not found")
+
+    if not experiment.sequential_testing_enabled:
+        raise HTTPException(
+            status_code=404,
+            detail="Sequential testing is not enabled for this experiment",
+        )
+
+    response = _compute_sequential_response(experiment, db, alpha)
 
     # Audit snapshot (best-effort; mSPRT is closed-form, so no seed).
     try:

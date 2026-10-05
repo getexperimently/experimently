@@ -13,7 +13,7 @@
 
 [meta]
 documents = 37
-exec = 196
+exec = 197
 universe = [
     ".github/pull_request_template.md",
     "CHANGELOG.md",
@@ -365,9 +365,9 @@ expects = 17
 [[document]]
 path = "docs/api/sequential-testing.md"
 environment = "stack"
-exec = 3
+exec = 4
 skip = 0
-expects = 10
+expects = 12
 
 [[document]]
 path = "docs/statistics/fdr-correction.md"

@@ -109,6 +109,7 @@ Stable operations changed this way, before any user depended on them:
 | `GET /api/v1/holdout/all`, `POST /api/v1/holdout`, `PUT /api/v1/holdout/{holdout_id}`, `DELETE /api/v1/mutual-exclusion-groups/{group_id}`, `PUT /api/v1/mutual-exclusion-groups/{group_id}` | #904 | These operations accept the roles their documentation states. Listing, creating and updating holdouts and archiving a group with `DELETE` need ADMIN or a superuser; a DEVELOPER now answers 403 on them. Changing a group's `status` with `PUT` (archiving or unarchiving) needs ADMIN too, as archiving does; a DEVELOPER may still change a group's name, description and traffic allocation, and may send its current `status` back. ADMIN and superusers are unchanged. The OpenAPI document changes only in the description of `PUT /api/v1/mutual-exclusion-groups/{group_id}`. See [Mutual Exclusion Groups & Global Holdout](mutual-exclusion-groups.md#permissions). |
 | `GET /api/v1/results/{experiment_id}/sequential` | #854 | The confidence sequence and `can_stop` use the Agresti-Caffo variance of the difference in rates instead of the plug-in one, so the interval keeps its coverage when the arms are split unequally. Some experiments that showed `can_stop: true` and `recommended_action: "stop_for_effect"` (mostly with one small, low-rate arm) now show `false` and `"continue"`, a few at equal splits stop slightly later, and a very few, mostly with rates near 50%, stop slightly earlier; an arm in which every user has the same outcome now gets a finite interval instead of `[-1, 1]`. `lambda_ratio` is capped at the largest finite double (about 1.8e308), so an overwhelming difference reports a finite number and can stop. The response's fields are unchanged and `analysis_status` stays `beta`. The engine version becomes 1.4.0; the OpenAPI document changes only in the `engine_version` default of the responses that carry it (bandit, Bayesian, variance reduction). See [Sequential Testing](sequential-testing.md#always-valid-confidence-intervals-confidence-sequences). |
 | `POST /api/v1/tracking/assign`, `POST /api/v1/tracking/assign/batch` | #822 | Experiment targeting treats a missing attribute as flags do. A new user whose context lacks an attribute is no longer refused outright (`assigned: false`, `reason: "targeting"`): they fail only the conditions on that attribute, and `is_null` on it passes. So a user who matches one `OR` branch is enrolled even when they lack an attribute used only in another branch, and a user without an attribute now matches a `NOT` group on it (a user with no `country` matches `NOT (country equals US)`, but still not `country not_equals US`). `AND` still needs every condition to hold. Users already assigned keep their assignment. The OpenAPI document does not change. See [Targeting Rules](endpoints.md#targeting-rules). |
+| `GET /api/v1/results/{experiment_id}`, `GET /api/v1/experiments/{experiment_id}/results` | #922 | When the experiment has sequential testing on, `sequential_testing` carries the analysis `GET /api/v1/results/{experiment_id}/sequential` serves at the experiment's stored `alpha` (the primary metric, the control against the first treatment); it used to be `null` always. It stays `null` when sequential testing is off, and is `null` when the analysis could not be computed (the API logs a warning); the rest of the response is unaffected. It is cached with the results, so an answer cached before the upgrade keeps `null` until it expires (5 minutes for a running experiment, 24 hours otherwise) or `POST /api/v1/results/{experiment_id}/invalidate-cache` clears it. For the same reason a change to `sequential_testing_enabled` or `sequential_testing_config`, which is accepted on a running experiment, shows on these routes when the cached answer expires or is cleared, not immediately. The OpenAPI document does not change. See [Sequential Testing](sequential-testing.md#in-the-results-response). |
 
 ## Deprecated operations
 
@@ -134,12 +135,17 @@ one is a breaking change.
 
 ## Beta numbers on a stable route
 
-One route carries `analysis_status: "beta"` while staying `x-stability:
-stable`: the sequential analysis (`GET /api/v1/results/{id}/sequential`).
-Its shape is settled (dashboards read it) and the fixes to its numbers
-(#231, #854) change values, not fields, so the two fields were added to it
-optionally. A fix that changes its numbers gets a row in the table of
-changed stable operations above, as #854 does.
+One analysis carries `analysis_status: "beta"` while staying `x-stability:
+stable`: the sequential analysis. `GET /api/v1/results/{id}/sequential` serves
+it, and `GET /api/v1/results/{id}` and `GET /api/v1/experiments/{id}/results`
+embed the same block as `sequential_testing` (#922). Its shape is settled
+(dashboards read it) and the fixes to its numbers (#231, #854) change values,
+not fields, so the two fields were added to it optionally. A fix that changes
+its numbers gets a row in the table of changed stable operations above naming
+all three operations, and bumps `ENGINE_VERSION`
+(`backend/app/core/stats_engine.py`): the results routes cache their answer
+under a key that includes it, so without the bump the embedded copy is served
+with the old numbers for up to 24 hours.
 
 ## Profiles
 
