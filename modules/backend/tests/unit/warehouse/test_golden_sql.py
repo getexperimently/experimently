@@ -9,6 +9,7 @@ again, in that dialect, before the golden is replaced.
 
 from __future__ import annotations
 
+import json
 import re
 from datetime import datetime, timezone
 from pathlib import Path
@@ -295,3 +296,107 @@ def test_previews_return_aggregates_and_whole_epoch_seconds(
         if dialect == "snowflake":
             expected.append("session_offset")
         assert outer == expected
+
+
+# -- a bare name that is also a range variable ------------------------------------
+
+PARITY_GOLDEN = Path(__file__).parent / "parity" / "duckdb_metric_mean.sql"
+RECORDED_BIGQUERY = Path(__file__).parent / "recorded" / "bigquery"
+
+
+def _bare_range_variable_names(sql: str, dialect: str) -> list[str]:
+    """Unqualified column references that name a table, CTE or subquery the
+    same scope reads FROM.
+
+    Snowflake, Athena and DuckDB resolve such a name to the column; BigQuery
+    resolves it to the whole row, a STRUCT, so ``AVG(y) ... FROM y`` is
+    refused.  The generated SQL qualifies every one of them instead.
+    """
+    from sqlglot.optimizer.scope import traverse_scope
+
+    found = []
+    for scope in traverse_scope(sqlglot.parse_one(sql, read=dialect)):
+        sources = {name.lower() for name in scope.selected_sources}
+        for column in scope.columns:
+            if not column.table and column.name.lower() in sources:
+                found.append(column.name)
+    return found
+
+
+def _live_check_mean_query():
+    """The statement bq_dry_run_statement_type, bq_mean_parity and
+    bq_runner_parity sent, with the suite's placeholder project."""
+    from modules.backend.tests.live_warehouse import harness
+
+    project, dataset = "acme-analytics", "live_check"
+    return build_metric_query(
+        SQL_DIALECTS["bigquery"],
+        AssignmentMapping(
+            (project, dataset, harness.EXPOSURES_TABLE), *harness.EXPOSURE_COLUMNS
+        ),
+        MetricMapping(
+            (project, dataset, harness.EVENTS_TABLE),
+            "user_id",
+            "event_at",
+            "mean",
+            "amount",
+        ),
+        harness.EXPERIMENT_KEY,
+        AnalysisWindow(harness.WINDOW_START, harness.WINDOW_END),
+    )
+
+
+@pytest.mark.regression
+@pytest.mark.parametrize(("dialect", "kind"), CASES)
+def test_no_bare_column_names_a_range_variable(dialect: str, kind: str) -> None:
+    for sql in _golden_and_built(dialect, kind):
+        assert _bare_range_variable_names(sql, dialect) == []
+
+
+@pytest.mark.regression
+def test_the_duckdb_parity_statement_has_no_bare_range_variable() -> None:
+    sql = PARITY_GOLDEN.read_text(encoding="utf-8")
+    assert _bare_range_variable_names(sql, "duckdb") == []
+
+
+@pytest.mark.regression
+def test_the_live_check_statement_has_no_bare_range_variable() -> None:
+    assert _bare_range_variable_names(_live_check_mean_query().sql, "bigquery") == []
+
+
+def test_the_scope_check_finds_a_bare_range_variable() -> None:
+    """The check above, shown to fire: the construct BigQuery refused."""
+    sql = "WITH y AS (SELECT 1.0 AS y)\nSELECT AVG(y) AS k FROM y\n"
+    assert _bare_range_variable_names(sql, "bigquery") == ["y"]
+    qualified = "WITH y AS (SELECT 1.0 AS y)\nSELECT AVG(y.y) AS k FROM y\n"
+    assert _bare_range_variable_names(qualified, "bigquery") == []
+
+
+@pytest.mark.regression
+def test_the_position_bigquery_refused_now_names_its_column() -> None:
+    """Read from the real dry-run answer: BigQuery refused AVG at [40:10]
+    because its argument was the row of the CTE ``y`` (variant, converted, y),
+    not the column.  The same statement, built now, names the column there."""
+    recorded = json.loads(
+        (RECORDED_BIGQUERY / "real_dry_run_avg_of_row.json").read_text(encoding="utf-8")
+    )
+    assert recorded["status"] == 400
+    assert recorded["body"]["error"]["errors"][0]["reason"] == "invalidQuery"
+    message = recorded["body"]["error"]["message"]
+    position = re.search(r" at \[(\d+):(\d+)\]$", message)
+    assert position is not None
+    line, column = int(position.group(1)), int(position.group(2))
+    struct = re.search(r"Argument types: STRUCT<([^>]*)>", message)
+    assert struct is not None
+    fields = [part.split(" ")[0] for part in struct.group(1).split(", ")]
+    assert fields == ["variant", "converted", "y"]
+
+    sql = _live_check_mean_query().sql
+    root = sqlglot.parse_one(sql, read="bigquery")
+    y_cte = next(c for c in root.find_all(exp.CTE) if c.alias == "y")
+    assert [e.alias_or_name for e in y_cte.this.expressions] == fields
+
+    at = sql.split("\n")[line - 1][column - 1 :]
+    assert at.startswith("AVG(")
+    argument = at[len("AVG(") : at.index(")")]
+    assert argument == "y.y"

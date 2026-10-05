@@ -829,6 +829,31 @@ def test_google_errors_map_to_codes_without_their_text(
         assert "(code invalidQuery)" in err.value.message
 
 
+def test_the_real_avg_of_a_row_refusal_is_reported_by_its_reason(key, caplog):
+    """BigQuery's real dry-run answer to the statement it refused (#312):
+    invalidQuery has no code of ours, so it is unrecognised, with the reason
+    as the vendor code and none of BigQuery's text."""
+    fake = GoogleFake(happy(dry_run=["real_dry_run_avg_of_row"]))
+    caplog.set_level(logging.DEBUG)
+    with pytest.raises(WarehouseError) as err:
+        adapter(key, fake, sleeper=lambda s: None).run_query(
+            metric_query(), Deadline(600)
+        )
+    assert err.value.code is C.UNRECOGNISED_WAREHOUSE_ERROR
+    assert err.value.vendor_code == "invalidQuery"
+    assert err.value.http_status == 400
+    for surface in (
+        str(err.value),
+        repr(err.value),
+        err.value.message,
+        json.dumps(err.value.to_body()),
+        _formatted(err.value),
+        caplog.text,
+    ):
+        assert "No matching signature" not in surface
+        assert "STRUCT" not in surface
+
+
 def test_a_job_that_failed_is_reported_by_its_reason(key):
     fake = GoogleFake(happy(job=["job_done_error"]))
     with pytest.raises(WarehouseError) as err:

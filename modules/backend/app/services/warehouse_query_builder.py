@@ -430,7 +430,11 @@ def build_metric_query(
         f"    {y_expr} AS y\n"
         "  FROM per_unit\n"
         "),\nk AS (\n"
-        "  SELECT AVG(y) AS k FROM y\n"
+        # ``y.y``, not ``y``: the CTE and its column share the name, and
+        # BigQuery reads a bare ``y`` here as the whole row (a STRUCT), so
+        # AVG is refused with invalidQuery.  Snowflake, Athena and DuckDB read
+        # it as the column; the qualified name means the column in all four.
+        "  SELECT AVG(y.y) AS k FROM y\n"
         "),\ndiag AS (\n"
         "  SELECT (SELECT COUNT(*) FROM events) AS metric_rows_in_window,\n"
         "    (SELECT COUNT(*) FROM events AS e INNER JOIN units AS u ON e.unit_id = u.unit_id)"

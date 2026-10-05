@@ -1,0 +1,32 @@
+{
+  "_provenance": {
+    "source": "real account",
+    "real_run_id": "wl-bigquery-20261005T061050Z-728dbcb3",
+    "check": "bq_dry_run_statement_type",
+    "request": {
+      "method": "POST",
+      "host": "bigquery.googleapis.com",
+      "path": "/bigquery/v2/projects/acme-analytics/jobs",
+      "dry_run": true,
+      "maximum_bytes_billed": "104857600"
+    },
+    "note": "Recorded on a real account by the warehouse_live check, then scrubbed: the billing project in the request path is replaced with this suite's placeholder. The body is as BigQuery answered the dry run of the generated mean-metric statement; bq_mean_parity and bq_runner_parity received the same body."
+  },
+  "status": 400,
+  "body": {
+    "error": {
+      "code": 400,
+      "message": "No matching signature for aggregate function AVG\n  Argument types: STRUCT<variant STRING, converted INT64, y FLOAT64>\n  Signature: AVG(INT64)\n    Argument 1: Unable to coerce type STRUCT<variant STRING, converted INT64, y FLOAT64> to expected type INT64\n  Signature: AVG(FLOAT64)\n    Argument 1: Unable to coerce type STRUCT<variant STRING, converted INT64, y FLOAT64> to expected type FLOAT64\n  Signature: AVG(NUMERIC)\n    Argument 1: Unable to coerce type STRUCT<variant STRING, converted INT64, y FLOAT64> to expected type NUMERIC\n  Signature: AVG(BIGNUMERIC)\n    Argument 1: Unable to coerce type STRUCT<variant STRING, converted INT64, y FLOAT64> to expected type BIGNUMERIC\n  Signature: AVG(INTERVAL)\n    Argument 1: Unable to coerce type STRUCT<variant STRING, converted INT64, y FLOAT64> to expected type INTERVAL at [40:10]",
+      "errors": [
+        {
+          "message": "No matching signature for aggregate function AVG\n  Argument types: STRUCT<variant STRING, converted INT64, y FLOAT64>\n  Signature: AVG(INT64)\n    Argument 1: Unable to coerce type STRUCT<variant STRING, converted INT64, y FLOAT64> to expected type INT64\n  Signature: AVG(FLOAT64)\n    Argument 1: Unable to coerce type STRUCT<variant STRING, converted INT64, y FLOAT64> to expected type FLOAT64\n  Signature: AVG(NUMERIC)\n    Argument 1: Unable to coerce type STRUCT<variant STRING, converted INT64, y FLOAT64> to expected type NUMERIC\n  Signature: AVG(BIGNUMERIC)\n    Argument 1: Unable to coerce type STRUCT<variant STRING, converted INT64, y FLOAT64> to expected type BIGNUMERIC\n  Signature: AVG(INTERVAL)\n    Argument 1: Unable to coerce type STRUCT<variant STRING, converted INT64, y FLOAT64> to expected type INTERVAL at [40:10]",
+          "domain": "global",
+          "reason": "invalidQuery",
+          "location": "q",
+          "locationType": "parameter"
+        }
+      ],
+      "status": "INVALID_ARGUMENT"
+    }
+  }
+}
