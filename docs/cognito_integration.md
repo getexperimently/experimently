@@ -250,7 +250,7 @@ SYNC_ROLES_ON_LOGIN: bool = True
 
 The application defines the following user roles, in order of decreasing privilege:
 
-1. **ADMIN**: Can create and manage experiments and feature flags, and read all data. Managing users, safety settings, per-flag safety config and rollback, and opening the dashboard's admin pages, also needs a superuser account (see [Role-based access control](rbac/README.md)).
+1. **ADMIN**: Can create and manage experiments and feature flags, and read all data. Managing users, safety settings, per-flag safety config and rollback, and opening the dashboard's Users, API Keys, Safety settings and Roles pages, also needs a superuser account (see [Role-based access control](rbac/README.md)).
 2. **DEVELOPER**: Can create and manage experiments and feature flags
 3. **ANALYST**: Can view all data but cannot create or modify experiments/flags
 4. **VIEWER**: Read-only access to approved resources
