@@ -82,13 +82,14 @@ otherwise the warehouse numbers are the stricter ones.
 | Create, edit, validate or preview a metric source | yes | yes | yes | no |
 | Delete a metric source | yes | yes | no | no |
 | Start an analysis | yes | yes | no | no |
-| Read analyses and their results | yes | yes | yes | yes |
+| Read analyses and their results | yes | yes | yes | no |
 | Read the SQL an analysis or preview sent | yes | yes | yes | no |
 
-A superuser counts as ADMIN. A VIEWER, or a user with no role, who reads an
-analysis or a preview gets `statements: null`: the kind, dialect, SHA-256 and
-SQL of every statement are all left out. Everything else about the run is the
-same for every role.
+A superuser counts as ADMIN. A preview is stored as a run, so reading an
+analysis or a preview by its id (`GET /runs/{run_id}`) and listing an
+experiment's analyses both need ADMIN, DEVELOPER or ANALYST; a VIEWER gets 403
+`role_required` from both (D50). Everyone who can read a run also gets its
+`statements`.
 
 A refusal names the role needed and yours, for example
 `Creating a warehouse connection requires the ADMIN role; you are DEVELOPER.`

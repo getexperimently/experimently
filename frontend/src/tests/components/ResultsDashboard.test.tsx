@@ -150,7 +150,9 @@ describe('ResultsDashboard', () => {
     await waitFor(() =>
       expect(screen.getByTestId('error-state')).toBeInTheDocument()
     );
-    expect(screen.getByText(/failed to load results/i)).toBeInTheDocument();
+    // Fixed copy: a plain Error's message is not the page's to show.
+    expect(screen.getByText('The results could not be loaded.')).toBeInTheDocument();
+    expect(screen.queryByText(/network error/i)).not.toBeInTheDocument();
   });
 
   it('renders ExperimentSummary on success', async () => {

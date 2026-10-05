@@ -800,7 +800,10 @@ class TestProvisionUser:
 
         user_info = self._make_user_info(groups=["admins"])
         provisioned = provision_user(db, user_info, cfg)
-        db.add.assert_called_once()
+        # The new account, then its user_create audit entry (#221).
+        added = [c.args[0] for c in db.add.call_args_list]
+        assert [type(obj).__name__ for obj in added] == ["User", "AuditLog"]
+        assert added[1].action_type == "user_create"
         db.commit.assert_called()
 
     def test_existing_user_is_returned(self):
@@ -855,7 +858,8 @@ class TestProvisionUser:
         db.add.side_effect = lambda obj: added_users.append(obj)
 
         provision_user(db, user_info, cfg)
-        assert len(added_users) == 1
+        # The new account, then its user_create audit entry (#221).
+        assert [type(obj).__name__ for obj in added_users] == ["User", "AuditLog"]
         new_user = added_users[0]
         assert new_user.role == UserRole.VIEWER
 

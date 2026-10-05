@@ -155,7 +155,7 @@ def harness(monkeypatch: pytest.MonkeyPatch) -> Iterator[_Harness]:
     user.role = "ADMIN"
 
     monkeypatch.setattr(results_endpoints, "_get_cache_service", lambda: h.cache)
-    monkeypatch.setattr(results_endpoints, "_compute_srm", lambda *_a: None)
+    monkeypatch.setattr(analysis_module, "sample_ratio_check", lambda *_a: None)
     monkeypatch.setattr(
         results_endpoints,
         "_record_results_snapshots",

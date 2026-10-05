@@ -42,6 +42,9 @@ def _text() -> str:
         "A refusal for capacity does not use a slot of the daily limit.",
         # No row of data leaves the warehouse.
         "No row of your data.",
+        # VIEWER does not read analyses or previews (D50).
+        "| Read analyses and their results | yes | yes | yes | no |",
+        "a VIEWER gets 403 `role_required` from both (D50).",
     ],
 )
 def test_the_warehouse_page_states(claim):

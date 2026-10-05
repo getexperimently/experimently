@@ -5,6 +5,7 @@ import {
   RecommendationAction,
 } from '@/types/results';
 import { WinnerIndicator } from '@/components/results/shared/WinnerIndicator';
+import { SRM_QUALIFIER } from './SrmNotice';
 import {
   correctionName,
   describeSettings,
@@ -195,6 +196,16 @@ export function ExperimentSummary({ experiment, stored, onOpenSampleSize }: Expe
         <p className="pt-2 text-sm font-medium text-slate-700" data-testid="leading-variant">
           Leading: {winnerName}
           {experiment.sample_size_adequate ? '' : ' (not yet adequate sample)'}
+          {/* The server's verdict only: a null check is not a mismatch. */}
+          {experiment.srm?.warning === true && (
+            <span
+              className="block mt-1 font-medium text-amber-900"
+              data-testid="leading-srm-qualifier"
+            >
+              <span aria-hidden="true">⚠ </span>
+              {SRM_QUALIFIER}
+            </span>
+          )}
         </p>
       )}
     </div>

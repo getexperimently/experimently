@@ -39,6 +39,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from backend.app.api import deps
 from backend.app.db.session import get_db as _session_get_db
 from backend.app.main import app
+from backend.app.models.audit_log import AuditLog
 from modules.backend.app.models.sso_config import SSOConfig, SSOProviderType
 from modules.backend.app.services import sso_service
 
@@ -190,6 +191,30 @@ def test_a_sign_in_completes_and_its_token_is_accepted(browser, config, email, b
     )
     assert me.status_code == 200, me.text
     assert me.json()["email"] == email
+
+
+def test_a_sign_in_writes_one_user_login_and_one_user_create(
+    browser, config, email, db_session
+):
+    """#221: the callback that answers with a token is the sign-in, and the
+    first one creates the account: one entry each, by the account."""
+    callback, cookie = _sign_in(browser, config)
+    resp = browser.get(callback, headers={"cookie": cookie})
+    assert resp.status_code == 200, resp.text
+    user_id = uuid.UUID(resp.json()["user_id"])
+
+    db_session.expire_all()
+    rows = (
+        db_session.query(AuditLog)
+        .filter(AuditLog.entity_id == user_id)
+        .order_by(AuditLog.action_type)
+        .all()
+    )
+    assert [(r.action_type, r.user_id, r.user_email) for r in rows] == [
+        ("user_create", user_id, email),
+        ("user_login", user_id, email),
+    ]
+    assert rows[1].new_value == '{"provider": "sso"}'
 
 
 def test_a_replayed_callback_is_refused_by_the_provider(browser, config, branch):

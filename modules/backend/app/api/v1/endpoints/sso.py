@@ -48,8 +48,10 @@ from backend.app.api import deps
 from backend.app.api.v1.endpoints.auth import user_to_me
 from backend.app.core.config import normalise_origin, settings
 from backend.app.core.security import create_local_access_token
+from backend.app.models.audit_log import ActionType, EntityType
 from backend.app.models.user import User, UserRole
 from backend.app.schemas.auth import UserMe
+from backend.app.services.audit_service import AuditService
 from modules.backend.app.models.sso_config import SSOConfig, SSOProviderType
 from modules.backend.app.services import sso_service
 
@@ -193,6 +195,26 @@ def _issue_jwt(user: User) -> str:
     return token
 
 
+def _record_sso_login(db: Session, user: User) -> None:
+    """One ``user_login`` audit entry for an SSO sign-in that has succeeded.
+
+    Written once the response is built, after any account change has
+    committed; a failed entry is logged and does not refuse the sign-in. The
+    entry records the provider only. A dashboard sign-in is recorded once, at
+    ``POST /exchange``, where its session token is issued; the callback that
+    hands it the code records nothing.
+    """
+    AuditService.record_after_commit(
+        db,
+        actor=user,
+        action=ActionType.USER_LOGIN,
+        entity_type=EntityType.USER,
+        entity_id=user.id,
+        entity_name=user.username or str(user.id),
+        after={"provider": "sso"},
+    )
+
+
 def _get_redirect_uri(
     request: Request, provider: str, config_id: Optional[str] = None
 ) -> str:
@@ -313,12 +335,14 @@ def saml_acs(
         )
     token = _issue_jwt(user)
 
-    return SAMLLoginResponse(
+    result = SAMLLoginResponse(
         access_token=token,
         user_id=str(user.id),
         email=user.email,
         role=user.role.value if user.role else "viewer",
     )
+    _record_sso_login(db, user)
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -629,6 +653,7 @@ async def sso_exchange(
         access_token=create_local_access_token(user),
         user=user_to_me(user),
     )
+    _record_sso_login(db, user)
     return JSONResponse(
         content=jsonable_encoder(result), headers={"Cache-Control": "no-store"}
     )
@@ -866,7 +891,7 @@ async def _finish_oidc_login(
             status_code=status.HTTP_400_BAD_REQUEST, detail="Inactive user"
         )
 
-    return OIDCLoginResponse(
+    result = OIDCLoginResponse(
         # The same token a password login issues, so every auth path accepts it.
         access_token=create_local_access_token(user),
         user_id=str(user.id),
@@ -874,6 +899,8 @@ async def _finish_oidc_login(
         role=user.role.value if user.role else "viewer",
         provider=provider,
     )
+    _record_sso_login(db, user)
+    return result
 
 
 # ---------------------------------------------------------------------------

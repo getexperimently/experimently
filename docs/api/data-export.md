@@ -99,7 +99,7 @@ Download all experiments as a CSV (default) or JSON file.
 | `total_assignments`     | integer   | Total user assignments to this experiment |
 | `total_events`          | integer   | Total events tracked for this experiment |
 | `winner_variant`        | string    | Name of the winning variant, as `/results` reports it, or empty |
-| `recommendation`        | string    | `SHIP_VARIANT`, `KEEP_CONTROL` or `CONTINUE_TESTING`, as `/results` reports it; empty when the experiment's results cannot be computed (it has no control variant) |
+| `recommendation`        | string    | `SHIP_VARIANT`, `KEEP_CONTROL`, `CONTINUE_TESTING` or `INCONCLUSIVE` (the sample-ratio check failed), as `/results` reports it; empty when the experiment's results cannot be computed (it has no control variant) |
 
 #### Example curl
 

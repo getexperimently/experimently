@@ -60,6 +60,9 @@
       ],
       "@testing-library/*": [
         "./node_modules/@testing-library/*"
+      ],
+      "axe-core": [
+        "./node_modules/axe-core"
       ]
     },
     "incremental": true
