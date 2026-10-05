@@ -242,3 +242,15 @@ def test_the_check_fails_on_a_planted_defect(wh, monkeypatch, route):
     else:
         assert labels == {"GET /experiments/{id}/runs"}
     assert "results appear" in {what for _, _, what in wrong}
+
+
+@pytest.mark.parametrize("who", ["VIEWER", NO_ROLE])
+def test_a_refused_caller_gets_403_for_a_run_that_does_not_exist(wh, who):
+    """The role is checked before the run is looked up, so a refused caller gets
+    the same 403 for an id that names no run as for one that does, never a
+    404.  ``list_runs`` looks nothing up before its check; it is pinned too."""
+    client = wh.as_("VIEWER") if who == "VIEWER" else _no_role_client(wh)
+    for path in (f"{WA}/runs/{uuid.uuid4()}", f"{WA}/experiments/{uuid.uuid4()}/runs"):
+        response = client.get(path)
+        assert response.status_code == 403, (path, response.status_code, response.text)
+        assert response.json()["detail"]["code"] == "role_required", response.text

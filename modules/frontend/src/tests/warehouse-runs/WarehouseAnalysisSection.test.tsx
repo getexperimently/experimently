@@ -171,6 +171,18 @@ describe('roles', () => {
     expect(result.violations.map((v) => v.id)).toEqual([]);
   });
 
+  it('renders nothing and asks for no runs before the session has loaded', async () => {
+    mockUseAuth.mockReturnValue({ user: null, status: 'loading' });
+    install([{ path: RUNS_PATH, handler: () => ({ runs: [run()] }) }]);
+    const { container } = renderSection();
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(container).toBeEmptyDOMElement();
+    expect(calls('GET', RUNS_PATH)).toHaveLength(0);
+    expect(mockedApiFetch).not.toHaveBeenCalled();
+  });
+
   it('a superuser whose role is VIEWER reads runs', async () => {
     as('VIEWER', true);
     install([{ path: RUNS_PATH, handler: () => ({ runs: [run()] }) }]);
