@@ -33,7 +33,7 @@ jobs:
   shard:
     name: integration-tests (shard ${{ matrix.shard }})
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: ${{ matrix.shard == 3 && 1 || 30 }}
     strategy:
       # One red shard must not cancel the others: the summary needs every
       # shard's report to say which tests failed and that the rest ran.
