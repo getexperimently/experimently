@@ -10,8 +10,8 @@
  */
 import { ApiError } from '@/services/api';
 import { describeTargetingIssue } from '@/components/experiments/new/createErrors';
-import { OPERATOR_LABELS, OperatorType, TargetingRules } from '@/types/targeting';
-import { getOperatorsForAttribute, OperatorOptions, rulesToJson } from '@/utils/targeting';
+import { OPERATOR_LABELS, OperatorType, TargetingRules, isSegmentOperator } from '@/types/targeting';
+import { getOperatorsForAttribute, OperatorOptions, SEGMENT_ID_PATTERN, rulesToJson } from '@/utils/targeting';
 
 /** A stored `targeting_rules` value, as the API returned it: any JSON. */
 type Stored = unknown;
@@ -56,9 +56,11 @@ const NO_VALUE_OPERATORS = new Set(['is_null', 'is_not_null']);
  * into "" and the engine does not treat the two alike (`equals` with a
  * missing attribute matches null and not ""; `contains` and the other text
  * operators never match null and match everything with "").
+ * `in_segment` / `not_in_segment`: a segment id (the picker offers nothing else).
  */
 function builderValue(operator: string, value: unknown): boolean {
   if (NO_VALUE_OPERATORS.has(operator)) return value === null;
+  if (isSegmentOperator(operator)) return typeof value === 'string' && SEGMENT_ID_PATTERN.test(value);
   if (['string', 'number', 'boolean'].includes(typeof value)) return true;
   return Array.isArray(value) && value.every((item) => typeof item === 'string');
 }

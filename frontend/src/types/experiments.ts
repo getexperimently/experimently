@@ -118,6 +118,8 @@ export interface CreateExperimentRequest {
   confidence_level?: number;
   /** The API's default is `benjamini_hochberg`. */
   correction_method?: CorrectionMethod;
+  /** Sent only when true; the API then stores its default Bayesian settings. */
+  bayesian_enabled?: boolean;
 }
 
 /** `ExperimentListResponse` (offset pagination: `skip`/`limit`). */
@@ -134,6 +136,14 @@ export const EXPERIMENT_STATUS_LABELS: Record<ExperimentStatus, string> = {
   paused: 'Paused',
   completed: 'Completed',
   archived: 'Archived',
+};
+
+/** The traffic algorithm of an adaptive experiment, in words; `fixed` is a plain split. */
+export const OPTIMIZATION_TYPE_LABELS: Record<OptimizationType, string> = {
+  fixed: 'Fixed split',
+  thompson_sampling: 'Thompson sampling',
+  ucb1: 'UCB1',
+  epsilon_greedy: 'Epsilon-greedy',
 };
 
 export const EXPERIMENT_TYPE_LABELS: Record<ExperimentType, string> = {

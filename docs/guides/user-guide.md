@@ -93,6 +93,22 @@ For multivariate tests, add more variants:
 | Green Button | — | 33% |
 | Red Button | — | 33% |
 
+Each variant can also carry a **configuration**: a JSON object your app receives with the
+assignment, so code can read values instead of branching on the variant's name. Open
+**Configuration (JSON, optional)** under the variant and type an object, for example:
+
+```json
+{"button_color": "green", "button_text": "Buy now"}
+```
+
+Leave it empty when the variant name is enough; the variant then has no configuration (`null`,
+not `{}`). The form refuses anything that is not a JSON object, such as a list, a string or text
+that does not parse, and shows the problem under the field; **Next** and **Create Experiment**
+open the field and move to it. The dashboard accepts up to 16,384 bytes (UTF-8) per
+configuration; the API accepts larger ones. `POST /api/v1/tracking/assign`, which the SDKs
+call, returns the configuration as saved, and the experiment's page shows it in the variants
+table.
+
 Only want to test on specific users? Add targeting rules on the same step:
 
 - Country is in [US, CA]
@@ -119,7 +135,12 @@ cannot be changed after it starts:
   chance of even one false winner at 5% and needs more users. The correction applies to the
   variants of each metric, not across metrics.
 
-The single-page form has the same two settings in a collapsed **Analysis settings** section,
+Below them, **Also analyse the primary metric with Bayesian statistics** is off by default. Turned
+on, the results also carry a Bayesian analysis of the primary metric (the probability that each
+variant is the best) with default priors; the frequentist results and the recommendation do not
+change. To set the priors, see [Bayesian analysis](../api/bayesian.md).
+
+The single-page form has the same settings in a collapsed **Analysis settings** section,
 whose title shows the current values.
 
 Then, optionally, the estimate. Enter your baseline conversion rate and the smallest change
@@ -132,9 +153,9 @@ the experiment needs more users than it says.
 
 **Step 5: Review and create**
 
-Check the summary, including the **Analysis** row (for example "95% confidence ·
-Benjamini-Hochberg correction"), use **Edit** to go back to any step, then press **Create
-Experiment**.
+Check the summary, including each variant's configuration and the **Analysis** row (for example
+"95% confidence · Benjamini-Hochberg correction", with "· Bayesian analysis on" when it is on),
+use **Edit** to go back to any step, then press **Create Experiment**.
 The experiment is created as a draft and you land on its page.
 
 **Then: start the experiment**

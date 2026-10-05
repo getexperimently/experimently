@@ -689,8 +689,8 @@ jobs:
         python openfeature-python js openfeature edge react react-native
         go java android ruby php dotnet
 
-  # Six fail-hard browser journeys (login, experiment lifecycle, feature flag,
-  # RBAC, admin panel, results checks) driven through the dashboard a
+  # Seven fail-hard browser journeys (login, experiment lifecycle, feature flag,
+  # RBAC, admin panel, segments, results checks) driven through the dashboard a
   # self-hoster actually gets:
   # the Next.js static export, served the way the nginx image serves it
   # (tests/e2e/static-server.mjs — same origin, /api proxied), against a real

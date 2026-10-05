@@ -84,6 +84,14 @@ export const ROLE_CANNOT_CREATE =
 export const SESSION_EXPIRED_CREATE =
   'Your session has expired. Sign in again in another tab, then press Create Experiment again. Your answers are still here.';
 
+/**
+ * A create that failed without an answer from the API (an exception in the
+ * browser). The exception's own text is never shown; whether the experiment
+ * was saved is unknown, so the list is the place to check.
+ */
+export const CREATE_FAILED =
+  'Something went wrong while creating the experiment. Check the experiments list before trying again.';
+
 export type CreateView = 'guided' | 'advanced';
 
 /** The duplicate-key copy. `key` is the key the page sent. */
@@ -110,8 +118,9 @@ function sentence(text: string): string {
  * - 409: the key is taken; the page's own sentence and "Edit details".
  * - 422 naming `targeting_rules`: each problem, shown at the targeting rules;
  *   any other item in the same 422 is kept in `otherMessage`.
- * - anything else: the message the API client built (for a server error it
- *   carries the request ID once).
+ * - any other API answer: the message the API client built (for a server
+ *   error it carries the request ID once).
+ * - an exception that is not an API answer: `CREATE_FAILED`.
  */
 export function describeCreateError(err: unknown, sentKey: string | undefined, view: CreateView): CreateError {
   if (err instanceof ApiError) {
@@ -123,5 +132,6 @@ export function describeCreateError(err: unknown, sentKey: string | undefined, v
       if (split) return { message: TARGETING_REFUSED, ...split };
     }
   }
-  return { message: err instanceof Error ? err.message : 'Failed to create experiment' };
+  if (err instanceof ApiError) return { message: err.message };
+  return { message: CREATE_FAILED };
 }

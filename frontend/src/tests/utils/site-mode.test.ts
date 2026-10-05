@@ -31,7 +31,7 @@ describe('SITE_MODE', () => {
   it('lists the prefixes the marketing build prunes, and keeps the two that work', () => {
     const m = load(undefined);
     expect(m.PLATFORM_ONLY_PREFIXES).toEqual(
-      expect.arrayContaining(['admin', 'experiments', 'feature-flags', 'results', 'workspaces', 'warehouse', 'login']),
+      expect.arrayContaining(['admin', 'experiments', 'feature-flags', 'segments', 'results', 'workspaces', 'warehouse', 'login']),
     );
     expect(m.PLATFORM_ONLY_PREFIXES).not.toContain('docs');
     expect(m.PLATFORM_ONLY_PREFIXES).not.toContain('power-calculator');
