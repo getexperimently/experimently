@@ -74,6 +74,8 @@ export interface Experiment {
    */
   confidence_level?: number;
   correction_method?: CorrectionMethod;
+  /** Whether results also carry a Bayesian analysis of the primary metric (#216). */
+  bayesian_enabled?: boolean;
 }
 
 /** `VariantBase` (create payload) */
