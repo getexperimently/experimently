@@ -5,6 +5,8 @@ import {
   OperatorType,
   COMMON_ATTRIBUTES,
   OPERATORS_BY_TYPE,
+  SEGMENT_ATTRIBUTE,
+  SEGMENT_OPERATORS,
 } from '@/types/targeting';
 
 // Simple counter-based ID generator that works in both browser and Node test environments
@@ -68,6 +70,7 @@ export function validateRules(rules: TargetingRules): ValidationResult {
         'in', 'not_in', 'regex', 'is_null', 'is_not_null',
         'semver_eq', 'semver_gt', 'semver_lt', 'semver_gte', 'semver_lte',
         'geo_within_radius', 'time_window', 'array_contains', 'array_intersects',
+        'in_segment', 'not_in_segment',
       ];
 
       if (condition.operator && !validOperators.includes(condition.operator)) {
@@ -157,18 +160,40 @@ export interface OperatorOptions {
    * experiment pages do not.
    */
   semverOnCustomAttributes?: boolean;
+  /**
+   * Offer `in_segment` / `not_in_segment` on the attribute `segment`. On by
+   * default (flag and experiment rules); a segment's own rules turn it off,
+   * because a segment cannot contain a segment.
+   */
+  allowSegments?: boolean;
 }
 
 /** The flag pages' builder: version operators on any attribute outside `COMMON_ATTRIBUTES`. */
 export const FLAG_OPERATOR_OPTIONS: OperatorOptions = { semverOnCustomAttributes: true };
 
-/** The operators the builder offers for `attribute`, under a page's options. */
+/** A segment's own rule builder: no segment operators (a segment cannot contain a segment). */
+export const SEGMENT_RULES_OPERATOR_OPTIONS: OperatorOptions = { allowSegments: false };
+
+/**
+ * The operators the builder offers for `attribute`, under a page's options.
+ *
+ * The attribute `segment` also gets the two segment operators (unless
+ * `allowSegments` is false). It keeps the text operators too: a context
+ * attribute that happens to be called `segment` is still compared with
+ * `equals` and the rest, and only the operator decides which a row is.
+ */
 export function getOperatorsForAttribute(attribute: string, options: OperatorOptions = {}): OperatorType[] {
   const type = getAttributeType(attribute);
-  const operators = OPERATORS_BY_TYPE[type] || OPERATORS_BY_TYPE['string'];
+  let operators = OPERATORS_BY_TYPE[type] || OPERATORS_BY_TYPE['string'];
   const custom = !COMMON_ATTRIBUTES.some((a) => a.value === attribute);
   if (options.semverOnCustomAttributes && custom) {
-    return [...operators, ...OPERATORS_BY_TYPE['semver']];
+    operators = [...operators, ...OPERATORS_BY_TYPE['semver']];
+  }
+  if (attribute === SEGMENT_ATTRIBUTE && options.allowSegments !== false) {
+    operators = [...operators, ...SEGMENT_OPERATORS];
   }
   return operators;
 }
+
+/** A segment id as the API writes it: a lowercase canonical UUID. */
+export const SEGMENT_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;

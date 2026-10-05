@@ -442,3 +442,32 @@ describe('unreachable copy', () => {
     expect(unreachableMessage()).toContain('See docs → Quick start.');
   });
 });
+
+describe('Retry-After (#440 PR D, gates-D D5)', () => {
+  function limited(retryAfter: string | null): Response {
+    return jsonResponse(429, { detail: 'Rate limit exceeded' }, {
+      headers: {
+        get: (name: string) =>
+          ({ 'content-type': 'application/json', ...(retryAfter === null ? {} : { 'retry-after': retryAfter }) } as Record<
+            string,
+            string
+          >)[name.toLowerCase()] ?? null,
+      },
+    } as unknown as Partial<Response>);
+  }
+
+  it('reads whole seconds onto the error', async () => {
+    mockFetch.mockResolvedValueOnce(limited('7'));
+    const err = await rejection(apiFetch('/x'));
+    expect(err.status).toBe(429);
+    expect(err.retryAfter).toBe(7);
+  });
+
+  it('ignores a missing value, an HTTP date and junk', async () => {
+    for (const value of [null, 'Wed, 21 Oct 2026 07:28:00 GMT', '1.5', '-3']) {
+      mockFetch.mockResolvedValueOnce(limited(value));
+      const err = await rejection(apiFetch('/x'));
+      expect(err.retryAfter).toBeUndefined();
+    }
+  });
+});

@@ -696,7 +696,7 @@ def test_what_is_accepted_is_what_the_flag_evaluator_applies(monkeypatch):
     )
     service = ffs.FeatureFlagService(db=MagicMock())
     corpus = _accepted_corpus()
-    assert len(corpus) == len(ACCEPTED) + 141 + 446
+    assert len(corpus) == len(ACCEPTED) + 141 + 529
     with_rules = 0
     diverged = []
     for name, raw in corpus:
