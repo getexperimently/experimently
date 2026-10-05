@@ -122,9 +122,11 @@ source venv/bin/activate && python -m pytest demo/shoplab/simulator/test_traffic
    boundary, "can stop early?"). The dashboard has no Bayesian tab: the probability that video beats
    control and the expected loss are in the API (`GET /api/v1/results/{id}/bayesian`). Reload the
    storefront with "New visitor" until you land in `video_hero`.
-2. **Product sort** (`shoplab_plp_sort`): open the Bandit view. Traffic allocation drifts toward
-   `ml_personalized` (true click rate 28% vs 22% / 19%). Show the allocation history chart, then
-   go to `/products` and note "Sorted by Recommended for you".
+2. **Product sort** (`shoplab_plp_sort`): open the experiment's page. Its **Current traffic
+   weights** panel shows each variant's share of new visitors, drifting toward `ml_personalized`
+   (true click rate 28% vs 22% / 19%). Press **Refresh** to see the latest weights; the panel does
+   not update by itself, and the dashboard has no chart of past weights. Then go to `/products`
+   and note "Sorted by Recommended for you".
 3. **Buy button** (`shoplab_pdp_buy_button`): four cells. `orange_buy_now` wins on add-to-cart;
    show the multivariate breakdown and the sequential-testing status. On a product page, switch
    visitors to see colour and text change.
