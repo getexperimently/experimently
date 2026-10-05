@@ -12,6 +12,25 @@ jest.mock('@/services/admin', () => ({
   AdminService: { listAuditLogs: jest.fn(), exportAuditLogs: jest.fn() },
 }));
 
+// The page reads the signed-in user to choose its layout. These tests run on
+// the plain (non-superuser) layout as an ANALYST, who reads every entry; who
+// opens the page, and the superuser layout, are in AuditLogAccess.test.tsx.
+jest.mock('@/contexts/AuthContext', () => ({
+  useAuth: () => ({
+    user: {
+      id: 'u-analyst',
+      username: 'analyst',
+      email: 'analyst@example.com',
+      full_name: null,
+      role: 'ANALYST',
+      is_superuser: false,
+      is_active: true,
+      auth_provider: 'local',
+    },
+    status: 'authenticated',
+  }),
+}));
+
 jest.mock('@/components/admin/AdminLayout', () => ({
   AdminLayout: ({ children, title }: { children: React.ReactNode; title: string }) => (
     <main data-testid="admin-layout">
@@ -78,6 +97,15 @@ async function renderPage() {
   await screen.findByTestId('audit-log-row-log-1');
   return view;
 }
+
+describe('the Audit Log page (#915)', () => {
+  it('renders the page with its filters, downloads and table', async () => {
+    await renderPage();
+    expect(screen.getByTestId('audit-log-page')).toBeInTheDocument();
+    expect(screen.getByTestId('audit-log-download')).toBeInTheDocument();
+    expect(screen.getByTestId('audit-log-table')).toBeInTheDocument();
+  });
+});
 
 describe('rows open from the keyboard (#221)', () => {
   it('opens a row with Enter, moves focus into the panel, and returns it on close', async () => {

@@ -145,6 +145,58 @@ describe('AppShell', () => {
     expect(screen.getByTestId('nav-experiments')).toHaveAttribute('aria-current', 'page');
   });
 
+  describe('the Audit Log item (#915)', () => {
+    it.each([
+      ['ADMIN', false],
+      ['DEVELOPER', false],
+      ['ANALYST', false],
+      ['VIEWER', false],
+      ['ADMIN', true],
+    ] as const)('links a %s (superuser: %s) to /admin/audit', async (role, isSuperuser) => {
+      signInAs(makeUser({ role, is_superuser: isSuperuser }));
+      renderShell();
+      await waitFor(() => expect(screen.getByTestId('user-menu')).toBeInTheDocument());
+      expect(screen.getByTestId('nav-audit-log')).toHaveAttribute('href', '/admin/audit');
+      expect(screen.getByTestId('nav-audit-log')).toHaveTextContent('Audit Log');
+    });
+
+    it('is not offered to an anonymous visitor', async () => {
+      mockPathname = '/docs/[...slug]';
+      mockAsPath = '/docs/quick-start';
+      renderShell();
+      await waitFor(() => expect(screen.getByTestId('nav-sign-in')).toBeInTheDocument());
+      expect(screen.queryByTestId('nav-audit-log')).not.toBeInTheDocument();
+      expect(document.querySelectorAll('a[href="/admin/audit"]')).toHaveLength(0);
+    });
+
+    it('marks only Audit Log current on /admin/audit, and only Admin on /admin/users', async () => {
+      for (const [path, current] of [
+        ['/admin/audit', '/admin/audit'],
+        ['/admin/users', '/admin'],
+      ] as const) {
+        localStorage.clear();
+        mockFetch.mockReset();
+        mockPathname = path;
+        mockAsPath = path;
+        signInAs(makeUser());
+        const view = renderShell();
+        await waitFor(() => expect(screen.getByTestId('user-menu')).toBeInTheDocument());
+
+        const desktop = screen.getByRole('navigation', { name: 'Primary' });
+        const desktopCurrent = Array.from(desktop.querySelectorAll('a[aria-current="page"]'));
+        expect(desktopCurrent.map((a) => a.getAttribute('href'))).toEqual([current]);
+
+        // The mobile links carry no test ids: query inside the mobile nav.
+        fireEvent.click(screen.getByTestId('mobile-nav-toggle'));
+        const mobile = screen.getByTestId('mobile-nav');
+        const mobileCurrent = Array.from(mobile.querySelectorAll('a[aria-current="page"]'));
+        expect(mobileCurrent.map((a) => a.getAttribute('href'))).toEqual([current]);
+        expect(mobile.querySelector('a[href="/admin/audit"]')).toHaveTextContent('Audit Log');
+        view.unmount();
+      }
+    });
+  });
+
   it('shows Admin to a superuser whatever their role', async () => {
     // The admin API is uniformly `deps.get_current_superuser`, so that flag --
     // not the role -- is what the nav has to match (#84).
@@ -262,6 +314,7 @@ describe('AppShell', () => {
         '/experiments',
         '/feature-flags',
         '/segments',
+        '/admin/audit',
         '/admin',
         '/docs',
       ]);
@@ -458,6 +511,13 @@ describe('AppShell', () => {
     expect(isNavActive('/experiments/[id]', '/experiments')).toBe(true);
     expect(isNavActive('/experiments-archive', '/experiments')).toBe(false);
     expect(isNavActive('/feature-flags', '/experiments')).toBe(false);
-    expect(NAV_ITEMS.map((i) => i.label)).toEqual(['Experiments', 'Feature Flags', 'Segments', 'Admin', 'Docs']);
+    expect(NAV_ITEMS.map((i) => i.label)).toEqual([
+      'Experiments',
+      'Feature Flags',
+      'Segments',
+      'Audit Log',
+      'Admin',
+      'Docs',
+    ]);
   });
 });

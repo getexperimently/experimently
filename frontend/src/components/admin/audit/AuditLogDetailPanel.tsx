@@ -30,14 +30,15 @@ export function AuditLogDetailPanel({ log, onClose }: AuditLogDetailPanelProps) 
     >
       {/* Header */}
       <div className="flex items-center justify-between mb-4">
-        <h3
+        {/* h2: on the plain Audit Log page it follows the page's h1 directly. */}
+        <h2
           ref={heading}
           tabIndex={-1}
           data-testid="detail-panel-heading"
           className="text-base font-semibold text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500 rounded"
         >
           Audit log detail
-        </h3>
+        </h2>
         <button
           type="button"
           data-testid="detail-panel-close"

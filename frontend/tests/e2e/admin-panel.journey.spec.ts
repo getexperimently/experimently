@@ -3,8 +3,9 @@ import { test, expect } from "./fixtures/auth.fixture";
 /**
  * Journey 5 — admin panel.
  *
- * Admin-only surface: the pages must load for an ADMIN, be refused for a
- * VIEWER, mint an API key that is shown exactly once and then listed, and the
+ * Admin surface: the pages must load for an ADMIN, be refused for a VIEWER
+ * (except the Audit Log, which every role opens, narrowed to their own
+ * entries for DEVELOPER and VIEWER: #915), mint an API key that is shown exactly once and then listed, and the
  * safety dashboard must fan out its per-flag checks under a bound (it runs one
  * `/safety/feature-flags/{id}/check` per flag, and the non-SDK rate limit is
  * 300 req/min per IP).
@@ -14,17 +15,19 @@ import { test, expect } from "./fixtures/auth.fixture";
 const SAFETY_CHECK_CONCURRENCY = 5;
 const SAFETY_FLAG_LIMIT = 100;
 
-/** Admin pages: each must render for an admin and be refused for a viewer. */
+/** Superuser-only admin pages: each must render for an admin and be refused for a viewer. */
 const ADMIN_PAGES = [
   { path: "/admin", testId: "admin-dashboard" },
   { path: "/admin/users", testId: "user-table" },
-  { path: "/admin/audit", testId: "audit-log-table" },
   { path: "/admin/safety", testId: "safety-dashboard" },
   { path: "/admin/api-keys", testId: "api-keys-page" },
 ] as const;
 
 /** Admin pages that must render their content, not just their chrome. */
-const ADMIN_LOADS = ADMIN_PAGES;
+const ADMIN_LOADS = [...ADMIN_PAGES, { path: "/admin/audit", testId: "audit-log-table" }] as const;
+
+/** The seeded viewer, who must see only their own audit entries. */
+const VIEWER_EMAIL = "viewer@demo.com";
 
 test.describe("Journey: admin panel", () => {
   test.describe.configure({ mode: "serial" });
@@ -40,6 +43,14 @@ test.describe("Journey: admin panel", () => {
         timeout: 20_000,
       });
       await expect(adminPage.getByTestId("require-auth-forbidden")).toHaveCount(0);
+      if (path === "/admin/audit") {
+        // `audit-log-table` is the wrapper around the loading, error and empty
+        // states too, so its presence alone would pass on a failed request.
+        await expect(adminPage.getByTestId("audit-log-table-loading")).toHaveCount(0, {
+          timeout: 20_000,
+        });
+        await expect(adminPage.getByTestId("audit-log-error-state")).toHaveCount(0);
+      }
     }
   });
 
@@ -62,6 +73,34 @@ test.describe("Journey: admin panel", () => {
       ).toBeVisible({ timeout: 15_000 });
       await expect(viewerPage.getByTestId(testId)).toHaveCount(0);
       await expect(viewerPage.getByTestId("admin-sidebar")).toHaveCount(0);
+    }
+  });
+
+  test("a viewer opens the Audit Log from the nav and sees only their own entries", async ({
+    viewerPage,
+  }) => {
+    await viewerPage.goto("/experiments");
+    await viewerPage.getByTestId("nav-audit-log").click();
+    await expect(viewerPage).toHaveURL(/\/admin\/audit\/?$/);
+
+    await expect(viewerPage.getByTestId("audit-log-page")).toBeVisible({ timeout: 15_000 });
+    await expect(viewerPage.getByTestId("audit-log-table-loading")).toHaveCount(0, {
+      timeout: 20_000,
+    });
+    await expect(viewerPage.getByTestId("audit-log-error-state")).toHaveCount(0);
+    await expect(viewerPage.getByTestId("audit-log-scope-own")).toBeVisible();
+    await expect(viewerPage.getByTestId("admin-sidebar")).toHaveCount(0);
+    await expect(viewerPage.getByTestId("require-auth-forbidden")).toHaveCount(0);
+
+    // The fixture's sign-in writes a USER_LOGIN entry with the viewer as the
+    // actor, so there is at least one row, and every row must be theirs: the
+    // admin's sign-ins are in the log too, and must not reach this page.
+    const actors = viewerPage.locator('[data-testid^="actor-"]');
+    await expect(actors.first()).toBeVisible({ timeout: 15_000 });
+    const names = (await actors.allInnerTexts()).map((t) => t.trim());
+    expect(names.length, "the viewer's own sign-in entry").toBeGreaterThan(0);
+    for (const name of names) {
+      expect(name, "every row's actor is the viewer").toBe(VIEWER_EMAIL);
     }
   });
 

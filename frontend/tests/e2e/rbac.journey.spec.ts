@@ -17,22 +17,22 @@ import { ExperimentsPage } from "./pages/experiments.page";
 /** Nav items the AppShell renders for a role (`NAV_ITEMS` in AppShell.tsx). */
 const NAV_FOR_ROLE: Record<UserRole, { visible: string[]; hidden: string[] }> = {
   admin: {
-    visible: ["nav-experiments", "nav-feature-flags", "nav-admin", "nav-docs"],
+    visible: ["nav-experiments", "nav-feature-flags", "nav-audit-log", "nav-admin", "nav-docs"],
     hidden: [],
   },
   developer: {
     // nav-admin is NOT here: the admin area is superusers only, and of the
     // four seeded accounts only the admin is one. The item used to be shown
     // to DEVELOPER, who then got a 403 from every /api/v1/admin request (#84).
-    visible: ["nav-experiments", "nav-feature-flags", "nav-docs"],
+    visible: ["nav-experiments", "nav-feature-flags", "nav-audit-log", "nav-docs"],
     hidden: ["nav-admin"],
   },
   analyst: {
-    visible: ["nav-experiments", "nav-feature-flags", "nav-docs"],
+    visible: ["nav-experiments", "nav-feature-flags", "nav-audit-log", "nav-docs"],
     hidden: ["nav-admin"],
   },
   viewer: {
-    visible: ["nav-experiments", "nav-feature-flags", "nav-docs"],
+    visible: ["nav-experiments", "nav-feature-flags", "nav-audit-log", "nav-docs"],
     hidden: ["nav-admin"],
   },
 };

@@ -8,6 +8,7 @@ import { isMarketingSite } from '@/utils/site-mode';
 import { ROLE_COLORS, USER_ROLE_LABELS } from '@/types/admin';
 import { useModules } from '@/contexts/ModulesContext';
 import { MODULES, MODULES_DOC_PATH, ModulesInfo, moduleInstalled } from '@/services/modules';
+import { AUDIT_LOG_ROLES } from '@/components/admin/audit/access';
 
 export interface NavItem {
   label: string;
@@ -32,6 +33,9 @@ export const NAV_ITEMS: NavItem[] = [
   { label: 'Experiments', href: '/experiments', testId: 'nav-experiments' },
   { label: 'Feature Flags', href: '/feature-flags', testId: 'nav-feature-flags' },
   { label: 'Segments', href: '/segments', testId: 'nav-segments' },
+  // Every role: the audit API answers each one, narrowed to their own entries
+  // for DEVELOPER and VIEWER. `roles` also keeps it off anonymous renders.
+  { label: 'Audit Log', href: '/admin/audit', testId: 'nav-audit-log', roles: AUDIT_LOG_ROLES },
   { label: 'Admin', href: '/admin', testId: 'nav-admin', superuser: true },
   { label: 'Docs', href: '/docs', testId: 'nav-docs' },
 ];
@@ -41,6 +45,17 @@ export const CHANGE_PASSWORD_PATH = '/account/password';
 
 export function isNavActive(pathname: string, href: string): boolean {
   return pathname === href || pathname.startsWith(`${href}/`);
+}
+
+/**
+ * The one item to mark as the current page: the longest href that matches.
+ * `/admin/audit` matches both "Audit Log" and "Admin" by prefix; only the
+ * more specific one is current there, while `/admin/users` still marks Admin.
+ */
+export function activeNavHref(pathname: string, items: NavItem[]): string | null {
+  return items
+    .filter((item) => isNavActive(pathname, item.href))
+    .reduce<string | null>((best, item) => (best === null || item.href.length > best.length ? item.href : best), null);
 }
 
 /**
@@ -206,8 +221,8 @@ interface AppShellProps {
 }
 
 /**
- * Application chrome: top navigation (Experiments · Feature Flags · Admin ·
- * Docs · More) and the user area with a visible "Log out" button. Mounted by
+ * Application chrome: top navigation (Experiments · Feature Flags · Segments ·
+ * Audit Log · Admin · Docs · More) and the user area with a visible "Log out" button. Mounted by
  * `_app.tsx` for every route except `/login`.
  */
 export function AppShell({ children }: AppShellProps) {
@@ -231,6 +246,7 @@ export function AppShell({ children }: AppShellProps) {
     if (item.roles) return user !== null && item.roles.includes(user.role);
     return true;
   });
+  const activeHref = activeNavHref(pathname, visibleNav);
   const moduleNav = installedModuleNav({ profile, modules, version }, user);
   // Not while the probe is outstanding: the provider's initial state is core,
   // so a full-profile instance would paint the "Modules" guide link on every
@@ -278,7 +294,7 @@ export function AppShell({ children }: AppShellProps) {
 
             <nav aria-label="Primary" className="hidden md:flex items-center gap-1">
               {visibleNav.map((item) => {
-                const active = isNavActive(pathname, item.href);
+                const active = item.href === activeHref;
                 return (
                   <Link
                     key={item.href}
@@ -409,10 +425,10 @@ export function AppShell({ children }: AppShellProps) {
                 key={item.href}
                 href={item.href}
                 onClick={() => setMenuOpen(false)}
-                aria-current={isNavActive(pathname, item.href) ? 'page' : undefined}
+                aria-current={item.href === activeHref ? 'page' : undefined}
                 className={[
                   'px-3 py-2 rounded-md text-sm font-medium',
-                  isNavActive(pathname, item.href) ? 'bg-blue-50 text-blue-700' : 'text-slate-700 hover:bg-slate-50',
+                  item.href === activeHref ? 'bg-blue-50 text-blue-700' : 'text-slate-700 hover:bg-slate-50',
                 ].join(' ')}
               >
                 {item.label}

@@ -261,9 +261,12 @@ many match, and sends no file; narrow `from_date` and `to_date`, or filter by
 rate limit, 10 requests a minute per client address, apart from the
 [data export](data-export.md) routes' limit.
 
-The dashboard's Audit Log page (`/admin/audit`) has **Download CSV** and **Download JSON**
-buttons that export the page's current filters. The page makes the same comparison, and
-when the counts differ it says so and saves nothing.
+The dashboard's Audit Log page (`/admin/audit`) is in the top navigation for every signed-in
+role. It shows what `GET /api/v1/audit-logs/` returns for that user: every entry for ADMIN,
+ANALYST and superusers, and their own entries for DEVELOPER and VIEWER, who see a note saying
+so. Its **Download CSV** and **Download JSON** buttons export the same entries, with the
+page's current filters. The page makes the same comparison, and when the counts differ it
+says so and saves nothing.
 
 ---
 

@@ -71,6 +71,7 @@ WITNESSES: Dict[str, str] = {
     "Roll a feature flag back from the safety page": "rollback-button",
     "Manage users and their roles": "user-management-page",
     "Change your own password (local sign-in)": "change-password-page",  # #503
+    "Read the audit log, and download it as CSV or JSON": "audit-log-page",  # #915
     # The #442 slice before launch: B (#882), one toggle per variant.
     "Give each variant a configuration (a JSON payload) when creating an experiment": (
         "variant-configuration-toggle-*"

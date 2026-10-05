@@ -53,6 +53,13 @@ describe('marketing build', () => {
     }
   });
 
+  it('shows no Audit Log item', async () => {
+    const { container } = show();
+    await waitFor(() => expect(screen.getByText('page')).toBeInTheDocument());
+    expect(screen.queryByTestId('nav-audit-log')).toBeNull();
+    expect(container.querySelectorAll('a[href="/admin/audit"]')).toHaveLength(0);
+  });
+
   it('keeps the docs link, which works', async () => {
     const { container } = show();
     await waitFor(() => expect(container.querySelector('a[href="/docs"]')).toBeInTheDocument());
