@@ -18,7 +18,7 @@ This document describes the concrete security improvements applied to the FastAP
 
 The existing `SecurityHeadersMiddleware` was rewritten to:
 
-- Apply a **strict Content-Security-Policy** (`default-src 'none'; frame-ancestors 'none'`) instead of the permissive policy that allowed `unsafe-inline` and `unsafe-eval`.  An API-only service has no need to serve scripts, styles, or frames.
+- Apply a **strict Content-Security-Policy** (`default-src 'none'; frame-ancestors 'none'`) instead of the permissive policy that allowed `unsafe-inline` and `unsafe-eval`.  An API-only service has no need to serve scripts, styles, or frames. The one exception is the two API reference pages, `/api/v1/docs` and `/api/v1/redoc`, which allow the jsdelivr assets they load (see below).
 - Always emit **HSTS** (`max-age=31536000; includeSubDomains; preload`) on all responses, not only in production.  HTTPS enforcement is the responsibility of the load balancer; the header is safe to emit unconditionally.
 - **Remove server fingerprinting headers** (`server`, `x-powered-by`) to reduce the information available to an attacker.
 - Expand **Permissions-Policy** to additionally restrict `usb` and `magnetometer`.
@@ -34,6 +34,8 @@ Headers now set on every response:
 | `Permissions-Policy` | `geolocation=(), microphone=(), camera=(), payment=(), usb=(), magnetometer=()` |
 | `Strict-Transport-Security` | `max-age=31536000; includeSubDomains; preload` |
 | `Content-Security-Policy` | `default-src 'none'; frame-ancestors 'none'` |
+
+The API reference pages, `/api/v1/docs` (Swagger UI) and `/api/v1/redoc` (ReDoc), matched by exact path, get a different `Content-Security-Policy` instead (`DOCS_CSP` in the middleware): scripts and stylesheets from `https://cdn.jsdelivr.net`, ReDoc's Google Fonts and its logo image, Swagger UI's one inline script by its sha256 hash, and the OpenAPI document from the same origin. It allows no other inline script and no `eval`. The dashboard's nginx proxies these two paths without adding its own policy, so the API's is the only one the browser sees.
 
 ### Why it matters
 

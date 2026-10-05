@@ -57,7 +57,7 @@ The API is organized into resource-specific endpoint groups:
 | `/api/v1/rbac` | Role management and permission grants |
 | `/api/v1/bandit` | Multi-armed bandit state and weight management |
 
-Interactive API documentation is available at `/docs` (Swagger UI) and `/redoc`.
+Interactive API documentation is available at `/api/v1/docs` (Swagger UI) and `/api/v1/redoc` (ReDoc).
 
 ### Background Schedulers
 
