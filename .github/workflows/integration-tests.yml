@@ -33,7 +33,7 @@ jobs:
   shard:
     name: integration-tests (shard ${{ matrix.shard }})
     runs-on: ubuntu-latest
-    timeout-minutes: ${{ matrix.shard == 3 && 1 || 30 }}
+    timeout-minutes: 30
     strategy:
       # One red shard must not cancel the others: the summary needs every
       # shard's report to say which tests failed and that the rest ran.
@@ -134,6 +134,10 @@ jobs:
           done
           docker logs redis-auth
           exit 1
+
+      - name: G-f hold (scratch only)
+        if: matrix.shard == 4
+        run: sleep 300
 
       - name: Run integration tests
         env:
