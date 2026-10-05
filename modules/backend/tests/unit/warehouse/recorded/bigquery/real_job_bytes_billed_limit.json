@@ -2,12 +2,12 @@
   "_provenance": {
     "source": "real account",
     "real_run_id": "wl-bigquery-20261005T150837Z-7782e712",
-    "check": "bq_runner_parity",
+    "check": "bq_bytes_billed_cap_enforced",
     "request": {
       "method": "POST",
       "path": "/bigquery/v2/projects/acme-analytics/jobs"
     },
-    "note": "Recorded on a real account by the warehouse_live check, then scrubbed: the project, dataset, service-account email, job id, etag, temporary dataset and table names and the statement text are replaced with this suite's placeholders. Everything else is as BigQuery answered."
+    "note": "Recorded on a real account by the warehouse_live check, then scrubbed: the project, dataset, service-account email, job id, etag, temporary dataset and table names and the statement text are replaced with this suite's placeholders. Messages are replaced by the sentinel, so the tests can show no vendor text is passed on. Everything else is as BigQuery answered."
   },
   "status": 200,
   "body": {
@@ -26,7 +26,7 @@
         },
         "writeDisposition": "WRITE_TRUNCATE",
         "priority": "INTERACTIVE",
-        "maximumBytesBilled": "104857600",
+        "maximumBytesBilled": "10485760",
         "useLegacySql": false
       },
       "jobTimeoutMs": "60000",
@@ -41,36 +41,33 @@
       "location": "US"
     },
     "statistics": {
-      "creationTime": "1791212930443",
-      "startTime": "1791212930556",
+      "creationTime": "1791212937392",
+      "startTime": "1791212937631",
+      "endTime": "1791212937742",
       "query": {
-        "statementType": "SELECT",
-        "searchStatistics": {
-          "indexUnusedReasons": [
-            {
-              "code": "INDEX_CONFIG_NOT_AVAILABLE",
-              "message": "There is no index configuration for the base table `acme-analytics:analytics.events`.",
-              "baseTable": {
-                "projectId": "acme-analytics",
-                "datasetId": "analytics",
-                "tableId": "events"
-              }
-            },
-            {
-              "code": "INDEX_CONFIG_NOT_AVAILABLE",
-              "message": "There is no index configuration for the base table `acme-analytics:analytics.exposures`.",
-              "baseTable": {
-                "projectId": "acme-analytics",
-                "datasetId": "analytics",
-                "tableId": "exposures"
-              }
-            }
-          ]
-        }
+        "cacheHit": false,
+        "referencedTables": [
+          {
+            "projectId": "bigquery-public-data",
+            "datasetId": "usa_names",
+            "tableId": "usa_1910_current"
+          }
+        ],
+        "statementType": "SELECT"
       }
     },
     "status": {
-      "state": "RUNNING"
+      "errorResult": {
+        "reason": "bytesBilledLimitExceeded",
+        "message": "UPSTREAM-SENTINEL-bq-4d1e message"
+      },
+      "errors": [
+        {
+          "reason": "bytesBilledLimitExceeded",
+          "message": "UPSTREAM-SENTINEL-bq-4d1e message"
+        }
+      ],
+      "state": "DONE"
     },
     "principal_subject": "serviceAccount:analysis-reader@acme-analytics.iam.gserviceaccount.com",
     "jobCreationReason": {

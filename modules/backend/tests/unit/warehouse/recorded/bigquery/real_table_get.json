@@ -1,0 +1,63 @@
+{
+  "_provenance": {
+    "source": "real account",
+    "real_run_id": "wl-bigquery-20261005T150837Z-7782e712",
+    "check": "bq_table_columns",
+    "request": {
+      "method": "GET",
+      "path": "/bigquery/v2/projects/acme-analytics/datasets/analytics/tables/exposures"
+    },
+    "note": "Recorded on a real account by the warehouse_live check, then scrubbed: the project, dataset, service-account email, job id, etag, temporary dataset and table names and the statement text are replaced with this suite's placeholders. Everything else is as BigQuery answered."
+  },
+  "status": 200,
+  "body": {
+    "kind": "bigquery#table",
+    "etag": "AAAAAAAAAAAAAAAAAAAAAA==",
+    "id": "acme-analytics:analytics.exposures",
+    "selfLink": "https://bigquery.googleapis.com/bigquery/v2/projects/acme-analytics/datasets/analytics/tables/exposures",
+    "tableReference": {
+      "projectId": "acme-analytics",
+      "datasetId": "analytics",
+      "tableId": "exposures"
+    },
+    "schema": {
+      "fields": [
+        {
+          "name": "user_id",
+          "type": "STRING",
+          "mode": "NULLABLE"
+        },
+        {
+          "name": "experiment_key",
+          "type": "STRING",
+          "mode": "NULLABLE"
+        },
+        {
+          "name": "variant",
+          "type": "STRING",
+          "mode": "NULLABLE"
+        },
+        {
+          "name": "exposed_at",
+          "type": "TIMESTAMP",
+          "mode": "NULLABLE"
+        }
+      ]
+    },
+    "numBytes": "18577780",
+    "numLongTermBytes": "0",
+    "numRows": "400000",
+    "creationTime": "1791180125061",
+    "lastModifiedTime": "1791180125061",
+    "type": "TABLE",
+    "location": "US",
+    "numTimeTravelPhysicalBytes": "0",
+    "numTotalLogicalBytes": "18577780",
+    "numActiveLogicalBytes": "18577780",
+    "numLongTermLogicalBytes": "0",
+    "numTotalPhysicalBytes": "207845",
+    "numActivePhysicalBytes": "207845",
+    "numLongTermPhysicalBytes": "0",
+    "numCurrentPhysicalBytes": "207845"
+  }
+}

@@ -1,0 +1,139 @@
+{
+  "_provenance": {
+    "source": "real account",
+    "real_run_id": "wl-bigquery-20261005T150837Z-7782e712",
+    "check": "bq_runner_parity",
+    "request": {
+      "method": "GET",
+      "path": "/bigquery/v2/projects/acme-analytics/queries/JOBID"
+    },
+    "note": "Recorded on a real account by the warehouse_live check, then scrubbed: the project, dataset, service-account email, job id, etag, temporary dataset and table names and the statement text are replaced with this suite's placeholders. Everything else is as BigQuery answered."
+  },
+  "status": 200,
+  "body": {
+    "kind": "bigquery#getQueryResultsResponse",
+    "etag": "AAAAAAAAAAAAAAAAAAAAAA==",
+    "schema": {
+      "fields": [
+        {
+          "name": "variant",
+          "type": "STRING",
+          "mode": "NULLABLE"
+        },
+        {
+          "name": "n",
+          "type": "INTEGER",
+          "mode": "NULLABLE"
+        },
+        {
+          "name": "n_converted",
+          "type": "INTEGER",
+          "mode": "NULLABLE"
+        },
+        {
+          "name": "k",
+          "type": "STRING",
+          "mode": "NULLABLE"
+        },
+        {
+          "name": "sum_d",
+          "type": "STRING",
+          "mode": "NULLABLE"
+        },
+        {
+          "name": "sum_d2",
+          "type": "STRING",
+          "mode": "NULLABLE"
+        },
+        {
+          "name": "metric_rows_in_window",
+          "type": "INTEGER",
+          "mode": "NULLABLE"
+        },
+        {
+          "name": "metric_rows_matched",
+          "type": "INTEGER",
+          "mode": "NULLABLE"
+        },
+        {
+          "name": "null_value_rows",
+          "type": "INTEGER",
+          "mode": "NULLABLE"
+        }
+      ]
+    },
+    "jobReference": {
+      "projectId": "acme-analytics",
+      "jobId": "JOBID",
+      "location": "US"
+    },
+    "totalRows": "2",
+    "rows": [
+      {
+        "f": [
+          {
+            "v": "control"
+          },
+          {
+            "v": "200000"
+          },
+          {
+            "v": "100514"
+          },
+          {
+            "v": "0.50193499999999193"
+          },
+          {
+            "v": "127.00000000076665"
+          },
+          {
+            "v": "49998.759664882967"
+          },
+          {
+            "v": "200774"
+          },
+          {
+            "v": "200774"
+          },
+          {
+            "v": "0"
+          }
+        ]
+      },
+      {
+        "f": [
+          {
+            "v": "treatment"
+          },
+          {
+            "v": "200000"
+          },
+          {
+            "v": "100260"
+          },
+          {
+            "v": "0.50193499999999193"
+          },
+          {
+            "v": "-126.99999999809692"
+          },
+          {
+            "v": "49999.742644883164"
+          },
+          {
+            "v": "200774"
+          },
+          {
+            "v": "200774"
+          },
+          {
+            "v": "0"
+          }
+        ]
+      }
+    ],
+    "totalBytesProcessed": "30755560",
+    "jobComplete": true,
+    "cacheHit": false
+  }
+}

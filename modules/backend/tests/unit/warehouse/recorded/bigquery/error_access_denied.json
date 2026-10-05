@@ -1,24 +1,27 @@
 {
   "_provenance": {
-    "source": "vendor documentation",
-    "vendor_docs_row": "7c",
-    "url": "https://docs.cloud.google.com/bigquery/docs/error-messages",
-    "note": "accessDenied, 403; the messages are replaced by a sentinel.",
-    "real_run_id": null
+    "source": "real account",
+    "real_run_id": "wl-bigquery-20261005T150837Z-7782e712",
+    "check": "bq_create_refused",
+    "request": {
+      "method": "POST",
+      "path": "/bigquery/v2/projects/acme-analytics/jobs"
+    },
+    "note": "Recorded on a real account by the warehouse_live check, then scrubbed: the project, dataset, service-account email, job id, etag, temporary dataset and table names and the statement text are replaced with this suite's placeholders. Messages are replaced by the sentinel, so the tests can show no vendor text is passed on. Everything else is as BigQuery answered."
   },
   "status": 403,
   "body": {
     "error": {
       "code": 403,
       "message": "UPSTREAM-SENTINEL-bq-4d1e message",
-      "status": "PERMISSION_DENIED",
       "errors": [
         {
+          "message": "UPSTREAM-SENTINEL-bq-4d1e message",
           "domain": "global",
-          "reason": "accessDenied",
-          "message": "UPSTREAM-SENTINEL-bq-4d1e detail"
+          "reason": "accessDenied"
         }
-      ]
+      ],
+      "status": "PERMISSION_DENIED"
     }
   }
 }

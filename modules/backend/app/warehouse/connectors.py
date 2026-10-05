@@ -20,10 +20,11 @@ KNOWN_CONNECTORS: Final = ("bigquery", "snowflake", "athena")
 #:
 #: * ``snowflake`` -- the real-account check passed on 2026-10-04, run
 #:   ``wl-snowflake-20261004T225624Z-3787b33c`` (11 checks, all passed).
+#: * ``bigquery`` -- the real-account check passed on 2026-10-05, run
+#:   ``wl-bigquery-20261005T150837Z-7782e712`` (10 checks, all passed).
 #:
-#: BigQuery waits for its own real check.  Amazon Athena stays disabled until
-#: after launch.
-ENABLED_CONNECTORS: Final[frozenset[str]] = frozenset({"snowflake"})
+#: Amazon Athena stays disabled until after launch.
+ENABLED_CONNECTORS: Final[frozenset[str]] = frozenset({"snowflake", "bigquery"})
 
 _NAMES: Final = {
     "bigquery": "BigQuery",

@@ -102,7 +102,7 @@ def test_a_proportion_run_through_the_bigquery_connector(wh, service_account_pem
     assert counts == [("control", 1000, 100), ("treatment", 1000, 110)]
     assert run["results"]["diagnostics"]["multi_variant_units"] == 4
     assert [m["statement"] for m in run["job_metadata"]] == ["diagnostics", "metric"]
-    assert all(m["total_bytes_billed"] == 10485760 for m in run["job_metadata"])
+    assert all(m["total_bytes_billed"] == 31457280 for m in run["job_metadata"])
     assert all(m["job_id"].startswith("experimently_") for m in run["job_metadata"])
     # BigQuery statements, in BigQuery's dialect.
     assert all(s["dialect"] == "bigquery" for s in run["statements"])

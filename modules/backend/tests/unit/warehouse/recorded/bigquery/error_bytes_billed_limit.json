@@ -3,7 +3,7 @@
     "source": "vendor documentation",
     "vendor_docs_row": "7c",
     "url": "https://docs.cloud.google.com/bigquery/docs/error-messages",
-    "note": "The maximumBytesBilled failure. The reason bytesBilledLimitExceeded is not in the error table; the real check confirms it.",
+    "note": "The maximumBytesBilled failure. The reason bytesBilledLimitExceeded is not in the error table. The passing real-account run (wl-bigquery-20261005T150837Z-7782e712) received it as a finished job with that errorResult, which real_job_bytes_billed_limit.json records; this error-body form stays as documented.",
     "real_run_id": null
   },
   "status": 400,

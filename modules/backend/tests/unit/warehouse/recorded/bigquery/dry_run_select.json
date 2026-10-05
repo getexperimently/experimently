@@ -1,36 +1,142 @@
 {
   "_provenance": {
-    "source": "vendor documentation",
-    "vendor_docs_row": "7c",
-    "url": "https://docs.cloud.google.com/bigquery/docs/reference/rest/v2/Job",
-    "note": "jobs.insert dry run: 'a mostly empty response with some processing statistics'; statementType SELECT.",
-    "real_run_id": null
+    "source": "real account",
+    "real_run_id": "wl-bigquery-20261005T150837Z-7782e712",
+    "check": "bq_runner_parity",
+    "request": {
+      "method": "POST",
+      "path": "/bigquery/v2/projects/acme-analytics/jobs"
+    },
+    "note": "Recorded on a real account by the warehouse_live check, then scrubbed: the project, dataset, service-account email, job id, etag, temporary dataset and table names and the statement text are replaced with this suite's placeholders. Everything else is as BigQuery answered."
   },
   "status": 200,
   "body": {
     "kind": "bigquery#job",
+    "etag": "AAAAAAAAAAAAAAAAAAAAAA==",
+    "id": "acme-analytics:US.",
+    "selfLink": "https://bigquery.googleapis.com/bigquery/v2/projects/acme-analytics/jobs/?location=US",
+    "user_email": "analysis-reader@acme-analytics.iam.gserviceaccount.com",
     "configuration": {
-      "dryRun": true,
       "query": {
         "query": "...",
+        "destinationTable": {
+          "projectId": "acme-analytics",
+          "datasetId": "_0000000000000000000000000000000000000000",
+          "tableId": "anon0000000000000000000000000000000000000000000000000000000000000000"
+        },
+        "writeDisposition": "WRITE_TRUNCATE",
+        "priority": "INTERACTIVE",
+        "maximumBytesBilled": "104857600",
         "useLegacySql": false
-      }
+      },
+      "dryRun": true,
+      "labels": {
+        "experimently": "analysis"
+      },
+      "jobType": "QUERY"
     },
     "jobReference": {
       "projectId": "acme-analytics",
       "location": "US"
     },
     "statistics": {
-      "creationTime": "1759000000000",
-      "totalBytesProcessed": "1048576",
+      "creationTime": "1791212930040",
+      "endTime": "1791212930283",
+      "totalBytesProcessed": "30755560",
       "query": {
-        "totalBytesProcessed": "1048576",
+        "totalBytesProcessed": "30755560",
+        "totalBytesBilled": "0",
+        "cacheHit": false,
+        "referencedTables": [
+          {
+            "projectId": "acme-analytics",
+            "datasetId": "analytics",
+            "tableId": "exposures"
+          },
+          {
+            "projectId": "acme-analytics",
+            "datasetId": "analytics",
+            "tableId": "events"
+          }
+        ],
+        "schema": {
+          "fields": [
+            {
+              "name": "variant",
+              "type": "STRING",
+              "mode": "NULLABLE"
+            },
+            {
+              "name": "n",
+              "type": "INTEGER",
+              "mode": "NULLABLE"
+            },
+            {
+              "name": "n_converted",
+              "type": "INTEGER",
+              "mode": "NULLABLE"
+            },
+            {
+              "name": "k",
+              "type": "STRING",
+              "mode": "NULLABLE"
+            },
+            {
+              "name": "sum_d",
+              "type": "STRING",
+              "mode": "NULLABLE"
+            },
+            {
+              "name": "sum_d2",
+              "type": "STRING",
+              "mode": "NULLABLE"
+            },
+            {
+              "name": "metric_rows_in_window",
+              "type": "INTEGER",
+              "mode": "NULLABLE"
+            },
+            {
+              "name": "metric_rows_matched",
+              "type": "INTEGER",
+              "mode": "NULLABLE"
+            },
+            {
+              "name": "null_value_rows",
+              "type": "INTEGER",
+              "mode": "NULLABLE"
+            }
+          ]
+        },
+        "statementType": "SELECT",
         "totalBytesProcessedAccuracy": "PRECISE",
-        "statementType": "SELECT"
+        "searchStatistics": {
+          "indexUnusedReasons": [
+            {
+              "code": "INDEX_CONFIG_NOT_AVAILABLE",
+              "message": "There is no index configuration for the base table `acme-analytics:analytics.events`.",
+              "baseTable": {
+                "projectId": "acme-analytics",
+                "datasetId": "analytics",
+                "tableId": "events"
+              }
+            },
+            {
+              "code": "INDEX_CONFIG_NOT_AVAILABLE",
+              "message": "There is no index configuration for the base table `acme-analytics:analytics.exposures`.",
+              "baseTable": {
+                "projectId": "acme-analytics",
+                "datasetId": "analytics",
+                "tableId": "exposures"
+              }
+            }
+          ]
+        }
       }
     },
     "status": {
       "state": "DONE"
-    }
+    },
+    "principal_subject": "serviceAccount:analysis-reader@acme-analytics.iam.gserviceaccount.com"
   }
 }

@@ -123,7 +123,7 @@ You can combine both: run a feature behind a flag during an experiment, then gra
 
 ### Can I use my own data warehouse?
 
-Yes, if it is Snowflake. Warehouse analysis (beta, full profile) runs an experiment's analysis on your own tables, and each warehouse becomes available once its connector has been checked against a real account: Snowflake is available, and BigQuery and Amazon Athena are not yet. See [Warehouse analysis](../api/warehouse-analytics.md).
+Yes, if it is Snowflake or BigQuery. Warehouse analysis (beta, full profile) runs an experiment's analysis on your own tables, and each warehouse becomes available once its connector has been checked against a real account: Snowflake and BigQuery are available, and Amazon Athena is not yet. See [Warehouse analysis](../api/warehouse-analytics.md).
 
 ---
 
