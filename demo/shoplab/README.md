@@ -13,7 +13,7 @@ made-up products with gradient artwork.
 
 | Page | Experiment / flag | Platform feature shown |
 |---|---|---|
-| **Homepage** `/` | `shoplab_hero_banner` — image hero vs. CSS-animated "video" hero | Classic A/B test, sequential testing (mSPRT), Bayesian results (API only), variant configuration driving copy |
+| **Homepage** `/` | `shoplab_hero_banner` — image hero vs. CSS-animated "video" hero | Classic A/B test, sequential testing (mSPRT), Bayesian results, variant configuration driving copy |
 | **Product list** `/products` | `shoplab_plp_sort` — relevance vs. price vs. "ML personalised" ordering | **Multi-armed bandit** (Thompson sampling): traffic shifts toward the winning sort |
 | **Product detail** `/products/[id]` | `shoplab_pdp_buy_button` — button colour × CTA text (4 cells) | **Multivariate** test, sequential testing, `value` on `add_to_cart` |
 | **Checkout** `/checkout` | `shoplab_checkout_flow` — 3-step stepper vs. one-page form | **CUPED** (API only; the simulator's visitors are new, so they have no history), revenue metric from `purchase` value |
@@ -119,8 +119,9 @@ source venv/bin/activate && python -m pytest demo/shoplab/simulator/test_traffic
 ## Demo script — what to show in the dashboard
 
 1. **Hero banner** (`shoplab_hero_banner`): open Results. Point at the **Sequential** tab (mSPRT
-   boundary, "can stop early?"). The dashboard has no Bayesian tab: the probability that video beats
-   control and the expected loss are in the API (`GET /api/v1/results/{id}/bayesian`). Reload the
+   boundary, "can stop early?"). The probability that video beats control and the expected loss are
+   in the Overview tab's Bayesian panel where your version has one, and always in the API
+   (`GET /api/v1/results/{id}/bayesian`). Reload the
    storefront with "New visitor" until you land in `video_hero`.
 2. **Product sort** (`shoplab_plp_sort`): open the experiment's page. Its **Current traffic
    weights** panel shows each variant's share of new visitors, drifting toward `ml_personalized`

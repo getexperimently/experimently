@@ -1,0 +1,62 @@
+# What the Dashboard Does, and What Is API Only
+
+Everything Experimently does is in the REST API. The dashboard covers the everyday loop: create
+an experiment, start it, read its results, and create, target, roll out and switch off feature
+flags. Some capabilities work through the API, and through the SDKs where they apply, but have no
+screen yet.
+
+The table lists each capability and where you do it today:
+
+- **Dashboard**: a screen in the dashboard does it.
+- **API only**: it works through the API, with no screen yet. The guide in the last column shows
+  the requests.
+
+| Capability | Where you do it | Guide |
+|---|---|---|
+| Create an experiment, with guided setup or the single-page form | Dashboard | [Running experiments](user-guide.md) |
+| Start, pause, resume and complete an experiment | Dashboard | [Running experiments](user-guide.md) |
+| Change an experiment's targeting while it is a draft or paused | Dashboard | [Running experiments](user-guide.md) |
+| Create a feature flag | Dashboard | [Creating feature flags](../feature-flags/create.md) |
+| Turn a feature flag on or off | Dashboard | [Creating feature flags](../feature-flags/create.md) |
+| Set a flag's targeting rules and rollout percentage | Dashboard | [Creating feature flags](../feature-flags/create.md) |
+| See a flag's rollout schedule and its stages | Dashboard | [Gradual rollouts](../feature-flags/rollouts.md) |
+| Roll a feature flag back from the safety page | Dashboard | [Safety monitoring](../feature-flags/safety.md) |
+| Manage users and their roles | Dashboard | [Authentication user guide](../auth/auth-user-guide.md) |
+| Give each variant a configuration (a JSON payload) when creating an experiment | Dashboard | [Running experiments](user-guide.md) |
+| Turn on Bayesian analysis when creating an experiment | Dashboard | [Bayesian analysis](../api/bayesian.md) |
+| See on the experiment page whether Bayesian analysis is on | Dashboard | [Bayesian analysis](../api/bayesian.md) |
+| Segments: list, create, and upload a list of user ids | Dashboard | [Segments](segments.md) |
+| The sample-ratio check on the results page | Dashboard | [Running experiments](user-guide.md) |
+| Bayesian results: chance to be best, expected loss and credible intervals | Dashboard | [Bayesian analysis](../api/bayesian.md) |
+| See a bandit experiment's current traffic weights | Dashboard | [Multi-armed bandits](../api/multi-armed-bandit.md) |
+| Clone an experiment | API only | [API endpoints](../api/endpoints.md) |
+| Delete a draft experiment | API only | [API endpoints](../api/endpoints.md) |
+| Edit a draft experiment's name, description and hypothesis | API only | [API endpoints](../api/endpoints.md) |
+| Change a draft experiment's variants or metrics | API only | [API endpoints](../api/endpoints.md) |
+| Schedule an experiment's start and end dates | API only | [Running experiments](user-guide.md) |
+| Create or edit a rollout schedule and its stages | API only | [Gradual rollouts](../feature-flags/rollouts.md) |
+| Activate, pause or advance a rollout schedule | API only | [Gradual rollouts](../feature-flags/rollouts.md) |
+| Delete a feature flag | API only | [API endpoints](../api/endpoints.md) |
+| Archive and unarchive a feature flag | API only | [Running experiments](user-guide.md) |
+| Create a bandit experiment | API only | [Multi-armed bandits](../api/multi-armed-bandit.md) |
+| Set a bandit's weights by hand | API only | [Multi-armed bandits](../api/multi-armed-bandit.md) |
+| See how a bandit's weights changed over time | API only | [Multi-armed bandits](../api/multi-armed-bandit.md) |
+| Global holdouts: create, activate, and read their results (beta) | API only | [Mutual exclusion groups and global holdout](../api/mutual-exclusion-groups.md) |
+| Mutual exclusion groups | API only | [Mutual exclusion groups and global holdout](../api/mutual-exclusion-groups.md) |
+| Split-URL experiments (full profile) | API only | [Split URL testing](../api/split-url.md) |
+| CUPED-adjusted results (beta) | API only | [CUPED](../api/cuped.md) |
+| The interaction scan and the pair test (beta) | API only | [Interaction detection](../api/interaction-detection.md) |
+| Download results as CSV | API only | [Data export](../api/data-export.md) |
+| The effect size in the metric comparison table | API only | [Running experiments](user-guide.md) |
+| Each variant's confidence interval on the results page | API only | [Running experiments](user-guide.md) |
+| Bayesian priors, loss threshold and credible level | API only | [Bayesian analysis](../api/bayesian.md) |
+
+Screens for the API-only rows are planned for after launch. The open work is tracked in
+[issue #442](https://github.com/getexperimently/experimently/issues/442).
+
+!!! note "For contributors: this table is checked"
+    `backend/tests/unit/docs/test_dashboard_and_api.py` gives each row a marker the screen
+    carries in its markup. It fails when a row says **API only** while the dashboard has that
+    screen, and when a row says **Dashboard** while the screen is missing or no page test checks
+    it. A pull request that adds one of these screens changes its row to **Dashboard** in the
+    same change.

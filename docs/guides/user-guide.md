@@ -22,12 +22,32 @@ You'll need an account with one of the following roles:
 
 | Role | What You Can Do |
 |------|----------------|
-| **ADMIN** | Manage users; create, change, schedule and delete any experiment (schedule and delete through the API; the dashboard has no control for them yet); all flags |
-| **DEVELOPER** | Create, change, schedule and delete any experiment (schedule and delete through the API; the dashboard has no control for them yet); create and manage any feature flag |
+| **ADMIN** | Manage users; create, change, schedule and delete any experiment (scheduling is through the API; [which actions have a screen](dashboard-and-api.md)); all flags |
+| **DEVELOPER** | Create, change, schedule and delete any experiment (scheduling is through the API; [which actions have a screen](dashboard-and-api.md)); create and manage any feature flag |
 | **ANALYST** | View all experiments, results, and reports, and every feature flag (read-only) |
 | **VIEWER** | View every experiment and its results, and every feature flag (read-only) |
 
 Contact your platform admin to request access or role changes.
+
+### What the dashboard does not do yet
+
+Everything below works through the API today; the dashboard has no screen for it yet:
+
+- global holdouts, and mutual exclusion groups
+- scheduling an experiment's start and end dates
+- creating, editing, activating, pausing or advancing a rollout schedule (the flag's page shows
+  the schedule)
+- deleting, archiving or unarchiving a feature flag
+- changing a draft experiment's variants or metrics after it is created
+- creating a bandit experiment, or setting its weights by hand
+- split-URL experiments (full profile)
+- CUPED-adjusted results (beta), and the interaction scan and pair test
+- downloading results as CSV
+- Bayesian priors and stopping thresholds
+
+[What the dashboard does, and what is API only](dashboard-and-api.md) is the full list, row by
+row, with the guide for each. Screens for these are planned for after launch, tracked in
+[issue #442](https://github.com/getexperimently/experimently/issues/442).
 
 ---
 
