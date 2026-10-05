@@ -17,8 +17,9 @@ ROLES = (A, D, AN, V)
 #: Fields of a response that only some of the roles allowed on the route are
 #: given; every other role gets the field as null.  One entry per field, with
 #: the roles that get it (founder decision D34: a run's SQL is returned to
-#: ANALYST and above).  test_run_sql_roles.py derives its expectations from
-#: this table.
+#: ANALYST and above).  Since D50 a run is read by these same roles only, so
+#: the field is no narrower than its routes.  test_run_sql_roles.py derives its
+#: expectations from this table.
 FIELD_ROLES = {"statements": ("ADMIN", "DEVELOPER", "ANALYST")}
 
 
@@ -280,14 +281,14 @@ def _cases(wh, ids):
         (
             ("GET", f"{WA}/experiments/{{experiment_id}}/runs"),
             "Viewing warehouse analyses",
-            everyone,
+            readers,
             None,
             lambda cl, x: cl.get(f"{WA}/experiments/{e}/runs"),
         ),
         (
             ("GET", f"{WA}/runs/{{run_id}}"),
             "Viewing warehouse analyses",
-            everyone,
+            readers,
             None,
             lambda cl, x: cl.get(f"{WA}/runs/{r}"),
         ),

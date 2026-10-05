@@ -4,6 +4,7 @@
  * of "Analyse now", the role gating, SRM, "Not computed", and View SQL.
  */
 import React from 'react';
+import axe from 'axe-core';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { ModulesProvider } from '@/contexts/ModulesContext';
 import { ApiError, apiFetch } from '@/services/api';
@@ -122,21 +123,74 @@ describe('module gate', () => {
 });
 
 describe('roles', () => {
-  it.each([['ANALYST'], ['VIEWER']])(
-    '%s reads runs, sees why it cannot start one, and never lists connections',
-    async (role) => {
-      as(role);
-      install([{ path: RUNS_PATH, handler: () => ({ runs: [run()] }) }]);
-      renderSection();
-      expect(await screen.findByTestId('warehouse-results')).toBeInTheDocument();
-      expect(screen.getByTestId('warehouse-role-note')).toHaveTextContent(
-        `Starting a warehouse analysis requires the ADMIN or DEVELOPER role; you are ${role}.`,
-      );
-      expect(screen.queryByTestId('warehouse-open-form')).toBeNull();
-      expect(calls('GET', CONNECTIONS_PATH)).toHaveLength(0);
-      expect(calls('GET', SOURCES_PATH)).toHaveLength(0);
-    },
-  );
+  it('ANALYST reads runs, sees why it cannot start one, and never lists connections', async () => {
+    as('ANALYST');
+    install([{ path: RUNS_PATH, handler: () => ({ runs: [run()] }) }]);
+    renderSection();
+    expect(await screen.findByTestId('warehouse-results')).toBeInTheDocument();
+    expect(screen.getByTestId('warehouse-role-note')).toHaveTextContent(
+      'Starting a warehouse analysis requires the ADMIN or DEVELOPER role; you are ANALYST.',
+    );
+    expect(screen.queryByTestId('warehouse-open-form')).toBeNull();
+    expect(calls('GET', CONNECTIONS_PATH)).toHaveLength(0);
+    expect(calls('GET', SOURCES_PATH)).toHaveLength(0);
+  });
+
+  // D50: VIEWER does not read warehouse analyses or previews. The section asks
+  // the API for nothing, so a VIEWER's experiment page causes no refused
+  // request, and says why in one line.
+  const READ_NOTE =
+    'Viewing warehouse analyses requires the ADMIN, DEVELOPER or ANALYST role; you are VIEWER.';
+
+  it('VIEWER gets one line saying why, and the section makes no request at all', async () => {
+    as('VIEWER');
+    install([{ path: RUNS_PATH, handler: () => ({ runs: [run()] }) }]);
+    renderSection();
+    expect(await screen.findByTestId('warehouse-read-note')).toHaveTextContent(READ_NOTE);
+    // Give a load that should not happen the chance to happen.
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(calls('GET', RUNS_PATH)).toHaveLength(0);
+    expect(mockedApiFetch).not.toHaveBeenCalled();
+    expect(screen.getByRole('heading', { name: 'Warehouse analysis' })).toBeInTheDocument();
+    expect(screen.queryByTestId('warehouse-results')).toBeNull();
+    expect(screen.queryByTestId('warehouse-no-runs')).toBeNull();
+    expect(screen.queryByTestId('warehouse-run-history')).toBeNull();
+    expect(screen.queryByTestId('warehouse-open-form')).toBeNull();
+    expect(screen.queryByText('View SQL')).toBeNull();
+    expect(screen.queryByText(/You can read every analysis below/)).toBeNull();
+  });
+
+  it('the VIEWER render has no axe violations', async () => {
+    as('VIEWER');
+    install([]);
+    const { container } = renderSection();
+    await screen.findByTestId('warehouse-read-note');
+    const result = await axe.run(container, { rules: { 'color-contrast': { enabled: false } } });
+    expect(result.violations.map((v) => v.id)).toEqual([]);
+  });
+
+  it('renders nothing and asks for no runs before the session has loaded', async () => {
+    mockUseAuth.mockReturnValue({ user: null, status: 'loading' });
+    install([{ path: RUNS_PATH, handler: () => ({ runs: [run()] }) }]);
+    const { container } = renderSection();
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(container).toBeEmptyDOMElement();
+    expect(calls('GET', RUNS_PATH)).toHaveLength(0);
+    expect(mockedApiFetch).not.toHaveBeenCalled();
+  });
+
+  it('a superuser whose role is VIEWER reads runs', async () => {
+    as('VIEWER', true);
+    install([{ path: RUNS_PATH, handler: () => ({ runs: [run()] }) }]);
+    renderSection();
+    expect(await screen.findByTestId('warehouse-results')).toBeInTheDocument();
+    expect(calls('GET', RUNS_PATH)).toHaveLength(1);
+    expect(screen.queryByTestId('warehouse-read-note')).toBeNull();
+  });
 
   it.each([
     ['ADMIN', false],
@@ -619,9 +673,6 @@ describe('View SQL', () => {
     expect(writeText).toHaveBeenCalledWith(SQL);
     expect(screen.getByTestId('warehouse-sql-copied')).toHaveAttribute('aria-live', 'polite');
   });
-  const SQL_NOTE =
-    'Viewing the SQL a run sent requires the ADMIN, DEVELOPER or ANALYST role; you are VIEWER.';
-
   // Both runs carry statements, so what hides the buttons here is the role,
   // not a null from the API.
   const withStatements = () => [
@@ -629,18 +680,18 @@ describe('View SQL', () => {
     run(),
   ];
 
-  it('is not offered to a VIEWER, even when the response carries statements', async () => {
+  it('is not offered to a VIEWER, who is not given the runs at all (D50)', async () => {
     as('VIEWER');
     const runs = withStatements();
     expect(runs.every((r) => r.statements && r.statements.length > 0)).toBe(true);
     install([{ path: RUNS_PATH, handler: () => ({ runs }) }]);
     renderSection();
-    expect(await screen.findByTestId('warehouse-results')).toBeInTheDocument();
-    expect(screen.getByTestId('warehouse-run-failed')).toBeInTheDocument();
+    await screen.findByTestId('warehouse-read-note');
+    expect(calls('GET', RUNS_PATH)).toHaveLength(0);
+    expect(screen.queryByTestId('warehouse-run-failed')).toBeNull();
     expect(screen.queryByTestId('warehouse-view-sql')).toBeNull();
     expect(screen.queryByTestId('warehouse-failed-view-sql')).toBeNull();
     expect(screen.queryByText('View SQL')).toBeNull();
-    expect(screen.getByTestId('warehouse-sql-note')).toHaveTextContent(SQL_NOTE);
   });
 
   it.each([['ADMIN'], ['DEVELOPER'], ['ANALYST']])(

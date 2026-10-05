@@ -393,8 +393,10 @@ def test_a_failed_run_reports_its_code_and_no_numbers(wh):
     wh.fail_with = WarehouseError(
         WarehouseErrorCode.PERMISSION_DENIED, warehouse="athena"
     )
-    client = wh.as_("VIEWER")
     response = wh.start_run(wh.as_("ADMIN"), experiment, ids)
+    # Authentication is the app-global override, so the reader's client is
+    # made after the ADMIN call; made before it, it would act as ADMIN.
+    client = wh.as_("ANALYST")
     run = wh.wait_for_run(client, response.json()["run_id"])
     assert run["status"] == "failed"
     assert run["error_code"] == "permission_denied"
@@ -430,7 +432,8 @@ def _run_mean(wh, experiment, admin, ids, mean):
         },
     )
     assert response.status_code == 202, response.text
-    run = wh.wait_for_run(wh.as_("VIEWER"), response.json()["run_id"])
+    # ANALYST is the lowest role that reads a run (D50).
+    run = wh.wait_for_run(wh.as_("ANALYST"), response.json()["run_id"])
     assert run["status"] == "succeeded", run
     (metric,) = run["results"]["metrics"]
     return run, metric
@@ -588,10 +591,15 @@ def test_runs_list_newest_first_for_every_role(wh):
     wh.now = wh.now.replace(minute=5)
     second = wh.start_run(client, experiment, ids).json()["run_id"]
     wh.wait_for_run(client, second)
-    for role in ("ADMIN", "DEVELOPER", "ANALYST", "VIEWER"):
+    for role in ("ADMIN", "DEVELOPER", "ANALYST"):
         listed = wh.as_(role).get(f"{WA}/experiments/{experiment.id}/runs")
         assert listed.status_code == 200
         assert [r["id"] for r in listed.json()["runs"]] == [second, first]
+    # D50: VIEWER does not read warehouse analyses.
+    listed = wh.as_("VIEWER").get(f"{WA}/experiments/{experiment.id}/runs")
+    assert listed.status_code == 403, listed.text
+    assert listed.json()["detail"]["code"] == "role_required"
+    assert "runs" not in listed.json()
 
 
 def test_the_run_response_never_carries_rows(wh):

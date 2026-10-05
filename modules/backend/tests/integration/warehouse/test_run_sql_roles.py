@@ -1,23 +1,28 @@
-"""A warehouse run's SQL is returned to ANALYST and above (founder decision D34).
+"""Who reads a warehouse run, and its SQL (founder decisions D34 and D50).
 
-Every other role allowed to read a run -- VIEWER, or a user with no role --
-gets the run with ``statements: null``.  The whole list is withheld: not only
-each statement's SQL but its kind, dialect and SHA-256 too.
+A run -- an analysis or a preview, which is stored as a run with
+``kind="preview"`` -- is read through ``GET /runs/{run_id}`` and listed through
+``GET /experiments/{id}/runs``.  Both answer ADMIN, DEVELOPER and ANALYST (a
+superuser counts as ADMIN), and every one of them gets every statement's SQL.
+VIEWER, and a user whose role is NULL in the database, get 403
+``role_required`` from all three reads, and the body carries no SQL, no
+statement's SHA-256 and no ``results``.
 
 The expected roles come from ``FIELD_ROLES`` in test_roles.py, not from the
-endpoint, so the code and this test cannot drift together.  Each role reads an
-analysis run and a preview run through ``GET /runs/{run_id}``, and the
-experiment's runs through the list.  The filter value planted in the metric
-source (``SENTINEL``) appears in the SQL and nowhere else in a run, so its
-absence from the whole raw body proves the SQL was not returned in any shape.
+endpoint, so the code and this test cannot drift together.  The filter value
+planted in the metric source (``SENTINEL``) appears in the SQL and nowhere else
+in a run, so its absence from the whole raw body proves the SQL was not
+returned in any shape.
 """
 
 from __future__ import annotations
 
+import sys
 import uuid
 from typing import Any, Callable, Dict, List
 
 import pytest
+from sqlalchemy import update
 
 from backend.app.models.user import User
 from backend.tests.integration.conftest import HASHED_PASSWORD, make_client_for_user
@@ -80,6 +85,12 @@ def _setup(wh) -> Dict[str, Any]:
 
 
 def _no_role_client(wh):
+    """A client for a user whose role is NULL in the database.
+
+    ``User(role=None)`` is not enough: the column's default fires on insert
+    and the user comes back as VIEWER.  So the row is inserted, its role set to
+    NULL with an UPDATE, and the user re-read.
+    """
     suffix = uuid.uuid4().hex[:8]
     user = User(
         username=f"wh_norole_{suffix}",
@@ -88,11 +99,14 @@ def _no_role_client(wh):
         hashed_password=HASHED_PASSWORD,
         is_active=True,
         is_superuser=False,
-        role=None,
     )
     wh.db.add(user)
     wh.db.commit()
+    wh.db.execute(update(User).where(User.id == user.id).values(role=None))
+    wh.db.commit()
     wh.db.refresh(user)
+    assert user.role is None, user.role
+    assert wa.role_of(user) is None
     client = make_client_for_user(wh.db, user)
     wh.install()
     return client
@@ -110,25 +124,35 @@ def _clients(wh) -> Dict[str, Callable[[], Any]]:
     return clients
 
 
-def _gets_sql(who: str) -> bool:
-    """From FIELD_ROLES alone: a superuser counts as ADMIN, no role as none."""
+def _reads_runs(who: str) -> bool:
+    """From FIELD_ROLES alone: a superuser counts as ADMIN, no role as none.
+    Since D50 the roles that read a run are exactly those that read its SQL."""
     role = "ADMIN" if who == SUPERUSER else who
     return role in FIELD_ROLES["statements"]
 
 
 def _reads(client, ids) -> List[tuple]:
-    """(label, kind of run, raw body, the run) for each way of reading a run."""
+    """(label, kind of run, response) for each way of reading a run."""
     out = []
     for kind in ("analysis", "preview"):
-        response = client.get(f"{WA}/runs/{ids[kind]}")
-        assert response.status_code == 200, response.text
-        out.append((f"GET /runs ({kind})", kind, response.text, response.json()))
-    response = client.get(f"{WA}/experiments/{ids['experiment']}/runs")
-    assert response.status_code == 200, response.text
-    runs = response.json()["runs"]
-    assert [r["id"] for r in runs] == [ids["analysis"]], runs
-    out.append(("GET /experiments/{id}/runs", "analysis", response.text, runs[0]))
+        out.append((f"GET /runs ({kind})", kind, client.get(f"{WA}/runs/{ids[kind]}")))
+    out.append(
+        (
+            "GET /experiments/{id}/runs",
+            "analysis",
+            client.get(f"{WA}/experiments/{ids['experiment']}/runs"),
+        )
+    )
     return out
+
+
+def _the_run(label: str, response, ids) -> Dict[str, Any]:
+    body = response.json()
+    if label.startswith("GET /experiments"):
+        runs = body["runs"]
+        assert [r["id"] for r in runs] == [ids["analysis"]], runs
+        return runs[0]
+    return body
 
 
 def _wrong(wh, ids) -> List[tuple]:
@@ -136,15 +160,21 @@ def _wrong(wh, ids) -> List[tuple]:
     clients = _clients(wh)
     # The hashes the readers are given, to look for in everyone else's bodies.
     hashes = set()
-    for _, _, _, run in _reads(clients["ADMIN"](), ids):
+    for label, _, response in _reads(clients["ADMIN"](), ids):
+        assert response.status_code == 200, response.text
+        run = _the_run(label, response, ids)
         hashes.update(s.get("sha256") for s in run["statements"] or [])
     hashes.discard(None)
     assert len(hashes) == STATEMENTS["analysis"] + STATEMENTS["preview"], hashes
     wrong = []
     for who, make_client in clients.items():
-        for label, kind, body, run in _reads(make_client(), ids):
-            statements = run["statements"]
-            if _gets_sql(who):
+        for label, kind, response in _reads(make_client(), ids):
+            body = response.text
+            if _reads_runs(who):
+                if response.status_code != 200:
+                    wrong.append((who, label, "readers get 200"))
+                    continue
+                statements = _the_run(label, response, ids)["statements"]
                 if (
                     not isinstance(statements, list)
                     or len(statements) != STATEMENTS[kind]
@@ -156,54 +186,71 @@ def _wrong(wh, ids) -> List[tuple]:
                 elif SENTINEL not in body:
                     wrong.append((who, label, "the planted filter is in the SQL"))
             else:
-                if statements is not None:
-                    wrong.append((who, label, "statements is null"))
+                detail = (
+                    response.json().get("detail")
+                    if response.status_code == 403
+                    else None
+                )
+                if (
+                    not isinstance(detail, dict)
+                    or detail.get("code") != "role_required"
+                ):
+                    wrong.append((who, label, "refused with 403 role_required"))
                 if SENTINEL in body:
                     wrong.append((who, label, "the planted filter appears"))
                 if any(h in body for h in hashes):
                     wrong.append((who, label, "a statement's SHA-256 appears"))
+                if '"results"' in body:
+                    wrong.append((who, label, "results appear"))
     return wrong
 
 
-def test_the_sql_a_run_sent_is_returned_to_the_field_roles_only(wh):
+def test_runs_and_their_sql_are_returned_to_the_field_roles_only(wh):
     ids = _setup(wh)
     # Vacuity guards: the table names a strict subset of the roles, and every
     # role is read as at least one reader and one non-reader.
     assert set(FIELD_ROLES) == {"statements"}
     assert set(FIELD_ROLES["statements"]) < set(ROLES)
-    assert any(_gets_sql(r) for r in ROLES) and not all(_gets_sql(r) for r in ROLES)
+    assert any(_reads_runs(r) for r in ROLES) and not all(_reads_runs(r) for r in ROLES)
     assert _wrong(wh, ids) == []
 
 
-def _sql_for_everyone(original: Callable) -> Callable:
-    return lambda run, *, include_sql: original(run, include_sql=True)
+def _viewer_allowed_on(route: str) -> Callable:
+    """Plant: ``route`` lets VIEWER through, as it did before D50."""
+    original = wa.require
+
+    def require(user, roles, action):
+        if sys._getframe(1).f_code.co_name == route:
+            roles = (*roles, "VIEWER")
+        return original(user, roles, action)
+
+    return require
 
 
-def _hashes_kept(original: Callable) -> Callable:
-    def run_out(run, *, include_sql):
-        out = original(run, include_sql=True)
-        if not include_sql and out["statements"] is not None:
-            out["statements"] = [
-                {k: v for k, v in s.items() if k != "sql"} for s in out["statements"]
-            ]
-        return out
-
-    return run_out
-
-
-@pytest.mark.parametrize(
-    "plant, expected",
-    [
-        (_sql_for_everyone, "statements is null"),
-        (_hashes_kept, "a statement's SHA-256 appears"),
-    ],
-    ids=["sql-for-everyone", "only-the-sql-withheld"],
-)
-def test_the_check_fails_on_a_planted_defect(wh, monkeypatch, plant, expected):
-    """The gate can fail: plant each defect in the serialiser and it reports it."""
+@pytest.mark.parametrize("route", ["get_run", "list_runs"])
+def test_the_check_fails_on_a_planted_defect(wh, monkeypatch, route):
+    """The gate can fail: let VIEWER through on one read route and it reports
+    VIEWER, and only VIEWER, there."""
     ids = _setup(wh)
-    monkeypatch.setattr(wa, "run_out", plant(wa.run_out))
+    monkeypatch.setattr(wa, "require", _viewer_allowed_on(route))
     wrong = _wrong(wh, ids)
     assert wrong, "the planted defect went unreported"
-    assert {who for who, _, _ in wrong} == {"VIEWER", NO_ROLE}
-    assert expected in {what for _, _, what in wrong}
+    assert {who for who, _, _ in wrong} == {"VIEWER"}
+    labels = {label for _, label, _ in wrong}
+    if route == "get_run":
+        assert labels == {"GET /runs (analysis)", "GET /runs (preview)"}
+    else:
+        assert labels == {"GET /experiments/{id}/runs"}
+    assert "results appear" in {what for _, _, what in wrong}
+
+
+@pytest.mark.parametrize("who", ["VIEWER", NO_ROLE])
+def test_a_refused_caller_gets_403_for_a_run_that_does_not_exist(wh, who):
+    """The role is checked before the run is looked up, so a refused caller gets
+    the same 403 for an id that names no run as for one that does, never a
+    404.  ``list_runs`` looks nothing up before its check; it is pinned too."""
+    client = wh.as_("VIEWER") if who == "VIEWER" else _no_role_client(wh)
+    for path in (f"{WA}/runs/{uuid.uuid4()}", f"{WA}/experiments/{uuid.uuid4()}/runs"):
+        response = client.get(path)
+        assert response.status_code == 403, (path, response.status_code, response.text)
+        assert response.json()["detail"]["code"] == "role_required", response.text

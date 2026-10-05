@@ -7,11 +7,13 @@
  * instance. In a core build the `@modules/*` alias resolves this file to a
  * stub that renders nothing at all.
  *
- * Roles (the API's matrix): every role reads runs and results; ADMIN and
- * DEVELOPER start runs; ADMIN, DEVELOPER and ANALYST see the SQL a run sent.
- * Others see why they cannot, in text. A View SQL button needs both the
- * `viewRunSql` capability and statements in the response, which the API sends
- * as null to the other roles.
+ * Roles (the API's matrix): ADMIN, DEVELOPER and ANALYST read runs, their
+ * results and the SQL they sent; ADMIN and DEVELOPER start runs. A VIEWER
+ * (D50) gets the heading and one line saying why, and the section asks the
+ * API for nothing: the role is checked with `can(user, 'viewRuns')` before
+ * any request. Others see why they cannot start a run, in text. A View SQL
+ * button needs both the `viewRunSql` capability and statements in the
+ * response.
  *
  * Accessibility: the latest run's status is announced from a polite live
  * region (`role="status"`); a refused start is `role="alert"` because it is
@@ -109,6 +111,7 @@ export default function WarehouseAnalysisSection({ experiment }: WarehouseAnalys
 
   const experimentId = experiment.id;
   const experimentKey = experiment.key ?? 'this experiment';
+  const mayRead = can(user, 'viewRuns');
   const mayStart = canStartRun(user);
   const maySeeSql = can(user, 'viewRunSql');
 
@@ -130,8 +133,8 @@ export default function WarehouseAnalysisSection({ experiment }: WarehouseAnalys
   }, [experimentId]);
 
   useEffect(() => {
-    if (installed) void load();
-  }, [installed, load]);
+    if (installed && mayRead) void load();
+  }, [installed, mayRead, load]);
 
   // Poll the latest run while it is queued or running.
   const latestId = latest?.id;
@@ -171,6 +174,28 @@ export default function WarehouseAnalysisSection({ experiment }: WarehouseAnalys
   };
 
   if (!installed) return null;
+
+  if (!mayRead) {
+    // No session yet: say nothing rather than "you have no role".
+    if (!user) return null;
+    return (
+      <section
+        className="mt-6 rounded-lg border border-slate-200 bg-white"
+        aria-labelledby="warehouse-analysis-title"
+        data-testid="warehouse-analysis"
+      >
+        <div className="flex flex-wrap items-center gap-2 border-b border-slate-200 px-5 py-4">
+          <h2 id="warehouse-analysis-title" className="text-base font-semibold text-slate-800">
+            Warehouse analysis
+          </h2>
+          <BetaChip />
+        </div>
+        <p className="px-5 py-4 text-sm text-slate-700" data-testid="warehouse-read-note">
+          {refusal(user, 'viewRuns')}
+        </p>
+      </section>
+    );
+  }
 
   const lastGood = (runs ?? []).find((r) => r.status === 'succeeded' && r.results) ?? null;
   const shownFailure = latest && latest.status === 'failed' ? latest : null;
