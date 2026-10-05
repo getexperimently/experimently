@@ -1,10 +1,13 @@
 {
   "_provenance": {
-    "source": "vendor documentation",
-    "vendor_docs_row": "3",
-    "url": "https://docs.snowflake.com/en/developer-guide/sql-api/reference",
-    "note": "POST /api/v2/statements?async=true answers 202 with a QueryStatus (the documented example; message replaced by the sentinel).",
-    "real_run_id": null
+    "source": "real account",
+    "real_run_id": "wl-snowflake-20261004T225624Z-3787b33c",
+    "check": "sf_sign_in",
+    "request": {
+      "method": "POST",
+      "path": "/api/v2/statements"
+    },
+    "note": "Recorded on a real account by the warehouse_live check, then scrubbed: the account, user, database, schema, role and warehouse names, the statement handle, the request id and the creation time are replaced with this suite's placeholders. The message is replaced by the sentinel, so the tests can show no vendor text is passed on. Everything else is as Snowflake answered."
   },
   "status": 202,
   "body": {

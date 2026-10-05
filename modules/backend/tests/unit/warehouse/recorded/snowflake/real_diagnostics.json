@@ -2,7 +2,7 @@
   "_provenance": {
     "source": "real account",
     "real_run_id": "wl-snowflake-20261004T225624Z-3787b33c",
-    "check": "sf_sign_in",
+    "check": "sf_runner_parity",
     "request": {
       "method": "GET",
       "path": "/api/v2/statements/019c06a4-0000-df4f-0000-00100006589e"
@@ -17,46 +17,85 @@
       "partitionInfo": [
         {
           "rowCount": 1,
-          "uncompressedSize": 28
+          "uncompressedSize": 46
         }
       ],
       "rowType": [
         {
-          "name": "ROLE_NAME",
+          "name": "EXPOSURE_ROWS",
           "database": "",
           "schema": "",
           "table": "",
-          "nullable": true,
-          "precision": null,
-          "scale": null,
           "collation": null,
-          "byteLength": 134217728,
-          "length": 134217728,
-          "type": "text"
+          "byteLength": null,
+          "scale": 0,
+          "nullable": false,
+          "precision": 18,
+          "length": null,
+          "type": "fixed"
         },
         {
-          "name": "WAREHOUSE_NAME",
+          "name": "NULL_KEY_ROWS",
           "database": "",
           "schema": "",
           "table": "",
-          "nullable": true,
-          "precision": null,
-          "scale": null,
           "collation": null,
-          "byteLength": 134217728,
-          "length": 134217728,
-          "type": "text"
+          "byteLength": null,
+          "scale": 0,
+          "nullable": false,
+          "precision": 18,
+          "length": null,
+          "type": "fixed"
+        },
+        {
+          "name": "UNITS",
+          "database": "",
+          "schema": "",
+          "table": "",
+          "collation": null,
+          "byteLength": null,
+          "scale": 0,
+          "nullable": false,
+          "precision": 18,
+          "length": null,
+          "type": "fixed"
+        },
+        {
+          "name": "MULTI_VARIANT_UNITS",
+          "database": "",
+          "schema": "",
+          "table": "",
+          "collation": null,
+          "byteLength": null,
+          "scale": 0,
+          "nullable": false,
+          "precision": 18,
+          "length": null,
+          "type": "fixed"
+        },
+        {
+          "name": "VARIANT_VALUES",
+          "database": "",
+          "schema": "",
+          "table": "",
+          "collation": null,
+          "byteLength": null,
+          "scale": 0,
+          "nullable": false,
+          "precision": 18,
+          "length": null,
+          "type": "fixed"
         },
         {
           "name": "SESSION_OFFSET",
           "database": "",
           "schema": "",
           "table": "",
-          "nullable": false,
-          "precision": null,
-          "scale": null,
           "collation": null,
           "byteLength": 134217728,
+          "scale": null,
+          "nullable": false,
+          "precision": null,
           "length": 134217728,
           "type": "text"
         }
@@ -64,8 +103,11 @@
     },
     "data": [
       [
-        "ANALYSIS_READER_ROLE",
-        "ANALYSIS_WH",
+        "400000",
+        "0",
+        "400000",
+        "0",
+        "2",
         "Z"
       ]
     ],

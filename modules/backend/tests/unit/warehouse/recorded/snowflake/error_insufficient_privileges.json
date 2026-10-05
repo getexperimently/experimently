@@ -1,16 +1,19 @@
 {
   "_provenance": {
-    "source": "vendor documentation",
-    "vendor_docs_row": "3",
-    "url": "https://docs.snowflake.com/en/developer-guide/sql-api/reference",
-    "note": "422 QueryFailureStatus for insufficient privileges. The code value is not on this page; replace with a real recording at the flip.",
-    "real_run_id": null
+    "source": "real account",
+    "real_run_id": "wl-snowflake-20261004T225624Z-3787b33c",
+    "check": "sf_create_refused",
+    "request": {
+      "method": "GET",
+      "path": "/api/v2/statements/019c06a4-0000-df4f-0000-00100006589e"
+    },
+    "note": "Recorded on a real account by the warehouse_live check, then scrubbed: the account, user, database, schema, role and warehouse names, the statement handle, the request id and the creation time are replaced with this suite's placeholders. The message is replaced by the sentinel, so the tests can show no vendor text is passed on. Everything else is as Snowflake answered."
   },
   "status": 422,
   "body": {
     "code": "003001",
     "message": "UPSTREAM-SENTINEL-sf-7a2c detail",
-    "statementHandle": "019c06a4-0000-df4f-0000-00100006589e",
-    "sqlState": "42501"
+    "sqlState": "42501",
+    "statementHandle": "019c06a4-0000-df4f-0000-00100006589e"
   }
 }

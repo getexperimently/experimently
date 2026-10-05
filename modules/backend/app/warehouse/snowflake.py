@@ -1,8 +1,8 @@
 """The Snowflake connector: a key pair we generate, the SQL API v2, and limits.
 
-Disabled until verified (:mod:`.connectors`): the code is complete, but no
-deployment can use it until a check against a real Snowflake account has
-passed and :data:`~.connectors.ENABLED_CONNECTORS` names it.
+Enabled (:mod:`.connectors`): the check against a real Snowflake account
+passed on 2026-10-04 (run ``wl-snowflake-20261004T225624Z-3787b33c``), and
+:data:`~.connectors.ENABLED_CONNECTORS` names it.
 
 The connection
 --------------

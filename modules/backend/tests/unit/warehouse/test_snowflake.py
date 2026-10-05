@@ -897,7 +897,7 @@ def test_connection_test_in_another_time_zone_refused(key):
 
 
 def test_table_columns_from_show_columns(key):
-    fake = NetworkFake(happy(status=["result_show_columns"]))
+    fake = NetworkFake(happy(status=["real_show_columns"]))
     columns = adapter(key, fake).table_columns(
         ("ANALYTICS", "PUBLIC", "EXPOSURES"), Deadline(30)
     )
@@ -906,7 +906,6 @@ def test_table_columns_from_show_columns(key):
         ("EXPERIMENT_KEY", "TEXT"),
         ("VARIANT", "TEXT"),
         ("EXPOSED_AT", "TIMESTAMP_NTZ"),
-        ("AMOUNT", "REAL"),
     )
     body = of_kind(fake, "submit")[0].json()
     assert body["statement"] == 'SHOW COLUMNS IN TABLE "ANALYTICS"."PUBLIC"."EXPOSURES"'
@@ -939,7 +938,7 @@ def test_table_reference_checked_before_anything_is_sent(key, table):
     ids=["lower-case", "not-json", "not-a-type-name", "null", "deeply-nested"],
 )
 def test_a_column_type_of_an_unexpected_shape_refused(key, data_type):
-    status, body = recorded("result_show_columns")
+    status, body = recorded("real_show_columns")
     body["data"][0][3] = data_type
     fake = NetworkFake(happy(status=[(status, body)]))
     with pytest.raises(WarehouseError) as err:
@@ -949,7 +948,7 @@ def test_a_column_type_of_an_unexpected_shape_refused(key, data_type):
     assert err.value.code is C.RESULT_INVALID
 
 
-# -- answers recorded on a real account (run wl-snowflake-20261004T194134Z-155c1c4b)
+# -- answers recorded on a real account (run wl-snowflake-20261004T225624Z-3787b33c)
 
 
 #: What the live check's statements read back, as BuiltQuery previews.
@@ -1013,6 +1012,27 @@ def test_real_show_columns_is_read(key):
         ("EXPOSED_AT", "TIMESTAMP_NTZ"),
     )
     assert not of_kind(fake, "cancel")
+
+
+def test_real_metric_statement_is_read_and_parsed(key):
+    """A proportion metric statement as a real account answered it."""
+    fake = NetworkFake(happy(status=["real_metric"]))
+    result = adapter(key, fake).run_query(metric_query(), Deadline(600))
+    stats = parse_metric_rows(list(result.rows), expect_session_offset=True)
+    assert [v.variant for v in stats.variants] == ["control", "treatment"]
+    assert [v.n for v in stats.variants] == [200_000, 200_000]
+    assert [v.n_converted for v in stats.variants] == [100_514, 100_260]
+    assert stats.k_text == "0.50193500000000002"
+    assert not of_kind(fake, "cancel")
+
+
+def test_real_diagnostics_statement_is_read_and_parsed(key):
+    fake = NetworkFake(happy(status=["real_diagnostics"]))
+    query = build_diagnostics_query(SNOWFLAKE_SQL, ASSIGNMENT, "checkout-test", WINDOW)
+    result = adapter(key, fake).run_query(query, Deadline(600))
+    diagnostics = parse_diagnostics_rows(list(result.rows), expect_session_offset=True)
+    assert diagnostics.units == 400_000
+    assert diagnostics.multi_variant_units == 0
 
 
 @pytest.mark.parametrize(

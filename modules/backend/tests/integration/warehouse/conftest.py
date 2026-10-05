@@ -4,7 +4,7 @@
 non-superuser of each role, with these seams overridden:
 
 * the connectors enabled on the "deployment" (``ENABLED_CONNECTORS`` itself is
-  empty and stays so -- ``test_enabled_connectors_exact``);
+  pinned by ``test_enabled_connectors_exact``);
 * the client factory: an ``athena``-typed connection is served by an
   in-memory DuckDB warehouse (DuckDB's identifier rules are Athena's), and a
   ``bigquery`` one by the real BigQuery connector over the recorded-response

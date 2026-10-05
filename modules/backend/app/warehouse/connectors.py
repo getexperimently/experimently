@@ -16,9 +16,14 @@ from typing import AbstractSet, Final, Optional
 #: Every connector the code knows about, enabled or not.
 KNOWN_CONNECTORS: Final = ("bigquery", "snowflake", "athena")
 
-#: The connectors a deployment may use.  Empty until a connector's real
-#: check has passed; see the module docstring.
-ENABLED_CONNECTORS: Final[frozenset[str]] = frozenset()
+#: The connectors a deployment may use; see the module docstring.
+#:
+#: * ``snowflake`` -- the real-account check passed on 2026-10-04, run
+#:   ``wl-snowflake-20261004T225624Z-3787b33c`` (11 checks, all passed).
+#:
+#: BigQuery waits for its own real check.  Amazon Athena stays disabled until
+#: after launch.
+ENABLED_CONNECTORS: Final[frozenset[str]] = frozenset({"snowflake"})
 
 _NAMES: Final = {
     "bigquery": "BigQuery",

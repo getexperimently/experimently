@@ -1,17 +1,18 @@
 # Warehouse analysis (beta)
 
-!!! note "Beta, and no warehouse is available yet"
+!!! note "Beta: Snowflake is available"
     Warehouse analysis runs an experiment's analysis on tables in your own
     data warehouse instead of on events sent to Experimently. The API below is
     part of the **full profile** and every route is `x-stability: beta`: its
     shape may still change.
 
-    A warehouse becomes available on a deployment only after its connector
-    has been checked against a real account, one release at a time.
+    Snowflake is available: its connector passed a check against a real
+    Snowflake account on 2026-10-04 (see [Setting up Snowflake](#setting-up-snowflake)).
+    BigQuery and Amazon Athena aren't available yet. Each becomes available
+    only after its own check against a real account, one release at a time.
     `GET /api/v1/warehouse/analysis/connectors` says which are available on
-    yours; until one is, creating a connection answers
-    `422 connector_disabled`. Setup guides for each warehouse are published
-    when it becomes available.
+    your deployment; creating a connection of any other type answers
+    `422 connector_disabled`.
 
 ## What it does
 
@@ -70,6 +71,47 @@ diagnostics.
 conversion window. So the two agree only on data with no event before a
 unit's exposure, no unit in two variants and no event outside the window;
 otherwise the warehouse numbers are the stricter ones.
+
+## Setting up Snowflake
+
+Experimently signs in to Snowflake's SQL API as a user in your account, with
+a key pair it generates. There is no password field.
+
+1. **Create a role that can read the tables analysis needs, and nothing
+   else**, and a user that has it. For example, as an administrator:
+
+    ```sql
+    CREATE ROLE EXPERIMENTLY_READER;
+    GRANT USAGE ON WAREHOUSE ANALYSIS_WH TO ROLE EXPERIMENTLY_READER;
+    GRANT USAGE ON DATABASE ANALYTICS TO ROLE EXPERIMENTLY_READER;
+    GRANT USAGE ON SCHEMA ANALYTICS.PUBLIC TO ROLE EXPERIMENTLY_READER;
+    GRANT SELECT ON TABLE ANALYTICS.PUBLIC.ASSIGNMENTS TO ROLE EXPERIMENTLY_READER;
+    GRANT SELECT ON TABLE ANALYTICS.PUBLIC.ORDERS TO ROLE EXPERIMENTLY_READER;
+    CREATE USER EXPERIMENTLY DEFAULT_ROLE = EXPERIMENTLY_READER;
+    GRANT ROLE EXPERIMENTLY_READER TO USER EXPERIMENTLY;
+    ```
+
+    A connection whose role is ACCOUNTADMIN or another of Snowflake's
+    built-in administrative roles is refused.
+2. **Create the connection** in Warehouse › Connections (ADMIN). The account
+   is the organisation-account identifier, for example `MYORG-MYACCOUNT`
+   (Snowsight › Admin › Accounts), not a locator or a URL. Saving generates
+   the key pair and shows the statement that registers its public key, for
+   example `ALTER USER EXPERIMENTLY SET RSA_PUBLIC_KEY='…';`. Run it as an
+   administrator. The private key never leaves Experimently.
+3. **Test the connection.** The test signs in and runs one statement that
+   reads no table.
+4. **Name tables in full** in a source: `DATABASE.SCHEMA.TABLE`, each part
+   as Snowflake stores it (upper case unless it was created quoted).
+
+Every statement runs with the session time zone set to UTC and is stopped by
+Snowflake at the connection's `query_timeout_seconds`. Snowflake bills for
+the warehouse's running time, so a resource monitor on the warehouse is a
+good second limit.
+
+To replace the key, use **Generate a new key**: it shows a statement for
+`RSA_PUBLIC_KEY_2`, and the old key keeps working until a test with the new
+one passes.
 
 ## Who can do what
 

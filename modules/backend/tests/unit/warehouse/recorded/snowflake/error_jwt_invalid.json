@@ -3,7 +3,7 @@
     "source": "vendor documentation",
     "vendor_docs_row": "1",
     "url": "https://docs.snowflake.com/en/developer-guide/sql-api/authenticating",
-    "note": "401: the JWT was not accepted. The code value is not on this page; replace with a real recording at the flip.",
+    "note": "401: the JWT was not accepted. The code value is not on this page. The passing real-account run (wl-snowflake-20261004T225624Z-3787b33c) never received this answer, so it stays as documented.",
     "real_run_id": null
   },
   "status": 401,

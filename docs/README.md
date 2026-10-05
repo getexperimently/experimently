@@ -35,7 +35,7 @@
 | Doc | Description |
 |-----|-------------|
 | [Mutual Exclusion & Holdout](api/mutual-exclusion-groups.md) | Prevent experiment conflicts, global holdout configuration |
-| [Warehouse analysis](api/warehouse-analytics.md) | Beta; no warehouse available yet |
+| [Warehouse analysis](api/warehouse-analytics.md) | Beta; Snowflake is available |
 | [Audit Logging & Bulk Toggle](api/audit-logging.md) | Audit trail, SSE stream, bulk feature flag operations |
 | [Alerting](api/alerting.md) | Slack and email notifications for platform events |
 
