@@ -48,6 +48,17 @@ export interface SampleSizeEstimate {
   notes: string | null;
 }
 
+/**
+ * The body of a details edit: the changed subset of these three fields and
+ * nothing else. The update route replaces variants and metrics wholesale when
+ * a request carries them, so this type has no room for either.
+ */
+export interface ExperimentDetailsUpdate {
+  name?: string;
+  description?: string | null;
+  hypothesis?: string | null;
+}
+
 /** Options for `ExperimentsService.create`. */
 export interface CreateOptions {
   /** Default true: a 401 sends the browser to the login page. */
@@ -105,6 +116,24 @@ export const ExperimentsService = {
 
   async update(id: string, data: Partial<Experiment>): Promise<Experiment> {
     return apiFetch<Experiment>(`${BASE}/${id}`, { method: 'PUT', json: data });
+  },
+
+  /**
+   * `PUT /api/v1/experiments/{id}` with only name, description and hypothesis.
+   * The API accepts it on a DRAFT experiment; outside DRAFT it answers 400
+   * to everyone but a superuser.
+   */
+  async updateDetails(id: string, body: ExperimentDetailsUpdate): Promise<Experiment> {
+    return apiFetch<Experiment>(`${BASE}/${id}`, { method: 'PUT', json: body });
+  },
+
+  /**
+   * `POST /api/v1/experiments/{id}/clone`, with no body. The answer is the new
+   * experiment: a DRAFT named "Copy of …", with a key of its own, owned by the
+   * caller. It needs READ on the source and CREATE (ADMIN or DEVELOPER).
+   */
+  async clone(id: string): Promise<Experiment> {
+    return apiFetch<Experiment>(`${BASE}/${id}/clone`, { method: 'POST' });
   },
 
   // The route requires `experiment_key`, which must equal the experiment id
