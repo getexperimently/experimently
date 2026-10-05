@@ -273,6 +273,93 @@ def test_core_build_s_pytest_sessions_inherit_the_environment():
     assert not re.search(r"(^|[\s;&|(])env\s+-", code), code
 
 
+def test_core_build_selects_its_steps_by_no_variable():
+    """scripts/core_build.sh reads CORE_BUILD_STEPS as `--steps`: set to every
+    step but `integration`, it would leave the Redis variables nothing to arm
+    while the command line above still looks like the default list."""
+    workflow = wg.load(GATE)
+    for where, scope in (
+        ("the workflow", workflow.get("env") or {}),
+        (f"job {CORE_JOB}", _core_job().get("env") or {}),
+        (f"step {CORE_STEP!r}", _core_step(CORE_STEP).get("env") or {}),
+    ):
+        assert "CORE_BUILD_STEPS" not in scope, f"{where} sets CORE_BUILD_STEPS"
+
+
+#: pytest options that run fewer tests than the paths given select, beyond the
+#: `-m`/`-k` that `_narrowing_flags` finds. Matched as the whole token or as
+#: `--opt=value`.
+NARROWING_LONG_OPTIONS = (
+    "--deselect",
+    "--ignore",
+    "--ignore-glob",
+    "--lf",
+    "--last-failed",
+    "--sw",
+    "--stepwise",
+    "--sw-skip",
+    "--stepwise-skip",
+    "--co",
+    "--collect-only",
+    "--collectonly",
+    "--keyword",
+)
+
+
+def _script_narrowing(tokens: List[str]) -> List[str]:
+    long = [
+        token
+        for token in tokens
+        if any(
+            token == option or token.startswith(option + "=")
+            for option in NARROWING_LONG_OPTIONS
+        )
+    ]
+    return _narrowing_flags(tokens) + long
+
+
+def _shell_function(name: str) -> List[str]:
+    """The words of a function in scripts/core_build.sh, comments removed."""
+    script = (REPO_ROOT / "scripts" / "core_build.sh").read_text(encoding="utf-8")
+    body = re.search(rf"^{re.escape(name)}\(\) \{{\n(.*?)^\}}", script, re.S | re.M)
+    assert body, f"scripts/core_build.sh has no {name}()"
+    # A subshell's closing `)` sticks to the last word (`--lf)`).
+    return [t.rstrip(")") for t in _tokens(body.group(1))]
+
+
+@pytest.mark.parametrize("function", ["step_integration", "pytest_session"])
+def test_core_build_runs_the_whole_integration_suite(function):
+    """The integration step hands pytest_session the suite and nothing that
+    selects a subset, and pytest_session adds nothing that does either: a
+    `-k "not redis"` in either would deselect the tests this job arms."""
+    tokens = _shell_function(function)
+    if function == "step_integration":
+        assert tokens[:2] == ["pytest_session", "backend/tests/integration"], tokens
+    else:
+        # The words after `pytest`: the `-m` of `python -m pytest` is not one.
+        tokens = _pytest_args(tokens)
+        assert tokens[0] == "$@", tokens
+    assert not _script_narrowing(tokens), (
+        f"{function}() narrows the run with {_script_narrowing(tokens)}: {tokens}"
+    )
+
+
+@pytest.mark.parametrize(
+    "tokens, narrowed",
+    [
+        (["-p", "no:cov", "-q", "--tb=short"], False),
+        (["-k", "not redis"], True),
+        (["--deselect", "a.py::t"], True),
+        (["--ignore=backend/tests/integration/api"], True),
+        (["--ignore-glob", "*redis*"], True),
+        (["--lf"], True),
+        (["--collect-only"], True),
+    ],
+)
+def test_script_narrowing_is_recognised(tokens, narrowed):
+    assert bool(_script_narrowing(tokens)) is narrowed
+
+
 # ---------------------------------------------------------------------------
 # The shards
 # ---------------------------------------------------------------------------
