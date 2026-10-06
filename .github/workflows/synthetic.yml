@@ -1,0 +1,160 @@
+name: Synthetic check
+
+# Every 30 minutes, proves that staging assigns, tracks, evaluates and counts,
+# with an account that can do nothing else: scripts/synthetic_check.py runs
+# eight steps in order (ready; sign in as a non-superuser ANALYST before any
+# write; the key's expiry; results before; assign and a sticky repeat; track;
+# evaluate; results after = exactly one more assignment and one more
+# conversion) and sends nothing but its eight requests.
+#
+# DARK UNTIL ENABLED. The check job runs only when the repository variable
+# SYNTH_ENABLED is `true`; otherwise every scheduled run is a job-level skip
+# (its conclusion is `skipped`, never green), so the cron's cadence is on
+# record from the day this merges. Any value other than empty, `true` or
+# `false` fails the `dark-switch` job.
+#
+# Before setting SYNTH_ENABLED to `true`, in this order:
+#   1. create the environment `synthetic-staging`: no reviewers, deployment
+#      branch `main` only. A job that names an environment that does not
+#      exist creates it, with no deployment branch rule; a skipped job does
+#      not, so the dark runs create nothing.
+#   2. in it, the secrets SYNTH_EMAIL, SYNTH_PASSWORD (the staging ANALYST
+#      account) and SYNTH_API_KEY (its one unscoped key, 90-day expiry);
+#   3. in it, the variables PUBLIC_BASE_URL, SYNTH_EXPERIMENT_ID,
+#      SYNTH_EXPERIMENT_KEY, SYNTH_EVENT_NAME (the event the canary's
+#      conversion metric counts) and SYNTH_FLAG_KEY.
+# A missing one fails the check by its name.
+#
+# The `report` job keeps one rolling `synthetic-failure` issue per target:
+# opened on the 3rd failed run in a row, a comment only when the failing step
+# changes, closed by the first run that passes. Every text it posts or writes
+# to the step summary is rendered from .github/qa-templates/ by
+# scripts/qa_render.py and posted with --body-file
+# (backend/tests/unit/scripts/test_synthetic_workflow.py pins all of this).
+# The freshness of these runs is judged by nightly-qa.yml.
+
+on:
+  schedule:
+    # Not :00 or :30, when most scheduled workflows start.
+    - cron: '17,47 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: synthetic-staging
+  cancel-in-progress: false
+
+jobs:
+  dark-switch:
+    name: SYNTH_ENABLED is true or false
+    if: vars.SYNTH_ENABLED != '' && vars.SYNTH_ENABLED != 'true' && vars.SYNTH_ENABLED != 'false'
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Refuse any other value
+        run: |
+          printf '%s\n' '::error title=Synthetic check::SYNTH_ENABLED must be true or false; the check did not run.'
+          exit 1
+
+  check:
+    name: Synthetic check (staging)
+    if: vars.SYNTH_ENABLED == 'true' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    environment: synthetic-staging
+    outputs:
+      ran: ${{ steps.check.outputs.ran }}
+      step: ${{ steps.check.outputs.step }}
+      status: ${{ steps.check.outputs.status }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+          sparse-checkout: scripts
+
+      # Standard library only: this job holds the credentials and installs
+      # nothing.
+      - name: Run the eight steps
+        id: check
+        env:
+          SYNTH_ENABLED: ${{ vars.SYNTH_ENABLED }}
+          PUBLIC_BASE_URL: ${{ vars.PUBLIC_BASE_URL }}
+          SYNTH_EXPERIMENT_ID: ${{ vars.SYNTH_EXPERIMENT_ID }}
+          SYNTH_EXPERIMENT_KEY: ${{ vars.SYNTH_EXPERIMENT_KEY }}
+          SYNTH_EVENT_NAME: ${{ vars.SYNTH_EVENT_NAME }}
+          SYNTH_FLAG_KEY: ${{ vars.SYNTH_FLAG_KEY }}
+          SYNTH_EMAIL: ${{ secrets.SYNTH_EMAIL }}
+          SYNTH_PASSWORD: ${{ secrets.SYNTH_PASSWORD }}
+          SYNTH_API_KEY: ${{ secrets.SYNTH_API_KEY }}
+        run: python3 scripts/synthetic_check.py
+
+      # Runs only when the check reported all eight steps passed. A run counts
+      # as green (for the issue and for freshness) only when this step
+      # succeeded.
+      - name: ran 8 of 8
+        if: steps.check.outputs.ran == '8'
+        run: 'true'
+
+  report:
+    name: Synthetic check issue
+    needs: check
+    if: always() && (needs.check.result == 'success' || needs.check.result == 'failure')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+          sparse-checkout: |
+            scripts
+            .github/qa-templates
+
+      - name: Decide and render
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RESULT: ${{ needs.check.result }}
+          RAN: ${{ needs.check.outputs.ran }}
+          STEP: ${{ needs.check.outputs.step }}
+          STATUS: ${{ needs.check.outputs.status }}
+        run: >-
+          python3 scripts/synthetic_report.py report
+          --result "$RESULT" --ran "$RAN" --step "$STEP" --status "$STATUS"
+          --out "$RUNNER_TEMP/synthetic"
+
+      - name: Post to the synthetic-failure issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          DIR="$RUNNER_TEMP/synthetic"
+          ACTION="$(head -n 1 "$DIR/action")"
+          case "$ACTION" in
+            none)
+              ;;
+            open)
+              gh label create synthetic-failure --repo "$GITHUB_REPOSITORY" --color B60205 --description "Synthetic check failed" > /dev/null 2>&1 || true
+              gh issue create --repo "$GITHUB_REPOSITORY" --title "$(head -n 1 "$DIR/title.txt")" --label synthetic-failure --body-file "$DIR/body.md" > /dev/null
+              ;;
+            comment)
+              gh issue comment "$(head -n 1 "$DIR/issue")" --repo "$GITHUB_REPOSITORY" --body-file "$DIR/body.md" > /dev/null
+              ;;
+            close)
+              ISSUE="$(head -n 1 "$DIR/issue")"
+              gh issue comment "$ISSUE" --repo "$GITHUB_REPOSITORY" --body-file "$DIR/body.md" > /dev/null
+              gh api --method PATCH "repos/$GITHUB_REPOSITORY/issues/$ISSUE" -f state=closed -f state_reason=completed > /dev/null
+              ;;
+            *)
+              printf '%s\n' '::error title=Synthetic check::the report wrote an unknown action'
+              exit 1
+              ;;
+          esac
+
+      - name: Step summary
+        run: |
+          set -euo pipefail
+          if [ -f "$RUNNER_TEMP/synthetic/summary.md" ]; then
+            cat "$RUNNER_TEMP/synthetic/summary.md" >> "$GITHUB_STEP_SUMMARY"
+          fi

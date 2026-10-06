@@ -14,7 +14,7 @@ The check runs these eight steps in order and stops at the first one that fails:
 4. Results before: the canary experiment's results are read without the cache. If this fails, the API cannot compute them, or the synthetic account may no longer read them.
 5. Assign: a new synthetic user is assigned on the canary experiment, and asking again returns the same variant. If this fails, check that the canary experiment is still active.
 6. Track: a conversion event for that user is accepted. If this fails, the API is refusing tracking events from the check's key.
-7. Evaluate: the canary flag answers with one of the documented reasons. If this fails, check that the canary flag still exists.
+7. Evaluate: the canary flag is evaluated for that user, by its rollout or a targeting rule. If this fails, check that the canary flag still exists and is active.
 8. Results after: the results show exactly one more assignment and one more conversion than step 4 read. If only this step fails, the events were accepted but the results do not count them yet.
 
 The check sends SDK traffic only to its own canary experiment and flag, and changes nothing else on {check}.

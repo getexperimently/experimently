@@ -122,7 +122,34 @@ reader.
 3. The first run that passes comments `synthetic-recovered.tmpl` and closes the
    issue.
 4. A run that is skipped (`SYNTH_ENABLED` not `true`) counts as neither a
-   failure nor a pass.
+   failure nor a pass: it does not break a run of failures, and it does not
+   add to one. The same holds for a run that was cancelled, or whose check job
+   failed before the check itself started (a checkout that failed, say).
+5. A run counts as a pass only when its check job succeeded and its step
+   `ran 8 of 8` ran, which it does only when the check reports all eight steps
+   passed. The count of failed runs in a row, and when the first of them
+   started, come from the workflow's own run history on `main`.
+6. Every failed run also writes the issue's body, as it would be posted, to the
+   run's step summary; the run that closes the issue writes its closing
+   comment there.
+
+`scripts/synthetic_report.py` applies these rules and
+`backend/tests/unit/scripts/test_synthetic_report.py` pins them.
+
+## Rendering
+
+`scripts/qa_render.py` is the one reader of this directory. It fills a
+template's placeholders from one fixed mapping of name to kind, checks every
+value against its kind with an anchored pattern (a commit is 7 to 40 hex
+digits; a run link is a run of this repository; a check name, a step and an
+HTTP status come from fixed sets; counts and seeds are bounded digits; a
+heading is one line of plain text with no URL), refuses a placeholder it has no
+value for and a value the template does not use, renders in one pass, and
+refuses output that is not ASCII. For an issue it writes the title (the
+rendered first line) and the body to separate files; the workflow passes the
+title's first line to `--title` and the body to `--body-file`.
+`backend/tests/unit/scripts/test_qa_render.py` plants a bad value of every
+kind.
 
 ## The docs-defect issue
 
