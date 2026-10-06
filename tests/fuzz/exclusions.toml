@@ -1,0 +1,151 @@
+# API fuzzing: the operations a pass never sends a request to.
+#
+# scripts/fuzz_check.py turns this file into Schemathesis's --exclude-name
+# arguments for each pass (fuzz.yml through _platform.yml's fuzz arm, and
+# `make fuzz`), and leaves the same operations out of the pass's selection
+# when it decides the run. Each entry names one operation exactly as the
+# served API document does ("METHOD /path"), the passes it applies to
+# (superuser, viewer, sdk) and why. An entry that names no operation of the
+# document, a pass outside those three, or no reason is refused, and so the
+# run fails. backend/tests/unit/scripts/test_fuzz_check.py pins the list:
+# change it there in the same pull request.
+#
+# The sdk pass selects only the SDK routes; an entry for a route outside them
+# changes nothing there and is listed for every pass so that a later change to
+# the sdk pass's selection cannot bring it back by accident.
+
+# --- Signing in and out, and the caller's own credentials ------------------
+
+[[exclude]]
+operation = "POST /api/v1/auth/login"
+passes = ["superuser", "viewer", "sdk"]
+reason = "Signs in. Every refused attempt counts toward the address's lockout, so fuzzing it fuzzes the lockout rather than the API."
+
+[[exclude]]
+operation = "POST /api/v1/auth/token"
+passes = ["superuser", "viewer", "sdk"]
+reason = "Signs in (the OAuth2 password form of the same login), with the same lockout."
+
+[[exclude]]
+operation = "POST /api/v1/auth/logout"
+passes = ["superuser", "viewer", "sdk"]
+reason = "Signs the caller out."
+
+[[exclude]]
+operation = "POST /api/v1/users/me/password"
+passes = ["superuser", "viewer", "sdk"]
+reason = "Changes the caller's own password."
+
+[[exclude]]
+operation = "DELETE /api/v1/api-keys/{key_id}"
+passes = ["superuser", "viewer", "sdk"]
+reason = "Revokes one of the caller's own API keys; Schemathesis reuses ids from earlier answers, and GET /api/v1/api-keys lists them."
+
+[[exclude]]
+operation = "DELETE /api/v1/users/{user_id}"
+passes = ["viewer"]
+reason = "A user who is not a superuser may delete only their own account; given the caller's id (Schemathesis reuses ids from earlier answers) it ends the pass's session. A superuser may not delete itself, so the superuser pass keeps it."
+
+# --- /api/v1/export/*: one shared counter of 10 requests a minute ----------
+
+[[exclude]]
+operation = "GET /api/v1/export/experiments"
+passes = ["superuser", "viewer", "sdk"]
+reason = "Every /api/v1/export/ route shares one counter of 10 requests a minute per address; at the fuzzing rate nearly every request would answer 429."
+
+[[exclude]]
+operation = "GET /api/v1/export/feature-flags"
+passes = ["superuser", "viewer", "sdk"]
+reason = "Every /api/v1/export/ route shares one counter of 10 requests a minute per address; at the fuzzing rate nearly every request would answer 429."
+
+[[exclude]]
+operation = "GET /api/v1/export/reports/experiments/{experiment_id}"
+passes = ["superuser", "viewer", "sdk"]
+reason = "Every /api/v1/export/ route shares one counter of 10 requests a minute per address; at the fuzzing rate nearly every request would answer 429."
+
+[[exclude]]
+operation = "GET /api/v1/export/reports/overview"
+passes = ["superuser", "viewer", "sdk"]
+reason = "Every /api/v1/export/ route shares one counter of 10 requests a minute per address; at the fuzzing rate nearly every request would answer 429."
+
+[[exclude]]
+operation = "GET /api/v1/export/variants"
+passes = ["superuser", "viewer", "sdk"]
+reason = "Every /api/v1/export/ route shares one counter of 10 requests a minute per address; at the fuzzing rate nearly every request would answer 429."
+
+# --- Outbound connections ---------------------------------------------------
+# Operations that open a connection to another host, or would with the
+# deployment's credentials set: the warehouse connection and query routes, the
+# test notifications, the LLM provider calls, and the stored identity-provider
+# endpoints of SSO. The stack runs with AWS_ENDPOINT_URL pointed at a closed
+# local port as well, so an AWS call fails on the runner.
+
+[[exclude]]
+operation = "POST /api/v1/warehouse/analysis/connections/test"
+passes = ["superuser", "viewer", "sdk"]
+reason = "Tests a warehouse connection described in the request: it connects to the warehouse the request names."
+
+[[exclude]]
+operation = "POST /api/v1/warehouse/analysis/connections/{connection_id}/test"
+passes = ["superuser", "viewer", "sdk"]
+reason = "Tests a stored warehouse connection: it connects to that warehouse."
+
+[[exclude]]
+operation = "POST /api/v1/warehouse/analysis/sources/{source_id}/validate"
+passes = ["superuser", "viewer", "sdk"]
+reason = "Runs a query on the source's warehouse connection."
+
+[[exclude]]
+operation = "POST /api/v1/warehouse/analysis/sources/{source_id}/preview"
+passes = ["superuser", "viewer", "sdk"]
+reason = "Runs a query on the source's warehouse connection."
+
+[[exclude]]
+operation = "POST /api/v1/warehouse/analysis/experiments/{experiment_id}/runs"
+passes = ["superuser", "viewer", "sdk"]
+reason = "Runs an analysis on the experiment's warehouse connection."
+
+[[exclude]]
+operation = "POST /api/v1/notifications/test"
+passes = ["superuser", "viewer", "sdk"]
+reason = "Sends a test e-mail or Slack message to a recipient or channel the request names."
+
+[[exclude]]
+operation = "POST /api/v1/scheduler/notify/test"
+passes = ["superuser", "viewer", "sdk"]
+reason = "Posts a test notification to the configured webhook."
+
+[[exclude]]
+operation = "POST /api/v1/llm-experiments/{experiment_id}/complete"
+passes = ["superuser", "viewer", "sdk"]
+reason = "Sends the prompt to the variant's LLM provider, a billable service when its key is set."
+
+[[exclude]]
+operation = "POST /api/v1/llm-experiments/{experiment_id}/judge"
+passes = ["superuser", "viewer", "sdk"]
+reason = "Sends the outputs to an LLM provider for scoring, a billable service when its key is set."
+
+[[exclude]]
+operation = "POST /api/v1/ai/design"
+passes = ["superuser", "viewer", "sdk"]
+reason = "Asks the AI assistant's LLM provider, a billable service when its key is set."
+
+[[exclude]]
+operation = "POST /api/v1/ai/interpret/{experiment_id}"
+passes = ["superuser", "viewer", "sdk"]
+reason = "Asks the AI assistant's LLM provider, a billable service when its key is set."
+
+[[exclude]]
+operation = "POST /api/v1/auth/sso/configs"
+passes = ["superuser", "viewer", "sdk"]
+reason = "Stores an identity provider's endpoints, which the sign-in callback then connects to."
+
+[[exclude]]
+operation = "PUT /api/v1/auth/sso/configs/{config_id}"
+passes = ["superuser", "viewer", "sdk"]
+reason = "Changes an identity provider's stored endpoints, which the sign-in callback then connects to."
+
+[[exclude]]
+operation = "GET /api/v1/auth/sso/oidc/{provider}/callback"
+passes = ["superuser", "viewer", "sdk"]
+reason = "Exchanges the sign-in code at the identity provider's stored token endpoint: a connection to that host."

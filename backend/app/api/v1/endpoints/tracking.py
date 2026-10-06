@@ -85,6 +85,20 @@ def _unknown_keys_detail(
     )
 
 
+#: The 404 sentence for each id field ``/tracking/events`` was given and could
+#: not find (#400). It names the field, never the id that was sent.
+_UNKNOWN_ID_SENTENCES = {
+    "experiment_id": "No experiment has that experiment_id.",
+    "feature_flag_id": "No feature flag has that feature_flag_id.",
+    "variant_id": "No variant has that variant_id.",
+}
+
+
+def _unknown_ids_detail(fields: List[str]) -> str:
+    """The 404 for an event by ids naming an id that is no stored row."""
+    return " ".join(_UNKNOWN_ID_SENTENCES[field] for field in fields)
+
+
 def _event_model(
     experiment_id: Any, feature_flag_id: Any
 ) -> type[EventCreate] | type[UntaggedEventCreate]:
@@ -576,6 +590,12 @@ async def track_event(
     response_model=EventResponse,
     summary="Track event by ids",
     response_description="Returns the stored event",
+    responses={
+        404: {
+            "description": "An experiment_id, feature_flag_id or variant_id names "
+            "no stored row; the detail names each such field, and nothing is stored"
+        },
+    },
 )
 async def track_event_by_ids(
     event_data: EventCreate = Body(
@@ -585,19 +605,27 @@ async def track_event_by_ids(
     api_key_info: Dict[str, Any] = Depends(deps.get_api_key),
 ) -> EventResponse:
     """
-    Track an event that already carries internal identifiers.
+    Track an event that names its experiment, flag and variant by id.
 
     Unlike ``/track`` (which resolves ``experiment_key``/``feature_flag_key``),
     this endpoint accepts ``experiment_id``/``feature_flag_id``/``variant_id``
     directly.  It is used by server-side integrations and the data seeding
     tooling that already hold the ids.
 
+    An id that is not a UUID answers 422. A UUID that names no stored
+    experiment, feature flag or variant answers 404 naming the field, and
+    nothing is stored.
+
     **Authentication**: Requires a valid API key in the X-API-Key header.
     """
+    service = EventService(db)
     try:
-        event = EventService(db).track_event(event_data)
-        record_event_tracked(str(event_data.event_type))
-        return _event_response(event)
+        # Raises ValueError for an id that is not a UUID, as track_event does.
+        unknown = service.unknown_id_fields(event_data)
+        if not unknown:
+            event = service.track_event(event_data)
+            record_event_tracked(str(event_data.event_type))
+            return _event_response(event)
     except ValidationError as e:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -615,6 +643,11 @@ async def track_event_by_ids(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=failure_detail("Could not store the event"),
         )
+    # An id named nothing: nothing was stored. The detail names the fields.
+    raise HTTPException(
+        status_code=status.HTTP_404_NOT_FOUND,
+        detail=_unknown_ids_detail(unknown),
+    )
 
 
 @router.post(

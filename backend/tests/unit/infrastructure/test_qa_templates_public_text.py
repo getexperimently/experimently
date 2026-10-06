@@ -737,6 +737,13 @@ WORKFLOW_POSTERS: Dict[str, Tuple[str, str]] = {
         "the synthetic-failure issue and its comments, and the run's step "
         "summary, rendered by scripts/qa_render.py",
     ),
+    # The fuzz arm writes each fuzzing pass's step summary; fuzz.yml itself
+    # only calls it, and posts nothing.
+    "workflows/_platform.yml": (
+        "template",
+        "each API fuzzing pass's step summary, rendered from fuzz-green.tmpl "
+        "or fuzz-red.tmpl by scripts/fuzz_check.py through scripts/qa_render.py",
+    ),
 }
 POSTER_KINDS = ("template", "legacy-inline")
 

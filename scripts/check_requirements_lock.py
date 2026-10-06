@@ -37,6 +37,8 @@ makes a bump in one file fail the lint job until the other follows.
 The acceptance suites' pins (``tests/acceptance/requirements.txt``) are held
 the same way: every package they share with ``backend/requirements.txt`` or
 with ``backend/requirements/runtime.lock`` must name the same version there.
+So are API fuzzing's (``tests/fuzz/requirements.txt``), against
+``backend/requirements.txt``.
 
 The modules pair is skipped when ``modules/`` is absent (a core checkout).
 
@@ -120,6 +122,15 @@ SUPERSETS = [
     (
         ROOT / "tests" / "acceptance" / "requirements.txt",
         ROOT / "backend" / "requirements" / "runtime.lock",
+        True,
+        False,
+    ),
+    # API fuzzing (tests/fuzz/requirements.txt) installs Schemathesis in an
+    # environment of its own; a package it shares with the venv must name the
+    # venv's version. Schemathesis and Hypothesis are its alone.
+    (
+        ROOT / "tests" / "fuzz" / "requirements.txt",
+        ROOT / "backend" / "requirements.txt",
         True,
         False,
     ),

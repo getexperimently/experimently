@@ -858,6 +858,9 @@ A 422 names positions and fields, never the ids that were sent.
 - **Endpoint**: `POST /api/v1/tracking/events`
 - **Description**: Same as `/track` but keyed by internal ids (`experiment_id`, `variant_id`, `feature_flag_id`);
   `event_name` is required. Used by server-side integrations and seeding tools.
+- **Headers**: X-API-Key: {api_key}
+- **Response**: 200 OK (the stored event); 404 an id names no stored row, and nothing is stored: the detail names
+  each such field, for example `No experiment has that experiment_id.`; 422 invalid body, or an id that is not a UUID
 
 ### Get User Assignments
 - **Endpoint**: `GET /api/v1/tracking/assignments/{user_id}`

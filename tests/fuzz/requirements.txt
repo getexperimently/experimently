@@ -1,0 +1,12 @@
+# What API fuzzing installs: fuzz.yml (through _platform.yml's fuzz arm) and
+# `make fuzz`, each into a virtualenv of its own, never next to the backend.
+#
+# Hypothesis is pinned as well as Schemathesis: it generates the inputs, so a
+# different version makes different requests from the same seed, and `make
+# fuzz FUZZ_SEED=<seed>` would no longer repeat a CI run.
+#
+# A package this file shares with backend/requirements.txt must name the same
+# version there; scripts/check_requirements_lock.py fails the lint job
+# otherwise.
+schemathesis==4.29.3
+hypothesis==6.168.5

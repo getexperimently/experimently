@@ -206,10 +206,9 @@ Each key also carries its `id`, `description`, `user_id`, `created_at`, `expires
 every user's keys. The list leaves out inactive keys unless you add
 `?include_inactive=true`.
 
-`last_used_at` is when the key was last used, recorded at most once a minute per key, so it
-can be up to a minute behind; it is `null` until the key is first used. The dashboard shows it
-as **Last used**. A key whose `last_used_at` is old, or still `null`, is a candidate for
-deleting once you have checked that no service holds it.
+`last_used_at` is when the key last authenticated a request, and `null` for a key that was never
+used. The API writes it at most once a minute per key, so it can trail the last request by up to
+a minute. Use it to find keys that are no longer used.
 
 ---
 

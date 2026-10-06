@@ -346,16 +346,21 @@ def test_a_track_whose_metadata_the_database_refuses_answers_the_fixed_sentence(
     assert resp.json() == {"detail": _with_id(EVENT)}
 
 
-def test_an_event_for_an_unknown_experiment_id_answers_the_fixed_sentence(
-    admin_client: TestClient,
+@pytest.mark.usefixtures("nul_reaches_the_database")
+def test_an_event_by_ids_whose_properties_the_database_refuses_answers_the_fixed_sentence(
+    admin_client: TestClient, experiment
 ) -> None:
+    # An id that names no stored row answers 404 before the write (#400,
+    # test_tracking_events_unknown_ids.py), so a NUL is what the database
+    # refuses here.
     resp = admin_client.post(
         "/api/v1/tracking/events",
         json={
             "event_type": "click",
             "event_name": "click",
             "user_id": _user(),
-            "experiment_id": str(uuid.uuid4()),
+            "experiment_id": str(experiment.id),
+            "properties": {"note": "a\u0000b"},
         },
         headers={"X-Request-ID": REQUEST_ID},
     )

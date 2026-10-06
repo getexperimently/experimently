@@ -1,21 +1,13 @@
 """
 Unit tests for AIExperimentPlannerService (EP-056).
 
-Claude API is always mocked — no real API calls are made.
 Tests cover:
 - get_planning_advice returns dict with required keys
-- Claude API called with correct prompt structure
-- Fallback to template when API unavailable
 - Template content rules (short runtime, long runtime, large/small MDE)
-- Prompt contains key numbers (baseline rate, MDE, runtime)
 """
-
-import os
-from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from backend.app.core.config import settings
 from backend.app.services.ai_experiment_planner_service import (
     AIExperimentPlannerService,
 )
@@ -25,60 +17,8 @@ from backend.app.services.ai_experiment_planner_service import (
 # ---------------------------------------------------------------------------
 
 
-def _make_mock_anthropic_client(
-    response_text: str = "AI planning advice here.",
-    *,
-    with_thinking: bool = True,
-):
-    """Return a mock ``anthropic.Anthropic()`` client.
-
-    The blocks carry a real ``type``, and by default a **thinking block comes
-    first** -- which is the shape the API actually returns once adaptive
-    thinking is on, and therefore the shape the services must handle.
-
-    This mock previously produced one bare ``MagicMock`` with only ``.text``
-    set. That made ``message.content[0].text`` pass in tests while it was
-    raising ``AttributeError`` against a real response, because a MagicMock
-    answers any attribute. The mock agreeing with the code is not evidence
-    that either agrees with the API.
-    """
-    blocks = []
-    if with_thinking:
-        thinking = MagicMock()
-        thinking.type = "thinking"
-        thinking.thinking = "...reasoning..."
-        blocks.append(thinking)
-
-    text_block = MagicMock()
-    text_block.type = "text"
-    text_block.text = response_text
-    blocks.append(text_block)
-
-    mock_message = MagicMock()
-    mock_message.content = blocks
-
-    mock_client = MagicMock()
-    mock_client.messages.create.return_value = mock_message
-    return mock_client
-
-
 def _planner() -> AIExperimentPlannerService:
     return AIExperimentPlannerService()
-
-
-# ---------------------------------------------------------------------------
-# TestIsAIAvailable
-# ---------------------------------------------------------------------------
-
-
-class TestIsAIAvailable:
-    def test_returns_false_when_no_api_key(self, monkeypatch):
-        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-        assert AIExperimentPlannerService.is_ai_available() is False
-
-    def test_returns_true_when_api_key_set(self, monkeypatch):
-        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test-key")
-        assert AIExperimentPlannerService.is_ai_available() is True
 
 
 # ---------------------------------------------------------------------------
@@ -149,7 +89,7 @@ class TestGetPlanningAdviceReturnsDict:
 
 
 class TestTemplateAdvice:
-    """Tests for the template-based fallback advice."""
+    """Tests for the built-in planning advice."""
 
     @pytest.mark.asyncio
     async def test_generated_by_template_when_no_api_key(self, monkeypatch):
@@ -297,193 +237,3 @@ class TestTemplateAdvice:
             or "normal" in advice_lower
             or "14" in result["advice"]
         )
-
-
-# ---------------------------------------------------------------------------
-# TestAIAdvice
-# ---------------------------------------------------------------------------
-
-
-def _make_mock_anthropic_module(
-    response_text: str = "AI planning advice here.", *, with_thinking: bool = True
-):
-    """Return a mock 'anthropic' module with a mock Anthropic class."""
-    mock_client = _make_mock_anthropic_client(
-        response_text, with_thinking=with_thinking
-    )
-    mock_anthropic_module = MagicMock()
-    mock_anthropic_module.Anthropic.return_value = mock_client
-    return mock_anthropic_module, mock_client
-
-
-class TestAIAdvice:
-    """Tests for the AI-based advice path (Claude API mocked)."""
-
-    @pytest.mark.asyncio
-    async def test_ai_advice_called_when_api_key_set(self, monkeypatch):
-        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test-key")
-        mock_module, mock_client = _make_mock_anthropic_module(
-            "Great experiment design!"
-        )
-
-        planner = _planner()
-        with patch.dict("sys.modules", {"anthropic": mock_module}):
-            result = await planner.get_planning_advice(
-                experiment_name="AI Test",
-                metric_description="revenue",
-                baseline_rate=0.10,
-                mde=0.10,
-                runtime_days=30.0,
-            )
-
-        assert result["generated_by"] == "ai"
-        assert "Great experiment design!" in result["advice"]
-
-    @pytest.mark.asyncio
-    async def test_anthropic_client_created_with_correct_model(self, monkeypatch):
-        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test-key")
-        mock_module, mock_client = _make_mock_anthropic_module("Advice text")
-
-        with patch.dict("sys.modules", {"anthropic": mock_module}):
-            planner = _planner()
-            await planner.get_planning_advice(
-                experiment_name="Test",
-                metric_description="conversion",
-                baseline_rate=0.10,
-                mde=0.10,
-                runtime_days=20.0,
-            )
-
-        # Verify messages.create was called
-        mock_client.messages.create.assert_called_once()
-        call_kwargs = mock_client.messages.create.call_args
-        # The configured model, not a literal. It was `claude-sonnet-4-6`
-        # here and in the service, so the two agreed with each other while
-        # both sat a generation behind and nothing said so.
-        assert call_kwargs.kwargs.get("model") == settings.ANTHROPIC_MODEL
-
-    @pytest.mark.asyncio
-    async def test_prompt_contains_baseline_rate(self, monkeypatch):
-        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test-key")
-        mock_module, mock_client = _make_mock_anthropic_module("Advice text")
-
-        with patch.dict("sys.modules", {"anthropic": mock_module}):
-            planner = _planner()
-            await planner.get_planning_advice(
-                experiment_name="Test",
-                metric_description="conversion",
-                baseline_rate=0.15,
-                mde=0.10,
-                runtime_days=20.0,
-            )
-
-        call_kwargs = mock_client.messages.create.call_args
-        prompt_content = call_kwargs.kwargs["messages"][0]["content"]
-        assert "15" in prompt_content  # 15% baseline
-
-    @pytest.mark.asyncio
-    async def test_prompt_contains_mde(self, monkeypatch):
-        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test-key")
-        mock_module, mock_client = _make_mock_anthropic_module("Advice")
-
-        with patch.dict("sys.modules", {"anthropic": mock_module}):
-            planner = _planner()
-            await planner.get_planning_advice(
-                experiment_name="Test",
-                metric_description="conversion",
-                baseline_rate=0.10,
-                mde=0.25,
-                runtime_days=10.0,
-            )
-
-        call_kwargs = mock_client.messages.create.call_args
-        prompt_content = call_kwargs.kwargs["messages"][0]["content"]
-        assert "25" in prompt_content  # 25% MDE
-
-    @pytest.mark.asyncio
-    async def test_prompt_contains_runtime_days(self, monkeypatch):
-        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test-key")
-        mock_module, mock_client = _make_mock_anthropic_module("Advice")
-
-        with patch.dict("sys.modules", {"anthropic": mock_module}):
-            planner = _planner()
-            await planner.get_planning_advice(
-                experiment_name="Test",
-                metric_description="conversion",
-                baseline_rate=0.10,
-                mde=0.10,
-                runtime_days=45.0,
-            )
-
-        call_kwargs = mock_client.messages.create.call_args
-        prompt_content = call_kwargs.kwargs["messages"][0]["content"]
-        assert "45" in prompt_content  # 45 days runtime
-
-    @pytest.mark.asyncio
-    async def test_falls_back_to_template_when_api_raises(self, monkeypatch):
-        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test-key")
-
-        planner = _planner()
-        # Make the AI path raise an exception
-        with patch.object(planner, "_ai_advice", side_effect=RuntimeError("API error")):
-            result = await planner.get_planning_advice(
-                experiment_name="Test",
-                metric_description="conversion",
-                baseline_rate=0.10,
-                mde=0.10,
-                runtime_days=20.0,
-            )
-
-        assert result["generated_by"] == "template"
-        assert len(result["advice"]) > 0
-
-    @pytest.mark.asyncio
-    async def test_prompt_contains_experiment_name(self, monkeypatch):
-        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test-key")
-        mock_module, mock_client = _make_mock_anthropic_module("Advice")
-
-        with patch.dict("sys.modules", {"anthropic": mock_module}):
-            planner = _planner()
-            await planner.get_planning_advice(
-                experiment_name="Unique Experiment Name XYZ",
-                metric_description="conversion",
-                baseline_rate=0.10,
-                mde=0.10,
-                runtime_days=10.0,
-            )
-
-        call_kwargs = mock_client.messages.create.call_args
-        prompt_content = call_kwargs.kwargs["messages"][0]["content"]
-        assert "Unique Experiment Name XYZ" in prompt_content
-
-
-class TestResponseShapes:
-    """Both block layouts a real response can have.
-
-    `with_thinking=False` existed on the mock helper with no caller, so the
-    shape a model that does *not* think returns -- Opus 4.8 and 4.7 omit
-    thinking unless asked -- went untested even though `first_text` has to keep
-    working on it.
-    """
-
-    @pytest.mark.asyncio
-    @pytest.mark.parametrize("with_thinking", [True, False])
-    async def test_advice_is_extracted_from_either_shape(
-        self, monkeypatch, with_thinking: bool
-    ):
-        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test-key")
-        mock_module, _ = _make_mock_anthropic_module(
-            "Great experiment design!", with_thinking=with_thinking
-        )
-
-        with patch.dict("sys.modules", {"anthropic": mock_module}):
-            result = await _planner().get_planning_advice(
-                experiment_name="Test",
-                metric_description="conversion",
-                baseline_rate=0.10,
-                mde=0.10,
-                runtime_days=20.0,
-            )
-
-        assert result["generated_by"] == "ai"
-        assert "Great experiment design!" in result["advice"]

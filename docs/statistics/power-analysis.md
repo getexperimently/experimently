@@ -211,6 +211,8 @@ control user converted) the tab asks for the rate you expect, and the API answer
 
 All endpoints are unauthenticated (no login required). They perform pure computation with no database access.
 
+**Limits.** `n_variants` is at most 100 (an experiment's variants split its traffic in whole percentages, so no more than 100 of them receive any), and `sample_size_per_variant`, `required_sample_size` and `daily_traffic` are at most 1,000,000,000,000 (10^12, more than a hundred times the world's population). A larger value answers 422 naming the field: the error's `loc` is `["body", "<field>"]` and its `type` is `less_than_equal`. A calculation whose numbers still leave floating-point range, such as a `mean` metric with a very large `baseline_std`, answers 422 with the detail "These values are too large or too small to calculate with. Use values nearer those of a real experiment."
+
 ### POST /api/v1/power/sample-size
 
 Compute the required sample size per variant.
@@ -326,7 +328,8 @@ Return the power curve — sample size required per variant for a range of effec
 
 ### POST /api/v1/power/plan
 
-Generate plain-English planning advice using Claude AI (falls back to built-in templates).
+Generate plain-English planning advice for a power analysis result. The advice is the
+built-in planning advice, and `generated_by` is always `"template"`.
 
 **Request body**:
 ```json
