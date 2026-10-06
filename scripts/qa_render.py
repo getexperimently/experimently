@@ -100,9 +100,13 @@ KINDS: Dict[str, Callable[[str], bool]] = {
     "seed": _fullmatch(r"[0-9]{1,10}"),
     "duration": _fullmatch(r"(?:[1-9][0-9]{0,3} h )?[0-9]{1,2} min"),
     "count": _fullmatch(r"[0-9]{1,6}"),
+    # A page of the docs nav: README.md and Enhanced_Rules_Engine_Reference.md
+    # are two, so capitals are letters here like any other.
     "guide_path": lambda value: (
         len(value) <= 200
-        and re.fullmatch(r"[a-z0-9][a-z0-9_-]*(?:/[a-z0-9][a-z0-9_.-]*)*\.md", value)
+        and re.fullmatch(
+            r"[A-Za-z0-9][A-Za-z0-9_-]*(?:/[A-Za-z0-9][A-Za-z0-9_.-]*)*\.md", value
+        )
         is not None
     ),
     "step_number": _fullmatch(r"[1-9][0-9]{0,2}"),

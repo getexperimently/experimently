@@ -25,7 +25,8 @@
 #                       (.github/workflows/<workflow>.yml).
 #   reference           nothing is walked: it has no steps to follow, or the
 #                       reason says why its steps are not walked. The docs-site
-#                       journey is to check that it answers and has its heading.
+#                       journey checks that it answers on the published site
+#                       with its source heading, like every nav page.
 #   aws                 needs an AWS account; to be reported NOT RUN.
 #   external:<service>  needs a third-party account or service, named by the
 #                       slug after the colon; to be reported NOT RUN.
@@ -33,26 +34,29 @@
 #                       be reported NOT RUN.
 #
 # Fields: `class` and a one-line `reason` on every page; `journey` (a slug) and,
-# until its file exists, `pending = true` on a journey; `workflow` on a workflow.
+# until its file exists, `pending = true` on a journey, with `planned` naming
+# the pull request of the QA plan (#897, #939) that writes it: "D2", "D3a",
+# "D3b", or "unassigned"; `workflow` on a workflow.
 #
 # [[flow]] maps each flow in the "Flows, at least" list of #939 to journeys, to
 # pages (whose class and reason are above) or to every page of a class. The test
 # holds that list itself, so a flow cannot drop out of the mapping.
 #
-# The intent for the journeys' run summary: it prints the #939 mapping, and every
-# nav page that is not a journey with its class and reason, so what is not
-# walked is listed, never silent.
+# The journeys' run summary (docs_runner/report.py) prints the #939 mapping, and
+# every nav page that is not a journey that ran with its class and reason, so
+# what is not walked is listed, never silent. A pending journey is shown as
+# planned in the pull request `planned` names, never as passed.
 
 [pages."README.md"]
 class = "journey"
 journey = "docs-site"
-pending = true
-reason = "the landing page: the docs-site journey starts here, then checks every nav page's heading on the published site and that search finds it"
+reason = "the landing page: the docs-site journey starts here, then checks every nav page's heading and every link to the site on the published site, and that search finds four pages"
 
 [pages."getting-started/quick-start.md"]
 class = "journey"
 journey = "quick-start"
 pending = true
+planned = "D3a"
 reason = "the first-run guide: its shell steps run in Doc Examples; the journey walks the dashboard half"
 
 [pages."getting-started/concepts.md"]
@@ -75,6 +79,7 @@ reason = "its runnable blocks run on a full-profile stack in Doc Examples; the s
 class = "journey"
 journey = "feature-flag-create"
 pending = true
+planned = "D3b"
 reason = "create a flag in the dashboard with a targeting rule, turn it on and see it evaluate; its API steps run in Doc Examples"
 
 [pages."Enhanced_Rules_Engine_Reference.md"]
@@ -89,18 +94,21 @@ reason = "its API steps run on a stack in Doc Examples"
 class = "journey"
 journey = "feature-flag-rollout"
 pending = true
+planned = "D3b"
 reason = "a rollout schedule made through the API, its stages seen in the dashboard as they advance; its API steps run in Doc Examples"
 
 [pages."feature-flags/safety.md"]
 class = "journey"
 journey = "feature-flag-safety"
 pending = true
+planned = "D3b"
 reason = "reported errors roll a flag back, seen on the dashboard's safety page; its API steps run in Doc Examples"
 
 [pages."guides/user-guide.md"]
 class = "journey"
 journey = "experiment-results"
 pending = true
+planned = "D3b"
 reason = "running an experiment and reading its results page after seeded traffic: counts, p-value and the sample-ratio check"
 
 [pages."guides/dashboard-and-api.md"]
@@ -147,12 +155,14 @@ reason = "steps 3-5 call a model and need an LLM provider key (OpenAI, Anthropic
 class = "journey"
 journey = "sdk-javascript"
 pending = true
+planned = "unassigned"
 reason = "install the published package (0.1.0 on npm) as the page says and run its snippet against a stack"
 
 [pages."sdk/python.md"]
 class = "journey"
 journey = "sdk-python"
 pending = true
+planned = "unassigned"
 reason = "install the published package (0.1.0 on PyPI) as the page says and run its snippet against a stack"
 
 [pages."sdk/java.md"]
@@ -167,6 +177,7 @@ reason = "not walked: the page says the package is not yet on npm; the SDK live 
 class = "journey"
 journey = "sdk-go"
 pending = true
+planned = "unassigned"
 reason = "go get the module as the page says and run its snippet against a stack"
 
 [pages."sdk/ios.md"]
@@ -269,6 +280,7 @@ reason = "an API reference for the rbac module; its shell blocks are not yet enr
 class = "journey"
 journey = "api-key-first-assignment"
 pending = true
+planned = "D3b"
 reason = "create an API key in the dashboard and use it for a first assignment; its API steps run in Doc Examples"
 
 [pages."auth/sso.md"]
@@ -292,6 +304,7 @@ reason = "its marked blocks are run on a kind cluster by the chart-kind workflow
 class = "journey"
 journey = "docker-guide"
 pending = true
+planned = "D3a"
 reason = "start the stack as written, open the dashboard and sign in; its shell steps run in Doc Examples"
 
 [pages."getting-started/docker-compose-file.md"]
@@ -322,6 +335,7 @@ reason = "its API steps run on a stack in Doc Examples"
 class = "journey"
 journey = "experiment-wizard"
 pending = true
+planned = "D3b"
 reason = "the wizard's five steps to a draft, then started; its API steps run in Doc Examples"
 
 [pages."api/interaction-detection.md"]
@@ -332,6 +346,7 @@ reason = "its API steps run on a stack in Doc Examples"
 class = "journey"
 journey = "power-calculator"
 pending = true
+planned = "D2"
 reason = "the dashboard's power calculator and POST /api/v1/power/sample-size, both checked against a scipy oracle"
 
 [pages."statistics/post-stratification.md"]
@@ -350,6 +365,7 @@ reason = "what workspaces are; no steps to follow"
 class = "journey"
 journey = "workspaces-quickstart"
 pending = true
+planned = "D3b"
 reason = "full profile: create a workspace, invite a member, connect an SDK with a platform API key"
 
 [pages."deployment/deployment-guide.md"]
@@ -432,6 +448,7 @@ reason = "the Cognito user pool and app client set-up"
 class = "journey"
 journey = "onboarding-and-password"
 pending = true
+planned = "D3a"
 reason = "sign in as each role, manage users and change your own password with local sign-in"
 
 [pages."auth/auth-environment-variables.md"]

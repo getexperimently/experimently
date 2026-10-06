@@ -1,0 +1,67 @@
+# The published documentation site, as a reader meets it (#939): the home page,
+# every page of the nav with its heading, every link to the site, and search.
+#
+# The site is deployed from release tags, so it is compared with the source it
+# was built from: docs-journeys.yml sets DOCS_JOURNEY_PUBLISHED_SOURCE to the
+# commit of the site's last successful deployment, not to main.
+#
+# The searches: each query is a phrase a reader would type for one page, and
+# that page must be among the first three results (model.SEARCH_TOP). Measured
+# on 2026-10-06 against the site deployed from v0.25.0, each was result 1 but
+# "quick start" (result 2, after the LLM evaluation quick start).
+guide: README.md
+stack: docs-published
+profile: core
+video: true
+written: 2026-10-06
+steps:
+  - id: home
+    doc: experimently-documentation
+    do:
+      goto: /
+    expect:
+      status: 200
+      aria: |
+        - main:
+          - article:
+            - heading "Experimently Documentation" [level=1]
+            - heading "Start Here" [level=2]
+    fail: the site does not answer, or its home page is not the documentation's home page
+  - id: nav-pages
+    doc: experimently-documentation
+    do:
+      crawl: nav
+    fail: a page of the nav answers anything but 2xx, leaves the site, or shows a heading its source does not have
+  - id: links
+    doc: experimently-documentation
+    do:
+      crawl: links
+    fail: a link to the site, on a nav page or written absolute in its source, answers anything but 2xx or redirects out of the site
+  - id: search-quick-start
+    doc: getting-started
+    do:
+      search: quick start
+    expect:
+      found: /getting-started/quick-start/
+    fail: the Quick Start is not among the first three results for "quick start"
+  - id: search-power-analysis
+    doc: experimently-documentation
+    do:
+      search: power analysis
+    expect:
+      found: /statistics/power-analysis/
+    fail: the power analysis page is not among the first three results for "power analysis"
+  - id: search-safety-monitoring
+    doc: experimently-documentation
+    do:
+      search: safety monitoring
+    expect:
+      found: /feature-flags/safety/
+    fail: the safety monitoring page is not among the first three results for "safety monitoring"
+  - id: search-docker-compose
+    doc: getting-started
+    do:
+      search: docker compose
+    expect:
+      found: /getting-started/docker-compose-file/
+    fail: the Docker Compose stack page is not among the first three results for "docker compose"
