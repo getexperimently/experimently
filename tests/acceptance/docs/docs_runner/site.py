@@ -14,7 +14,14 @@ What a crawl expects comes from the site's source, the ``mkdocs.yml`` and
 
 And what a crawl or a search does with what it sees, without a browser: which
 links are the site's, how a link is resolved (redirects are followed only
-within the site), and where a page is in the search results. ``execute`` drives
+within the site), and where a page is in the search results.
+
+A page or a link that answers 5xx, or nothing, is asked once more,
+``RETRY_SECONDS`` later, and the second answer is the one judged: GitHub Pages
+answers 503 now and then (one of 121 pages in one run, measured on
+2026-10-06), and one such answer would make a whole night red for nothing. A
+second 5xx is a finding, and a 4xx is never asked again. The crawl's file says
+which were asked twice. ``execute`` drives
 the browser; this module imports neither Playwright nor ``backend``, so the
 unit job tests it.
 """
@@ -23,6 +30,7 @@ from __future__ import annotations
 
 import posixpath
 import re
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
@@ -34,6 +42,8 @@ from docs_runner import guide as guides
 
 #: Redirects followed for one link, at most.
 MAX_REDIRECTS = 5
+#: How long before a page or link that answered 5xx or nothing is asked again.
+RETRY_SECONDS = 2.0
 REDIRECTS = (301, 302, 303, 307, 308)
 #: An absolute link in Markdown text ends at whitespace or at what closes it.
 _LINK_END = r"[^\s<>\"'`)\]]*"
@@ -217,31 +227,61 @@ class Resolved:
     status: Optional[int]  # the last answer's status; None when none came
     final: str  # the last URL asked for
     problem: str  # "" when the link resolves
+    retried: bool = (
+        False  # a URL on the way answered 5xx or nothing, and was asked again
+    )
 
 
-def resolve(link: str, base: str, fetch: Fetch) -> Resolved:
-    """Follow *link*'s redirects within the site to a 2xx, or say why not."""
+def transient(status: Optional[int]) -> bool:
+    """True for an answer worth asking again: a 5xx, or none at all."""
+    return status is None or status >= 500
+
+
+def resolve(
+    link: str, base: str, fetch: Fetch, pause: Callable[[float], None] = time.sleep
+) -> Resolved:
+    """Follow *link*'s redirects within the site to a 2xx, or say why not.
+
+    Each URL that answers 5xx or nothing is asked once more after
+    ``RETRY_SECONDS``; ``retried`` says it was.
+    """
     url = link
+    retried = False
     for _ in range(MAX_REDIRECTS + 1):
-        try:
-            status, location = fetch(url)
-        # Any failure to answer is a finding about the link, not a crash.
-        except Exception as error:
-            return Resolved(link, None, url, f"no answer ({type(error).__name__})")
+        for attempt in (1, 2):
+            try:
+                status, location = fetch(url)
+                error = ""
+            # Any failure to answer is a finding about the link, not a crash.
+            except Exception as failure:
+                status, location, error = None, "", type(failure).__name__
+            if attempt == 1 and transient(status):
+                retried = True
+                pause(RETRY_SECONDS)
+                continue
+            break
+        if status is None:
+            return Resolved(link, None, url, f"no answer ({error})", retried)
         if status in REDIRECTS:
             if not location:
-                return Resolved(link, status, url, f"{status} with no Location")
+                return Resolved(
+                    link, status, url, f"{status} with no Location", retried
+                )
             target = urljoin(url, location)
             if not within(target, base):
                 return Resolved(
-                    link, status, url, f"{status} to {target}, outside the site"
+                    link,
+                    status,
+                    url,
+                    f"{status} to {target}, outside the site",
+                    retried,
                 )
             url = target
             continue
         if 200 <= status < 300:
-            return Resolved(link, status, url, "")
-        return Resolved(link, status, url, f"answered {status}")
-    return Resolved(link, None, url, f"more than {MAX_REDIRECTS} redirects")
+            return Resolved(link, status, url, "", retried)
+        return Resolved(link, status, url, f"answered {status}", retried)
+    return Resolved(link, None, url, f"more than {MAX_REDIRECTS} redirects", retried)
 
 
 def compare_headings(

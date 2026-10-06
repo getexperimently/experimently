@@ -8,7 +8,7 @@ is NOT RUN with that reason, and ``ref: doc-examples`` is NOT RUN
 Elements are found only by role and accessible name, or by label, with exact
 matching. Waiting is Playwright's own: an action waits for its element and an
 expectation retries until it holds or ``DOCS_JOURNEY_TIMEOUT_MS`` (default
-10000) passes. There is no fixed sleep anywhere.
+10000) passes. No step sleeps; the crawl's one re-ask is below.
 
 Files, under ``<run dir>/<journey>/``: ``NN-<step>.expected.aria.yml`` (the
 expected ARIA snapshot, written before the step runs), ``NN-<step>.png`` and
@@ -21,6 +21,9 @@ and ``NN-<step>.crawl.json`` (what a crawl saw, and what differed). A
 unless ``DOCS_JOURNEY_RECORD_VIDEO=0``.
 
 The two crawls visit the nav pages once per journey and share what they saw.
+A page or link that answers 5xx or nothing is asked once more,
+``site.RETRY_SECONDS`` later (``site.py`` says why); that is the only wait
+here that is not Playwright's own.
 A search starts from the site's home page, so the results it reads are its
 own: the site's search box is MkDocs Material's (a textbox named "Search"),
 and its results are read once the count above them is shown.
@@ -223,12 +226,27 @@ class JourneyRunner:
         return f'searching for "{query}": {wanted} is result {place} of {len(results)}'
 
     # -- the documentation site --------------------------------------------
-    def _visit(self, page: Page, url: str, base: str) -> Dict[str, Any]:
-        """Open one page of the site: its status, where it ended, its heading, its links."""
+    @staticmethod
+    def _open(page: Page, url: str):
+        """(the navigation's response, or None; the error, or "")."""
         try:
-            response = page.goto(url, wait_until="domcontentloaded")
+            return page.goto(url, wait_until="domcontentloaded"), ""
         except PlaywrightError as error:
-            return {"url": url, "status": None, "error": one_line(error, 160)}
+            return None, one_line(error, 160)
+
+    def _visit(self, page: Page, url: str, base: str) -> Dict[str, Any]:
+        """Open one page of the site: its status, where it ended, its heading, its links.
+
+        A page that answers 5xx or nothing is opened once more, after
+        ``site.RETRY_SECONDS`` (``site.py`` says why).
+        """
+        response, error = self._open(page, url)
+        retried = site.transient(response.status if response is not None else None)
+        if retried:
+            time.sleep(site.RETRY_SECONDS)
+            response, error = self._open(page, url)
+        if error:
+            return {"url": url, "status": None, "error": error, "retried": retried}
         final = page.url
         headings = page.get_by_role("main").get_by_role("heading", level=1)
         heading = headings.first.inner_text() if headings.count() else None
@@ -242,6 +260,7 @@ class JourneyRunner:
             "on_site": site.within(final, base),
             "heading": site.normalise(heading) if heading is not None else None,
             "links": site.site_links(hrefs, base),
+            "retried": retried,
         }
 
     def _site_visits(self, page: Page, running: Running):
@@ -329,6 +348,7 @@ class JourneyRunner:
                     "/" + site.on_site(running.base_url, r.link): {
                         "on": links[r.link],
                         "status": r.status,
+                        "retried": r.retried,
                     }
                     for r in resolved
                 },

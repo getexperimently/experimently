@@ -1554,11 +1554,46 @@ BASE = "https://example.github.io/sample/"
 )
 def test_a_link_resolves_only_within_the_site(answers, problem):
     link = next(iter(answers))
-    resolved = site.resolve(link, BASE, _fetcher(answers))
+    resolved = site.resolve(link, BASE, _fetcher(answers), pause=lambda s: None)
     if problem:
         assert problem in resolved.problem, resolved
     else:
         assert resolved.problem == "", resolved
+
+
+def _sequence(*answers):
+    """A fetch that gives *answers* in turn, whatever the URL."""
+    queue = list(answers)
+
+    def fetch(url: str):
+        answer = queue.pop(0)
+        if isinstance(answer, Exception):
+            raise answer
+        return answer
+
+    return fetch
+
+
+@pytest.mark.parametrize(
+    "answers, problem, retried, pauses",
+    [
+        ([(503, ""), (200, "")], "", True, 1),
+        ([OSError("reset"), (200, "")], "", True, 1),
+        ([(503, ""), (503, "")], "answered 503", True, 1),
+        ([OSError("reset"), OSError("reset")], "no answer (OSError)", True, 1),
+        ([(404, "")], "answered 404", False, 0),
+        ([(200, "")], "", False, 0),
+    ],
+    ids=["503-then-ok", "none-then-ok", "503-twice", "none-twice", "404-once", "ok"],
+)
+def test_a_5xx_or_no_answer_is_asked_once_more(answers, problem, retried, pauses):
+    """GitHub Pages answers 503 now and then; a second 5xx is the finding, and
+    a 4xx is never asked again."""
+    waited = []
+    resolved = site.resolve(BASE + "a/", BASE, _sequence(*answers), pause=waited.append)
+    assert resolved.problem.startswith(problem) if problem else resolved.problem == ""
+    assert resolved.retried is retried
+    assert waited == [site.RETRY_SECONDS] * pauses
 
 
 def test_each_way_a_nav_page_can_differ_from_its_source(tmp_path):
