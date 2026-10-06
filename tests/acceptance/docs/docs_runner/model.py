@@ -311,14 +311,14 @@ class Step(_Strict):
     doc: StrictStr = Field(pattern=r"^[^#\s]+$")
     do: Do
     expect: Optional[Expect] = None
-    fail: Optional[StrictStr] = None
+    fail: StrictStr
     snapshot: Optional[StrictBool] = None
     not_run: Optional[StrictStr] = None
 
     @field_validator("fail")
     @classmethod
-    def _fail_one_line(cls, value):
-        return value
+    def _fail_one_line(cls, value: str) -> str:
+        return _one_line(value, "fail")
 
     @property
     def in_browser(self) -> bool:

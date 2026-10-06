@@ -21,7 +21,3 @@ def test_journey(journey_file: Path, walk_journey) -> None:
         pytest.fail(
             f"{outcome.journey}: {result.line}. {result.sentence}", pytrace=False
         )
-
-
-def test_planted_skip(journey_file: Path) -> None:
-    pytest.skip("planted")

@@ -110,7 +110,7 @@ updates:
   # As an entry of its own, a bump to one of them would arrive alone and stay
   # red. playwright, its own pin, is updated here too.
   - package-ecosystem: "pip"
-    directories: ["/backend", "/infrastructure/cdk", "/tests/acceptance"]
+    directories: ["/backend", "/infrastructure/cdk"]
     commit-message:
       prefix: "chore(deps)"
     schedule:

@@ -171,7 +171,7 @@ def _side_by_side(record: Record, run_dir: Path) -> str:
     expected, seen = _sides(record, run_dir)
     return (
         "<table>\n<tr><th>Expected (written before the run)</th><th>Seen</th></tr>\n"
-        '<tr><td valign="top"></td>'
+        f'<tr><td valign="top">\n{_side_html(expected)}\n</td>'
         f'<td valign="top">\n{_side_html(seen)}\n</td></tr>\n</table>\n'
         f"<p>Failure, as written before the run: {html.escape(record.failure_signature)}</p>"
     )

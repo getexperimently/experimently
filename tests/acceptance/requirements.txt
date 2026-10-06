@@ -18,6 +18,6 @@ playwright==1.63.0
 
 # The numerics
 numpy==1.26.4
-scipy==1.17.1
+scipy==1.17.0
 pandas==2.3.3
 statsmodels==0.15.0
