@@ -458,13 +458,18 @@ async def salesforce_webhook(
     request: Request,
     db: Session = Depends(deps.get_db),
 ):
-    """Receive and process a Salesforce outbound message webhook.
+    """Receive and process a Salesforce webhook delivery.
+
+    The body is a JSON object posted by a Salesforce Flow HTTP Callout, an
+    Apex callout or a relay.  A native Salesforce Outbound Message sends
+    SOAP/XML with no custom headers, so it cannot call this route.
 
     Authenticates the sender against the Salesforce integration's
-    ``webhook_secret`` — the secret in ``X-Experimently-Webhook-Secret``, which
-    is all an outbound message can send, or an ``X-Hub-Signature-256`` from a
-    callout that can sign — and answers 401 when that fails.  Beyond that,
-    always 200: Salesforce failures must not be surfaced.
+    ``webhook_secret`` — the secret in ``X-Experimently-Webhook-Secret``, or an
+    ``X-Hub-Signature-256`` from a callout that can sign — and answers 401 when
+    that fails.  Once the sender is known, a body that is not a JSON object is
+    400, and any other failure is logged and still answered 200: Salesforce
+    failures must not be surfaced.
     """
     body = await request.body()
 

@@ -190,7 +190,7 @@ Yes. The platform supports bidirectional integrations with all three:
 - **Salesforce**: Push experiment results to Salesforce campaign objects via OAuth 2.0
 - **GitHub**: Receive push/pull_request/issues events; webhook payloads are validated using HMAC-SHA256 against your webhook secret
 
-Integrations are created at `POST /api/v1/integrations` and have per-service webhook endpoints at `POST /api/v1/integrations/webhooks/github   (also /jira, /salesforce)`.
+Integrations are created by an ADMIN at `POST /api/v1/integrations`, are addressed by their type afterwards (`GET /api/v1/integrations/github`; there is one of each type), and have per-service webhook endpoints at `POST /api/v1/integrations/webhooks/github   (also /jira, /salesforce)`.
 
 See [Integrations API](../api/integrations.md), [Salesforce Integration](../integrations/salesforce.md), and [GitHub Integration](../integrations/github.md) for detailed setup guides.
 
@@ -206,8 +206,8 @@ The platform uses a layered role-based access control system with four built-in 
 |------|-----------------|
 | **VIEWER** | Read-only access to approved experiments and results |
 | **ANALYST** | View all experiments, results, audit logs, and reports |
-| **DEVELOPER** | Create and manage experiments, feature flags, and integrations |
-| **ADMIN** | Full access: user management, compliance exports, global settings |
+| **DEVELOPER** | Create and manage experiments and feature flags; read integration settings, but not change them |
+| **ADMIN** | Full access: user management, compliance exports, global settings, integrations |
 
 Beyond the four base roles, admins can create **custom roles** with specific per-resource and per-action permissions. They can also grant **direct permission** to a user for a specific resource, with an optional expiry timestamp for temporary access. Both are stored and shown by `GET /api/v1/rbac/users/{user_id}/permissions`, but no permission check reads them yet: what a user can do is decided by their base role ([#891](https://github.com/getexperimently/experimently/issues/891)).
 

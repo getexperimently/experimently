@@ -3,14 +3,14 @@
 !!! info "Part of the `integrations` module"
     Third-party integrations is one of the optional modules -- present in the **full profile**, absent from the core one. A core deployment does not serve these routes. See [Modules and profiles](../getting-started/modules.md) for what each profile includes and how to run the full one.
 
-The Salesforce integration enables the platform to synchronize experiment status and results with your Salesforce CRM. Experiment lifecycle events can update Salesforce Campaign objects, and Salesforce outbound messages can trigger actions in the platform.
+The Salesforce integration enables the platform to synchronize experiment status and results with your Salesforce CRM. Experiment lifecycle events can update Salesforce Campaign objects, and a Salesforce Flow or Apex callout can send events to the platform.
 
 ---
 
 ## What the Integration Does
 
 - **Outbound (Platform → Salesforce)**: Push experiment status changes and results to Salesforce Campaign records. When an experiment completes or reaches statistical significance, the associated Salesforce campaign can be automatically updated.
-- **Inbound (Salesforce → Platform)**: Receive Salesforce outbound messages via webhook. For example, when a Salesforce campaign status changes to "Completed", the platform can be notified to finalize an associated experiment.
+- **Inbound (Salesforce → Platform)**: Receive events from Salesforce via webhook, posted as JSON by a Flow HTTP Callout, an Apex callout or a relay. For example, when a Salesforce campaign status changes to "Completed", the platform can be notified to finalize an associated experiment.
 
 ---
 
@@ -37,18 +37,20 @@ Before creating the integration, you need:
 
 ## Creating the Integration
 
+Creating, changing and deleting an integration needs an **ADMIN** bearer token; an ADMIN or a DEVELOPER can read it. `is_active` defaults to `false`, and only an active integration answers webhook deliveries, so send `true`.
+
 ```bash
 curl -X POST http://localhost:8000/api/v1/integrations \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
-    "name": "Salesforce CRM Sync",
-    "integration_type": "SALESFORCE",
-    "description": "Syncs experiment completion to Salesforce campaigns",
-    "config": {
+    "integration_type": "salesforce",
+    "is_active": true,
+    "encrypted_config": {
       "instance_url": "https://your-org.my.salesforce.com",
       "client_id": "3MVG9...",
-      "client_secret": "1234567890ABCDEF..."
+      "client_secret": "1234567890ABCDEF...",
+      "webhook_secret": "a-strong-random-secret-at-least-32-chars"
     }
   }'
 ```
@@ -57,15 +59,22 @@ curl -X POST http://localhost:8000/api/v1/integrations \
 
 ```json
 {
-  "id": "int-uuid-here",
-  "name": "Salesforce CRM Sync",
-  "integration_type": "SALESFORCE",
+  "id": "3f1a9c62-6f5e-4a3b-9a0c-6d2b8e7f1a45",
+  "integration_type": "salesforce",
   "is_active": true,
-  "created_at": "2026-03-02T10:00:00Z"
+  "encrypted_config": {
+    "instance_url": "https://your-org.my.salesforce.com",
+    "client_id": "3MVG9..."
+  },
+  "stored_secrets": ["client_secret", "webhook_secret"],
+  "last_sync_at": null,
+  "last_error": null,
+  "created_at": "2026-03-02T10:00:00Z",
+  "updated_at": "2026-03-02T10:00:00Z"
 }
 ```
 
-Save the `id` — you will need it for the webhook endpoint URL.
+There is one Salesforce configuration, and it is addressed by its type, `salesforce`, not by the `id`: `GET`, `PUT` and `DELETE` use `/api/v1/integrations/salesforce`, and the webhook URL below has no id in it either. The request and response are described in [Create Integration](../api/integrations.md#create-integration).
 
 ---
 
@@ -76,6 +85,7 @@ Save the `id` — you will need it for the webhook endpoint URL.
 | `instance_url` | string | Yes | Your Salesforce instance URL, e.g., `https://your-org.my.salesforce.com` |
 | `client_id` | string | Yes | OAuth 2.0 Consumer Key from the Connected App |
 | `client_secret` | string | Yes | OAuth 2.0 Consumer Secret from the Connected App |
+| `webhook_secret` | string | Yes | A secret you choose (for example `openssl rand -hex 32`). An inbound delivery to the webhook endpoint below must present it; see [Webhook Endpoints](../api/integrations.md#webhook-endpoints) |
 | `access_token` | string | No | Pre-seeded OAuth 2.0 access token. The platform manages token refresh automatically; you do not need to supply this. |
 
 The platform uses the **OAuth 2.0 Client Credentials** flow. The credentials are stored in the database as given; they are not encrypted. The `client_secret`, an `access_token` and the `webhook_secret` are not returned in any response, not even masked: a response shows `instance_url` and `client_id` and lists the names of the other keys in `stored_secrets` (see [What a response shows](../api/integrations.md#what-a-response-shows)).
@@ -84,23 +94,39 @@ The platform uses the **OAuth 2.0 Client Credentials** flow. The credentials are
 
 ## Webhook Endpoint
 
-To receive incoming events from Salesforce, configure a Salesforce Outbound Message (or Process Builder / Flow) to POST to:
+To receive incoming events from Salesforce, configure a Salesforce Flow with an HTTP Callout (or an Apex callout, or a relay in front of the platform) to POST a JSON object to:
 
 ```
 POST /api/v1/integrations/webhooks/salesforce
 ```
 
-### Configuring Outbound Messages in Salesforce
+### Configuring a Salesforce callout
 
-1. In Salesforce, go to **Setup → Workflow Actions → Outbound Messages → New Outbound Message**
-2. Set the **Endpoint URL** to your webhook URL:
+A native Salesforce Outbound Message sends a SOAP/XML envelope and cannot add custom headers, so it cannot be pointed at this endpoint directly. Send the event from something that can post a JSON object and set a header: a Flow with an **HTTP Callout** action, an Apex callout (`HttpRequest.setHeader`), or a relay that turns the message into that request.
+
+1. In Salesforce, build the sender: a Flow that runs on the record change you care about (for example a Campaign whose status becomes `Completed`) and calls an **HTTP Callout** action, or an Apex callout, or point your relay at the platform
+2. Set the method to `POST` and the URL to your webhook URL:
    `https://your-platform.example.com/api/v1/integrations/webhooks/salesforce`
-3. Set the **User to Send As** to a user with API access
-4. Select the fields you want to include in the payload
+3. Set the `Content-Type` header to `application/json`
+4. Set the body to a JSON object with the fields you want to include (see [Incoming Webhook Payload Format](#incoming-webhook-payload-format))
+5. Add the integration's `webhook_secret` as a header on the callout, as described next
+
+### Authenticating a delivery
+
+The platform parses a delivery only after the sender has presented the integration's `webhook_secret`, in one of two forms. Without it the answer is `401` and the body is not parsed.
+
+| How | Header | Value |
+|-----|--------|-------|
+| Shared secret | `X-Experimently-Webhook-Secret` | The `webhook_secret` itself |
+| Signature, from a callout that can compute one | `X-Hub-Signature-256`, or `X-Hub-Signature` | `sha256=` followed by the hex HMAC-SHA256 of the raw request body, keyed with the `webhook_secret` (a SHA-1 value, `sha1=...`, is refused) |
+
+A Flow HTTP Callout or an Apex callout sets the shared-secret header. The secret then travels with every delivery, so the endpoint must be HTTPS. An Apex callout can sign the raw body instead (`Crypto.generateMac`), and should. A delivery that carries either signature header is judged on the signature alone: a wrong signature is refused even when the shared-secret header is right. The body must be a JSON object: a SOAP/XML body is refused with `400` even when the secret is right.
+
+Every refused delivery gets the same answer, `401` with the body `{"detail": "Webhook authentication failed"}`: a wrong or missing secret, an integration that is not active, an integration with no `webhook_secret`, and no Salesforce integration at all are not told apart. If every delivery is refused, check with `GET /api/v1/integrations/salesforce` that `is_active` is `true` and that `stored_secrets` lists `webhook_secret`. See [Webhook Endpoints](../api/integrations.md#webhook-endpoints) for the whole contract.
 
 ### Incoming Webhook Payload Format
 
-The platform accepts JSON payloads from Salesforce outbound messages or custom REST calls. The expected format:
+The platform accepts JSON objects from a Salesforce Flow HTTP Callout, an Apex callout or a relay. The expected format:
 
 ```json
 {
@@ -123,8 +149,10 @@ The platform accepts JSON payloads from Salesforce outbound messages or custom R
 **Response: 200 OK**
 
 ```json
-{"processed": true}
+{"status": "received"}
 ```
+
+A delivery from an authenticated sender is answered `200` even when the platform could not process the event: the failure is logged, so the provider does not retry something it cannot fix. A body that is not a JSON object is `400 Bad Request`, and that is checked only after the sender is authenticated.
 
 ---
 
@@ -165,24 +193,25 @@ If this returns a token, the credentials are correct.
 
 ### Webhook Not Receiving Events
 
-1. Confirm the **Endpoint URL** in the Salesforce Outbound Message matches your integration webhook URL exactly
+1. Confirm the URL in the Salesforce callout (the Flow HTTP Callout, the Apex callout or the relay) matches your integration webhook URL exactly
 2. Ensure your platform is accessible from the public internet (Salesforce requires a reachable HTTPS endpoint)
 3. Check the platform's delivery log: `GET /api/v1/notifications/delivery-log`
-4. In Salesforce, check **Setup → Monitoring → Outbound Messages** for delivery failures
+4. In Salesforce, check the callout's response in the Flow's debug details or the Apex debug log (**Setup → Debug Logs**): `401` means the secret header is missing or wrong, or the integration is not active; `400` means the body is not a JSON object
 
 ### Updating Integration Credentials
 
-If you rotate your Salesforce Connected App credentials:
+If you rotate your Salesforce Connected App credentials, send the new values with `PUT /api/v1/integrations/salesforce` and an ADMIN token. The integration is addressed by its type, not by an id. `PUT` merges `encrypted_config` key by key, so send only the keys that changed: the keys you leave out, such as `instance_url` and `webhook_secret`, are kept.
 
 ```bash
-curl -X PUT http://localhost:8000/api/v1/integrations/int-uuid-here \
+curl -X PUT http://localhost:8000/api/v1/integrations/salesforce \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
-    "config": {
-      "instance_url": "https://your-org.my.salesforce.com",
+    "encrypted_config": {
       "client_id": "3MVG9-new-key...",
       "client_secret": "new-secret..."
     }
   }'
 ```
+
+The whole request is described in [Update Integration](../api/integrations.md#update-integration). To change the `webhook_secret` instead, use the recipe in [Upgrading an integration created before webhook authentication](../api/integrations.md#upgrading-an-integration-created-before-webhook-authentication) with `TYPE=salesforce`.

@@ -214,13 +214,13 @@ POST /api/v1/integrations/webhooks/salesforce
 POST /api/v1/integrations/webhooks/github
 ```
 
-These three are the only routes in the platform an anonymous caller can reach with a body of its own choosing, so every one of them **authenticates the sender against the integration's `webhook_secret` before the payload is read**. There is no path parameter: the handler uses the single *active* configuration of that type.
+These three are the only routes in the platform an anonymous caller can reach with a body of its own choosing, so every one of them **authenticates the sender against the integration's `webhook_secret` before the payload is parsed**. There is no path parameter: the handler uses the single *active* configuration of that type.
 
 **Authenticating a delivery.** A sender presents the secret one of two ways:
 
 | Method | Header | Value |
 |---|---|---|
-| Signature (preferred) | `X-Hub-Signature-256`, or `X-Hub-Signature` for Jira Cloud | `sha256=` + HMAC-SHA256 of the **raw** request body, hex |
+| Signature (preferred) | `X-Hub-Signature-256`, or `X-Hub-Signature` (Jira and Salesforce only) | `sha256=` + HMAC-SHA256 of the **raw** request body, hex |
 | Shared secret | `X-Experimently-Webhook-Secret` | The `webhook_secret` itself |
 
 ```
@@ -228,7 +228,7 @@ expected = "sha256=" + HMAC-SHA256(webhook_secret, raw_body)
 ```
 
 - **GitHub** signs every delivery, so only `X-Hub-Signature-256` is accepted. The legacy SHA-1 `X-Hub-Signature` GitHub also sends is ignored.
-- **Jira** and **Salesforce** accept either. A Salesforce outbound message cannot compute an HMAC over the body it sends, and neither can a Jira Server webhook; a custom header is what they *can* set. The shared secret is replayable and puts the secret on the wire, so use it only over TLS, and prefer the signature where the sender can produce one.
+- **Jira** and **Salesforce** accept either. A delivery that carries a signature header is judged on the signature alone, and a SHA-1 value (`sha1=...`) is refused. A Jira Server webhook cannot compute an HMAC, so a custom header is what it sets; a Salesforce Flow HTTP Callout or Apex callout sets the header too, and an Apex callout can sign (`Crypto.generateMac`). A native Salesforce Outbound Message sends SOAP/XML with no custom headers, so it cannot call this route. The shared secret is replayable and puts the secret on the wire, so use it only over TLS, and prefer the signature where the sender can produce one.
 
 Both comparisons are constant-time. An integration with **no `webhook_secret` configured cannot authenticate anybody** and every delivery to it is refused — an anonymous write path fails closed.
 
@@ -273,7 +273,7 @@ CODE=$(jq -n --arg s "$SECRET" '{encrypted_config: {webhook_secret: $s}}' \
 
 A script written for the earlier version of this recipe, which read the configuration, added the key and sent the whole object back, still works: the stored secrets it cannot send are kept.
 
-Then set the same value at the provider: GitHub's webhook *Secret* field, Jira's webhook secret (Jira Cloud) or the `X-Experimently-Webhook-Secret` header on the relay in front of it, and the same header on the Salesforce outbound message or callout.
+Then set the same value at the provider: GitHub's webhook *Secret* field, Jira's webhook secret (Jira Cloud) or the `X-Experimently-Webhook-Secret` header on the relay in front of it, and the same header on the Salesforce callout (or relay).
 
 ---
 
@@ -308,9 +308,9 @@ Receives Jira issue events (created, updated, transitioned). The platform maps J
 
 ### Salesforce Webhook
 
-Receives Salesforce outbound messages (Campaign updated, Opportunity stage changed). The platform can push experiment results back to associated Salesforce objects.
+Receives a JSON object from a Salesforce Flow HTTP Callout, Apex callout or relay (Campaign updated, Opportunity stage changed). A native Salesforce Outbound Message sends SOAP/XML with no custom headers and cannot call this route: without the header it is refused with `401`, and with the header added by a proxy the XML body is refused with `400`. The platform can push experiment results back to associated Salesforce objects.
 
-**Headers**: `Content-Type: application/json`, plus `X-Experimently-Webhook-Secret` (an outbound message cannot sign its body) or `X-Hub-Signature-256` from a callout that can.
+**Headers**: `Content-Type: application/json`, plus `X-Experimently-Webhook-Secret`, set by the callout or relay, or `X-Hub-Signature-256` from a callout that signs the body.
 
 **Example Payload**:
 
