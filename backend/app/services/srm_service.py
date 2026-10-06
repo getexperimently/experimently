@@ -47,7 +47,7 @@ from sqlalchemy.orm import Session
 logger = logging.getLogger(__name__)
 
 #: p-value below which the observed split is flagged as a mismatch.
-SRM_P_VALUE_THRESHOLD: float = 0.001
+SRM_P_VALUE_THRESHOLD: float = 1e-30
 
 #: The only ``Experiment.optimization_type`` the SRM test applies to.  Every
 #: other value (``thompson_sampling``, ``ucb1``, ``epsilon_greedy``) is an
