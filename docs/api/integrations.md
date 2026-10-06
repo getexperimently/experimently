@@ -257,7 +257,7 @@ The active jira integration has no webhook_secret in its encrypted_config, so ev
 inbound delivery to /api/v1/integrations/webhooks/jira is refused with 401. Add one …
 ```
 
-The remedy is one `PUT` that sends the new key. `PUT` merges `encrypted_config` key by key, so the stored credentials are kept and nothing is read back first. Set `TOKEN` to an ADMIN bearer token, and `TYPE` to the integration: `jira` below, or `salesforce` or `github`. The last line prints the secret to configure at the provider.
+The remedy is one `PUT` that sends the new key. `PUT` merges `encrypted_config` key by key, so the stored credentials are kept and nothing is read back first. Set `TOKEN` to an ADMIN bearer token, and `TYPE` to the integration: `jira` below, or `salesforce` or `github`. The recipe prints the new secret once, and only after the `PUT` has been answered with a 2xx status. The response to the `PUT` is discarded (`-o /dev/null`), so the secret is the only thing the recipe writes to standard output. Any other answer prints nothing to standard output, shows curl's one-line error on standard error and exits non-zero: `404` for a type with no configuration (create it first), `403` for a token that is not an ADMIN's, `401` for a token that is missing, invalid or expired, `422` for a `TYPE` that is not `jira`, `salesforce` or `github`, and curl's own error when the API cannot be reached. A secret that was never stored is never shown.
 
 ```bash
 TOKEN=…
@@ -265,10 +265,10 @@ TYPE=jira
 SECRET=$(openssl rand -hex 32)
 
 jq -n --arg s "$SECRET" '{encrypted_config: {webhook_secret: $s}}' \
-  | curl -sf -X PUT -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
-         --data @- "http://localhost:8000/api/v1/integrations/$TYPE"
-
-printf '%s\n' "$SECRET"
+  | curl -sSf -o /dev/null -X PUT -H "Authorization: Bearer $TOKEN" \
+         -H 'Content-Type: application/json' --data @- \
+         "http://localhost:8000/api/v1/integrations/$TYPE" \
+  && printf '%s\n' "$SECRET"
 ```
 
 A script written for the earlier version of this recipe, which read the configuration, added the key and sent the whole object back, still works: the stored secrets it cannot send are kept.
