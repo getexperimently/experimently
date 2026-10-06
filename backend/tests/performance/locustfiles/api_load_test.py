@@ -8,6 +8,10 @@ This script simulates realistic production traffic with two user classes:
 The 80/20 split reflects typical production load patterns where tracking
 calls far outnumber management API calls.
 
+It calls only what ``backend/scripts/seed_sdk_contract.py`` creates (see
+``common.py``): run that seed first, and pass its key in ``LOAD_TEST_API_KEY``
+or ``LOAD_TEST_API_KEY_FILE``.
+
 Usage (headless CI):
     locust -f api_load_test.py --headless --users 100 --spawn-rate 10 \
            --run-time 60s --host http://localhost:8000 \
@@ -18,25 +22,27 @@ Usage (interactive web UI):
     # Then open http://localhost:8089 in your browser
 """
 
-import os
 import random
 import uuid
 
 from locust import HttpUser, between, events, task
 from locust.env import Environment
 
+from backend.tests.performance.locustfiles.common import (
+    EXPERIMENT_KEY,
+    FLAG_KEY,
+    expect,
+    login,
+    sdk_headers,
+)
+
+# The PERFORMANCE_TARGETS this file exercises. run_load_tests.py fails the run
+# unless Locust recorded requests for every one of them.
+TARGETS = ("track", "assign", "list_experiments", "evaluate_flag", "health")
+
 # ---------------------------------------------------------------------------
-# Test data — deterministic fake IDs used across all virtual users
+# Test data
 # ---------------------------------------------------------------------------
-
-# 20 fake experiment IDs used in assignment and tracking requests
-EXPERIMENT_IDS: list[str] = [f"exp-{i:04d}" for i in range(1, 21)]
-
-# 10 fake experiment keys that correspond to the IDs above
-EXPERIMENT_KEYS: list[str] = [f"experiment-key-{i:04d}" for i in range(1, 21)]
-
-# 15 fake feature flag keys
-FEATURE_FLAG_KEYS: list[str] = [f"flag-{i:03d}" for i in range(1, 16)]
 
 # User pool — 10,000 synthetic user IDs
 USER_POOL_SIZE: int = 10_000
@@ -85,12 +91,8 @@ class TrackingUser(HttpUser):
     wait_time = between(0.01, 0.05)
 
     def on_start(self) -> None:
-        """Set up authentication headers for tracking API calls."""
-        self.api_key: str = os.environ.get("LOAD_TEST_API_KEY", "test-api-key")
-        self.headers: dict[str, str] = {
-            "X-API-Key": self.api_key,
-            "Content-Type": "application/json",
-        }
+        """Set up the API key headers for tracking calls."""
+        self.headers: dict[str, str] = sdk_headers()
 
     @task(3)
     def track_event(self) -> None:
@@ -101,7 +103,7 @@ class TrackingUser(HttpUser):
         Weight 3 — the most frequent operation in the tracking pipeline.
         """
         payload = {
-            "experiment_key": random.choice(EXPERIMENT_KEYS),
+            "experiment_key": EXPERIMENT_KEY,
             "user_id": _random_user_id(),
             "event_type": random.choice(EVENT_TYPES),
             "value": round(random.uniform(0.0, 100.0), 2),
@@ -110,14 +112,14 @@ class TrackingUser(HttpUser):
                 "session_id": str(uuid.uuid4()),
             },
         }
-        self.client.post(
+        with self.client.post(
             "/api/v1/tracking/track",
             json=payload,
             headers=self.headers,
             name="/api/v1/tracking/track",
-            # Catch failures so Locust records them without crashing the user
             catch_response=True,
-        )
+        ) as response:
+            expect(response, 200)
 
     @task(1)
     def assign_user(self) -> None:
@@ -128,17 +130,18 @@ class TrackingUser(HttpUser):
         Weight 1 — less frequent than tracking but still high volume.
         """
         payload = {
-            "experiment_key": random.choice(EXPERIMENT_KEYS),
+            "experiment_key": EXPERIMENT_KEY,
             "user_id": _random_user_id(),
             "context": _random_context(),
         }
-        self.client.post(
+        with self.client.post(
             "/api/v1/tracking/assign",
             json=payload,
             headers=self.headers,
             name="/api/v1/tracking/assign",
             catch_response=True,
-        )
+        ) as response:
+            expect(response, 200)
 
 
 # ---------------------------------------------------------------------------
@@ -152,8 +155,8 @@ class APIUser(HttpUser):
 
     This user class represents dashboard users and server-side SDK calls
     for feature flag evaluation. Tasks are weighted by frequency:
-    - list_experiments (weight 5): Frequent dashboard polling
-    - evaluate_feature_flag (weight 3): Server-side flag evaluation
+    - list_experiments (weight 5): Frequent dashboard polling (bearer token)
+    - evaluate_feature_flag (weight 3): Server-side flag evaluation (API key)
     - health_check (weight 2): Monitoring and load balancer probes
     """
 
@@ -162,12 +165,9 @@ class APIUser(HttpUser):
     wait_time = between(0.5, 2.0)
 
     def on_start(self) -> None:
-        """Set up authentication headers."""
-        self.api_key: str = os.environ.get("LOAD_TEST_API_KEY", "test-api-key")
-        self.auth_headers: dict[str, str] = {
-            "X-API-Key": self.api_key,
-            "Content-Type": "application/json",
-        }
+        """Sign in for the dashboard calls; the API key is for evaluation."""
+        self.auth_headers: dict[str, str] = login(self.client)
+        self.sdk_headers: dict[str, str] = sdk_headers()
 
     @task(5)
     def list_experiments(self) -> None:
@@ -177,12 +177,13 @@ class APIUser(HttpUser):
         Simulates dashboard polling the experiments list.
         Weight 5 — frequent dashboard operation.
         """
-        self.client.get(
-            "/api/v1/experiments",
+        with self.client.get(
+            "/api/v1/experiments/",
             headers=self.auth_headers,
             name="/api/v1/experiments",
             catch_response=True,
-        )
+        ) as response:
+            expect(response, 200)
 
     @task(3)
     def evaluate_feature_flag(self) -> None:
@@ -192,15 +193,14 @@ class APIUser(HttpUser):
         Simulates server-side SDK evaluating a feature flag for a user.
         Weight 3 — moderate frequency.
         """
-        flag_key = random.choice(FEATURE_FLAG_KEYS)
-        user_id = _random_user_id()
-        self.client.get(
-            f"/api/v1/feature-flags/evaluate/{flag_key}",
-            params={"user_id": user_id},
-            headers=self.auth_headers,
+        with self.client.get(
+            f"/api/v1/feature-flags/evaluate/{FLAG_KEY}",
+            params={"user_id": _random_user_id()},
+            headers=self.sdk_headers,
             name="/api/v1/feature-flags/evaluate/{key}",
             catch_response=True,
-        )
+        ) as response:
+            expect(response, 200)
 
     @task(2)
     def health_check(self) -> None:
@@ -210,11 +210,12 @@ class APIUser(HttpUser):
         Simulates load balancer health probes and monitoring checks.
         Weight 2 — continuous background traffic.
         """
-        self.client.get(
+        with self.client.get(
             "/health",
             name="/health",
             catch_response=True,
-        )
+        ) as response:
+            expect(response, 200)
 
 
 # ---------------------------------------------------------------------------

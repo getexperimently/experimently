@@ -81,14 +81,16 @@ PERFORMANCE_TARGETS: dict[str, PerformanceTarget] = {
         min_rps=2000,
         description="Single feature flag evaluation",
     ),
+    # Every flag for one user in one request. This once named
+    # POST /api/v1/feature-flags/evaluate-batch, which does not exist (404).
     "batch_evaluate_flags": PerformanceTarget(
-        endpoint="/api/v1/feature-flags/evaluate-batch",
-        method="POST",
+        endpoint="/api/v1/feature-flags/user/{user_id}",
+        method="GET",
         p50_ms=80,
         p95_ms=300,
         p99_ms=800,
         min_rps=500,
-        description="Batch evaluation of multiple feature flags",
+        description="Batch evaluation: every feature flag for one user",
     ),
     # --- CRUD endpoints (dashboard/management operations) ---
     "create_experiment": PerformanceTarget(

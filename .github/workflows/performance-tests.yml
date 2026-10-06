@@ -106,6 +106,16 @@ jobs:
       - name: Bootstrap database schema
         run: python -m backend.app.db.bootstrap
 
+      # Everything the locustfiles call: the experiment sdk_contract_ab, the
+      # flag sdk_contract_flag, an API key, and the developer account the
+      # management tasks sign in as (dev@demo.com, not a superuser). The key
+      # is written to a file under the runner's temp directory and the
+      # locustfiles read it from there, so it never reaches the log.
+      - name: Seed the load-test fixtures
+        run: python -m backend.scripts.seed_sdk_contract
+        env:
+          SDK_CONTRACT_KEY_DIR: ${{ runner.temp }}/load-test-keys
+
       - name: Start API server
         working-directory: backend
         run: |
@@ -143,6 +153,11 @@ jobs:
           echo "locustfile=$FILE" >> "$GITHUB_OUTPUT"
           echo "Using locustfile: $FILE"
 
+      # --sla report: the run fails when a request fails (Locust exits 1),
+      # when nothing was recorded, or when a target the locustfile declares
+      # in TARGETS was not recorded. Latency and throughput are printed
+      # beside the targets and NOT gated: one run's timings on a shared
+      # runner are not a stable statistic, and budgets are Phase 2 (QA L2).
       - name: Run load tests
         working-directory: ${{ github.workspace }}
         run: |
@@ -152,10 +167,11 @@ jobs:
             --spawn-rate 10 \
             --duration "${{ github.event.inputs.duration || '60s' }}" \
             --locustfile "${{ steps.locustfile.outputs.locustfile }}" \
-            --csv-prefix /tmp/locust_results
+            --csv-prefix /tmp/locust_results \
+            --sla report
         env:
           PYTHONPATH: ${{ github.workspace }}
-          LOAD_TEST_API_KEY: test-api-key
+          LOAD_TEST_API_KEY_FILE: ${{ runner.temp }}/load-test-keys/.api_key
 
       - name: Upload Locust CSV results
         if: always()

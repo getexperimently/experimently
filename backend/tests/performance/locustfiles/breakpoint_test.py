@@ -29,7 +29,6 @@ Usage (interactive web UI):
     # Then open http://localhost:8089 in your browser
 """
 
-import os
 import random
 import uuid
 from typing import Any, Optional, Tuple
@@ -37,12 +36,22 @@ from typing import Any, Optional, Tuple
 from locust import HttpUser, LoadTestShape, between, events, task
 from locust.env import Environment
 
+from backend.tests.performance.locustfiles.common import (
+    EXPERIMENT_KEY,
+    FLAG_KEY,
+    expect,
+    login,
+    sdk_headers,
+)
+
+# The PERFORMANCE_TARGETS this file exercises. run_load_tests.py fails the run
+# unless Locust recorded requests for every one of them.
+TARGETS = ("track", "assign", "evaluate_flag", "list_experiments", "health")
+
 # ---------------------------------------------------------------------------
 # Test data
 # ---------------------------------------------------------------------------
 
-EXPERIMENT_KEYS: list[str] = [f"experiment-key-{i:04d}" for i in range(1, 21)]
-FEATURE_FLAG_KEYS: list[str] = [f"flag-{i:03d}" for i in range(1, 16)]
 EVENT_TYPES: list[str] = ["page_view", "click", "conversion"]
 USER_POOL_SIZE: int = 50_000  # Large pool to avoid hot-user cache effects
 
@@ -112,12 +121,9 @@ class BreakpointUser(HttpUser):
     wait_time = between(0.05, 0.2)
 
     def on_start(self) -> None:
-        """Set up authentication headers."""
-        self.api_key: str = os.environ.get("LOAD_TEST_API_KEY", "test-api-key")
-        self.headers: dict[str, str] = {
-            "X-API-Key": self.api_key,
-            "Content-Type": "application/json",
-        }
+        """API key for the SDK routes; a bearer token for the experiments list."""
+        self.headers: dict[str, str] = sdk_headers()
+        self.auth_headers: dict[str, str] = login(self.client)
 
     @task(4)
     def track_event(self) -> None:
@@ -128,19 +134,20 @@ class BreakpointUser(HttpUser):
         At high user counts this stresses write throughput and WAL.
         """
         payload = {
-            "experiment_key": random.choice(EXPERIMENT_KEYS),
+            "experiment_key": EXPERIMENT_KEY,
             "user_id": _random_user_id(),
             "event_type": random.choice(EVENT_TYPES),
             "value": round(random.uniform(0.0, 100.0), 2),
             "metadata": {"source": "breakpoint_test", "session_id": str(uuid.uuid4())},
         }
-        self.client.post(
+        with self.client.post(
             "/api/v1/tracking/track",
             json=payload,
             headers=self.headers,
             name="/api/v1/tracking/track",
             catch_response=True,
-        )
+        ) as response:
+            expect(response, 200)
 
     @task(2)
     def assign_user(self) -> None:
@@ -151,17 +158,18 @@ class BreakpointUser(HttpUser):
         writes under increasing concurrency.
         """
         payload = {
-            "experiment_key": random.choice(EXPERIMENT_KEYS),
+            "experiment_key": EXPERIMENT_KEY,
             "user_id": _random_user_id(),
             "context": {"country": "US", "device": "mobile"},
         }
-        self.client.post(
+        with self.client.post(
             "/api/v1/tracking/assign",
             json=payload,
             headers=self.headers,
             name="/api/v1/tracking/assign",
             catch_response=True,
-        )
+        ) as response:
+            expect(response, 200)
 
     @task(2)
     def evaluate_feature_flag(self) -> None:
@@ -171,14 +179,14 @@ class BreakpointUser(HttpUser):
         Server-side flag evaluation — tests cache effectiveness and
         database read path as concurrency scales.
         """
-        flag_key = random.choice(FEATURE_FLAG_KEYS)
-        self.client.get(
-            f"/api/v1/feature-flags/evaluate/{flag_key}",
+        with self.client.get(
+            f"/api/v1/feature-flags/evaluate/{FLAG_KEY}",
             params={"user_id": _random_user_id()},
             headers=self.headers,
             name="/api/v1/feature-flags/evaluate/{key}",
             catch_response=True,
-        )
+        ) as response:
+            expect(response, 200)
 
     @task(1)
     def list_experiments(self) -> None:
@@ -188,12 +196,13 @@ class BreakpointUser(HttpUser):
         Dashboard traffic — tests that list queries remain stable
         even as overall system load increases dramatically.
         """
-        self.client.get(
-            "/api/v1/experiments",
-            headers=self.headers,
+        with self.client.get(
+            "/api/v1/experiments/",
+            headers=self.auth_headers,
             name="/api/v1/experiments",
             catch_response=True,
-        )
+        ) as response:
+            expect(response, 200)
 
     @task(1)
     def health_check(self) -> None:
@@ -203,11 +212,12 @@ class BreakpointUser(HttpUser):
         Health probe — must remain responsive at every load stage.
         A failing health check indicates the system has truly broken.
         """
-        self.client.get(
+        with self.client.get(
             "/health",
             name="/health",
             catch_response=True,
-        )
+        ) as response:
+            expect(response, 200)
 
 
 # ---------------------------------------------------------------------------
