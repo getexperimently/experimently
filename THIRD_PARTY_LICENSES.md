@@ -273,15 +273,15 @@ These are the dashboard's **build-time** dependencies. The dashboard image runs 
 
 | Package | Version |
 |---|---|
-| `@img/sharp-linux-x64` | 0.35.4 |
-| `@img/sharp-linuxmusl-x64` | 0.35.4 |
+| `@img/sharp-linux-x64` | 0.35.5 |
+| `@img/sharp-linuxmusl-x64` | 0.35.5 |
 | `@playwright/test` | 1.63.0 |
 | `@swc/helpers` | 0.5.23 |
 | `baseline-browser-mapping` | 2.11.21 |
 | `detect-libc` | 2.1.2 |
 | `playwright` | 1.63.0 |
 | `playwright-core` | 1.63.0 |
-| `sharp` | 0.35.4 |
+| `sharp` | 0.35.5 |
 
 #### BSD-3-Clause (2)
 
@@ -294,8 +294,8 @@ These are the dashboard's **build-time** dependencies. The dashboard image runs 
 
 | Package | Version |
 |---|---|
-| `@img/sharp-libvips-linux-x64` | 1.3.3 |
-| `@img/sharp-libvips-linuxmusl-x64` | 1.3.3 |
+| `@img/sharp-libvips-linux-x64` | 1.3.4 |
+| `@img/sharp-libvips-linuxmusl-x64` | 1.3.4 |
 
 #### 0BSD (1)
 
