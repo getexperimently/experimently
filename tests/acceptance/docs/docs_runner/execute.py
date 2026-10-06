@@ -315,26 +315,28 @@ class JourneyRunner:
 
     # -- the documentation site --------------------------------------------
     @staticmethod
-    def _open(page: Page, url: str):
-        """(the navigation's response, or None; the error, or "")."""
+    def _open(page: Page, url: str) -> Tuple[Optional[int], str]:
+        """(the navigation's status, or None; the error, or "")."""
         try:
-            return page.goto(url, wait_until="domcontentloaded"), ""
+            response = page.goto(url, wait_until="domcontentloaded")
         except PlaywrightError as error:
             return None, one_line(error, 160)
+        return (response.status if response is not None else None), ""
 
     def _visit(self, page: Page, url: str, base: str) -> Dict[str, Any]:
         """Open one page of the site: its status, where it ended, its heading, its links.
 
         A page that answers 5xx or nothing is opened once more, after
-        ``site.RETRY_SECONDS`` (``site.py`` says why).
+        ``site.RETRY_SECONDS`` (``site.open_page`` says why).
         """
-        response, error = self._open(page, url)
-        retried = site.transient(response.status if response is not None else None)
-        if retried:
-            time.sleep(site.RETRY_SECONDS)
-            response, error = self._open(page, url)
-        if error:
-            return {"url": url, "status": None, "error": error, "retried": retried}
+        opened = site.open_page(url, lambda target: self._open(page, target))
+        if opened.error:
+            return {
+                "url": url,
+                "status": None,
+                "error": opened.error,
+                "retried": opened.retried,
+            }
         final = page.url
         headings = page.get_by_role("main").get_by_role("heading", level=1)
         heading = headings.first.inner_text() if headings.count() else None
@@ -343,12 +345,12 @@ class JourneyRunner:
         )
         return {
             "url": "/" + site.on_site(base, url),
-            "status": response.status if response is not None else None,
+            "status": opened.status,
             "final": "/" + site.on_site(base, site.strip(final)),
             "on_site": site.within(final, base),
             "heading": site.normalise(heading) if heading is not None else None,
             "links": site.site_links(hrefs, base),
-            "retried": retried,
+            "retried": opened.retried,
         }
 
     def _site_visits(self, page: Page, running: Running):
@@ -400,6 +402,7 @@ class JourneyRunner:
         if step.do.crawl == "nav":
             problems = site.compare_headings(pages, seen)
             checked, what = len(pages), "nav pages"
+            asked_twice = sum(1 for visit in seen.values() if visit.get("retried"))
             record: Dict[str, Any] = {
                 "problems": problems,
                 "seen": {
@@ -430,6 +433,7 @@ class JourneyRunner:
                 if r.problem
             ]
             checked, what = len(links), "links to the site"
+            asked_twice = sum(1 for r in resolved if r.retried)
             record = {
                 "problems": problems,
                 "links": {
@@ -446,16 +450,14 @@ class JourneyRunner:
             json.dumps({"checked": checked, **record}, indent=2, ensure_ascii=False)
             + "\n",
         )
+        observed = site.crawl_text(
+            checked, what, problems, asked_twice, running.source_ref
+        )
         if problems:
-            raise _Failed(
-                one_line(
-                    f"{len(problems)} of {checked} {what}: " + "; ".join(problems)
-                ),
-                snapshot,
-            )
+            raise _Failed(one_line(observed), snapshot)
         if not checked:
             raise _Failed(f"no {what} to check", snapshot)
-        return f"{checked} {what}, every one as expected", snapshot
+        return observed, snapshot
 
     def _browser_step(self, step: Step, page: Page, running: Running) -> str:
         response = self._act(step, page, running)

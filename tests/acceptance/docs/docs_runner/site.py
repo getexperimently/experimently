@@ -20,10 +20,10 @@ A page or a link that answers 5xx, or nothing, is asked once more,
 ``RETRY_SECONDS`` later, and the second answer is the one judged: GitHub Pages
 answers 503 now and then (one of 121 pages in one run, measured on
 2026-10-06), and one such answer would make a whole night red for nothing. A
-second 5xx is a finding, and a 4xx is never asked again. The crawl's file says
-which were asked twice. ``execute`` drives
-the browser; this module imports neither Playwright nor ``backend``, so the
-unit job tests it.
+second 5xx is a finding, and a 4xx is never asked again. The crawl says how
+many were asked twice, and which source it compared the site with
+(``crawl_text``). ``execute`` drives the browser; this module imports neither
+Playwright nor ``backend``, so the unit job tests it.
 """
 
 from __future__ import annotations
@@ -184,8 +184,33 @@ def normalise(text: str) -> str:
     return " ".join(text.split())
 
 
+def resolve_dots(url: str) -> str:
+    """*url* with the ``.`` and ``..`` segments of its path resolved, as a
+    browser reads it (``%2e`` is a dot too); a ``..`` cannot climb above the root."""
+    parts = urlsplit(url)
+    segments = parts.path.replace("%2e", ".").replace("%2E", ".").split("/")
+    kept: List[str] = []
+    for place, segment in enumerate(segments):
+        last = place == len(segments) - 1
+        if segment in (".", ".."):
+            if segment == ".." and len(kept) > 1:
+                kept.pop()
+            if last:
+                kept.append("")
+        else:
+            kept.append(segment)
+    return urlunsplit(
+        (parts.scheme, parts.netloc, "/".join(kept), parts.query, parts.fragment)
+    )
+
+
 def within(url: str, base: str) -> bool:
-    """True when *url* is a page of the site at *base* (same scheme, host, path)."""
+    """True when *url* is a page of the site at *base* (same scheme, host, path).
+
+    ``.../site/../other/`` is not: the dot segments are resolved first, because
+    that is the page a browser or a request would reach.
+    """
+    url = resolve_dots(url)
     return url.startswith(base) or url == base.rstrip("/")
 
 
@@ -235,6 +260,33 @@ class Resolved:
 def transient(status: Optional[int]) -> bool:
     """True for an answer worth asking again: a 5xx, or none at all."""
     return status is None or status >= 500
+
+
+#: ``open(url) -> (status or None, error text or "")``: one attempt at a page.
+Open = Callable[[str], Tuple[Optional[int], str]]
+
+
+@dataclass(frozen=True)
+class Opened:
+    status: Optional[int]  # the last answer's status; None when none came
+    error: str  # why nothing came, from the last attempt; "" when something did
+    retried: bool  # the first attempt answered 5xx or nothing, and was repeated
+
+
+def open_page(
+    url: str, open: Open, pause: Callable[[float], None] = time.sleep
+) -> Opened:
+    """Open *url*; a 5xx or no answer is asked once more after ``RETRY_SECONDS``.
+
+    The second answer is the one judged. A 2xx or a 4xx on the first attempt
+    is final: nothing is asked again and ``pause`` is not called.
+    """
+    status, error = open(url)
+    retried = transient(status)
+    if retried:
+        pause(RETRY_SECONDS)
+        status, error = open(url)
+    return Opened(status, error, retried)
 
 
 def resolve(
@@ -322,6 +374,29 @@ def compare_headings(
                 f" first heading is {page.heading!r}"
             )
     return problems
+
+
+def crawl_text(
+    checked: int,
+    what: str,
+    problems: Sequence[str],
+    asked_twice: int,
+    against: str = "",
+) -> str:
+    """What a crawl observed, on one line, in a log line and a report.
+
+    ``7 nav pages, every one as expected against v0.25.1 (1 asked twice)``, or
+    ``2 of 7 nav pages against v0.25.1 (1 asked twice): <what differed>``.
+    *against* is the ref the site's source was taken from ("" when the crawl
+    compared the site with a checkout); *asked_twice* is how many pages or
+    links answered 5xx or nothing and were asked again.
+    """
+    context = (f" against {against}" if against else "") + (
+        f" ({asked_twice} asked twice)" if asked_twice else ""
+    )
+    if problems:
+        return f"{len(problems)} of {checked} {what}{context}: " + "; ".join(problems)
+    return f"{checked} {what}, every one as expected{context}"
 
 
 def rank(results: Sequence[str], base: str, wanted: str) -> Optional[int]:

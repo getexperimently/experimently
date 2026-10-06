@@ -16,16 +16,20 @@ pinned rather than reviewed once:
 * the journeys job installs the runner's pinned requirements and Chromium,
   checks out the deployed site's source by the commit
   ``docs_journeys_report.py deployed`` names, and runs the runner's own pytest
-  root with its run directory, that source and the video switch; every upload
-  is of the run directory or a file in it, kept 14 days (90 on a release tag);
+  root with its run directory, that source, the ref it was taken from (the
+  crawls say which they compared the site with) and the video switch; every
+  upload is of the run directory or a file in it, kept 14 days (90 on a
+  release tag);
 * nothing from the run directory leaves the job (the step summary, the
   verdicts, the directory itself) unless the runner's scan of it for the values
   the run made up, kept or signed in for ran: its ``secret-scan.json`` is there;
 * the report job runs only after verdicts were written; it posts only on a
-  scheduled run on ``main``; everything posted goes through ``--body-file``
-  from a rendered file, the issue title is the rendered title file's first
-  line, and no script holds an expression, prints a file other than the
-  summary or annotates with non-literal text.
+  scheduled run on ``main``, and every step of the workflow whose script posts
+  (``gh issue create|comment``, ``gh api``) is that one step with that
+  condition; everything posted goes through ``--body-file`` from a rendered
+  file, the issue title is the rendered title file's first line, and no script
+  holds an expression, prints a file other than the summary or annotates with
+  non-literal text.
 
 Every rule is also planted against the real workflow below, so a rule that
 stops firing fails here.
@@ -58,6 +62,7 @@ WALK_RUN = "python -m pytest -c tests/acceptance/docs/pytest.ini tests/acceptanc
 WALK_ENV = {
     "DOCS_JOURNEY_RUN_DIR": RUN_DIR,
     "DOCS_JOURNEY_PUBLISHED_SOURCE": SOURCE,
+    "DOCS_JOURNEY_PUBLISHED_REF": "${{ steps.source.outputs.ref }}",
     "DOCS_JOURNEY_RECORD_VIDEO": "${{ inputs.record_video && '1' || '0' }}",
     "PYTHONDONTWRITEBYTECODE": "1",
 }
@@ -66,6 +71,7 @@ SOURCE_LINES = [
     "set -euo pipefail",
     'python3 scripts/docs_journeys_report.py deployed --out "$RUNNER_TEMP/deployed"',
     'SHA="$(head -n 1 "$RUNNER_TEMP/deployed/sha")"',
+    r'''printf 'ref=%s\n' "$(head -n 1 "$RUNNER_TEMP/deployed/ref")" >> "$GITHUB_OUTPUT"''',
     'git fetch --no-tags --depth=1 origin "$SHA"',
     'mkdir -p "$RUNNER_TEMP/published-source"',
     'git archive "$SHA" mkdocs.yml docs | tar -x -C "$RUNNER_TEMP/published-source"',
@@ -133,6 +139,23 @@ def _lines(step: Dict[str, Any]) -> List[str]:
     ]
 
 
+#: Any ``gh`` command at all. The posting rule fails closed: a step that runs
+#: one is treated as posting, whatever its verb (``gh label create``,
+#: ``gh pr merge``, ``gh  api`` with two spaces: an allowlist of verbs let each
+#: of those through), so it must be the POST step with POST_IF.
+GH_COMMAND = re.compile(r"(?:^|[\s;&|(`])gh\s+[a-z]")
+
+
+def _posts(step: Dict[str, Any]) -> bool:
+    """True when the step's script runs any ``gh`` command (comment lines aside)."""
+    script = str(step.get("run") or "").replace("\\\n", " ")
+    return any(
+        GH_COMMAND.search(line)
+        for line in script.splitlines()
+        if not line.lstrip().startswith("#")
+    )
+
+
 def _named(doc, name):
     return next((s for s in steps_of(doc) if s.get("name") == name), None)
 
@@ -189,7 +212,7 @@ def workflow_problems(doc: Dict[Any, Any], text: str) -> List[str]:
             " Chromium"
         )
     source = _named(doc, SOURCE_STEP)
-    if source is None or _lines(source) != SOURCE_LINES:
+    if source is None or _lines(source) != SOURCE_LINES or source.get("id") != "source":
         found.append(
             "the site's source is not the commit of its live deployment"
             " (docs_journeys_report.py deployed)"
@@ -198,7 +221,7 @@ def workflow_problems(doc: Dict[Any, Any], text: str) -> List[str]:
     if walk is None or walk.get("run") != WALK_RUN or walk.get("env") != WALK_ENV:
         found.append(
             "the journeys do not run the runner's pytest root with its run directory,"
-            " the deployed source and the video switch"
+            " the deployed source, its ref and the video switch"
         )
 
     for step in steps_of(doc):
@@ -242,6 +265,12 @@ def workflow_problems(doc: Dict[Any, Any], text: str) -> List[str]:
     post = _named(doc, POST)
     if post is None or _condition(post) != POST_IF:
         found.append("posting is not limited to a scheduled run on main")
+    for step in steps_of(doc):
+        if _posts(step) and (step.get("name") != POST or _condition(step) != POST_IF):
+            found.append(
+                f"a step that posts is not the {POST!r} step with its condition:"
+                f" {step.get('name')!r}"
+            )
 
     for line in script_lines(doc):
         stripped = line.strip()
@@ -337,6 +366,14 @@ def _env(name, key, value):
         env = dict(_named(doc, name).get("env") or {})
         env[key] = value
         _named(doc, name)["env"] = env
+        return doc, text
+
+    return plant
+
+
+def _add_step(job, step):
+    def plant(doc, text):
+        doc["jobs"][job]["steps"].append(step)
         return doc, text
 
     return plant
@@ -438,6 +475,64 @@ PLANTS: List[tuple] = [
         "scheduled run on main",
     ),
     (
+        "second-step-comments",
+        _add_step(
+            "report",
+            {
+                "name": "Comment again",
+                "run": 'gh issue comment 1 --repo "$GITHUB_REPOSITORY"'
+                ' --body-file "$DIR/body.md"',
+            },
+        ),
+        "a step that posts",
+    ),
+    (
+        "second-step-opens",
+        _add_step(
+            "report",
+            {
+                "name": "Open again",
+                "if": POST_IF,
+                "run": 'gh issue create --repo "$GITHUB_REPOSITORY"'
+                ' --title "$(head -n 1 "$DIR/title.txt")"'
+                ' --body-file "$DIR/body.md"',
+            },
+        ),
+        "a step that posts",
+    ),
+    (
+        "second-step-closes",
+        _add_step("report", {"name": "Close again", "run": CLOSE_LINE}),
+        "a step that posts",
+    ),
+    (
+        "second-step-creates-a-label",
+        _add_step("report", {"name": "Label again", "run": "gh label create x"}),
+        "a step that posts",
+    ),
+    (
+        "second-step-merges",
+        _add_step("report", {"name": "Merge", "run": "gh pr merge 1 --squash"}),
+        "a step that posts",
+    ),
+    (
+        "second-step-api-two-spaces",
+        _add_step("report", {"name": "Api again", "run": "gh  api repos/x/y/issues"}),
+        "a step that posts",
+    ),
+    (
+        "post-step-condition-dropped-in-a-copy",
+        _add_step(
+            "report",
+            {
+                "name": POST,
+                "run": 'gh issue comment 1 --repo "$GITHUB_REPOSITORY"'
+                ' --body-file "$DIR/body.md"',
+            },
+        ),
+        "a step that posts",
+    ),
+    (
         "source-is-main",
         _replace_in(SOURCE_STEP, 'git archive "$SHA"', "git archive HEAD"),
         "live deployment",
@@ -448,6 +543,21 @@ PLANTS: List[tuple] = [
             WALK, "env", {k: v for k, v in WALK_ENV.items() if "SOURCE" not in k}
         ),
         "deployed source",
+    ),
+    (
+        "ref-not-passed",
+        _step_set(WALK, "env", {k: v for k, v in WALK_ENV.items() if "REF" not in k}),
+        "its ref",
+    ),
+    (
+        "ref-not-written",
+        _replace_in(SOURCE_STEP, "printf 'ref=%s", "printf 'x=%s"),
+        "live deployment",
+    ),
+    (
+        "source-step-renamed",
+        _step_set(SOURCE_STEP, "id", "checkout"),
+        "live deployment",
     ),
     ("video-always", _env(WALK, "DOCS_JOURNEY_RECORD_VIDEO", "1"), "video switch"),
     (
@@ -595,6 +705,8 @@ def test_the_release_checklist_dispatches_the_journeys_after_the_docs_deploy():
     docs = claude.index("gh workflow run docs.yml --ref vX.Y.Z")
     journeys = claude.index("gh workflow run docs-journeys.yml --ref vX.Y.Z")
     assert docs < journeys
+    # A red right after a deploy is run once more before it is read as a defect.
+    assert "dispatched once more" in claude[journeys : journeys + 1000]
     release_please = (
         REPO_ROOT / ".github" / "workflows" / "release-please.yml"
     ).read_text(encoding="utf-8")

@@ -50,7 +50,9 @@ first step rather than ending the session.
   built from. The site is deployed from release tags, not from ``main``, so
   ``docs-journeys.yml`` sets it to the commit of the site's last successful
   deployment; unset, it is this checkout, which is right only when the
-  checkout is that commit.
+  checkout is that commit. ``DOCS_JOURNEY_PUBLISHED_REF``, when set, names that
+  deployment's ref (a tag such as ``v0.25.1``): the crawls say they compared
+  the site with it. Anything that is not a ref's characters is refused.
 * ``marketing-local``: ``npm run build:marketing`` in ``frontend/`` (which needs
   its ``node_modules``), then ``frontend/out`` served like docs-local
   (``DOCS_JOURNEY_MARKETING_PORT``, else a free port). The build writes Next's
@@ -80,6 +82,8 @@ from typing import Dict, Mapping, Optional, Tuple
 import yaml
 
 PUBLISHED_URL = "https://getexperimently.github.io/experimently/"
+#: A ref as ``docs_journeys_report.py deployed`` accepts one.
+SOURCE_REF = re.compile(r"[A-Za-z0-9][A-Za-z0-9._/-]{0,99}")
 
 #: The compose variables of the two services a browser opens: the API and the dashboard.
 HTTP_PORT_VARIABLES = ("API_HOST_PORT", "FRONTEND_HOST_PORT")
@@ -130,6 +134,8 @@ class Running:
     accounts: Mapping[str, Tuple[str, str]] = field(default_factory=dict)
     #: For a documentation site: the directory it was built from.
     source: Optional[Path] = None
+    #: And the ref that directory was taken from, "" when it is not known.
+    source_ref: str = ""
     #: For the compose stack: each default host port a guide's address names,
     #: and the base URL that stands for it here.
     published: Mapping[int, str] = field(default_factory=dict)
@@ -419,6 +425,9 @@ class DocsPublished:
         self.url = url if url.endswith("/") else url + "/"
         raw = environ.get("DOCS_JOURNEY_PUBLISHED_SOURCE", "")
         self.source = Path(raw) if raw else repo_root
+        self.source_ref = environ.get("DOCS_JOURNEY_PUBLISHED_REF", "")
+        if self.source_ref and not SOURCE_REF.fullmatch(self.source_ref):
+            raise StackError("DOCS_JOURNEY_PUBLISHED_REF is not a git ref")
 
     def up(self, profile: str = "") -> Running:
         if not (self.source / "mkdocs.yml").is_file():
@@ -426,7 +435,12 @@ class DocsPublished:
                 f"DOCS_JOURNEY_PUBLISHED_SOURCE={self.source} holds no mkdocs.yml:"
                 " it must be the directory the published site was built from"
             )
-        return Running(name="docs-published", base_url=self.url, source=self.source)
+        return Running(
+            name="docs-published",
+            base_url=self.url,
+            source=self.source,
+            source_ref=self.source_ref,
+        )
 
     def down(self) -> None:
         return None
