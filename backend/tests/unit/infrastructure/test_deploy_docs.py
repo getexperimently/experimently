@@ -604,12 +604,118 @@ def test_the_runbook_undoes_a_migration_before_the_api_rollback():
         r"snapshot restore|restore from (aurora )?snapshot", flat, re.I
     )
     assert not re.search(r"restore the snapshot", RUNBOOK.read_text(), re.I)
-    # The STOP paragraph and its gap reference come before the command.
-    command = section.index("aws rds restore-db-cluster-to-point-in-time")
+    # The STOP paragraph and the gap sentence come before the restore, which
+    # the runbook no longer copies: its copy never added an instance and left
+    # two of the cluster's network settings as placeholders (#190). It links to
+    # the disaster-recovery page's "Restore from PITR" instead.
+    assert "aws rds restore-db-cluster-to-point-in-time" not in section
+    assert "<the cluster's DB subnet group>" not in section
+    assert "<aurora-sg-id>" not in section
     stop = section.index("**STOP. A restore to a NEW cluster cannot be picked up")
-    gap = section.index("Tracked as a gap in the deploy path.")
-    assert "issue 78" in section[stop:gap]
-    assert stop < gap < command, (stop, gap, command)
+    gap = section.index("This is a known gap in the deploy path.")
+    link = section.index("disaster-recovery.md#restore-from-pitr-preferred")
+    # #78 is closed: it is not a pointer to an open gap.
+    assert "issue 78" not in section
+    assert stop < gap < link, (stop, gap, link)
+    assert "restore-from-pitr-preferred" in _anchors(
+        DOCS / "deployment" / "disaster-recovery.md"
+    )
+
+
+def _restore_section() -> str:
+    """The disaster-recovery page's "Restore from PITR" section."""
+    page = (DOCS / "deployment" / "disaster-recovery.md").read_text(encoding="utf-8")
+    start = page.index("### Restore from PITR (preferred)")
+    return page[start : page.index("\n### ", start + 1)]
+
+
+@pytest.mark.regression
+def test_the_restore_reads_and_passes_the_original_clusters_settings():
+    """A restore given no parameter group gets the engine's default one, with no
+    error, so the settings the database stack makes are lost. The page reads
+    the cluster's and the instance's group from the original, and passes them
+    (and the tags setting) to the commands that make the new cluster and its
+    instance. Values are read, never typed."""
+    section = _restore_section()
+    for read in (
+        "CLUSTER_PARAMETER_GROUP=$(aws rds describe-db-clusters",
+        "'DBClusters[0].DBClusterParameterGroup'",
+        "INSTANCE_PARAMETER_GROUP=$(aws rds describe-db-instances",
+        '--filters "Name=db-cluster-id,Values=$CLUSTER"',
+        "'DBInstances[0].DBParameterGroups[0].DBParameterGroupName'",
+    ):
+        assert read in section, read
+    blocks = re.findall(r"```bash\n(.*?)```", section, re.S)
+    (restore,) = [b for b in blocks if "restore-db-cluster-to-point-in-time" in b]
+    (create,) = [b for b in blocks if "aws rds create-db-instance" in b]
+    assert '--db-cluster-parameter-group-name "$CLUSTER_PARAMETER_GROUP"' in restore
+    assert "--copy-tags-to-snapshot" in restore
+    assert '--db-parameter-group-name "$INSTANCE_PARAMETER_GROUP"' in create
+    # No group name is typed into a command.
+    for block in (restore, create):
+        assert not re.search(r"parameter-group-name\s+[^\s$\"']", block), block
+
+
+#: The recovery pages' AWS CLI commands the flag check below reads: page ->
+#: the `service operation` commands it must find there (so that a scan that
+#: reads nothing fails), and every command of those services is then checked.
+#: Only the flags before a `$(` are read, so a command nested in an argument is
+#: not checked against the outer one: a page that gains one needs a parser.
+CLI_FLAG_CHECKED = {
+    "disaster-recovery.md": {
+        "rds restore-db-cluster-to-point-in-time",
+        "rds create-db-instance",
+        "rds describe-db-instances",
+        "cloudformation describe-stack-resources",
+    },
+    "rollback-runbook.md": {"rds describe-db-cluster-snapshots"},
+    "secrets-management.md": {
+        "rds modify-db-cluster",
+        "logs filter-log-events",
+    },
+}
+
+
+@pytest.mark.regression
+@pytest.mark.parametrize("page", sorted(CLI_FLAG_CHECKED))
+def test_every_aws_flag_the_recovery_pages_print_is_one_the_cli_has(page):
+    """`aws <service> <operation>` takes its flags from botocore's service
+    model, which is also what the AWS CLI reads: a flag that is not a member of
+    the operation's input is refused with exit 252 when it is pasted
+    mid-incident. Checked offline, for every `aws rds`, `aws logs` and
+    `aws cloudformation` command the page prints."""
+    from botocore import xform_name
+    from botocore.session import get_session
+
+    text = (DOCS / "deployment" / page).read_text(encoding="utf-8")
+    blocks = re.findall(r"```bash\n(.*?)```", text, re.S)
+    found = set()
+    for service in ("rds", "logs", "cloudformation"):
+        model = get_session().get_service_model(service)
+        flags_of = {
+            xform_name(op).replace("_", "-"): {
+                xform_name(member).replace("_", "-")
+                for member in model.operation_model(op).input_shape.members
+            }
+            for op in model.operation_names
+            if model.operation_model(op).input_shape is not None
+        }
+        for block in blocks:
+            # Join the continuation lines, then read each command of the service.
+            flat = block.replace("\\\n", " ")
+            for operation, rest in re.findall(
+                rf"aws {service} ([a-z0-9-]+)([^\n]*)", flat
+            ):
+                if operation == "wait":
+                    continue
+                assert operation in flags_of, (page, service, operation)
+                found.add(f"{service} {operation}")
+                # A `$(date ...)` in an argument is another command's flags.
+                rest = rest.split("$(")[0]
+                for flag in re.findall(r"(?<![\w-])--([a-z0-9-]+)", rest):
+                    if flag not in ("query", "output"):
+                        assert flag in flags_of[operation], (page, operation, flag)
+    assert CLI_FLAG_CHECKED[page] <= found, (page, CLI_FLAG_CHECKED[page] - found)
 
 
 # --- the canary's length (#212, D47) -------------------------------------------

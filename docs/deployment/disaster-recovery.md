@@ -257,19 +257,42 @@ aws rds describe-db-cluster-snapshots \
 ### Restore from PITR (preferred)
 
 A restore creates a **new** cluster with no instances. Add one before anything can connect.
-The restored cluster goes in the original's subnet group and security group, so read them
-from the original first:
+The restored cluster has to be put where the original is and given the original's two parameter
+groups (the cluster's, and the instances'). Read all four values (`DB_SUBNET_GROUP`,
+`AURORA_SECURITY_GROUP` and the two parameter groups) from the original first and do not type
+them. A restore that is given no parameter group uses the engine's
+default one, with no error, so the settings the database stack makes would not be carried over: the
+cluster's `timezone`, `rds.force_ssl` and `shared_preload_libraries`, and the instances' logging
+and `work_mem`:
 
 ```bash
 DB_SUBNET_GROUP=$(aws rds describe-db-clusters --db-cluster-identifier "$CLUSTER" \
   --query 'DBClusters[0].DBSubnetGroup' --output text)
 AURORA_SECURITY_GROUP=$(aws rds describe-db-clusters --db-cluster-identifier "$CLUSTER" \
   --query 'DBClusters[0].VpcSecurityGroups[0].VpcSecurityGroupId' --output text)
+CLUSTER_PARAMETER_GROUP=$(aws rds describe-db-clusters --db-cluster-identifier "$CLUSTER" \
+  --query 'DBClusters[0].DBClusterParameterGroup' --output text)
+INSTANCE_PARAMETER_GROUP=$(aws rds describe-db-instances \
+  --filters "Name=db-cluster-id,Values=$CLUSTER" \
+  --query 'DBInstances[0].DBParameterGroups[0].DBParameterGroupName' --output text)
 ```
 
-Then restore:
+The instance's group can be read only while the original cluster still has an instance. If
+`INSTANCE_PARAMETER_GROUP` is `None`, read it from the database stack instead (its one
+`AWS::RDS::DBParameterGroup`), and do not leave `--db-parameter-group-name` out of the instance
+command below:
 
-Restore the cluster to just before the failure. Replace YYYY-MM-DDTHH:MM:SSZ with the timestamp just before the failure:
+```bash
+INSTANCE_PARAMETER_GROUP=$(aws cloudformation describe-stack-resources \
+  --stack-name "experimentation-database-$ENV" \
+  --query "StackResources[?ResourceType=='AWS::RDS::DBParameterGroup'].PhysicalResourceId" \
+  --output text)
+```
+
+Then restore the cluster. Replace `2026-03-01T14:55:00Z` with the time to restore to, in UTC: just
+before the failure here, and before the migration when you come from the
+[Rollback Runbook](rollback-runbook.md). `--copy-tags-to-snapshot` keeps the tags on the restored
+cluster's snapshots, as the stack's cluster does; without it they are not copied.
 
 ```bash
 aws rds restore-db-cluster-to-point-in-time \
@@ -277,20 +300,23 @@ aws rds restore-db-cluster-to-point-in-time \
   --db-cluster-identifier "$CLUSTER-restored" \
   --restore-to-time 2026-03-01T14:55:00Z \
   --db-subnet-group-name "$DB_SUBNET_GROUP" \
-  --vpc-security-group-ids "$AURORA_SECURITY_GROUP"
+  --vpc-security-group-ids "$AURORA_SECURITY_GROUP" \
+  --db-cluster-parameter-group-name "$CLUSTER_PARAMETER_GROUP" \
+  --copy-tags-to-snapshot
 
 aws rds wait db-cluster-available \
   --db-cluster-identifier "$CLUSTER-restored"
 ```
 
-Add a writer instance (prod's instances are db.r5.large):
+Add a writer instance in the instance parameter group (prod's instances are db.r5.large):
 
 ```bash
 aws rds create-db-instance \
   --db-instance-identifier "$CLUSTER-restored-1" \
   --db-cluster-identifier "$CLUSTER-restored" \
   --engine aurora-postgresql \
-  --db-instance-class db.r5.large
+  --db-instance-class db.r5.large \
+  --db-parameter-group-name "$INSTANCE_PARAMETER_GROUP"
 
 aws rds wait db-instance-available \
   --db-instance-identifier "$CLUSTER-restored-1"
