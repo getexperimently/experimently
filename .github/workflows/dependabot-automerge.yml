@@ -38,6 +38,15 @@ name: Dependabot auto-merge
 #                                    reaching this workflow at all means
 #                                    somebody lifted an ignore on purpose;
 #                                    it is left for them to merge.
+#   anything in /tests/fuzz          The API fuzzer's pins (Schemathesis,
+#                                    Hypothesis and what they pull in). A
+#                                    bump changes the requests the nightly
+#                                    fuzz run sends, which can move its
+#                                    known-5xx and unreached lists, and no
+#                                    check on the pull request runs the
+#                                    fuzzer. Someone dispatches fuzz.yml on
+#                                    the branch and rebuilds a list that
+#                                    moved, in the same pull request.
 #
 # SECURITY SHAPE
 #
@@ -77,6 +86,7 @@ jobs:
         env:
           UPDATE_TYPE: ${{ steps.meta.outputs.update-type }}
           ECOSYSTEM: ${{ steps.meta.outputs.package-ecosystem }}
+          DIRECTORY: ${{ steps.meta.outputs.directory }}
         run: |
           set -euo pipefail
           # version-update:semver-{patch,minor,major}
@@ -87,6 +97,8 @@ jobs:
               if [ "$ECOSYSTEM" = "github_actions" ]; then ok=yes; else ok=no; fi ;;
             *) ok=no ;;
           esac
+          # The fuzzer's pins -- see the header.
+          if [ "$DIRECTORY" = "/tests/fuzz" ]; then ok=no; fi
           echo "ok=$ok" >> "$GITHUB_OUTPUT"
           echo "$ECOSYSTEM / $UPDATE_TYPE -> auto-merge: $ok"
 
@@ -104,4 +116,4 @@ jobs:
           ECOSYSTEM: ${{ steps.meta.outputs.package-ecosystem }}
         run: |
           echo "Left for a human: $ECOSYSTEM $UPDATE_TYPE."
-          echo "Majors outside github-actions are migrations, not bumps."
+          echo "Majors outside github-actions are migrations, not bumps; a /tests/fuzz bump needs a dispatched fuzz.yml run."

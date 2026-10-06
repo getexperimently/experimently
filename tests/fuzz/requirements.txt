@@ -3,10 +3,19 @@
 #
 # Hypothesis is pinned as well as Schemathesis: it generates the inputs, so a
 # different version makes different requests from the same seed, and `make
-# fuzz FUZZ_SEED=<seed>` would no longer repeat a CI run.
+# fuzz FUZZ_SEED=<seed>` would no longer repeat a CI run. Everything the two
+# pull in is pinned in constraints.txt (named below), and both files are
+# installed with --no-deps and checked with `pip check`.
+#
+# A bump of either moves the requests the nightly run sends, and so can move
+# tests/fuzz/known-5xx.toml and tests/fuzz/unreached.toml. Such a pull request
+# is not merged automatically (.github/workflows/dependabot-automerge.yml):
+# dispatch fuzz.yml on its branch, and if a list moved, rebuild it in the same
+# pull request (see .github/dependabot.yml).
 #
 # A package this file shares with backend/requirements.txt must name the same
 # version there; scripts/check_requirements_lock.py fails the lint job
 # otherwise.
+-c constraints.txt
 schemathesis==4.29.3
 hypothesis==6.168.5

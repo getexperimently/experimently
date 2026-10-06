@@ -158,6 +158,27 @@ pins them.
    run, a run on another branch) prints in its log what a scheduled run with
    its results would post, and posts nothing.
 
+## The API fuzzing issue
+
+`fuzz.yml` follows these rules; `scripts/fuzz_report.py` applies them and
+`backend/tests/unit/scripts/test_fuzz_report.py` pins them.
+
+1. One issue, labelled `fuzz-failure`, opened from `fuzz-issue.tmpl` by the
+   first red pass of a scheduled run when none is open; its body is that
+   pass's `fuzz-red.tmpl` summary. The run's other red passes comment their
+   own summary on it. A red pass means a 5xx or an unreached operation that no
+   list explains, or a list entry that went stale, so one red night is enough.
+2. While it is open, every red pass of a scheduled run comments its
+   `fuzz-red.tmpl` summary.
+3. Nothing closes it automatically: it is closed by hand once the cause is
+   fixed, or listed in `tests/fuzz/known-5xx.toml` or
+   `tests/fuzz/unreached.toml` after triage.
+4. A green pass, and a pass with no verdict (its job failed or was cancelled
+   before the evaluation), post nothing.
+5. Only a scheduled run on `main` posts. Any other run (a dispatch, a run on
+   another branch) prints in its log what a scheduled run with its results
+   would post, and posts nothing.
+
 ## Rendering
 
 `scripts/qa_render.py` is the one reader of this directory. It fills a

@@ -7,22 +7,48 @@ name: API fuzzing
 #
 #   superuser  the seeded demo administrator's bearer token, every operation
 #   viewer     the seeded VIEWER's bearer token, every operation
-#   sdk        the sdk-contract API key, the SDK routes only
+#   sdk        the sdk-contract seed's sdk:ruleset key, the SDK routes only
 #
 # minus the operations tests/fuzz/exclusions.toml names for the pass. Each
 # pass is decided by scripts/fuzz_check.py, never by Schemathesis's exit
-# status: red when any operation answers 5xx, when an operation is not reached
-# and tests/fuzz/unreached.toml does not list it for the pass, or when a listed
-# one was reached. There is no list of known 5xx answers yet, so any 5xx turns
-# the run red.
+# status. It is red when:
+#   * a route answered 5xx with a status tests/fuzz/known-5xx.toml does not
+#     list for the pass. A 5xx counts against the route that ANSWERED the
+#     request, resolved by the application's own router, not the operation
+#     Schemathesis generated it for;
+#   * an entry of known-5xx.toml answered no 5xx in the run (stale: the bug
+#     was fixed, so the entry goes);
+#   * an operation is not reached and tests/fuzz/unreached.toml does not list
+#     it for the pass, or a listed one was reached (stale).
+#
+# THE SEED. Both lists hold for the seed they were built from, 20261006
+# (LISTS_SEED in scripts/fuzz_check.py). Schemathesis runs with
+# --generation-deterministic, so at one commit that seed sends the same
+# requests every night, and the lists cannot flap from one night to the next:
+# a change in them is a change in the API or in the fuzzer's pins. The
+# scheduled run always uses it, and so does a dispatch unless it names
+# another; another seed changes the fuzzing phase's requests, so its list
+# differences are not, by themselves, API changes.
 #
 # This repository is public, and so is this run's log. It carries the date,
 # the commit, the seed and counts; which operations failed stays on the
-# runner. To see them, run the same pass locally:
+# runner. To see them, run the pass locally, on a compose stack built from the
+# commit (the header of scripts/fuzz_local.sh says how that stack differs from
+# this workflow's, and what was measured of the difference):
 #
 #   make fuzz FUZZ_SEED=<seed> SHA=<commit> PASS=<superuser|viewer|sdk>
 #
-# Dispatched by hand only.
+# When: nightly at 05:23 UTC, after the 02:00-04:00 nightly jobs (nightly-qa,
+# doc-examples, sdk-unit-tests, chart-kind, docs-journeys, codeql) and away
+# from the synthetic check's :17 and :47; and by hand (workflow_dispatch).
+#
+# The `report` job keeps one rolling `fuzz-failure` issue: opened by the
+# first red pass of a scheduled run when none is open, commented by every red
+# pass while it is open, closed by hand once the cause is fixed or listed.
+# Only a scheduled run on main posts; any other run prints what it would
+# post. Every text it posts is rendered from .github/qa-templates/ by
+# scripts/qa_render.py and posted with --body-file
+# (backend/tests/unit/scripts/test_fuzz_workflow.py pins all of this).
 #
 # timeout-minutes: each pass's longest measured job plus 50%, from two runs
 # at one commit and seed on the pull request that added this file: superuser
@@ -32,15 +58,21 @@ name: API fuzzing
 # =============================================================================
 
 on:
+  schedule:
+    - cron: '23 5 * * *'
   workflow_dispatch:
     inputs:
       fuzz_seed:
-        description: 'The Schemathesis seed, an integer of up to ten digits. Empty: the UTC date as YYYYMMDD.'
+        description: 'The Schemathesis seed, an integer of up to ten digits. Empty: 20261006, the seed the known-5xx and unreached lists were built from.'
         type: string
         default: ''
 
 permissions:
   contents: read
+
+concurrency:
+  group: fuzz-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
   seed:
@@ -55,13 +87,13 @@ jobs:
           FUZZ_SEED: ${{ inputs.fuzz_seed }}
         run: |
           set -euo pipefail
-          seed="${FUZZ_SEED:-$(date -u +%Y%m%d)}"
+          seed="${FUZZ_SEED:-20261006}"
           if ! [[ "$seed" =~ ^(0|[1-9][0-9]{0,9})$ ]]; then
-            echo "::error::fuzz_seed must be an integer of one to ten digits, without leading zeros"
+            printf '%s\n' '::error::fuzz_seed must be an integer of one to ten digits, without leading zeros'
             exit 1
           fi
-          echo "fuzz_seed=$seed" >> "$GITHUB_OUTPUT"
-          echo "seed $seed"
+          printf 'fuzz_seed=%s\n' "$seed" >> "$GITHUB_OUTPUT"
+          printf 'seed %s\n' "$seed"
 
   superuser:
     needs: seed
@@ -77,6 +109,10 @@ jobs:
         AWS_ENDPOINT_URL=http://127.0.0.1:9
         AWS_ACCESS_KEY_ID=fuzz
         AWS_SECRET_ACCESS_KEY=fuzz
+        AWS_REGION=us-east-1
+        AWS_DEFAULT_REGION=us-east-1
+        AWS_MAX_ATTEMPTS=1
+        AWS_EC2_METADATA_DISABLED=true
 
   viewer:
     needs: seed
@@ -92,6 +128,10 @@ jobs:
         AWS_ENDPOINT_URL=http://127.0.0.1:9
         AWS_ACCESS_KEY_ID=fuzz
         AWS_SECRET_ACCESS_KEY=fuzz
+        AWS_REGION=us-east-1
+        AWS_DEFAULT_REGION=us-east-1
+        AWS_MAX_ATTEMPTS=1
+        AWS_EC2_METADATA_DISABLED=true
 
   sdk:
     needs: seed
@@ -107,3 +147,71 @@ jobs:
         AWS_ENDPOINT_URL=http://127.0.0.1:9
         AWS_ACCESS_KEY_ID=fuzz
         AWS_SECRET_ACCESS_KEY=fuzz
+        AWS_REGION=us-east-1
+        AWS_DEFAULT_REGION=us-east-1
+        AWS_MAX_ATTEMPTS=1
+        AWS_EC2_METADATA_DISABLED=true
+
+  report:
+    name: API fuzzing issue
+    needs: [seed, superuser, viewer, sdk]
+    if: always() && needs.seed.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+          sparse-checkout: |
+            scripts
+            .github/qa-templates
+
+      - name: Decide and render
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT: ${{ github.event_name }}
+          REF: ${{ github.ref }}
+          FUZZ_SUPERUSER_RESULT: ${{ needs.superuser.result }}
+          FUZZ_SUPERUSER_VALUES: ${{ needs.superuser.outputs.fuzz_values }}
+          FUZZ_VIEWER_RESULT: ${{ needs.viewer.result }}
+          FUZZ_VIEWER_VALUES: ${{ needs.viewer.outputs.fuzz_values }}
+          FUZZ_SDK_RESULT: ${{ needs.sdk.result }}
+          FUZZ_SDK_VALUES: ${{ needs.sdk.outputs.fuzz_values }}
+        run: python3 scripts/fuzz_report.py --event "$EVENT" --ref "$REF" --out "$RUNNER_TEMP/fuzz-issue"
+
+      - name: Post to the fuzz-failure issue
+        if: github.event_name == 'schedule' && github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          OPENED=""
+          for DIR in "$RUNNER_TEMP"/fuzz-issue/posts/*/; do
+            [ -d "$DIR" ] || continue
+            ACTION="$(head -n 1 "$DIR/action")"
+            case "$ACTION" in
+              open)
+                gh label create fuzz-failure --repo "$GITHUB_REPOSITORY" --color B60205 --description "API fuzzing failed" > /dev/null 2>&1 || true
+                URL="$(gh issue create --repo "$GITHUB_REPOSITORY" --title "$(head -n 1 "$DIR/title.txt")" --label fuzz-failure --body-file "$DIR/body.md")"
+                OPENED="${URL##*/}"
+                ;;
+              comment)
+                ISSUE="$(head -n 1 "$DIR/issue")"
+                if [ "$ISSUE" = new ]; then
+                  ISSUE="$OPENED"
+                fi
+                if ! [[ "$ISSUE" =~ ^[0-9]+$ ]]; then
+                  printf '%s\n' '::error title=API fuzzing::no issue to comment on'
+                  exit 1
+                fi
+                gh issue comment "$ISSUE" --repo "$GITHUB_REPOSITORY" --body-file "$DIR/body.md" > /dev/null
+                ;;
+              *)
+                printf '%s\n' '::error title=API fuzzing::the report wrote an unknown action'
+                exit 1
+                ;;
+            esac
+          done
