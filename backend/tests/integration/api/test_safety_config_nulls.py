@@ -167,6 +167,22 @@ def test_null_is_refused_when_creating_and_nothing_is_written(
     assert _stored(db_session, flag) == []
 
 
+@pytest.mark.parametrize("field", ["enabled", "rollback_percentage"])
+def test_null_is_refused_on_a_create_that_sends_metrics(
+    admin_client, db_session, field
+):
+    """This create used to answer 200, taking the null as the field's default."""
+    flag = _flag(db_session)
+
+    response = _no_raise(admin_client).post(
+        f"{SAFETY}/{flag.id}/config", json={"metrics": STORED_METRICS, field: None}
+    )
+
+    assert response.status_code == 422, response.text
+    assert _null_refusal(response) == (["body", field], f"{field} cannot be null")
+    assert _stored(db_session, flag) == []
+
+
 @pytest.mark.parametrize("field", ["enabled", "metrics", "rollback_percentage"])
 def test_null_is_refused_when_updating_and_the_stored_config_is_kept(
     admin_client, db_session, field
