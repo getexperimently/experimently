@@ -144,7 +144,6 @@ CLAIM_RULES = [
     (r"1B\+", "a scale figure nothing here measures"),
     (r"SOC 2 Type II", "a certification this project does not hold"),
     (r"GDPR Compliant", "a compliance claim no audit supports"),
-    (r"SRM detection", "a feature that is not implemented"),
     (r'"environment": "Production"', "a fabricated production environment"),
     (
         r"Enterprise Edition",

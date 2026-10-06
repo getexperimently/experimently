@@ -91,6 +91,16 @@ MUST_FIRE = [
     ("edition", "i.md", "Available in Enterprise Edition."),
     ("licence key", "j.md", "Paste your license key here."),
     ("claim in tsx", "k.tsx", "export const C = () => <p>GDPR Compliant</p>;"),
+    # The claim rules the cases above do not reach.
+    ("scale figure, millions", "q.md", "Trusted with 58M+ events a day."),
+    ("scale figure, decimal millions", "r.md", "Over 2.8M+ users served."),
+    ("scale figure, billions", "s.md", "1B+ assignments served."),
+    ("edition, community", "t.md", "Available in Community Edition."),
+    (
+        "fabricated production environment",
+        "u.json",
+        '{"environment": "Production"}',
+    ),
 ]
 
 MUST_NOT_FIRE = [
@@ -130,6 +140,41 @@ def test_allowance_does_not_fire(tmp_path, label, name, content):
         f"leak-guard wrongly rejected {label}: {content!r}\n"
         f"{result.stdout}{result.stderr}"
     )
+
+
+@pytest.mark.unit
+@pytest.mark.regression
+@pytest.mark.parametrize("name", ["v.md", "w.tsx"], ids=["markdown", "tsx"])
+def test_the_sample_ratio_check_is_not_a_false_claim(tmp_path, name):
+    """Sample-ratio-mismatch checking exists, so the phrase is accurate text.
+
+    `backend/app/services/srm_service.py` computes it and the results endpoint
+    returns it. A claim rule for the phrase "SRM detection" called it "a
+    feature that is not implemented", and so rejected true sentences about it.
+    """
+    phrase = "SRM detection warns when the observed split drifts from the plan."
+    result = _plant(_repo(tmp_path), name, phrase)
+    assert result.returncode == 0, (
+        "the guard rejected an accurate sentence about the sample-ratio check\n"
+        f"{result.stdout}{result.stderr}"
+    )
+
+
+@pytest.mark.unit
+@pytest.mark.regression
+def test_dropping_the_sample_ratio_rule_kept_the_other_claim_rules(tmp_path):
+    """A file with the phrase and a real false claim is still rejected, for the claim."""
+    result = _plant(
+        _repo(tmp_path),
+        "x.md",
+        "SRM detection is on.\nDelivering 99.97% uptime.\n",
+    )
+    assert result.returncode == 1, (
+        "the guard accepted a false claim next to the phrase\n"
+        f"{result.stdout}{result.stderr}"
+    )
+    assert "99.97" in result.stderr
+    assert "SRM" not in result.stderr, result.stderr
 
 
 @pytest.mark.unit
