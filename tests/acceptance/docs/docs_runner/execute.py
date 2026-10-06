@@ -457,7 +457,13 @@ class JourneyRunner:
         wanted = step.expect
 
         def here() -> str:
-            return urlparse(page.url).path or "/"
+            # The document's own location. Measured 2026-10-06: after the
+            # sign-in page sent the browser on to /experiments, page.url still
+            # read /login while the screen showed the experiments.
+            try:
+                return str(page.evaluate("location.pathname")) or "/"
+            except PlaywrightError:
+                return urlparse(page.url).path or "/"
 
         if wanted.status is not None:
             status = response.status if response is not None else None
