@@ -12,6 +12,10 @@
  * - The flag builder offers version operators on any attribute outside the
  *   suggested ones, so the StreamPulse demo flags stay editable here, while
  *   the experiment page keeps them read-only.
+ * - Rules the builder cannot show only because of a NOT group are shown as
+ *   stored under NOT_GROUPS_NOTE, which says they are applied as written,
+ *   instead of the general note that says they may not be (#918). A save
+ *   that moves only the rollout still leaves them untouched.
  */
 import React from 'react';
 import fs from 'fs';
@@ -23,7 +27,7 @@ import { OUTSIDE_BUILDER_NOTE } from '@/components/experiments/TargetingSection'
 import { ApiError, ApiFetchOptions, apiFetch } from '@/services/api';
 import { FeatureFlag } from '@/services/featureFlags';
 import { isEditableTargeting } from '@/utils/experimentTargeting';
-import { isEditableFlagTargeting, targetingToSend } from '@/utils/flagTargeting';
+import { NOT_GROUPS_NOTE, isEditableFlagTargeting, targetingToSend, usesNotGroups } from '@/utils/flagTargeting';
 import { FLAG_OPERATOR_OPTIONS, createEmptyRules, getOperatorsForAttribute, jsonToRules } from '@/utils/targeting';
 import { apiError, makeRouter, routedApi } from './helpers/apiMock';
 
@@ -60,6 +64,23 @@ const UNKNOWN_OPERATOR = {
   logical_operator: 'AND',
   groups: [{ logical_operator: 'AND', conditions: [{ attribute: 'country', operator: 'equalz', value: 'DE' }] }],
 };
+
+/**
+ * NOT groups (#918). The API accepts `not` in any case, stores it as sent and
+ * applies it; the builder has no NOT. Each shape would be editable if its
+ * NOT were an AND, so NOT is the only reason the page shows it as stored.
+ */
+const NOT_DE = { attribute: 'country', operator: 'equals', value: 'DE' };
+const GROUP_NOT = { logical_operator: 'AND', groups: [{ logical_operator: 'NOT', conditions: [NOT_DE] }] };
+const TOP_LEVEL_NOT = { logical_operator: 'NOT', groups: [{ logical_operator: 'AND', conditions: [NOT_DE] }] };
+const LOWERCASE_NOT = { logical_operator: 'AND', groups: [{ logical_operator: 'not', conditions: [NOT_DE] }] };
+const MIXED_CASE_NOT = { logical_operator: 'and', groups: [{ logical_operator: 'not', conditions: [NOT_DE] }] };
+const NOT_SHAPES: [string, unknown][] = [
+  ['a group NOT', GROUP_NOT],
+  ['a top-level NOT', TOP_LEVEL_NOT],
+  ['a lowercase not', LOWERCASE_NOT],
+  ['a mixed-case and with a not group', MIXED_CASE_NOT],
+];
 
 function flag(rules: unknown, overrides: Partial<FeatureFlag> = {}): FeatureFlag {
   return {
@@ -166,6 +187,7 @@ describe('a save that moves only the rollout', () => {
     ['the seed operator/rules value', SEED_OPERATOR_RULES],
     ['an operator the builder does not offer', UNKNOWN_OPERATOR],
     ['a value that is not an object', 42],
+    ...NOT_SHAPES,
   ])('sends no targeting_rules: %s', async (_name, rules) => {
     const puts = install(rules);
     render(<FeatureFlagDetailPage />);
@@ -202,12 +224,14 @@ describe('stored rules the builder cannot show', () => {
     render(<FeatureFlagDetailPage />);
     const s = await section();
     expect(within(s).getByTestId('targeting-raw-note')).toHaveTextContent(OUTSIDE_BUILDER_NOTE);
+    expect(within(s).getByTestId('targeting-raw-note')).not.toHaveTextContent(NOT_GROUPS_NOTE);
     expect(within(s).getByRole('link', { name: 'Read about targeting rules' })).toHaveAttribute(
       'href',
       expect.stringContaining('targeting-rules'),
     );
     expect(JSON.parse(within(s).getByTestId('targeting-raw-json').textContent ?? '')).toEqual(NATIVE);
-    expect(within(s).queryByTestId('targeting-rule-builder')).toBeNull();
+    expect(within(s).getByTestId('targeting-raw')).toBeInTheDocument();
+    expect(within(s).queryByTestId('add-group')).toBeNull();
     expect(within(s).queryByRole('button', { name: '+ Add Group' })).toBeNull();
     expect(within(s).getByRole('button', { name: 'Replace rules' })).toBeInTheDocument();
   });
@@ -253,6 +277,60 @@ describe('stored rules the builder cannot show', () => {
     expect(within(s).getByTestId('targeting-raw')).toBeInTheDocument();
     await slideAndSave('35');
     expect(puts).toEqual([{ rollout_percentage: 35 }]);
+  });
+});
+
+describe('NOT groups (#918)', () => {
+  it.each(NOT_SHAPES)('usesNotGroups is true for %s, which the builder cannot show', (_name, rules) => {
+    expect(usesNotGroups(rules)).toBe(true);
+    expect(isEditableFlagTargeting(rules)).toBe(false);
+  });
+
+  it.each([
+    ['a NOT rule that also has a rollout_percentage', { ...GROUP_NOT, rollout_percentage: 50 }],
+    ['the native shape', NATIVE],
+    ['an AND/OR rule', { logical_operator: 'OR', groups: [{ logical_operator: 'AND', conditions: [NOT_DE] }] }],
+    ['no rules', null],
+  ])('usesNotGroups is false for %s', (_name, rules) => {
+    expect(usesNotGroups(rules)).toBe(false);
+  });
+
+  it.each(NOT_SHAPES)('%s is shown as stored under the NOT note, with "Replace rules"', async (_name, rules) => {
+    install(rules);
+    render(<FeatureFlagDetailPage />);
+    const s = await section();
+    const note = within(s).getByTestId('targeting-raw-note');
+    expect(note).toHaveTextContent(NOT_GROUPS_NOTE);
+    expect(note).not.toHaveTextContent(OUTSIDE_BUILDER_NOTE);
+    expect(within(s).getByRole('link', { name: 'Read about targeting rules' })).toHaveAttribute(
+      'href',
+      expect.stringContaining('targeting-rules'),
+    );
+    expect(JSON.parse(within(s).getByTestId('targeting-raw-json').textContent ?? '')).toEqual(rules);
+    expect(within(s).getByTestId('targeting-raw')).toBeInTheDocument();
+    expect(within(s).queryByTestId('add-group')).toBeNull();
+    expect(within(s).getByRole('button', { name: 'Replace rules' })).toBeInTheDocument();
+  });
+
+  it('a NOT rule that is not editable for another reason keeps the general note', async () => {
+    install({ ...GROUP_NOT, rollout_percentage: 50 });
+    render(<FeatureFlagDetailPage />);
+    const s = await section();
+    const note = within(s).getByTestId('targeting-raw-note');
+    expect(note).toHaveTextContent(OUTSIDE_BUILDER_NOTE);
+    expect(note).not.toHaveTextContent(NOT_GROUPS_NOTE);
+  });
+
+  it('replace, confirm, leave empty, save: a NOT rule is replaced only through the confirmed path', async () => {
+    const puts = install(GROUP_NOT);
+    render(<FeatureFlagDetailPage />);
+    const s = await section();
+    fireEvent.click(within(s).getByRole('button', { name: 'Replace rules' }));
+    expect(within(s).getByRole('dialog', { name: 'Replace rules' })).toBeInTheDocument();
+    fireEvent.click(within(s).getByRole('button', { name: 'Start with no rules' }));
+    fireEvent.click(screen.getByTestId('save-flag'));
+    await screen.findByTestId('save-success');
+    expect(puts).toEqual([{ rollout_percentage: 25, targeting_rules: {} }]);
   });
 });
 
