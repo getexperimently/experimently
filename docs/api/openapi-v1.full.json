@@ -33148,7 +33148,7 @@
     },
     "/api/v1/tracking/events": {
       "post": {
-        "description": "Track an event that already carries internal identifiers.\n\nUnlike ``/track`` (which resolves ``experiment_key``/``feature_flag_key``),\nthis endpoint accepts ``experiment_id``/``feature_flag_id``/``variant_id``\ndirectly.  It is used by server-side integrations and the data seeding\ntooling that already hold the ids.\n\n**Authentication**: Requires a valid API key in the X-API-Key header.",
+        "description": "Track an event that names its experiment, flag and variant by id.\n\nUnlike ``/track`` (which resolves ``experiment_key``/``feature_flag_key``),\nthis endpoint accepts ``experiment_id``/``feature_flag_id``/``variant_id``\ndirectly.  It is used by server-side integrations and the data seeding\ntooling that already hold the ids.\n\nAn id that is not a UUID answers 422. A UUID that names no stored\nexperiment, feature flag or variant answers 404 naming the field, and\nnothing is stored.\n\n**Authentication**: Requires a valid API key in the X-API-Key header.",
         "operationId": "track_event_by_ids_api_v1_tracking_events_post",
         "requestBody": {
           "content": {
@@ -33171,6 +33171,9 @@
               }
             },
             "description": "Returns the stored event"
+          },
+          "404": {
+            "description": "An experiment_id, feature_flag_id or variant_id names no stored row; the detail names each such field, and nothing is stored"
           },
           "422": {
             "content": {

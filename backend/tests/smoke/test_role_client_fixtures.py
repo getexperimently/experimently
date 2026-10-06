@@ -66,7 +66,8 @@ ROLE_CLIENT_FIXTURES = frozenset(
         # test_user_email_and_username_updates.py
         "member",
         "member_as_written",
-        # test_tracking_text_refused.py, test_sdk_path_text_refused.py
+        # test_tracking_text_refused.py, test_sdk_path_text_refused.py,
+        # test_tracking_events_unknown_ids.py
         "sdk_client",
         # test_unexpected_errors_fixed_message.py (core); the modules'
         # test_workspaces_api.py defines a fixture of the same name.
