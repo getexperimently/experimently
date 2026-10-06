@@ -128,12 +128,16 @@ PLATFORM_STEPS: Dict[str, str] = {
     "Install SDK dependencies": (
         "${{ !inputs.skip && inputs.suite == 'sdk-live-contract' }}"
     ),
+    "Install the fuzzer": "${{ !inputs.skip && inputs.suite == 'fuzz' }}",
     "Create the schema": "${{ !inputs.skip }}",
     "Apply seeds": "${{ !inputs.skip && inputs.seed != '' }}",
     "Start the API": "${{ !inputs.skip }}",
     "Assert the running profile": "${{ !inputs.skip }}",
     "Run suite": "${{ !inputs.skip }}",
-    "Backend log (on failure)": "${{ !inputs.skip && failure() }}",
+    # Not on a fuzz run: its API log quotes the requests, and the log is public.
+    "Backend log (on failure)": (
+        "${{ !inputs.skip && failure() && inputs.suite != 'fuzz' }}"
+    ),
 }
 
 #: The tests that read docs/ content and so must run on the pull request that
@@ -181,6 +185,9 @@ NOT_DOCS_TESTS = {
     "backend/tests/smoke/test_audit_export_in_snapshot.py": "docs/api only",
     # Reads only docs/api/openapi-v1.stable.json (same reason as above).
     "backend/tests/smoke/test_assign_batch_route.py": "docs/api only",
+    # Reads only docs/api/openapi-v1.full.json, to hold tests/fuzz/'s lists to
+    # the full profile's operations (same reason as above).
+    "backend/tests/unit/scripts/test_fuzz_check.py": "docs/api only",
     # Reads the `json` extra-files in release-please-config.json: the two
     # docs/api/ snapshots and frontend/src/tests/fixtures/openapi.json. None
     # of those, nor the config, is docs-only (same reason as above).

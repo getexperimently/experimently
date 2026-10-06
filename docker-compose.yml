@@ -278,7 +278,11 @@ services:
 
   # ===========================================================================
   # profile: aws — LocalStack for the DynamoDB counters / Kinesis / S3 paths.
-  # Point the api at it with AWS_ENDPOINT_URL=http://localstack:4566.
+  # Setting AWS_ENDPOINT_URL in the shell or in .env does NOT reach the api:
+  # its environment above names each variable it passes. To point the api at
+  # LocalStack, add AWS_ENDPOINT_URL: http://localstack:4566 to the api's
+  # environment in an override file (docker compose -f docker-compose.yml
+  # -f <override>), as tests/fuzz/compose.fuzz.yml does for a closed port.
   # ===========================================================================
   localstack:
     profiles: ["aws"]
