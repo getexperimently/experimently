@@ -88,6 +88,23 @@ def _as_utc(value: Any) -> Optional[datetime]:
     return value.astimezone(timezone.utc)
 
 
+def record_end_date(experiment: Experiment, now: datetime) -> None:
+    """Set an experiment's ``end_date`` to *now*, the time it is completed.
+
+    ``check_experiment_dates`` requires ``end_date > start_date``. A start
+    date that is not before *now* is moved to one microsecond before it, the
+    latest start the row accepts. An experiment an earlier version started
+    by hand before its scheduled start holds one: that start kept the
+    scheduled date, which can still be ahead (#974). The experiment has been
+    running since before *now*, so the start written is nearer the real one
+    than the date it replaces.
+    """
+    start_date = _as_utc(experiment.start_date)
+    if start_date is not None and start_date >= now:
+        experiment.start_date = now - timedelta(microseconds=1)
+    experiment.end_date = now
+
+
 def _resolve_enum_member(enum_cls, value: Any):
     """
     Resolve *value* to a member of *enum_cls* by value or by name.
@@ -841,6 +858,12 @@ class ExperimentService:
         """
         Start an experiment by changing its status to ACTIVE.
 
+        The start date is set to now when the experiment has none, and when
+        it is a draft whose scheduled start is still ahead: a draft started by
+        hand before its scheduled start records when it actually started
+        (#974). A start date that has passed is kept, and so is a paused
+        experiment's (when it first started).
+
         Args:
             experiment: Experiment model object to start
 
@@ -848,9 +871,8 @@ class ExperimentService:
             Dictionary containing the updated experiment data
 
         Raises:
-            EndDatePassedError: If the experiment has no start date yet and
-                its end date is not after now, the start date this would
-                stamp. Nothing is written.
+            EndDatePassedError: If the start date would be set to now and the
+                end date is not after now. Nothing is written.
             ValueError: If the experiment cannot be started
         """
         # Validate experiment status
@@ -864,10 +886,19 @@ class ExperimentService:
             raise ValueError("Experiment does not meet requirements to start")
 
         # A start date already stored is kept, and the row already holds it
-        # before its end date. Otherwise the start date is now, which must be
-        # before the end date (#953); the same ``now`` is checked and written.
+        # before its end date, unless it is a draft's scheduled start that is
+        # still ahead: the draft starts now, so that is its start date (#974).
+        # A start date set to now must be before the end date (#953); the
+        # same ``now`` is checked and written.
         now = datetime.now(timezone.utc)
-        if not experiment.start_date:
+        start_date = _as_utc(experiment.start_date)
+        if (
+            experiment.status == ExperimentStatus.DRAFT
+            and start_date is not None
+            and start_date > now
+        ):
+            start_date = None
+        if start_date is None:
             end_date = _as_utc(experiment.end_date)
             if end_date is not None and end_date <= now:
                 raise EndDatePassedError()
@@ -876,7 +907,7 @@ class ExperimentService:
         # id; a resume from PAUSED keeps the users the rule admits (#533).
         stamp_rollout_rule_id(experiment, experiment.status)
         experiment.status = ExperimentStatus.ACTIVE
-        if not experiment.start_date:
+        if start_date is None:
             experiment.start_date = now.isoformat()
 
         experiment.updated_at = datetime.now(timezone.utc)
@@ -933,7 +964,7 @@ class ExperimentService:
             )
 
         experiment.status = ExperimentStatus.COMPLETED
-        experiment.end_date = datetime.now(timezone.utc).isoformat()
+        record_end_date(experiment, datetime.now(timezone.utc))
         experiment.updated_at = datetime.now(timezone.utc)
 
         self.db.commit()

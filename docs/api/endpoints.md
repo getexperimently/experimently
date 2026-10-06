@@ -1337,14 +1337,17 @@ the caller's role, superusers included:
 
 - `POST /api/v1/experiments/{experiment_id}/start`: `draft` or `paused` to
   `active`. It checks for at least two variants, a control variant and at
-  least one metric, and sets `start_date` to now when it has none. An
-  experiment with no `start_date` whose `end_date` has passed is refused with
-  400 and nothing is changed; set a later `end_date`, or clear it with
-  `null`, through `PUT /api/v1/experiments/{experiment_id}/schedule` and start
-  it again.
+  least one metric, and sets `start_date` to now when it has none. A draft
+  started before its scheduled `start_date` starts now, and its `start_date`
+  is set to now; a scheduled `end_date` is kept. An experiment with no
+  `start_date` whose `end_date` has passed is refused with 400 and nothing is
+  changed; set a later `end_date`, or clear it with `null`, through
+  `PUT /api/v1/experiments/{experiment_id}/schedule` and start it again.
 - `POST /api/v1/experiments/{experiment_id}/pause`: `active` to `paused`.
 - `POST /api/v1/experiments/{experiment_id}/complete`: `active` or `paused` to
-  `completed`, and sets `end_date`.
+  `completed`, and sets `end_date` to now. An experiment that an earlier
+  version started before its scheduled start can still have a `start_date`
+  after now; complete sets it to one microsecond before the new `end_date`.
 - `POST /api/v1/experiments/{experiment_id}/archive`: any status but
   `archived` to `archived`.
 
