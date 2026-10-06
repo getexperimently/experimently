@@ -11,6 +11,7 @@ import {
   SampleSizeResult,
   DimensionalBreakdownResponse,
 } from '@/types/results';
+import { SequentialTestingResponse } from '@/types/sequential';
 
 jest.mock('@/services/results');
 jest.mock('@/services/experiments');
@@ -657,5 +658,78 @@ describe('the stored analysis settings', () => {
         expect(notice).not.toBeInTheDocument();
       }
     });
+  });
+});
+
+describe('the sequential block (#919)', () => {
+  // Since the results response carries `sequential_testing` whenever
+  // sequential testing is on, the dedicated route is asked only when the
+  // experiment says it is on and the block is still missing. Asking it when
+  // it is off answered 404 and logged a failed request on every results page.
+  const mockGetSequential = ResultsService.getSequentialResults as jest.Mock;
+  const stored = { id: 'exp-1', correction_method: 'none', confidence_level: 0.95 };
+
+  const SEQUENTIAL: SequentialTestingResponse = {
+    method: 'msprt',
+    msprt_result: {
+      lambda_ratio: 1.2,
+      always_valid_p_value: 0.4,
+      can_stop: false,
+      evidence_strength: 'inconclusive',
+      boundary: 20,
+    },
+    confidence_sequence: { lower: -0.01, upper: 0.03, width: 0.04, sample_size: 2000 },
+    evidence_trajectory: [],
+    alpha_spending: [],
+    long_running_risk: null,
+    recommended_action: 'continue',
+    at_risk: false,
+    analysis_status: 'beta',
+    analysis_notice: 'Beta',
+  };
+
+  function loads(results: ExperimentResultsResponse) {
+    mockGetResults.mockResolvedValue(results);
+    mockGetDailyResults.mockResolvedValue(mockDaily);
+    mockGetSampleSize.mockResolvedValue(mockSampleSize);
+  }
+
+  it('is not asked for from the dedicated route when the experiment says sequential testing is off', async () => {
+    mockGetExperiment.mockResolvedValue({ ...stored, sequential_testing_enabled: false });
+    loads({ ...mockResults, sequential_testing: null });
+
+    render(<ResultsDashboard experimentId="exp-1" />);
+    await waitFor(() => screen.getByTestId('experiment-summary'));
+    expect(mockGetSequential).not.toHaveBeenCalled();
+    expect(screen.queryByRole('tab', { name: /sequential/i })).toBeNull();
+  });
+
+  it('is asked for from the dedicated route when the experiment says it is on and the results carry no block', async () => {
+    mockGetExperiment.mockResolvedValue({ ...stored, sequential_testing_enabled: true });
+    loads({ ...mockResults, sequential_testing: null });
+    mockGetSequential.mockResolvedValue(SEQUENTIAL);
+
+    render(<ResultsDashboard experimentId="exp-1" />);
+    expect(await screen.findByRole('tab', { name: /sequential/i })).toBeInTheDocument();
+    expect(mockGetSequential).toHaveBeenCalledTimes(1);
+    expect(mockGetSequential).toHaveBeenCalledWith('exp-1');
+  });
+
+  it('comes from the results when they carry it, with no second request', async () => {
+    mockGetExperiment.mockResolvedValue({ ...stored, sequential_testing_enabled: true });
+    loads({ ...mockResults, sequential_testing: SEQUENTIAL });
+
+    render(<ResultsDashboard experimentId="exp-1" />);
+    expect(await screen.findByRole('tab', { name: /sequential/i })).toBeInTheDocument();
+    expect(mockGetSequential).not.toHaveBeenCalled();
+  });
+
+  it('is not asked for when the experiment could not be read', async () => {
+    mockGetExperiment.mockRejectedValue(new ApiError({ status: 500, detail: 'boom' }));
+    loads({ ...mockResults, sequential_testing: null });
+
+    render(<ResultsDashboard experimentId="exp-1" />);
+    await waitFor(() => screen.getByTestId('experiment-summary'));
+    expect(mockGetSequential).not.toHaveBeenCalled();
   });
 });

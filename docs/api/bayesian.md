@@ -15,8 +15,8 @@ in `GET /results/{id}`.
 
 - **Posterior** parameters (`alpha`, `beta`), updated from the prior with the observed
   conversions and non-conversions, and the posterior mean.
-- **Credible interval** (highest-density interval) at the configured level, 95% by
-  default.
+- **Credible interval** (equal-tailed: at 95%, the 2.5th and 97.5th percentiles of the
+  posterior) at the configured level, 95% by default.
 - **Probability to be best**: the share of Monte Carlo draws in which this variant has the
   highest rate.
 - **Expected loss**: how much conversion rate you would give up, on average, by choosing
