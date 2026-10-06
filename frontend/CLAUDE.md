@@ -12,7 +12,7 @@ npm install
 
 # Run development server
 npm run dev
-# Opens at http://localhost:3000
+# Opens at http://localhost:3100 (package.json runs next dev -p 3100)
 
 # Run tests
 npm test
