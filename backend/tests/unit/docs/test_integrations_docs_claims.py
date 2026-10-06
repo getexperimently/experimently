@@ -28,10 +28,12 @@ pattern that has silently stopped matching fails here instead of reporting
 "clean" for ever. When the API changes, change the docs and this test together.
 
 Reads only files; no git and no `modules` import, so it runs the same in
-`scripts/core_build.sh`'s copy (no `.git`, no `modules/`). The three module
-files whose docstrings describe the webhooks are swept too whenever `modules/`
-is present, and then required to exist. It is in the docs-only gate's "Docs
-content tests" through its directory, `backend/tests/unit/docs/`.
+`scripts/core_build.sh`'s copy (no `.git`, no `modules/`). It names no module
+path (the core/modules boundary test forbids it): the module docstrings that
+describe the webhooks are swept with these same rules by
+`modules/backend/tests/unit/services/test_integration_docstrings.py`. It is in
+the docs-only gate's "Docs content tests" through its directory,
+`backend/tests/unit/docs/`.
 """
 
 from __future__ import annotations
@@ -54,14 +56,6 @@ SWEEP_FLOOR = (
     "docs/getting-started/faq.md",
     "docs/integrations/github.md",
     "docs/integrations/salesforce.md",
-)
-
-#: Module files whose docstrings describe the webhooks (and the OpenAPI text
-#: built from them). Swept whenever `modules/` exists; a core tree has none.
-MODULE_FILES = (
-    "modules/backend/app/api/v1/endpoints/integrations.py",
-    "modules/backend/app/services/integrations/salesforce_service.py",
-    "modules/backend/app/services/integrations/webhook_auth.py",
 )
 
 #: Where a rule applies, when it is not the whole of `docs/`.
@@ -261,16 +255,6 @@ def test_the_sweep_reads_the_pages() -> None:
 
 def test_no_page_describes_an_integration_the_api_does_not_have() -> None:
     hits = list(_hits(_swept()))
-    assert not hits, "\n".join(hits)
-
-
-def test_the_module_docstrings_say_the_same() -> None:
-    if not (REPO_ROOT / "modules").is_dir():
-        pytest.skip("a core tree has no modules/ to sweep")
-    paths = [REPO_ROOT / rel for rel in MODULE_FILES]
-    missing = [p.name for p in paths if not p.is_file()]
-    assert not missing, f"the sweep did not find {missing}: it is broken, not clean"
-    hits = list(_hits(paths))
     assert not hits, "\n".join(hits)
 
 
