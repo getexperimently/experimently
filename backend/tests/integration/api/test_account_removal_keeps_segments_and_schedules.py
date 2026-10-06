@@ -6,8 +6,7 @@ carry no delete cascade, so both are kept, with ``owner_id`` null, when the
 account is removed. The account's API keys are removed with it, as before.
 
 A DEVELOPER creates a rules segment, an id-list segment with two members, a
-rollout schedule with two stages and an API key through the routes, and an
-ACTIVE flag and an ACTIVE experiment target the rules segment. The account is
+rollout schedule with two stages and an API key through the routes. The account is
 removed through ``DELETE /api/v1/admin/users/{user_id}`` or through
 ``DELETE /api/v1/users/{user_id}`` (one case each), and the response is 204.
 Afterwards the segments are listed and read, the id list keeps its two
@@ -226,7 +225,6 @@ def test_removing_an_account_keeps_its_segments_and_rollout_schedules(
     assert created.status_code == 201, created.text
     segment_id = created.json()["id"]
 
-    # An ACTIVE flag targets it.
     flag_key = f"keeps-{uuid.uuid4().hex[:10]}"
     flag = client.post(
         f"{FLAGS}/",
@@ -275,7 +273,6 @@ def test_removing_an_account_keeps_its_segments_and_rollout_schedules(
     stage_ids = {stage["id"] for stage in schedule.json()["stages"]}
     assert len(stage_ids) == 2
 
-    # An ACTIVE experiment targets it too.
     experiment = client.post(
         f"{EXPERIMENTS}/",
         json={
@@ -323,8 +320,6 @@ def test_removing_an_account_keeps_its_segments_and_rollout_schedules(
     developer_key = _key(client, developer)
     sdk_key = _key(client, superuser)
 
-    # Before the removal: the developer's key works, the flag matches by its
-    # rule, and the experiment assigns a matching user.
     assert _evaluate(client, flag_key, developer_key, "keeps-probe").status_code == 200
     before = _evaluate(client, flag_key, sdk_key, f"keeps-{uuid.uuid4().hex[:8]}")
     assert before.status_code == 200, before.text
@@ -369,8 +364,6 @@ def test_removing_an_account_keeps_its_segments_and_rollout_schedules(
         == 2
     )
 
-    # The flag still matches by its rule and the experiment still assigns a
-    # matching user.
     after = _evaluate(client, flag_key, sdk_key, f"keeps-{uuid.uuid4().hex[:8]}")
     assert after.status_code == 200, after.text
     assert (after.json()["enabled"], after.json()["reason"]) == (
