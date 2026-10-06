@@ -19,6 +19,22 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 VALID_METRIC_TYPES = ("proportion", "mean", "ratio")
 
+# Upper bounds on the integer inputs of the sample-size, MDE and runtime
+# requests (#1003). The calculations convert these integers to floats, and an
+# integer above about 1.8e308 cannot be converted (OverflowError), so before
+# these bounds such a value answered 500. Both bounds sit far above anything a
+# real experiment sends:
+#
+# * MAX_VARIANTS: an experiment's variants take whole percentages of its
+#   traffic that sum to 100, so at most 100 of them receive any; the
+#   dashboard's power calculator offers 2 to 5.
+# * MAX_COUNT: a sample size or a daily traffic of 10**12 is more than a
+#   hundred times the world's population. The documented examples use 31,234
+#   users per variant and 10,000 a day. Every integer up to it is exact as a
+#   float (it is below 2**53).
+MAX_VARIANTS = 100
+MAX_COUNT = 10**12
+
 
 # ---------------------------------------------------------------------------
 # Request schemas
@@ -54,6 +70,7 @@ class SampleSizeRequest(BaseModel):
     n_variants: int = Field(
         default=2,
         ge=2,
+        le=MAX_VARIANTS,
         description="Number of variants including control (minimum 2).",
     )
     two_tailed: bool = Field(
@@ -72,6 +89,7 @@ class SampleSizeRequest(BaseModel):
     daily_traffic: Optional[int] = Field(
         default=None,
         gt=0,
+        le=MAX_COUNT,
         description="Daily users exposed to the experiment (used to compute runtime).",
     )
     traffic_allocation: float = Field(
@@ -127,6 +145,7 @@ class MDERequest(BaseModel):
     sample_size_per_variant: int = Field(
         ...,
         gt=0,
+        le=MAX_COUNT,
         description="Fixed sample size per variant.",
     )
     baseline_rate: float = Field(
@@ -150,6 +169,7 @@ class MDERequest(BaseModel):
     n_variants: int = Field(
         default=2,
         ge=2,
+        le=MAX_VARIANTS,
         description="Number of variants including control.",
     )
     two_tailed: bool = Field(
@@ -164,11 +184,13 @@ class RuntimeRequest(BaseModel):
     required_sample_size: int = Field(
         ...,
         gt=0,
+        le=MAX_COUNT,
         description="Required sample size per variant.",
     )
     daily_traffic: int = Field(
         ...,
         gt=0,
+        le=MAX_COUNT,
         description="Total daily users exposed to the experiment.",
     )
     traffic_allocation: float = Field(
@@ -180,6 +202,7 @@ class RuntimeRequest(BaseModel):
     n_variants: int = Field(
         default=2,
         ge=2,
+        le=MAX_VARIANTS,
         description="Number of variants including control.",
     )
 
