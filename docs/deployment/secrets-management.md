@@ -410,31 +410,68 @@ Step 1: Revoke the compromised key. Only its SHA-256 hash is stored, so hash the
 KEY_HASH=$(printf '%s' "$LEAKED_KEY" | shasum -a 256 | cut -d' ' -f1)
 ```
 
-Then, connected to Aurora, deactivate that row (every request with the key then gets 401):
+Then, connected to Aurora, deactivate that row (every request with the key then gets 401). The
+`RETURNING` clause prints what steps 2 and 4 need: the key's owner (`user_id`), its `scopes`
+(empty when it has none, otherwise a comma-separated list such as `sdk:ruleset`) and when it was
+last used:
 
 ```sql
-UPDATE experimentation.api_keys SET is_active = false WHERE key = '<KEY_HASH>' RETURNING id, name, user_id;
+UPDATE experimentation.api_keys SET is_active = false WHERE key = '<KEY_HASH>' RETURNING id, name, user_id, scopes, last_used_at;
 ```
 
-Step 2: Issue a new key to the legitimate owner via the API:
+Step 2: Issue a replacement, owned by the person who owned the old key. A key belongs to whoever
+creates it: `POST /api/v1/api-keys` always creates the key for the caller, so a key an ADMIN
+creates on someone else's behalf is the ADMIN's own, and it stops working when that ADMIN's
+account is deactivated. So the owner (`user_id` from step 1) signs in as themselves
+([Authentication](../api/auth.md)) and creates the replacement with the `scopes` step 1 printed,
+as a JSON list:
 
 ```bash
 curl -X POST \
-  -H "Authorization: Bearer $ADMIN_TOKEN" \
+  -H "Authorization: Bearer $OWNER_TOKEN" \
   -H "Content-Type: application/json" \
-  -d '{"name": "Replacement key for owner X"}' \
+  -d '{"name": "Replacement key", "scopes": ["sdk:ruleset"]}' \
   https://api.experimentation.example.com/api/v1/api-keys
 ```
 
-Step 3: Notify the owner of the new key through a secure channel (not Slack or email).
+Leave `scopes` out when step 1 printed none. A server SDK that evaluates flags locally uses a key
+with the `sdk:ruleset` scope: its replacement needs the same scope, because
+`GET /api/v1/sdk/ruleset` answers 403 to a key without it. Only users who can change feature
+flags (ADMIN, DEVELOPER, or a superuser) can create a key with that scope; for any other owner the
+API answers 403 and creates nothing, so someone with one of those roles creates the key, and
+it is theirs. An owner with a superuser account can instead use **Admin → API Keys** (the admin
+area is for superusers) and tick **Server-side local evaluation (sdk:ruleset)**.
 
-Step 4: Audit all requests made with the compromised key in CloudWatch:
+Step 3: Put the new key where the service that used the old one reads it (a secrets manager or
+that service's deployment settings, not Slack or email), and remove the old key from wherever it
+was copied.
+
+Step 4: Find out whether the key was used. The platform records little about a key's use, and
+none of it can list what one key did:
+
+- **`last_used_at`** on the key's row is when the key last authenticated a request. The API writes
+  it at most once a minute per key, so it can trail the last request by up to a minute. Step 1
+  printed it, and an inactive key keeps it. An ADMIN can read it with
+  `GET /api/v1/api-keys?all=true&include_inactive=true`, and a superuser in the **Last used**
+  column of **Admin → API Keys** with **All users (admin)** and **Include inactive** ticked. A
+  time later than the last request your own service made with the key means someone else used it.
+  Deleting a key removes its row and this time with it, so read it before you delete the key.
+- **The API's request log**, the CloudWatch log group `/ecs/experimentation-backend-$ENV`, has an
+  access line for each request with the peer address, the method, the path, the status and a
+  request id. No line says which key made a request: the API logs no key, no part of one and no key
+  id (the one exception is a warning that names the key's id when the `last_used_at` write fails),
+  so the log cannot be searched for a key. It can show whether a route that only an `sdk:ruleset`
+  key may call was called while the key was out. This looks for the one that returns every flag's
+  targeting rules; set `START_MS` to when the key may first have been copied (this form works on
+  macOS and Linux):
 
 ```bash
+START_MS=$(python3 -c 'import time; print(int((time.time() - 7 * 86400) * 1000))')
 aws logs filter-log-events \
-  --log-group-name /experimentation-platform/api \
-  --filter-pattern '"api_key_prefix":"eptk_XXXXX"' \
-  --start-time $(date -u -d '7 days ago' +%s000)
+  --log-group-name "/ecs/experimentation-backend-$ENV" \
+  --filter-pattern '"/api/v1/sdk/ruleset"' \
+  --start-time "$START_MS" \
+  --query 'events[].message' --output text
 ```
 
 The key's owner, or an ADMIN, can instead delete it through the API with `DELETE /api/v1/api-keys/{id}`, or from **Admin → API Keys** in the dashboard. Neither the plaintext nor its `eptk_xxxx` prefix is stored, so identify the key by its name, or get its `id` from the `RETURNING` clause above. `KEY_HASH` is the hex SHA-256 of the key, which is what the platform stores (`hash_api_key` in `backend/app/core/security.py`).

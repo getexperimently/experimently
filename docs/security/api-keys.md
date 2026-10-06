@@ -206,9 +206,9 @@ Each key also carries its `id`, `description`, `user_id`, `created_at`, `expires
 every user's keys. The list leaves out inactive keys unless you add
 `?include_inactive=true`.
 
-`last_used_at` is not updated when a key is used in this release, so it stays `null`
-([#198](https://github.com/getexperimently/experimently/issues/198)). To
-find keys that are no longer used, check your services' configuration instead.
+`last_used_at` is when the key last authenticated a request, and `null` for a key that was never
+used. The API writes it at most once a minute per key, so it can trail the last request by up to
+a minute. Use it to find keys that are no longer used.
 
 ---
 
