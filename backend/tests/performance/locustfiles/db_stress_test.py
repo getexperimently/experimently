@@ -10,7 +10,10 @@ Stress vectors:
   - Complex result queries with joins (connection hold time)
   - High-volume feature flag evaluations (evaluation cache pressure)
   - Tracking bursts (write throughput, WAL pressure)
-  - Batch flag evaluations (multi-row reads in a single transaction)
+  - Batch flag evaluations (every flag for one user in a single request)
+
+It calls only what ``backend/scripts/seed_sdk_contract.py`` creates (see
+``common.py``); results are read from the seeded ACTIVE experiment.
 
 Signals to watch for:
   - Connection pool exhaustion (HTTP 503, increasing queue wait times)
@@ -28,22 +31,36 @@ Usage (interactive web UI):
     # Then open http://localhost:8089 in your browser
 """
 
-import os
+import json
 import random
 import uuid
 
 from locust import HttpUser, between, events, task
 from locust.env import Environment
 
+from backend.tests.performance.locustfiles.common import (
+    EXPERIMENT_KEY,
+    FLAG_KEY,
+    expect,
+    login,
+    sdk_headers,
+    seeded_experiment_id,
+)
+
+# The PERFORMANCE_TARGETS this file exercises. run_load_tests.py fails the run
+# unless Locust recorded requests for every one of them.
+TARGETS = (
+    "create_experiment",
+    "list_experiments",
+    "get_experiment_results",
+    "evaluate_flag",
+    "track",
+    "batch_evaluate_flags",
+)
+
 # ---------------------------------------------------------------------------
 # Test data
 # ---------------------------------------------------------------------------
-
-# 20 experiment keys used in queries and writes
-EXPERIMENT_KEYS: list[str] = [f"experiment-key-{i:04d}" for i in range(1, 21)]
-
-# 15 feature flag keys for evaluation endpoints
-FEATURE_FLAG_KEYS: list[str] = [f"flag-{i:03d}" for i in range(1, 16)]
 
 # Event types that can be tracked
 EVENT_TYPES: list[str] = ["page_view", "click", "conversion", "add_to_cart", "checkout"]
@@ -52,7 +69,7 @@ EVENT_TYPES: list[str] = ["page_view", "click", "conversion", "add_to_cart", "ch
 USER_POOL_SIZE: int = 100_000
 
 # Experiment statuses for filtered queries
-EXPERIMENT_STATUSES: list[str] = ["DRAFT", "ACTIVE", "PAUSED", "COMPLETED"]
+EXPERIMENT_STATUSES: list[str] = ["draft", "active", "paused", "completed"]
 
 # Device types for context enrichment
 DEVICE_TYPES: list[str] = ["mobile", "desktop", "tablet"]
@@ -93,19 +110,16 @@ class DbStressUser(HttpUser):
     - complex_query (2): JOIN-heavy result queries (connection hold time)
     - flag_evaluation_storm (3): Rapid flag evaluations (cache + read pressure)
     - tracking_burst (5): High-volume event writes (WAL, write throughput)
-    - batch_flag_eval (2): Multi-row reads in single transaction
+    - batch_flag_eval (2): Every flag evaluated for one user in one request
     """
 
     wait_time = between(0.05, 0.2)
 
     def on_start(self) -> None:
-        """Set up authentication headers for database stress operations."""
-        self.api_key: str = os.environ.get("LOAD_TEST_API_KEY", "test-api-key")
-        self.headers: dict[str, str] = {
-            "X-API-Key": self.api_key,
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {os.environ.get('LOAD_TEST_AUTH_TOKEN', 'test-bearer-token')}",
-        }
+        """API key for the SDK routes; a bearer token for the management routes."""
+        self.headers: dict[str, str] = sdk_headers()
+        self.auth_headers: dict[str, str] = login(self.client)
+        self.experiment_id: str = seeded_experiment_id(self.client, self.auth_headers)
 
     @task(4)
     def concurrent_write(self) -> None:
@@ -119,23 +133,25 @@ class DbStressUser(HttpUser):
         exp_key = f"stress-exp-{uuid.uuid4().hex[:12]}"
         payload = {
             "name": f"Stress Test Experiment {exp_key}",
-            "description": "Created during database stress test",
-            "experiment_type": "ab_test",
-            "status": "DRAFT",
             "key": exp_key,
+            "description": "Created during database stress test",
+            "experiment_type": "a_b",
             "variants": [
-                {"name": "control", "traffic_allocation": 0.5},
-                {"name": "treatment", "traffic_allocation": 0.5},
+                {"name": "control", "is_control": True, "traffic_allocation": 50},
+                {"name": "treatment", "traffic_allocation": 50},
             ],
-            "traffic_allocation": round(random.uniform(0.1, 1.0), 2),
+            "metrics": [
+                {"name": "Purchase", "event_name": "purchase", "is_primary": True}
+            ],
         }
-        self.client.post(
-            "/api/v1/experiments",
+        with self.client.post(
+            "/api/v1/experiments/",
             json=payload,
-            headers=self.headers,
-            name="/api/v1/experiments [write]",
+            headers=self.auth_headers,
+            name="/api/v1/experiments",
             catch_response=True,
-        )
+        ) as response:
+            expect(response, 201)
 
     @task(4)
     def read_with_filters(self) -> None:
@@ -146,16 +162,19 @@ class DbStressUser(HttpUser):
         query planning and index utilisation under concurrent load.
         Weight 4 — high-frequency filtered reads.
         """
-        status = random.choice(EXPERIMENT_STATUSES)
-        page = random.randint(1, 10)
-        per_page = random.choice([10, 20, 50, 100])
-        self.client.get(
-            "/api/v1/experiments",
-            params={"status": status, "page": page, "per_page": per_page},
-            headers=self.headers,
-            name="/api/v1/experiments [filtered]",
+        params = {
+            "status_filter": random.choice(EXPERIMENT_STATUSES),
+            "skip": random.randint(0, 9) * 20,
+            "limit": random.choice([10, 20, 50, 100]),
+        }
+        with self.client.get(
+            "/api/v1/experiments/",
+            params=params,
+            headers=self.auth_headers,
+            name="/api/v1/experiments",
             catch_response=True,
-        )
+        ) as response:
+            expect(response, 200)
 
     @task(2)
     def complex_query(self) -> None:
@@ -166,20 +185,13 @@ class DbStressUser(HttpUser):
         metrics tables. Tests connection hold time under high concurrency.
         Weight 2 — moderate frequency, each query is expensive.
         """
-        experiment_key = random.choice(EXPERIMENT_KEYS)
-        # Use the key as a pseudo-ID to generate a deterministic UUID
-        experiment_id = str(
-            uuid.uuid5(
-                uuid.UUID("12345678-1234-5678-1234-567812345678"),
-                experiment_key,
-            )
-        )
-        self.client.get(
-            f"/api/v1/experiments/{experiment_id}/results",
-            headers=self.headers,
+        with self.client.get(
+            f"/api/v1/experiments/{self.experiment_id}/results",
+            headers=self.auth_headers,
             name="/api/v1/experiments/{experiment_id}/results",
             catch_response=True,
-        )
+        ) as response:
+            expect(response, 200)
 
     @task(3)
     def flag_evaluation_storm(self) -> None:
@@ -190,14 +202,17 @@ class DbStressUser(HttpUser):
         and underlying database reads when cache misses occur.
         Weight 3 — high frequency to overwhelm cache capacity.
         """
-        flag_key = random.choice(FEATURE_FLAG_KEYS)
-        self.client.get(
-            f"/api/v1/feature-flags/evaluate/{flag_key}",
-            params={"user_id": _random_user_id(), "context": str(_random_context())},
+        with self.client.get(
+            f"/api/v1/feature-flags/evaluate/{FLAG_KEY}",
+            params={
+                "user_id": _random_user_id(),
+                "context": json.dumps(_random_context()),
+            },
             headers=self.headers,
             name="/api/v1/feature-flags/evaluate/{key}",
             catch_response=True,
-        )
+        ) as response:
+            expect(response, 200)
 
     @task(5)
     def tracking_burst(self) -> None:
@@ -209,7 +224,7 @@ class DbStressUser(HttpUser):
         Weight 5 — highest frequency to maximise write pressure.
         """
         payload = {
-            "experiment_key": random.choice(EXPERIMENT_KEYS),
+            "experiment_key": EXPERIMENT_KEY,
             "user_id": _random_user_id(),
             "event_type": random.choice(EVENT_TYPES),
             "value": round(random.uniform(0.0, 500.0), 2),
@@ -219,40 +234,33 @@ class DbStressUser(HttpUser):
                 "device": random.choice(DEVICE_TYPES),
             },
         }
-        self.client.post(
+        with self.client.post(
             "/api/v1/tracking/track",
             json=payload,
             headers=self.headers,
             name="/api/v1/tracking/track",
             catch_response=True,
-        )
+        ) as response:
+            expect(response, 200)
 
     @task(2)
     def batch_flag_eval(self) -> None:
         """
-        POST /api/v1/feature-flags/evaluate-batch
+        GET /api/v1/feature-flags/user/{user_id}
 
-        Batch evaluation of multiple feature flags in a single request.
-        Tests multi-row reads within a single database transaction.
-        Weight 2 — moderate frequency, each request is heavier than single eval.
+        Every feature flag evaluated for one user in a single request, the
+        call an SDK makes at start-up. Weight 2 — moderate frequency, each
+        request is heavier than a single evaluation.
         """
-        # Select a random subset of flags to evaluate in one batch
-        num_flags = random.randint(3, 8)
-        selected_flags = random.sample(
-            FEATURE_FLAG_KEYS, min(num_flags, len(FEATURE_FLAG_KEYS))
-        )
-        payload = {
-            "flag_keys": selected_flags,
-            "user_id": _random_user_id(),
-            "context": _random_context(),
-        }
-        self.client.post(
-            "/api/v1/feature-flags/evaluate-batch",
-            json=payload,
+        user_id = _random_user_id()
+        with self.client.get(
+            f"/api/v1/feature-flags/user/{user_id}",
+            params={"context": json.dumps(_random_context())},
             headers=self.headers,
-            name="/api/v1/feature-flags/evaluate-batch",
+            name="/api/v1/feature-flags/user/{user_id}",
             catch_response=True,
-        )
+        ) as response:
+            expect(response, 200)
 
 
 # ---------------------------------------------------------------------------

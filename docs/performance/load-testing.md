@@ -29,10 +29,19 @@ and serve as the authoritative contracts for API performance.
 | `GET /api/v1/experiments` | GET | < 100ms | < 300ms | < 800ms | > 200 |
 | `GET /health` | GET | < 10ms | < 30ms | < 100ms | > 5000 |
 
-A test **passes** when all of the following hold simultaneously:
+Run with `--sla enforce` (the runner's default), a test **passes** when all of the
+following hold simultaneously:
+- no request failed (Locust exits 1 on any failed request, and the runner names the endpoints)
+- every target the locustfile declares in its `TARGETS` tuple was recorded
 - p50, p95, and p99 response times are at or below the target thresholds
-- Error rate is at or below 1%
 - Achieved RPS meets or exceeds the minimum target
+
+**The weekly Performance Tests workflow does not gate on latency or throughput.** It
+passes `--sla report`: it fails when a request fails, when nothing was recorded, or when
+a declared target was not recorded, and it prints each endpoint's p50, p95, p99 and
+requests per second beside its target without checking them. One run's timings on a
+shared CI runner are not a stable statistic to fail on, and latency and throughput
+budgets are Phase 2 work (QA L2). Nothing may cite that run as meeting a budget.
 
 ---
 
@@ -71,6 +80,16 @@ Ensure dependencies are installed (includes locust==2.17.0):
 
 ```bash
 pip install -r backend/requirements.txt
+```
+
+Seed what the locustfiles call: the experiment `sdk_contract_ab`, the flag
+`sdk_contract_flag`, an API key, and the developer account the management tasks sign in
+as (`dev@demo.com`, not a superuser). The seed writes the key to
+`tests/sdk-contract/live/.api_key`:
+
+```bash
+python -m backend.scripts.seed_sdk_contract
+export LOAD_TEST_API_KEY_FILE=tests/sdk-contract/live/.api_key
 ```
 
 Start the backend API server (in a separate terminal) from the repository root:
@@ -143,10 +162,24 @@ python backend/tests/performance/run_load_tests.py \
     --duration 60s
 ```
 
-It exits 0 when every SLA is met and 1 when any is violated. A run that measured
-nothing also exits 1: when Locust recorded no requests (`FAIL: no stats`), or when
-no recorded endpoint matches a target in `performance_targets.py`
-(`FAIL: no matched endpoint`).
+It exits 0 when every SLA is met and 1 when any is violated. It also exits 1 when a
+request failed (`ERROR: Locust exited with code 1`, then one `FAIL:` line per endpoint
+with failures), and when the run measured nothing or not what it should: Locust recorded
+no requests (`FAIL: no stats`), no recorded endpoint matches a target in
+`performance_targets.py` (`FAIL: no matched endpoint`), or a target the locustfile
+declares in `TARGETS` was not recorded, or it declares none (`FAIL: unmatched target`).
+A recorded endpoint matches a target when its method and its Locust `name=` are the
+target's `method` and `endpoint` exactly.
+
+The weekly workflow adds `--sla report`, which prints latency and throughput beside the
+targets instead of gating on them (see above):
+
+```bash
+python backend/tests/performance/run_load_tests.py \
+    --host http://localhost:8000 \
+    --duration 60s \
+    --sla report
+```
 
 The runner can also start a local server automatically:
 
@@ -265,14 +298,14 @@ backend/tests/performance/specs/performance_targets.py
 To add a new endpoint target:
 
 ```python
-PERFORMANCE_TARGETS["batch_evaluate"] = PerformanceTarget(
-    endpoint="/api/v1/feature-flags/evaluate-batch",
-    method="POST",
-    p50_ms=40,
-    p95_ms=150,
-    p99_ms=400,
-    min_rps=800,
-    description="Batch feature flag evaluation",
+PERFORMANCE_TARGETS["list_feature_flags"] = PerformanceTarget(
+    endpoint="/api/v1/feature-flags",
+    method="GET",
+    p50_ms=100,
+    p95_ms=300,
+    p99_ms=800,
+    min_rps=200,
+    description="List feature flags",
 )
 ```
 
@@ -294,11 +327,18 @@ To update an existing target (e.g., after a performance improvement):
 
 ## Adding Load Tests for New Endpoints
 
-1. Add a `PerformanceTarget` entry in `performance_targets.py`
+1. Add a `PerformanceTarget` entry in `performance_targets.py`, for a route the API
+   serves (a unit test checks every target against the OpenAPI document)
 2. Write spec tests in `test_specs.py` covering the new target
-3. Add a `@task` method to the appropriate user class in `api_load_test.py`
-4. Run the validator unit tests to confirm everything works
-5. Trigger a CI baseline run to establish a performance baseline
+3. Add a `@task` method to the appropriate user class in `api_load_test.py`, in the
+   form every task uses: `with self.client.get(..., name=<the target's endpoint>,
+   catch_response=True) as response:` and `expect(response, 200)` from
+   `locustfiles/common.py`. Without the `with` block Locust sends the request and never
+   records it
+4. Add the target's key to the locustfile's `TARGETS` tuple, so a run that does not
+   record it fails
+5. Run the validator unit tests to confirm everything works
+6. Trigger a CI baseline run to check that the new endpoint is recorded
 
 ---
 

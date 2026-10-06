@@ -11,6 +11,10 @@ Two user classes simulate realistic dashboard traffic patterns:
 The 60/40 write/read split reflects admin dashboard usage where operators
 actively manage experiments and feature flags while monitoring results.
 
+Both sign in as the seeded developer (see ``common.py``). A writer changes and
+deletes only experiments and flags it created itself; results are read from
+the seeded ACTIVE experiment, because a DRAFT experiment has none.
+
 Usage (headless CI):
     locust -f crud_load_test.py --headless --users 100 --spawn-rate 10 \
            --run-time 60s --host http://localhost:8000 \
@@ -21,49 +25,53 @@ Usage (interactive web UI):
     # Then open http://localhost:8089 in your browser
 """
 
-import os
 import random
 import uuid
 
 from locust import HttpUser, between, events, task
 from locust.env import Environment
 
+from backend.tests.performance.locustfiles.common import (
+    expect,
+    login,
+    seeded_experiment_id,
+)
+
+# The PERFORMANCE_TARGETS this file exercises. run_load_tests.py fails the run
+# unless Locust recorded requests for every one of them.
+TARGETS = (
+    "create_experiment",
+    "update_experiment",
+    "delete_experiment",
+    "create_feature_flag",
+    "update_feature_flag",
+    "bulk_flag_toggle",
+    "list_experiments",
+    "get_experiment_results",
+)
+
 # ---------------------------------------------------------------------------
-# Test data — deterministic fake IDs used across all virtual users
+# Test data
 # ---------------------------------------------------------------------------
-
-# Fixed UUID namespace for deterministic ID generation via uuid5
-_UUID_NAMESPACE: uuid.UUID = uuid.UUID("12345678-1234-5678-1234-567812345678")
-
-# 20 experiment keys for CRUD operations
-EXPERIMENT_KEYS: list[str] = [f"experiment-key-{i:04d}" for i in range(1, 21)]
-
-# 20 deterministic experiment UUIDs (uuid5 for reproducibility across runs)
-EXPERIMENT_IDS: list[str] = [
-    str(uuid.uuid5(_UUID_NAMESPACE, f"experiment-{i}")) for i in range(1, 21)
-]
-
-# 15 feature flag keys
-FEATURE_FLAG_KEYS: list[str] = [f"flag-{i:03d}" for i in range(1, 16)]
-
-# 15 deterministic feature flag UUIDs
-FEATURE_FLAG_IDS: list[str] = [
-    str(uuid.uuid5(_UUID_NAMESPACE, f"flag-{i}")) for i in range(1, 16)
-]
-
-# User pool — 10,000 synthetic user IDs
-USER_POOL_SIZE: int = 10_000
 
 # Experiment types for realistic payloads
-EXPERIMENT_TYPES: list[str] = ["ab_test", "multivariate"]
-
-# Feature flag types
-FLAG_TYPES: list[str] = ["boolean", "percentage", "variant"]
+EXPERIMENT_TYPES: list[str] = ["a_b", "mv"]
 
 
-def _random_user_id() -> str:
-    """Generate a random user ID from the synthetic user pool."""
-    return f"user_{random.randint(1, USER_POOL_SIZE)}"
+def _experiment_payload() -> dict:
+    """A valid ExperimentCreate body: two variants and a primary metric."""
+    exp_key = f"load-test-exp-{uuid.uuid4().hex[:8]}"
+    return {
+        "name": f"Load Test Experiment {exp_key}",
+        "key": exp_key,
+        "description": "Experiment created during CRUD load test",
+        "experiment_type": random.choice(EXPERIMENT_TYPES),
+        "variants": [
+            {"name": "control", "is_control": True, "traffic_allocation": 50},
+            {"name": "treatment", "traffic_allocation": 50},
+        ],
+        "metrics": [{"name": "Purchase", "event_name": "purchase", "is_primary": True}],
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -79,7 +87,7 @@ class CrudWriteUser(HttpUser):
     deleting experiments and feature flags. Tasks are weighted to reflect
     realistic admin activity patterns:
     - create_experiment (weight 3): Most common write — new experiments
-    - update_experiment (weight 2): Moderate — updating active experiments
+    - update_experiment (weight 2): Moderate — updating draft experiments
     - delete_experiment (weight 1): Rare — removing draft experiments
     - create_feature_flag (weight 3): Frequent — new feature flags
     - update_feature_flag (weight 2): Moderate — adjusting flag configuration
@@ -90,80 +98,78 @@ class CrudWriteUser(HttpUser):
     wait_time = between(0.5, 2.0)
 
     def on_start(self) -> None:
-        """Set up authentication headers for write operations."""
-        self.api_key: str = os.environ.get("LOAD_TEST_API_KEY", "test-api-key")
-        self.auth_headers: dict[str, str] = {
-            "X-API-Key": self.api_key,
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {os.environ.get('LOAD_TEST_AUTH_TOKEN', 'test-bearer-token')}",
-        }
+        """Sign in, and create one experiment and one flag to change."""
+        self.auth_headers: dict[str, str] = login(self.client)
+        self.experiment_ids: list[str] = []
+        self.flag_ids: list[str] = []
+        self.create_experiment()
+        self.create_feature_flag()
 
     @task(3)
     def create_experiment(self) -> None:
         """
         POST /api/v1/experiments
 
-        Creates a new experiment with realistic payload including variants
-        and traffic allocation. Weight 3 — most common write operation.
+        Creates a new DRAFT experiment with two variants and a primary metric.
+        Weight 3 — most common write operation.
         """
-        exp_key = f"load-test-exp-{uuid.uuid4().hex[:8]}"
-        payload = {
-            "name": f"Load Test Experiment {exp_key}",
-            "description": "Experiment created during CRUD load test",
-            "experiment_type": random.choice(EXPERIMENT_TYPES),
-            "status": "DRAFT",
-            "key": exp_key,
-            "variants": [
-                {"name": "control", "traffic_allocation": 0.5},
-                {"name": "treatment", "traffic_allocation": 0.5},
-            ],
-            "traffic_allocation": round(random.uniform(0.1, 1.0), 2),
-        }
-        self.client.post(
-            "/api/v1/experiments",
-            json=payload,
+        with self.client.post(
+            "/api/v1/experiments/",
+            json=_experiment_payload(),
             headers=self.auth_headers,
             name="/api/v1/experiments",
             catch_response=True,
-        )
+        ) as response:
+            if expect(response, 201):
+                self.experiment_ids.append(response.json()["id"])
 
     @task(2)
     def update_experiment(self) -> None:
         """
         PUT /api/v1/experiments/{experiment_id}
 
-        Updates an existing experiment with a partial payload.
+        Updates one of this user's draft experiments with a partial payload.
         Weight 2 — moderately frequent as operators adjust parameters.
         """
-        experiment_id = random.choice(EXPERIMENT_IDS)
+        if not self.experiment_ids:
+            self.create_experiment()
+            if not self.experiment_ids:
+                return
+        experiment_id = random.choice(self.experiment_ids)
         payload = {
             "name": f"Updated Experiment {random.randint(1, 1000)}",
             "description": "Updated during CRUD load test",
-            "traffic_allocation": round(random.uniform(0.1, 1.0), 2),
         }
-        self.client.put(
+        with self.client.put(
             f"/api/v1/experiments/{experiment_id}",
             json=payload,
             headers=self.auth_headers,
             name="/api/v1/experiments/{experiment_id}",
             catch_response=True,
-        )
+        ) as response:
+            expect(response, 200)
 
     @task(1)
     def delete_experiment(self) -> None:
         """
         DELETE /api/v1/experiments/{experiment_id}
 
-        Deletes a draft experiment. Weight 1 — rare operation, only
-        applicable to experiments in DRAFT status.
+        Deletes one of this user's draft experiments; the API asks for the ID
+        again as ``experiment_key`` to confirm. Weight 1 — rare operation.
         """
-        experiment_id = random.choice(EXPERIMENT_IDS)
-        self.client.delete(
+        if not self.experiment_ids:
+            self.create_experiment()
+            if not self.experiment_ids:
+                return
+        experiment_id = self.experiment_ids.pop()
+        with self.client.delete(
             f"/api/v1/experiments/{experiment_id}",
+            params={"experiment_key": experiment_id},
             headers=self.auth_headers,
             name="/api/v1/experiments/{experiment_id}",
             catch_response=True,
-        )
+        ) as response:
+            expect(response, 204)
 
     @task(3)
     def create_feature_flag(self) -> None:
@@ -178,65 +184,75 @@ class CrudWriteUser(HttpUser):
             "key": flag_key,
             "name": f"Load Test Flag {flag_key}",
             "description": "Feature flag created during CRUD load test",
-            "flag_type": random.choice(FLAG_TYPES),
-            "enabled": random.choice([True, False]),
             "rollout_percentage": random.randint(0, 100),
         }
-        self.client.post(
-            "/api/v1/feature-flags",
+        with self.client.post(
+            "/api/v1/feature-flags/",
             json=payload,
             headers=self.auth_headers,
             name="/api/v1/feature-flags",
             catch_response=True,
-        )
+        ) as response:
+            if expect(response, 201):
+                self.flag_ids.append(response.json()["id"])
 
     @task(2)
     def update_feature_flag(self) -> None:
         """
         PUT /api/v1/feature-flags/{flag_id}
 
-        Updates an existing feature flag with adjusted configuration.
+        Updates one of this user's feature flags.
         Weight 2 — moderate frequency as operators tune rollout parameters.
         """
-        flag_id = random.choice(FEATURE_FLAG_IDS)
+        if not self.flag_ids:
+            self.create_feature_flag()
+            if not self.flag_ids:
+                return
         payload = {
-            "name": f"Updated Flag {random.randint(1, 1000)}",
             "description": "Updated during CRUD load test",
-            "enabled": random.choice([True, False]),
             "rollout_percentage": random.randint(0, 100),
         }
-        self.client.put(
-            f"/api/v1/feature-flags/{flag_id}",
+        with self.client.put(
+            f"/api/v1/feature-flags/{random.choice(self.flag_ids)}",
             json=payload,
             headers=self.auth_headers,
             name="/api/v1/feature-flags/{flag_id}",
             catch_response=True,
-        )
+        ) as response:
+            expect(response, 200)
 
     @task(1)
     def bulk_flag_toggle(self) -> None:
         """
         POST /api/v1/feature-flags/bulk-toggle
 
-        Toggles multiple feature flags in a single request.
+        Enables or disables several of this user's flags in one request.
         Weight 1 — rare batch operation for emergency or deployment scenarios.
+        The endpoint answers 200 even when some flags fail, so the body's
+        ``failed`` count is part of the verdict.
         """
-        # Select a random subset of flag IDs to toggle
-        num_flags = random.randint(2, 5)
-        selected_flags = random.sample(
-            FEATURE_FLAG_IDS, min(num_flags, len(FEATURE_FLAG_IDS))
+        if not self.flag_ids:
+            self.create_feature_flag()
+            if not self.flag_ids:
+                return
+        selected = random.sample(
+            self.flag_ids, min(random.randint(2, 5), len(self.flag_ids))
         )
         payload = {
-            "flag_ids": selected_flags,
-            "enabled": random.choice([True, False]),
+            "flag_ids": selected,
+            "action": random.choice(["enable", "disable"]),
         }
-        self.client.post(
+        with self.client.post(
             "/api/v1/feature-flags/bulk-toggle",
             json=payload,
             headers=self.auth_headers,
             name="/api/v1/feature-flags/bulk-toggle",
             catch_response=True,
-        )
+        ) as response:
+            if expect(response, 200):
+                failed = (response.json() or {}).get("failed", 0)
+                if failed:
+                    response.failure(f"{failed} of {len(selected)} flags not toggled")
 
 
 # ---------------------------------------------------------------------------
@@ -261,13 +277,9 @@ class CrudReadUser(HttpUser):
     wait_time = between(0.5, 2.0)
 
     def on_start(self) -> None:
-        """Set up authentication headers for read operations."""
-        self.api_key: str = os.environ.get("LOAD_TEST_API_KEY", "test-api-key")
-        self.auth_headers: dict[str, str] = {
-            "X-API-Key": self.api_key,
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {os.environ.get('LOAD_TEST_AUTH_TOKEN', 'test-bearer-token')}",
-        }
+        """Sign in, and find the seeded experiment to read."""
+        self.auth_headers: dict[str, str] = login(self.client)
+        self.experiment_id: str = seeded_experiment_id(self.client, self.auth_headers)
 
     @task(4)
     def list_experiments(self) -> None:
@@ -277,31 +289,33 @@ class CrudReadUser(HttpUser):
         Lists experiments with random pagination parameters.
         Weight 4 — most frequent read, dashboard landing page polling.
         """
-        page = random.randint(1, 5)
-        per_page = random.choice([10, 20, 50])
-        self.client.get(
-            "/api/v1/experiments",
-            params={"page": page, "per_page": per_page},
+        with self.client.get(
+            "/api/v1/experiments/",
+            params={
+                "skip": random.randint(0, 4) * 20,
+                "limit": random.choice([10, 20, 50]),
+            },
             headers=self.auth_headers,
             name="/api/v1/experiments",
             catch_response=True,
-        )
+        ) as response:
+            expect(response, 200)
 
     @task(3)
     def get_experiment(self) -> None:
         """
         GET /api/v1/experiments/{experiment_id}
 
-        Retrieves a specific experiment by ID.
+        Retrieves the seeded experiment by ID.
         Weight 3 — frequent when operators drill into experiment details.
         """
-        experiment_id = random.choice(EXPERIMENT_IDS)
-        self.client.get(
-            f"/api/v1/experiments/{experiment_id}",
+        with self.client.get(
+            f"/api/v1/experiments/{self.experiment_id}",
             headers=self.auth_headers,
             name="/api/v1/experiments/{experiment_id}",
             catch_response=True,
-        )
+        ) as response:
+            expect(response, 200)
 
     @task(3)
     def list_feature_flags(self) -> None:
@@ -311,29 +325,30 @@ class CrudReadUser(HttpUser):
         Lists all feature flags.
         Weight 3 — frequent dashboard operation for flag management.
         """
-        self.client.get(
-            "/api/v1/feature-flags",
+        with self.client.get(
+            "/api/v1/feature-flags/",
             headers=self.auth_headers,
             name="/api/v1/feature-flags",
             catch_response=True,
-        )
+        ) as response:
+            expect(response, 200)
 
     @task(2)
     def get_experiment_results(self) -> None:
         """
         GET /api/v1/experiments/{experiment_id}/results
 
-        Retrieves experiment results — involves complex database queries
-        with joins across experiment, variant, and metrics tables.
+        Retrieves the seeded experiment's results — involves complex database
+        queries with joins across experiment, variant, and metrics tables.
         Weight 2 — moderate frequency as analysts check outcomes.
         """
-        experiment_id = random.choice(EXPERIMENT_IDS)
-        self.client.get(
-            f"/api/v1/experiments/{experiment_id}/results",
+        with self.client.get(
+            f"/api/v1/experiments/{self.experiment_id}/results",
             headers=self.auth_headers,
             name="/api/v1/experiments/{experiment_id}/results",
             catch_response=True,
-        )
+        ) as response:
+            expect(response, 200)
 
 
 # ---------------------------------------------------------------------------
