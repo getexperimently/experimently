@@ -137,6 +137,25 @@ def resolve_experiment_type(value: Any) -> Optional[ExperimentType]:
     return _resolve_enum_member(ExperimentType, value)
 
 
+#: The refusal of a start whose start date would not be before the end date
+#: (#953). A fixed sentence: the route answers it as the 400's ``detail``.
+END_DATE_PASSED = (
+    "Cannot start experiment: its end date has passed. Set a later end date, "
+    "or clear it, with PUT /api/v1/experiments/{id}/schedule, then start it again."
+)
+
+
+class EndDatePassedError(ValueError):
+    """Starting would stamp a start date at or after the stored end date.
+
+    ``check_experiment_dates`` (``end_date > start_date``) would refuse the
+    row; the start is refused before anything is written instead (#953).
+    """
+
+    def __init__(self) -> None:
+        super().__init__(END_DATE_PASSED)
+
+
 class AnalysisConfigError(ValueError):
     """A create/update would leave an analysis config in a state it refuses.
 
@@ -829,6 +848,9 @@ class ExperimentService:
             Dictionary containing the updated experiment data
 
         Raises:
+            EndDatePassedError: If the experiment has no start date yet and
+                its end date is not after now, the start date this would
+                stamp. Nothing is written.
             ValueError: If the experiment cannot be started
         """
         # Validate experiment status
@@ -841,12 +863,21 @@ class ExperimentService:
         if not self._validate_experiment_for_start(experiment):
             raise ValueError("Experiment does not meet requirements to start")
 
+        # A start date already stored is kept, and the row already holds it
+        # before its end date. Otherwise the start date is now, which must be
+        # before the end date (#953); the same ``now`` is checked and written.
+        now = datetime.now(timezone.utc)
+        if not experiment.start_date:
+            end_date = _as_utc(experiment.end_date)
+            if end_date is not None and end_date <= now:
+                raise EndDatePassedError()
+
         # Update status and start date. Only a first start stamps the rule
         # id; a resume from PAUSED keeps the users the rule admits (#533).
         stamp_rollout_rule_id(experiment, experiment.status)
         experiment.status = ExperimentStatus.ACTIVE
         if not experiment.start_date:
-            experiment.start_date = datetime.now(timezone.utc).isoformat()
+            experiment.start_date = now.isoformat()
 
         experiment.updated_at = datetime.now(timezone.utc)
 

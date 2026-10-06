@@ -69,7 +69,9 @@ from backend.app.services.audit_service import (
     record_experiment_change,
 )
 from backend.app.services.experiment_service import (
+    END_DATE_PASSED,
     AnalysisConfigError,
+    EndDatePassedError,
     ExperimentService,
     is_experiment_key_conflict,
 )
@@ -1126,6 +1128,9 @@ async def start_experiment(
     - The experiment must be in DRAFT or PAUSED status
     - The experiment must have at least one control and one non-control variant
     - The experiment must have at least one metric defined
+    - An experiment with no start date must not have an end date that has
+      passed: set a later one, or clear it, with
+      PUT /{experiment_id}/schedule first
 
     Returns:
         ExperimentResponse: The updated experiment with ACTIVE status
@@ -1180,8 +1185,14 @@ async def start_experiment(
 
         before_audit = audit_snapshot(EntityType.EXPERIMENT, experiment)
 
-        # Start experiment
-        started_experiment = experiment_service.start_experiment(experiment)
+        # Start experiment. A start whose start date would not be before the
+        # end date is refused before anything is written (#953).
+        try:
+            started_experiment = experiment_service.start_experiment(experiment)
+        except EndDatePassedError as err:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, detail=END_DATE_PASSED
+            ) from err
 
         record_experiment_change(
             db, current_user, ActionType.EXPERIMENT_START, experiment_id, before_audit
