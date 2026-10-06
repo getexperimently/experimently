@@ -211,7 +211,6 @@ PENDING_FROZEN: dict[str, tuple[int, int, int]] = {
     "docs/infrastructure/aws-iam-setup.md": (0, 0, 0),
     "docs/infrastructure/cloudwatch-setup.md": (0, 4, 0),
     "docs/infrastructure/dynamodb-readme.md": (0, 0, 0),
-    "docs/infrastructure/network-security-readme.md": (0, 0, 0),
     "docs/infrastructure/redis-summary.md": (0, 0, 0),
     "docs/infrastructure/vpc-stack-implementation.md": (0, 0, 0),
     "docs/integrations/aws.md": (0, 0, 0),
