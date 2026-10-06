@@ -11,7 +11,13 @@ import {
   TargetingSaveError,
   describeTargetingSaveError,
 } from '@/utils/experimentTargeting';
-import { isEditableFlagTargeting, rulesFromStored, targetingToSend } from '@/utils/flagTargeting';
+import {
+  NOT_GROUPS_NOTE,
+  isEditableFlagTargeting,
+  rulesFromStored,
+  targetingToSend,
+  usesNotGroups,
+} from '@/utils/flagTargeting';
 import { docsUrl } from '@/services/docs';
 import { isApiError } from '@/services/api';
 import {
@@ -590,8 +596,11 @@ export default function FeatureFlagDetailPage() {
                     </button>
                   )}
                 </div>
+                {/* Rules the builder cannot show only because of a NOT group
+                    are applied as stored, so they get their own note (#918);
+                    every other shape keeps the general one. */}
                 <p className="text-sm text-amber-900 mb-2" data-testid="targeting-raw-note">
-                  {OUTSIDE_BUILDER_NOTE}{' '}
+                  {usesNotGroups(stored) ? NOT_GROUPS_NOTE : OUTSIDE_BUILDER_NOTE}{' '}
                   <a
                     href={docsUrl('api/endpoints', 'targeting-rules')}
                     className="text-blue-600 hover:underline"

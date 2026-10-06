@@ -26,7 +26,7 @@ const GROUP_KEYS = new Set(['id', 'logical_operator', 'conditions']);
 const CONDITION_KEYS = new Set(['id', 'attribute', 'operator', 'value']);
 const BUILDER_LOGICAL_OPERATORS = new Set(['AND', 'OR']);
 
-function isPlainObject(value: unknown): value is Record<string, unknown> {
+export function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
