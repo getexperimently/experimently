@@ -42,7 +42,7 @@ OPENAI_API_KEY=sk-...
 
 - `ANTHROPIC_API_KEY` enables Anthropic variants in `POST /llm-experiments/{id}/complete`,
   the LLM-as-judge (`POST /llm-experiments/{id}/judge`), and the platform's own AI
-  features (`POST /ai/design`, `POST /ai/interpret/{id}` and `POST /power/plan`).
+  features (`POST /ai/design` and `POST /ai/interpret/{id}`).
 - `OPENAI_API_KEY` enables OpenAI variants in `/complete`.
 - With neither set, no provider is called: `/complete` answers 502 for that variant,
   the judge records its fallback score of 0.5, and the AI features use their templates.

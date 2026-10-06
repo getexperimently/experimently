@@ -6,7 +6,7 @@ Covers:
 - MDERequest / MDEResponse
 - RuntimeRequest / RuntimeResponse
 - PowerCurveRequest / PowerCurveResponse
-- PlanRequest / PlanResponse (AI-enhanced planning)
+- PlanRequest / PlanResponse (planning advice)
 """
 
 from typing import List, Optional, Tuple
@@ -235,7 +235,7 @@ class PowerCurveRequest(BaseModel):
 
 
 class PlanRequest(BaseModel):
-    """Request body for POST /power/plan (AI planning advice)."""
+    """Request body for POST /power/plan (planning advice)."""
 
     experiment_name: str = Field(
         ...,
@@ -358,12 +358,12 @@ class PowerCurveResponse(BaseModel):
 
 
 class PlanResponse(BaseModel):
-    """Response for POST /power/plan (AI-enhanced advice)."""
+    """Response for POST /power/plan (the built-in planning advice)."""
 
     model_config = ConfigDict(from_attributes=True)
 
     advice: str = Field(description="Plain-English planning advice.")
-    generated_by: str = Field(description="'ai' or 'template'.")
+    generated_by: str = Field(description="Always 'template'.")
     experiment_name: str
     baseline_rate: float
     mde: float

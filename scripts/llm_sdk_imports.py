@@ -41,11 +41,10 @@ ROOT = Path(__file__).resolve().parents[1]
 
 #: The files that make a real provider call, one per call path:
 #: ``POST /api/v1/llm-experiments/{id}/complete`` (the proxy), AI experiment
-#: design and the power-calculator planner, and the LLM-as-judge.
+#: design, and the LLM-as-judge.
 SOURCES = (
     ROOT / "backend" / "app" / "services" / "llm_proxy_service.py",
     ROOT / "backend" / "app" / "services" / "ai_design_service.py",
-    ROOT / "backend" / "app" / "services" / "ai_experiment_planner_service.py",
     ROOT / "backend" / "app" / "services" / "llm_analytics_service.py",
 )
 
