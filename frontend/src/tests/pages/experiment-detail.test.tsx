@@ -1,6 +1,6 @@
 import React from 'react';
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
-import ExperimentDetailPage, { ACTIONS_BY_STATUS } from '@/pages/experiments/[id]';
+import ExperimentDetailPage, { ACTIONS_BY_STATUS, keepOwnerName } from '@/pages/experiments/[id]';
 import { ModulesProvider } from '@/contexts/ModulesContext';
 import { apiFetch } from '@/services/api';
 import { docsUrl } from '@/services/docs';
@@ -188,7 +188,8 @@ describe("ExperimentDetailPage — the owner's name (#921)", () => {
     return copy;
   }
 
-  function installAsServer(current: Experiment) {
+  /** `afterStart` is what else POST /start changes in the experiment. */
+  function installAsServer(current: Experiment, afterStart: Partial<Experiment> = {}) {
     let state = current;
     mockedApiFetch.mockImplementation(
       routedApi([
@@ -197,7 +198,7 @@ describe("ExperimentDetailPage — the owner's name (#921)", () => {
           method: 'POST',
           path: '/api/v1/experiments/exp-1/start',
           handler: () => {
-            state = { ...state, status: 'active' };
+            state = { ...state, status: 'active', ...afterStart };
             return withoutName(state);
           },
         },
@@ -213,8 +214,14 @@ describe("ExperimentDetailPage — the owner's name (#921)", () => {
     );
   }
 
-  async function renderNamed(overrides: Partial<Experiment> = {}) {
-    installAsServer(experiment({ owner_id: OWNER_ID, owner_name: 'Jane Doe', ...overrides }));
+  async function renderNamed(
+    overrides: Partial<Experiment> = {},
+    afterStart: Partial<Experiment> = {},
+  ) {
+    installAsServer(
+      experiment({ owner_id: OWNER_ID, owner_name: 'Jane Doe', ...overrides }),
+      afterStart,
+    );
     render(<ExperimentDetailPage />);
     await screen.findByTestId('experiment-detail');
     return screen.getByTestId('experiment-owner');
@@ -251,6 +258,17 @@ describe("ExperimentDetailPage — the owner's name (#921)", () => {
     expect(screen.getByTestId('experiment-owner')).toHaveTextContent(/^Jane Doe$/);
   });
 
+  it('shows "No owner" when a change answers that the owner\'s account was removed', async () => {
+    // The answer has `owner_id: null` and, like every change's, no
+    // `owner_name`: the name read earlier belongs to nobody now.
+    await renderNamed({}, { owner_id: null });
+    fireEvent.click(screen.getByTestId('action-start'));
+    await waitFor(() => expect(screen.getByTestId('experiment-status')).toHaveTextContent('Active'));
+    const owner = screen.getByTestId('experiment-owner');
+    expect(owner).toHaveTextContent(/^No owner$/);
+    expect(owner).not.toHaveAttribute('title');
+  });
+
   it('keeps the name after Edit details is saved', async () => {
     await renderNamed();
     fireEvent.click(screen.getByTestId('experiment-edit-details'));
@@ -269,6 +287,42 @@ describe("ExperimentDetailPage — the owner's name (#921)", () => {
     await within(section).findByText('Saved. The new rules apply when the experiment starts.');
     expect(calledWith('PUT', '/api/v1/experiments/exp-1')).toBe(true);
     expect(screen.getByTestId('experiment-owner')).toHaveTextContent(/^Jane Doe$/);
+  });
+});
+
+describe('keepOwnerName (#921)', () => {
+  const OWNER_ID = '0f9e8d7c-6b5a-4c3d-2e1f-0a9b8c7d6e5f';
+  const read = experiment({ owner_id: OWNER_ID, owner_name: 'Jane Doe' });
+  const answer = (overrides: Partial<Experiment> = {}): Experiment => {
+    const copy: Experiment = { ...read, status: 'active', ...overrides };
+    if (!('owner_name' in overrides)) delete copy.owner_name;
+    return copy;
+  };
+
+  it.each([
+    ['a name', 'Janet Doe'],
+    ['null', null],
+  ])('an answer that carries owner_name (%s) wins', (_label, name) => {
+    expect(keepOwnerName(read, answer({ owner_name: name })).owner_name).toBe(name);
+  });
+
+  it('an answer without owner_name keeps the name when the owner is the same', () => {
+    const merged = keepOwnerName(read, answer());
+    expect(merged.owner_name).toBe('Jane Doe');
+    expect(merged.status).toBe('active');
+  });
+
+  it.each([
+    ['removed (null)', null],
+    ['someone else', '11111111-2222-4333-8444-555555555555'],
+  ])('an answer whose owner changed to %s does not keep the name', (_label, ownerId) => {
+    const merged = keepOwnerName(read, answer({ owner_id: ownerId }));
+    expect(merged.owner_id).toBe(ownerId);
+    expect(merged.owner_name).toBeNull();
+  });
+
+  it('with nothing read before, an answer without owner_name has none', () => {
+    expect(keepOwnerName(null, answer()).owner_name).toBeNull();
   });
 });
 
