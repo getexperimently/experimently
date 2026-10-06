@@ -560,7 +560,9 @@ class SafetyService:
             ).items():
                 setattr(existing, key, value)
         else:
-            payload = _config_columns(config.model_dump())
+            # Only the fields sent: one left out takes its column default. A
+            # full dump would store a JSON null for an unsent ``metrics`` (#954).
+            payload = _config_columns(config.model_dump(exclude_unset=True))
             payload.pop("feature_flag_id", None)
             existing = FeatureFlagSafetyConfig(
                 feature_flag_id=feature_flag_id, **payload

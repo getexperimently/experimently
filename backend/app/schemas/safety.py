@@ -7,7 +7,8 @@ from enum import Enum
 from typing import Any, Dict, List, Optional
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validator
+from pydantic_core import PydanticCustomError
 
 
 class HealthStatus(str, Enum):
@@ -104,11 +105,29 @@ class FeatureFlagSafetyConfigCreate(BaseModel):
 
 
 class FeatureFlagSafetyConfigUpdate(BaseModel):
-    """Schema for updating feature flag safety configuration."""
+    """Create or update a flag's safety configuration.
 
-    enabled: Optional[bool] = None
-    metrics: Optional[Dict[str, MetricThreshold]] = None
-    rollback_percentage: Optional[int] = Field(None, ge=0, le=100)
+    Every field is optional. A field left out keeps its stored value, or takes
+    its default (enabled true, metrics {}, rollback_percentage 0) when the call
+    creates the configuration. null is refused for every field (422).
+    """
+
+    # Every field is stored in a NOT NULL column (#954). Defaulting to None
+    # only means "not sent": pydantic does not validate a default, while an
+    # explicit null reaches refuse_null.
+    enabled: bool = Field(None)
+    metrics: Dict[str, MetricThreshold] = Field(None)
+    rollback_percentage: int = Field(None, ge=0, le=100)
+
+    @field_validator("enabled", "metrics", "rollback_percentage", mode="before")
+    @classmethod
+    def refuse_null(cls, value: Any, info: ValidationInfo) -> Any:
+        """Refuse an explicit null; a field left out never gets here."""
+        if value is None:
+            raise PydanticCustomError(
+                "null_not_allowed", f"{info.field_name} cannot be null"
+            )
+        return value
 
 
 class FeatureFlagSafetyConfigResponse(FeatureFlagSafetyConfigBase):
@@ -119,6 +138,13 @@ class FeatureFlagSafetyConfigResponse(FeatureFlagSafetyConfigBase):
     updated_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
+
+    @field_validator("metrics", mode="before")
+    @classmethod
+    def stored_null_metrics_is_empty(cls, value: Any) -> Any:
+        """A row written before #954 can hold a JSON null ``metrics``: read it
+        as no thresholds, so its reads and the safety monitor keep working."""
+        return {} if value is None else value
 
 
 class MetricValue(BaseModel):
