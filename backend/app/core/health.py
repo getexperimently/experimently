@@ -6,9 +6,7 @@ Routes (all unauthenticated, none in the OpenAPI schema):
 ``GET /health/live``
     Liveness: the process is up and the event loop answers. Never touches the
     database or Redis, so a dependency outage does not make orchestrators
-    restart healthy processes. Used by the container ``HEALTHCHECK``. The only
-    probe declared ``async def``: it runs on the event loop because that is
-    what it reports on.
+    restart healthy processes. Used by the container ``HEALTHCHECK``.
 
 ``GET /health/ready``
     Readiness: PostgreSQL must answer ``SELECT 1``. Redis is checked and
@@ -18,10 +16,6 @@ Routes (all unauthenticated, none in the OpenAPI schema):
     The profile the process runs (``core`` or ``full``) is reported as
     ``profile`` and in ``checks.modules``, and never gates readiness. Returns
     200 when ready, 503 otherwise.
-
-    A plain ``def`` route, so FastAPI runs it in the thread pool: the checks
-    are blocking calls, and a slow database or Redis holds one worker thread
-    instead of the event loop every other request is answered on (#810).
 
 ``GET /health``
     Alias of ``/health/ready`` kept for the existing ALB/ECS/CDK wiring.
@@ -197,26 +191,12 @@ def check_database() -> Dict[str, Any]:
 
 
 def check_redis() -> Dict[str, Any]:
-    """``PING`` Redis using the connection settings.
-
-    One connect attempt, with 1 s connect and socket timeouts. redis-py
-    retries ten times with backoff by default, which made one failed ping
-    take seconds with Redis refused and longer than the 5 s probe timeouts
-    with Redis unreachable (#810).
-    """
+    """``PING`` Redis using the connection settings."""
     try:
-        from redis.backoff import NoBackoff
-        from redis.retry import Retry
-
         from backend.app.core.redis_client import create_redis_client
 
         t0 = time.perf_counter()
-        client = create_redis_client(
-            socket_connect_timeout=1,
-            socket_timeout=1,
-            # No client retries: see the docstring.
-            retry=Retry(NoBackoff(), 0),
-        )
+        client = create_redis_client(socket_connect_timeout=1, socket_timeout=1)
         try:
             client.ping()
         finally:
@@ -254,8 +234,8 @@ def check_modules() -> Dict[str, Any]:
 
     The profile is read, never loaded: ``modules_active()`` answers from the
     loader's cache, where ``load_modules()`` could re-run a whole registration
-    (~3.5 s of endpoint imports, under the loader's lock) from inside an
-    unauthenticated probe.
+    (~3.5 s of endpoint imports, on the event loop, under the loader's lock)
+    from inside an unauthenticated probe.
     """
     from backend.app.modules_loader import modules_active, modules_failure
 
@@ -391,20 +371,15 @@ async def health_live() -> JSONResponse:
     return JSONResponse(content=liveness_payload(), status_code=200)
 
 
-# The two readiness routes are ``def``, not ``async def``: FastAPI runs them in
-# the thread pool, so the blocking checks in ``readiness_payload`` never hold
-# the event loop. ``backend/tests/unit/core/test_health_endpoints.py``
-# (TestReadinessRunsOffTheEventLoop) drives /health/live while /health is
-# blocked.
 @router.get("/health/ready", include_in_schema=False)
-def health_ready() -> JSONResponse:
+async def health_ready() -> JSONResponse:
     """Readiness probe: database (and Redis when required) reachable."""
     body, status_code = readiness_payload()
     return JSONResponse(content=body, status_code=status_code)
 
 
 @router.get("/health", include_in_schema=False)
-def health_check() -> JSONResponse:
+async def health_check() -> JSONResponse:
     """Compatibility alias of ``/health/ready``."""
     body, status_code = readiness_payload()
     return JSONResponse(content=body, status_code=status_code)
