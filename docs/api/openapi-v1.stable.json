@@ -7505,6 +7505,7 @@
           "n_variants": {
             "default": 2,
             "description": "Number of variants including control.",
+            "maximum": 100,
             "minimum": 2,
             "title": "N Variants",
             "type": "integer"
@@ -7520,6 +7521,7 @@
           "sample_size_per_variant": {
             "description": "Fixed sample size per variant.",
             "exclusiveMinimum": 0,
+            "maximum": 1000000000000,
             "title": "Sample Size Per Variant",
             "type": "integer"
           },
@@ -9861,12 +9863,14 @@
           "daily_traffic": {
             "description": "Total daily users exposed to the experiment.",
             "exclusiveMinimum": 0,
+            "maximum": 1000000000000,
             "title": "Daily Traffic",
             "type": "integer"
           },
           "n_variants": {
             "default": 2,
             "description": "Number of variants including control.",
+            "maximum": 100,
             "minimum": 2,
             "title": "N Variants",
             "type": "integer"
@@ -9874,6 +9878,7 @@
           "required_sample_size": {
             "description": "Required sample size per variant.",
             "exclusiveMinimum": 0,
+            "maximum": 1000000000000,
             "title": "Required Sample Size",
             "type": "integer"
           },
@@ -13550,6 +13555,7 @@
             "anyOf": [
               {
                 "exclusiveMinimum": 0,
+                "maximum": 1000000000000,
                 "type": "integer"
               },
               {
@@ -13574,6 +13580,7 @@
           "n_variants": {
             "default": 2,
             "description": "Number of variants including control (minimum 2).",
+            "maximum": 100,
             "minimum": 2,
             "title": "N Variants",
             "type": "integer"
