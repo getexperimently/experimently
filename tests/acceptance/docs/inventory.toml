@@ -55,8 +55,6 @@ reason = "the landing page: the docs-site journey starts here, then checks every
 [pages."getting-started/quick-start.md"]
 class = "journey"
 journey = "quick-start"
-pending = true
-planned = "D3a"
 reason = "the first-run guide: its shell steps run in Doc Examples; the journey walks the dashboard half"
 
 [pages."getting-started/concepts.md"]
@@ -303,8 +301,6 @@ reason = "its marked blocks are run on a kind cluster by the chart-kind workflow
 [pages."getting-started/docker-guide.md"]
 class = "journey"
 journey = "docker-guide"
-pending = true
-planned = "D3a"
 reason = "start the stack as written, open the dashboard and sign in; its shell steps run in Doc Examples"
 
 [pages."getting-started/docker-compose-file.md"]
@@ -447,8 +443,6 @@ reason = "the Cognito user pool and app client set-up"
 [pages."auth/auth-user-guide.md"]
 class = "journey"
 journey = "onboarding-and-password"
-pending = true
-planned = "D3a"
 reason = "sign in as each role, manage users and change your own password with local sign-in"
 
 [pages."auth/auth-environment-variables.md"]

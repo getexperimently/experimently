@@ -1,0 +1,147 @@
+# The Docker guide (docs/getting-started/docker-guide.md), as a reader follows
+# it (#939): the stack its command starts, the addresses it gives for the API
+# and the dashboard, and the dashboard behind them.
+#
+# The runner starts the stack with the guide's own command (stacks.py:
+# `docker compose up -d --wait`, with --build so the images are this
+# checkout's, on host ports of its own). The guide's shell steps (Steps 1 to 4,
+# and Stopping) run in Doc Examples on a stack of their own, so they are
+# ref: doc-examples here.
+#
+# Step 6 gives the addresses: "The API is at http://localhost:8000 and the
+# dashboard at http://localhost:3000." Each open step fails unless
+# docker-compose.yml's default host port for that service is the port the guide
+# names, then opens the same path on this stack.
+#
+# The guide sends its reader to the dashboard without saying how to sign in:
+# Step 3 prints the account (admin@demo.com), but its password is only in the
+# Quick Start and the compose file's header. So the sign-in steps name the
+# form's own labels with quote: false, and the gap is listed as a docs defect in
+# the pull request that added this journey.
+#
+# Expectations written on 2026-10-06 from the guide and the dashboard's source,
+# before the first run.
+guide: getting-started/docker-guide.md
+stack: compose-dev
+profile: core
+video: true
+written: 2026-10-06
+steps:
+  - id: start-services
+    doc: step-1-start-services
+    do:
+      ref: doc-examples
+    fail: Doc Examples reports docker compose up -d --wait red
+  - id: verify-services
+    doc: step-2-verify-services
+    do:
+      ref: doc-examples
+    fail: Doc Examples reports that api, frontend, postgres and redis are not all running
+  - id: first-administrator
+    doc: step-3-connect-to-postgresql
+    do:
+      ref: doc-examples
+    fail: Doc Examples reports that the first start created no administrator admin@demo.com
+  - id: redis
+    doc: step-4-interact-with-redis
+    do:
+      ref: doc-examples
+    fail: Doc Examples reports that Redis does not answer PONG
+  - id: api-address
+    doc: step-6-rebuild-after-a-change
+    do:
+      open: http://localhost:8000/health/ready
+    expect:
+      status: 200
+    snapshot: false
+    snapshot_reason: the API answers JSON there, not a screen; the address and its status are the check
+    fail: the API does not answer at the address the guide gives, or answers that it is not ready
+  - id: dashboard-address
+    doc: step-6-rebuild-after-a-change
+    do:
+      open: http://localhost:3000
+    expect:
+      status: 200
+      aria: |
+        - banner:
+          - navigation:
+            - link "Sign in"
+        - main:
+          - heading "A/B testing and feature flags you run yourself." [level=1]
+          - link "Sign in to the dashboard"
+    fail: the dashboard does not answer at the address the guide gives, or what answers is not its home page
+  - id: sign-in-page
+    doc: step-6-rebuild-after-a-change
+    do:
+      click:
+        role: link
+        name: Sign in
+        quote: false
+        reason: the dashboard's own link; the guide does not describe signing in
+    expect:
+      url: /login
+      aria: |
+        - main:
+          - heading "Sign in" [level=1]
+          - textbox "Email"
+          - textbox "Password"
+          - button "Sign in"
+    fail: the home page's Sign in link does not lead to the sign-in form
+  - id: email
+    doc: step-3-connect-to-postgresql
+    do:
+      fill:
+        label: Email
+        value: admin@demo.com
+        quote: false
+        reason: the sign-in form's field; the guide gives only the account
+    expect:
+      aria: |
+        - main:
+          - textbox "Email": admin@demo.com
+    fail: the sign-in form has no Email field
+  - id: password
+    doc: step-6-rebuild-after-a-change
+    do:
+      fill:
+        label: Password
+        value: Demo1234!
+        quote: false
+        reason: the sign-in form's field; the password is the Quick Start's documented demo credential
+    expect:
+      aria: |
+        - main:
+          - textbox "Password"
+          - button "Sign in"
+    fail: the sign-in form has no Password field
+  - id: signed-in
+    doc: step-6-rebuild-after-a-change
+    do:
+      click:
+        role: button
+        name: Sign in
+        quote: false
+        reason: the sign-in form's button; the guide does not describe signing in
+    expect:
+      url: /experiments
+      aria: |
+        - banner:
+          - navigation "Primary":
+            - link "Experiments"
+            - link "Admin"
+          - link "Change password"
+          - button "Log out"
+        - main:
+          - heading "Experiments" [level=1]
+          - link "+ New Experiment"
+          - table:
+            - rowgroup:
+              - row:
+                - cell:
+                  - link "Checkout Button Color"
+    fail: admin@demo.com cannot sign in with the documented password, or does not land on the experiments the first start seeded
+  - id: stopping
+    doc: stopping
+    do:
+      ref: doc-examples
+    fail: Doc Examples reports docker compose down -v red
