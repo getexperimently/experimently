@@ -74,6 +74,7 @@ from backend.app.services.experiment_service import (
     EndDatePassedError,
     ExperimentService,
     is_experiment_key_conflict,
+    record_end_date,
 )
 from backend.app.services.power_calculator_service import (
     SAMPLE_SIZE_NOT_FINITE_MESSAGE,
@@ -1117,7 +1118,9 @@ async def start_experiment(
     Start an experiment.
 
     This endpoint activates an experiment, changing its status to ACTIVE
-    and setting the start date if not already set.
+    and setting the start date to now if not already set. A draft started
+    before its scheduled start date starts now, and its start date is set to
+    now; a scheduled end date is kept.
 
     Starting an experiment makes it eligible for:
     - User traffic assignment
@@ -1428,7 +1431,9 @@ async def complete_experiment(
     Complete an experiment.
 
     This endpoint marks an experiment as completed, changing its status to COMPLETED
-    and setting the end date if not already set.
+    and setting the end date to now. A start date that is not before now,
+    left by an earlier version on an experiment started before its scheduled
+    start date, is moved to just before the end date.
 
     Completing an experiment:
     - Stops new user assignments
@@ -1465,9 +1470,11 @@ async def complete_experiment(
 
         before_audit = audit_snapshot(EntityType.EXPERIMENT, experiment)
 
-        # Update experiment status
+        # Update experiment status. A start date still ahead, which an
+        # earlier version left on an experiment started by hand before its
+        # scheduled start, is moved before the end date (#974).
         experiment.status = ExperimentStatus.COMPLETED
-        experiment.end_date = datetime.now(timezone.utc)
+        record_end_date(experiment, datetime.now(timezone.utc))
         db.commit()
         db.refresh(experiment)
 
