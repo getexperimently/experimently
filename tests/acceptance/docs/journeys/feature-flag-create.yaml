@@ -11,10 +11,13 @@
 # md5-mod100-v1 of docs/sdk/javascript.md) puts them below the 10% the slider
 # set, with reason rollout; once the flag is turned off, nobody gets it, with
 # reason inactive.
+#
+# Not recorded: the journey makes an API key (model.reveals_credential), so a
+# recording could show what the run keeps out of its files.
 guide: feature-flags/create.md
 stack: compose-dev
 profile: core
-video: true
+video: false
 written: 2026-10-06
 steps:
   - id: sign-in-page

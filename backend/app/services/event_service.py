@@ -10,6 +10,8 @@ from sqlalchemy.orm import Session
 
 from backend.app.models.assignment import Assignment
 from backend.app.models.event import Event, EventType, normalize_event_timestamp
+from backend.app.models.experiment import Experiment, Variant
+from backend.app.models.feature_flag import FeatureFlag
 from backend.app.schemas.tracking import EventCreate, UntaggedEventCreate
 
 logger = logging.getLogger(__name__)
@@ -18,6 +20,13 @@ logger = logging.getLogger(__name__)
 # ORM column names are both understood so callers can pass either shape).
 _METADATA_KEYS = ("event_metadata", "properties", "metadata")
 _TIMESTAMP_KEYS = ("timestamp", "created_at")
+
+#: The id columns an event stores, each with the table its foreign key names.
+_REFERENCE_MODELS = (
+    ("experiment_id", Experiment),
+    ("feature_flag_id", FeatureFlag),
+    ("variant_id", Variant),
+)
 
 
 def _to_uuid(value: Union[str, UUID, None]) -> Optional[UUID]:
@@ -139,6 +148,33 @@ class EventService:
     # ------------------------------------------------------------------
     # Writes
     # ------------------------------------------------------------------
+
+    def unknown_id_fields(
+        self,
+        event_data: Union[EventCreate, UntaggedEventCreate, Mapping[str, Any]],
+    ) -> List[str]:
+        """The id fields of an event that name no stored row of their table.
+
+        ``/tracking/events`` takes ids from the caller and asks this before
+        :meth:`track_event`, so an id naming nothing answers 404 instead of
+        reaching the database, which refuses the row (#400). The event is
+        built first, so anything :meth:`build_event` refuses (an id that is
+        not a UUID among it) still raises ``ValueError``. Fields are listed
+        in the order of ``_REFERENCE_MODELS``.
+
+        Only existence is checked, which is all the foreign keys check: no
+        owner, workspace or status rule, and no rule that the variant belongs
+        to the experiment.
+        """
+        event = self.build_event(event_data)
+        unknown = []
+        for field, model in _REFERENCE_MODELS:
+            value = getattr(event, field)
+            if value is None:
+                continue
+            if self.db.query(model.id).filter(model.id == value).first() is None:
+                unknown.append(field)
+        return unknown
 
     def track_event(
         self,

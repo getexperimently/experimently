@@ -145,6 +145,8 @@ from pydantic import (
     model_validator,
 )
 
+from docs_runner.redaction import credential_key, credential_path
+
 STACKS = ("compose-dev", "docs-local", "docs-published", "marketing-local")
 Stack = Literal["compose-dev", "docs-local", "docs-published", "marketing-local"]
 Profile = Literal["core", "full"]
@@ -655,4 +657,42 @@ class Journey(_Strict):
 
     @property
     def has_secrets(self) -> bool:
-        return bool(self.passwords) or any(step.do.keep for step in self.steps)
+        """Made-up passwords, kept values, or an api step that reveals a credential."""
+        return bool(self.passwords) or any(
+            step.do.keep is not None or reveals_credential(step) for step in self.steps
+        )
+
+
+#: Routes that answer with a credential: a sign-in's token, a new API key.
+CREDENTIAL_ROUTES = ("/api/v1/auth/login", "/api/v1/auth/token", "/api/v1/api-keys")
+
+
+def _names_a_credential(node: Any) -> bool:
+    if isinstance(node, dict):
+        return any(
+            credential_key(str(k)) or _names_a_credential(v) for k, v in node.items()
+        )
+    if isinstance(node, list):
+        return any(_names_a_credential(v) for v in node)
+    return False
+
+
+def reveals_credential(step: Step) -> bool:
+    """True for an api step that asks for a credential, expects one in its answer,
+    or saves one (``save`` with ``secret: true``).
+
+    Its journey then counts as having a secret: it is not recorded.
+    """
+    call = step.do.api
+    if call is None:
+        return False
+    if any(save.secret for save in (step.save or {}).values()):
+        return True
+    path = call.path.split("?", 1)[0].rstrip("/")
+    if call.method == "POST" and path in CREDENTIAL_ROUTES:
+        return True
+    expected = (step.expect.json_ if step.expect is not None else None) or {}
+    for json_path, wanted in expected.items():
+        if credential_path(json_path) or _names_a_credential(wanted):
+            return True
+    return False

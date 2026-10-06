@@ -28,7 +28,7 @@ import tempfile
 import textwrap
 import tomllib
 from pathlib import Path
-from typing import Any, Callable, Dict, List
+from typing import Any, Callable, Dict, List, Optional
 
 import pytest
 import yaml
@@ -42,7 +42,7 @@ if str(RUNNER_ROOT) not in sys.path:
 
 from docs_runner import checks, loader, log, registry, report, site
 from docs_runner import guide as guides
-from docs_runner.model import Journey
+from docs_runner.model import Journey, Named
 
 TODAY = datetime.date(2026, 10, 6)
 
@@ -2459,6 +2459,7 @@ def test_the_scan_removes_every_file_holding_a_value_and_records_only_names(
             "journey/02-done.png",
             "results.jsonl",
         ],
+        "screens_removed": [],
     }
     assert sorted(p.name for p in run.rglob("*") if p.is_file()) == [
         "03-clean.aria.yml",
@@ -2515,3 +2516,508 @@ def test_a_clean_run_directory_is_scanned_and_recorded(tmp_path):
     record = json.loads((tmp_path / "run" / redaction.SCAN_RECORD).read_text())
     assert record["removed"] == [] and record["values"] == 0
     assert "0 held one" in result.stdout
+
+
+# ---------------------------------------------------------------------------
+# #1004 review: a hit stops the upload and fails the journey; screens; deep
+# redaction; error lines; written passwords; the sign-in limit
+# ---------------------------------------------------------------------------
+PLANT = "Planted0Value9xyz"
+
+
+def test_a_removed_file_takes_its_screenshot_and_its_recording_with_it(tmp_path):
+    from docs_runner import redaction
+
+    run = tmp_path / "run"
+    (run / "invite").mkdir(parents=True)
+    (run / "videos").mkdir()
+    (run / "invite" / "02-reveal.aria.yml").write_text(f"- code: {PLANT}\n")
+    (run / "invite" / "02-reveal.png").write_bytes(b"\x89PNG pixels, not bytes")
+    (run / "invite" / "03-done.png").write_bytes(b"\x89PNG")
+    (run / "videos" / "invite.webm").write_bytes(b"webm")
+    (run / "videos" / "other.webm").write_bytes(b"webm")
+    record = redaction.clear(run, {PLANT})
+    assert record["removed"] == ["invite/02-reveal.aria.yml"]
+    assert record["screens_removed"] == [
+        "invite/02-reveal.png",
+        "videos/invite.webm",
+    ]
+    assert (run / "invite" / "03-done.png").is_file()
+    assert (run / "videos" / "other.webm").is_file()
+
+
+def test_a_shared_file_holding_a_value_takes_every_recording_and_fails_every_journey(
+    tmp_path,
+):
+    from docs_runner import redaction
+
+    run = tmp_path / "run"
+    (run / "videos").mkdir(parents=True)
+    (run / "results.jsonl").write_text(f'{{"observed": "{PLANT}"}}\n')
+    for name in ("a", "b"):
+        (run / "videos" / f"{name}.webm").write_bytes(b"webm")
+    record = redaction.clear(run, {PLANT})
+    assert record["screens_removed"] == ["videos/a.webm", "videos/b.webm"]
+    assert redaction.journeys_of(["results.jsonl"], ["a", "b"]) == {"a", "b"}
+    assert redaction.journeys_of(["a/01-x.aria.yml", "a.html"], ["a", "b"]) == {"a"}
+    assert redaction.files_of(["a/01-x.aria.yml", "b.md", "summary.md"], "a") == (
+        "a/01-x.aria.yml",
+        "summary.md",
+    )
+
+
+def test_a_journey_whose_files_the_scan_removed_is_fail_in_verdicts(tmp_path):
+    passed = _record(result=log.PASS, observed="at /experiments")
+    clean = report.GuideRun(
+        journey="sample",
+        guide="guides/sample.md",
+        title="Sample",
+        stack="compose-dev",
+        records=(passed,),
+    )
+    assert report.verdict(clean).word == "PASS"
+    hit = report.GuideRun(**{**clean.__dict__, "scrubbed": ("sample/01-x.aria.yml",)})
+    result = report.verdict(hit)
+    assert result.word == "FAIL"
+    assert result.line == "FAIL: its files held a value the run kept"
+    info = report.RunInfo("2026-10-06", "a" * 40, "")
+    assert report.verdicts_record([hit], info)["journeys"]["sample"]["word"] == "FAIL"
+
+
+SCRUBBED_RUN = (
+    "import conftest\n"
+    "from docs_runner import log, report\n\n\n"
+    "def test_planted(request):\n"
+    "    run_dir = conftest.run_dir_of(request.config)\n"
+    f'    request.config.stash[conftest.SECRET_VALUES].add("{PLANT}")\n'
+    '    (run_dir / "sample").mkdir()\n'
+    '    (run_dir / "videos").mkdir()\n'
+    '    (run_dir / "sample" / "02-reveal.aria.yml").write_text(\n'
+    f"        '- code: {PLANT}\\n'\n"
+    "    )\n"
+    '    (run_dir / "sample" / "02-reveal.png").write_bytes(b"pixels")\n'
+    '    (run_dir / "videos" / "sample.webm").write_bytes(b"webm")\n'
+    "    record = log.Record(\n"
+    '        run="r", sha="s", stack="compose-dev", guide="README.md", step=1,\n'
+    '        step_id="home", heading="Home", action="open /", expected="x",\n'
+    '        failure_signature="x", result="PASS", reason="", observed="at /",\n'
+    '        snapshot="", expected_snapshot="structural only", ms=1,\n'
+    "    )\n"
+    "    request.config.stash[conftest.RUNS].append(\n"
+    "        report.GuideRun(\n"
+    '            journey="sample", guide="README.md", title="Home",\n'
+    '            stack="compose-dev", records=(record,),\n'
+    "        )\n"
+    "    )\n"
+)
+
+
+def test_a_scan_hit_fails_the_journey_in_verdicts_json_and_removes_its_screens(
+    tmp_path,
+):
+    """The journey passed every step; its files held a value: FAIL, and its
+    screenshot and recording are gone with the file."""
+    from docs_runner import redaction
+
+    result = _run_runner(_runner_copy(tmp_path, SCRUBBED_RUN), tmp_path)
+    assert result.returncode == 1, result.stdout + result.stderr
+    run = tmp_path / "run"
+    verdicts = json.loads((run / "verdicts.json").read_text())
+    assert verdicts["journeys"]["sample"]["word"] == "FAIL"
+    record = json.loads((run / redaction.SCAN_RECORD).read_text())
+    assert record["removed"] == ["sample/02-reveal.aria.yml"]
+    assert record["screens_removed"] == ["sample/02-reveal.png", "videos/sample.webm"]
+    assert not (run / "sample" / "02-reveal.png").exists()
+    assert not (run / "videos" / "sample.webm").exists()
+    assert "1 failed" in result.stdout.split("docs journeys:")[1]
+    assert PLANT not in result.stdout + result.stderr
+
+
+def test_the_step_that_reveals_a_kept_value_keeps_no_screen(tmp_path):
+    """The reviewer's case: the step before a keep took a screenshot of the
+    dialog, password in clear. Now that journey does not load."""
+    data = _secrets(
+        lambda d: d["steps"].__setitem__(
+            0,
+            {
+                "id": "invite",
+                "doc": "sign-in",
+                "do": {"click": {"role": "button", "name": "Sign in"}},
+                "expect": {"aria": '- dialog "User created"'},
+                "fail": "no dialog",
+            },
+        )
+    )
+    problems = _refusals(tmp_path, data)
+    assert any(
+        "step 1 (invite): the next step keeps a value this step's screen shows"
+        in problem
+        for problem in problems
+    ), problems
+
+
+@pytest.mark.parametrize(
+    "value, refused",
+    [("Hunter2Hunter2", True), ("Demo1234!", False)],
+    ids=["a-written-password", "the-documented-demo-password"],
+)
+def test_a_written_password_is_typed_only_where_no_screen_is_kept(
+    tmp_path, value, refused
+):
+    data = _with(
+        lambda d: d["steps"].insert(
+            2,
+            {
+                "id": "typed",
+                "doc": "sign-in",
+                "do": {"fill": {"label": "Password", "value": value}},
+                "expect": {"aria": '- textbox "Password"'},
+                "fail": "no Password field",
+            },
+        )
+    )
+    if refused:
+        problems = _refusals(tmp_path, data)
+        assert any(
+            "fill types a written password into 'Password'" in p for p in problems
+        )
+    else:
+        _load(tmp_path, data)
+    with_no_screen = copy.deepcopy(data)
+    typed = _step(with_no_screen, "typed")
+    typed.update(
+        snapshot=False,
+        snapshot_reason="the field holds a password",
+        expect={"visible": [{"role": "button", "name": "Sign in"}]},
+    )
+    _load(tmp_path, with_no_screen)
+
+
+@pytest.mark.parametrize(
+    "api, recorded_ok",
+    [
+        ({"method": "POST", "path": "/api/v1/auth/login", "as": "anonymous"}, False),
+        ({"method": "POST", "path": "/api/v1/api-keys", "as": "admin"}, False),
+        ({"method": "GET", "path": "/api/v1/experiments/", "as": "admin"}, True),
+    ],
+    ids=["sign-in-route", "api-key-route", "no-credential"],
+)
+def test_an_api_step_that_reveals_a_credential_keeps_the_journey_unrecorded(
+    tmp_path, api, recorded_ok
+):
+    data = _with(
+        lambda d: (
+            d.update(video=True),
+            _step(d, "list").update(do={"api": api}, expect={"status": 200}),
+        )
+    )
+    if recorded_ok:
+        assert not _load(tmp_path, data).has_secrets
+    else:
+        problems = _refusals(tmp_path, data)
+        assert any("an api step reveals one" in p for p in problems), problems
+    expects_a_token = _with(
+        lambda d: (
+            d.update(video=True),
+            _step(d, "list").update(
+                expect={"status": 200, "json": {"user": {"access_token": "x"}}}
+            ),
+        )
+    )
+    assert any(
+        "an api step reveals one" in p for p in _refusals(tmp_path, expects_a_token)
+    )
+
+
+# -- deep redaction, through the pure function and through _api_step ---------
+def test_scrub_redacts_every_credential_at_any_depth_and_registers_it():
+    from docs_runner import redaction
+
+    redactor = redaction.Redactor()
+    value = {
+        "user": {"name": "ada", "access_token": "Tok0nestedValue1"},
+        "items": [{"token": "Tok0inListValue2", "id": 1}],
+        "key": "homepage_button_colour",
+    }
+    shown = redaction.scrub("answer", value, redactor=redactor)
+    assert shown == {
+        "user": {"name": "ada", "access_token": redaction.REDACTED},
+        "items": [{"token": redaction.REDACTED, "id": 1}],
+        "key": redaction.REDACTED,
+    }
+    assert redactor.values == {"Tok0nestedValue1", "Tok0inListValue2"}
+    expected = {"key": "homepage_button_colour"}
+    assert redaction.scrub("x", {"key": "homepage_button_colour"}, expected) == expected
+    redactor = redaction.Redactor()
+    redaction.register_credentials(
+        {"a": [{"refresh_token": "Ref0reshValue3"}], "key": "eptk_notregistered"},
+        redactor,
+    )
+    assert redactor.values == {"Ref0reshValue3"}
+
+
+class _FakeAnswer:
+    def __init__(self, status: int, body: Any):
+        self.status = status
+        self._body = body
+
+    def json(self):
+        return self._body
+
+
+class _FakeApi:
+    def __init__(self, answer: _FakeAnswer):
+        self.answer = answer
+        self.calls: List[tuple] = []
+
+    def fetch(self, path, method, headers, data):
+        self.calls.append((method, path, headers))
+        return self.answer
+
+
+@pytest.fixture
+def execute_module(monkeypatch):
+    """docs_runner.execute with a stand-in for Playwright, which the unit job lacks.
+
+    Only what the module touches at import and in JourneyRunner's __init__ is
+    stood in for; _api_step and _line use none of it.
+    """
+    import importlib
+    import types
+
+    sync_api = types.ModuleType("playwright.sync_api")
+
+    class _Expect:
+        def __call__(self, *args, **kwargs):
+            raise AssertionError("no browser here")
+
+        def set_options(self, **kwargs):
+            return None
+
+    sync_api.Error = type("Error", (Exception,), {})
+    sync_api.Browser = sync_api.Page = sync_api.Playwright = object
+    sync_api.expect = _Expect()
+    package = types.ModuleType("playwright")
+    package.sync_api = sync_api
+    monkeypatch.setitem(sys.modules, "playwright", package)
+    monkeypatch.setitem(sys.modules, "playwright.sync_api", sync_api)
+    monkeypatch.delitem(sys.modules, "docs_runner.execute", raising=False)
+    module = importlib.import_module("docs_runner.execute")
+    yield module
+    sys.modules.pop("docs_runner.execute", None)
+
+
+def _runner(execute_module, run_dir: Path):
+    return execute_module.JourneyRunner(
+        None,
+        None,
+        log.Log(run_dir / "results.jsonl"),
+        execute_module.Settings(run_dir=run_dir, run_id="r", sha="s"),
+    )
+
+
+def test_an_api_step_writes_no_nested_credential_and_the_scan_knows_them(
+    tmp_path, execute_module
+):
+    from docs_runner import redaction
+    from docs_runner.model import Step
+    from docs_runner.stacks import Running
+
+    step = Step.model_validate(
+        {
+            "id": "me",
+            "doc": "x",
+            "do": {"api": {"method": "GET", "path": "/me", "as": "anonymous"}},
+            "expect": {
+                "status": 200,
+                "json": {
+                    "nested": {"access_token": "whatever"},
+                    "items": [{"token": "whatever", "id": 1}],
+                },
+            },
+            "fail": "x",
+        }
+    )
+    body = {
+        "nested": {"access_token": "Acc0essNested1"},
+        "items": [{"token": "Tok0enInList2", "id": 1}],
+        "elsewhere": {"refresh_token": "Ref0reshUnwritten3"},
+    }
+    runner = _runner(execute_module, tmp_path)
+    running = Running(name="compose-dev", base_url="http://dash/", api_url="http://api")
+    with pytest.raises(execute_module._Failed) as failed:
+        runner._api_step(step, running, _FakeApi(_FakeAnswer(200, body)), "j", 1)
+    written = (tmp_path / "j" / "01-me.api.json").read_text()
+    for value in ("Acc0essNested1", "Tok0enInList2", "Ref0reshUnwritten3"):
+        assert value not in written
+        assert value not in failed.value.observed
+        assert value in runner.redactor.values
+    assert json.loads(written)["nested"] == {"access_token": redaction.REDACTED}
+    assert json.loads(written)["items"] == [{"token": redaction.REDACTED, "id": 1}]
+    (tmp_path / "later.aria.yml").write_text("- text: Tok0enInList2\n")
+    assert redaction.scan(tmp_path, runner.redactor.values)[1] == ["later.aria.yml"]
+
+
+def test_an_error_line_is_redacted_before_it_is_cut(tmp_path, execute_module):
+    runner = _runner(execute_module, tmp_path)
+    value = "Kept0Value9abcdefgh"
+    runner.redactor.add(value)
+    runner.redactor.add("two words kept here")
+    line = runner._line("x" * 290 + value + "y" * 50)
+    assert len(line) <= checks.OBSERVED_CHARS
+    assert value[:7] not in line
+    assert runner._line("refused: two\nwords   kept\there!") == "refused: (redacted)!"
+
+
+# -- the sign-in limit --------------------------------------------------------
+def _compose_journeys() -> List[Journey]:
+    context = loader.context_for(REPO_ROOT)
+    found = []
+    for path in sorted((RUNNER_ROOT / "journeys").glob("*.yaml")):
+        journey = loader.load(path, context)
+        if journey.stack == "compose-dev":
+            found.append(journey)
+    return found
+
+
+def sign_in_counts(journeys: List[Journey]) -> Dict[str, int]:
+    """The sign-ins and password changes a session of these journeys sends.
+
+    A click on the dashboard's "Sign in" button is one sign-in; the runner
+    signs in once per caller its api steps name, for the whole session.
+    """
+    callers = set()
+    sign_ins = changes = 0
+    for journey in journeys:
+        for step in journey.steps:
+            click = step.do.click
+            if click is not None and click.role == "button":
+                sign_ins += click.name == "Sign in"
+                changes += click.name == "Change password"
+            if step.do.api is not None and step.do.api.as_ != "anonymous":
+                callers.add(step.do.api.as_)
+    return {"sign_ins": sign_ins + len(callers), "password_changes": changes}
+
+
+#: Today's count, pinned: the three compose journeys sign in exactly this often,
+#: in less than a minute (the journeys' steps took 23 s in all on CI). The
+#: runner has no pacer yet (D3b adds one); while it has none, a change of this
+#: number is seen here before a run is refused.
+SIGN_INS_TODAY = 10
+
+
+def test_the_compose_journeys_sign_in_no_more_often_than_the_stack_allows():
+    from backend.app.middleware.rate_limiter import RATE_LIMIT_CONFIG
+
+    limit, window = RATE_LIMIT_CONFIG["/api/v1/auth/login"]
+    change_limit, _ = RATE_LIMIT_CONFIG["/api/v1/users/me/password"]
+    counts = sign_in_counts(_compose_journeys())
+    if (RUNNER_ROOT / "docs_runner" / "pacer.py").is_file():
+        # D3b's sign-in pacer: the runner then waits rather than be refused.
+        from docs_runner import pacer
+
+        assert (pacer.LIMIT, pacer.WINDOW_SECONDS) == (limit, float(window))
+        assert counts["password_changes"] <= change_limit, counts
+        return
+    assert counts["sign_ins"] <= limit, counts
+    assert counts["sign_ins"] == SIGN_INS_TODAY, counts
+    assert counts["password_changes"] <= change_limit, counts
+
+
+def test_one_more_sign_in_is_over_the_limit():
+    """The plant: the check above fails when a journey signs in once more."""
+    journeys = _compose_journeys()
+    extra = (
+        journeys[0]
+        .steps[0]
+        .model_copy(
+            update={
+                "do": journeys[0]
+                .steps[0]
+                .do.model_copy(update={"click": Named(role="button", name="Sign in")})
+            }
+        )
+    )
+    planted = [journeys[0].model_copy(update={"steps": [*journeys[0].steps, extra]})]
+    counts = sign_in_counts(planted + journeys[1:])
+    assert counts["sign_ins"] == sign_in_counts(journeys)["sign_ins"] + 1
+
+
+# -- screenshots in a journey with secrets, and the plaintext key -------------
+class _FakeLocator:
+    def __init__(self, what):
+        self.what = what
+
+    def aria_snapshot(self):
+        return "- main"
+
+
+class _FakePage:
+    def __init__(self):
+        self.masks: Optional[list] = None
+
+    def get_by_text(self, value):
+        return _FakeLocator(("text", value))
+
+    def locator(self, selector):
+        return _FakeLocator(("locator", selector))
+
+    def screenshot(self, path, mask):
+        self.masks = [m.what for m in mask]
+        Path(path).write_bytes(b"png")
+
+
+FIELDS = ("locator", "input, textarea, [contenteditable]")
+
+
+@pytest.mark.parametrize("secrets", [{}, {"pw": "S3cretValue9xyz"}])
+def test_a_screenshot_masks_every_field_exactly_when_the_journey_has_secrets(
+    tmp_path, execute_module, secrets
+):
+    from docs_runner.model import Step
+
+    step = Step.model_validate(
+        {
+            "id": "screen",
+            "doc": "x",
+            "do": {"api": {"method": "GET", "path": "/me", "as": "anonymous"}},
+            "fail": "x",
+        }
+    )
+    runner = _runner(execute_module, tmp_path)
+    runner.secrets = dict(secrets)
+    page = _FakePage()
+    runner._screen(page, "j", 1, step)
+    assert page.masks is not None, "no screenshot was taken"
+    assert (FIELDS in page.masks) == bool(secrets)
+    for value in secrets.values():
+        assert ("text", value) in page.masks
+
+
+def test_the_plaintext_key_a_credential_route_answers_is_looked_for(
+    tmp_path, execute_module
+):
+    from docs_runner import redaction
+    from docs_runner.model import Step
+    from docs_runner.stacks import Running
+
+    step = Step.model_validate(
+        {
+            "id": "new-key",
+            "doc": "x",
+            "do": {
+                "api": {"method": "POST", "path": "/api/v1/api-keys", "as": "anonymous"}
+            },
+            "expect": {"status": 201},
+            "fail": "x",
+        }
+    )
+    secret = "eptk_live_PLAINTEXT_SECRET_9999"
+    runner = _runner(execute_module, tmp_path)
+    running = Running(name="compose-dev", base_url="http://dash/", api_url="http://api")
+    runner._api_step(
+        step, running, _FakeApi(_FakeAnswer(201, {"key": secret, "name": "k"})), "j", 1
+    )
+    assert secret in runner.redactor.values
+    (tmp_path / "later.aria.yml").write_text(f"- text: {secret}\n")
+    assert redaction.scan(tmp_path, runner.redactor.values)[1] == ["later.aria.yml"]

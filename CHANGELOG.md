@@ -10,6 +10,30 @@ longer applies and release-please can generate this file directly. Until it
 does, entries below 0.2.2 are hand-written and the links in them are the
 reason why.
 
+## [0.25.4](https://github.com/getexperimently/experimently/compare/v0.25.3...v0.25.4) (2026-10-06)
+
+
+### Bug Fixes
+
+* **power:** planning advice is always the built-in advice ([#1011](https://github.com/getexperimently/experimently/issues/1011)) ([4c54916](https://github.com/getexperimently/experimently/commit/4c54916f5af162eb4103d197146d0700a9006e81))
+* **tracking:** an event naming an id that does not exist answers 404, not 500 ([#1010](https://github.com/getexperimently/experimently/issues/1010)) ([7e78203](https://github.com/getexperimently/experimently/commit/7e782033d361e3ff2ba68708d0aaf7586ca87c06))
+
+## [0.25.3](https://github.com/getexperimently/experimently/compare/v0.25.2...v0.25.3) (2026-10-06)
+
+
+### Bug Fixes
+
+* **ci:** the weekly load test seeds what it calls and records every request ([#992](https://github.com/getexperimently/experimently/issues/992)) ([1a2028a](https://github.com/getexperimently/experimently/commit/1a2028ae686b0d79c6ae04af6ff682422bc5f1e2))
+* **power:** very large integers are refused with 422, not 500 ([#1005](https://github.com/getexperimently/experimently/issues/1005)) ([023fabf](https://github.com/getexperimently/experimently/commit/023fabfe14fa4068c169421ffd3089b5f4401196))
+* **publish-guard:** drop the stale sample-ratio claim rule ([#999](https://github.com/getexperimently/experimently/issues/999)) ([18c4b95](https://github.com/getexperimently/experimently/commit/18c4b959d88fa822682605951b601cb6174cdb4a))
+
+
+### Documentation
+
+* **frontend:** the dashboard dev server is on port 3100 ([#998](https://github.com/getexperimently/experimently/issues/998)) ([e59e058](https://github.com/getexperimently/experimently/commit/e59e058d6e7bd9ada5b1963bfa100b33b244b129))
+* **infrastructure:** the network page describes the CDK stack that exists ([#997](https://github.com/getexperimently/experimently/issues/997)) ([5e97304](https://github.com/getexperimently/experimently/commit/5e97304bc1c7a075f86e619c94addeb6db849e0c))
+* **integrations:** the GitHub, Salesforce and FAQ pages name the integration by type and ADMIN-only changes ([#994](https://github.com/getexperimently/experimently/issues/994)) ([6fbdbcd](https://github.com/getexperimently/experimently/commit/6fbdbcd1bc85cab23968372030a9a25c2eb9c304))
+
 ## [0.25.2](https://github.com/getexperimently/experimently/compare/v0.25.1...v0.25.2) (2026-10-06)
 
 

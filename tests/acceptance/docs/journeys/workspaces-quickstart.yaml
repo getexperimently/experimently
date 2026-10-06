@@ -7,10 +7,13 @@
 # The invite's token is used in the accept path, so it is saved as a value; it
 # is still never written: a value saved from a path ending in token goes to
 # the run's redactor.
+#
+# Not recorded: the journey makes an API key (model.reveals_credential), so a
+# recording could show what the run keeps out of its files.
 guide: workspaces/quickstart.md
 stack: compose-dev
 profile: full
-video: true
+video: false
 written: 2026-10-06
 steps:
   - id: create

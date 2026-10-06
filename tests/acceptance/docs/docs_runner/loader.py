@@ -45,8 +45,14 @@ YAML, or not a mapping, stops at that. Refused, besides what ``model`` refuses:
   earlier ``keep`` step keeps, or that does not say ``snapshot: false``;
 * a ``keep`` step with an ``expect`` or a ``snapshot`` setting (its check is
   the action, and it keeps no screen);
-* a journey that makes up or keeps a secret and is recorded (``video: true``):
-  a recording would show what the run keeps out of its files.
+* a journey that makes up or keeps a secret, or has an api step that reveals
+  one (``model.reveals_credential``), and is recorded (``video: true``): a
+  recording would show what the run keeps out of its files;
+* a screen step right before a ``keep`` step (its screen shows what the keep
+  reads) without ``snapshot: false``;
+* a ``fill`` that types a written value into a field whose label says
+  "password", where its screen is kept, unless the value is the documented
+  demo password;
 * ``save`` on a step that is not an ``api`` step, or a name saved twice;
 * a ``{{name}}`` (in an api step's path, body or expected JSON, or in a
   ``goto``) that no earlier step saves, or that names a secret (a secret
@@ -87,13 +93,20 @@ from docs_runner.model import (
     API_EXPECTS,
     BROWSER_EXPECTS,
     LOCAL_URL,
+    SCREEN_ACTIONS,
     SEARCH_EXPECTS,
     SITE_STACKS,
     STACKS,
     STRUCTURAL_EXPECTS,
     Journey,
     Step,
+    reveals_credential,
 )
+from docs_runner.stacks import DEMO_ACCOUNTS
+
+#: The documented demo password (the Quick Start prints it): the one password a
+#: step may type where its screen is kept.
+DEMO_PASSWORDS = frozenset(password for _, password in DEMO_ACCOUNTS.values())
 
 #: Keys that would make a step wait for a time instead of for what it expects.
 SLEEP_KEYS = frozenset(
@@ -586,11 +599,37 @@ def _secret_problems(
             )
         if step.do.keep is not None:
             known.add(step.do.keep.secret)
-    has_secrets = bool(passwords) or any(step.do.keep for _, step in steps)
+    by_index = dict(steps)
+    for index, step in steps:
+        label = f"step {index + 1} ({step.id})"
+        following = by_index.get(index + 1)
+        reveals = following is not None and following.do.keep is not None
+        if reveals and step.do.kind in SCREEN_ACTIONS and step.snapshot is not False:
+            found.append(
+                f"{label}: the next step keeps a value this step's screen shows,"
+                " so this step keeps no screen: give snapshot: false and a"
+                " snapshot_reason"
+            )
+        fill = step.do.fill
+        if (
+            fill is not None
+            and fill.value is not None
+            and "password" in fill.label.lower()
+            and step.snapshot is not False
+            and fill.value not in DEMO_PASSWORDS
+        ):
+            found.append(
+                f"{label}: fill types a written password into {fill.label!r} where"
+                " its screen is kept; only the documented demo password may be:"
+                " make one up (passwords) or give snapshot: false"
+            )
+    has_secrets = bool(passwords) or any(
+        step.do.keep is not None or reveals_credential(step) for _, step in steps
+    )
     if has_secrets and video:
         found.append(
-            "video: true, but the journey makes up or keeps a secret; a recording"
-            " would show it, so give video: false"
+            "video: true, but the journey makes up or keeps a secret, or an api"
+            " step reveals one; a recording would show it, so give video: false"
         )
     return found
 

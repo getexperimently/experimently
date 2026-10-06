@@ -6,7 +6,7 @@ Tests the full HTTP request/response cycle for:
   POST /api/v1/power/mde          — compute MDE for a fixed sample
   POST /api/v1/power/runtime      — estimate experiment runtime
   GET  /api/v1/power/curve        — power curve
-  POST /api/v1/power/plan         — AI planning advice (Claude mocked)
+  POST /api/v1/power/plan         — built-in planning advice
 
 Validation tests (422):
   - baseline_rate=0 → 422
@@ -418,11 +418,12 @@ class TestPowerCurveEndpoint:
 
 
 class TestPlanEndpoint:
-    """POST /api/v1/power/plan (AI planning advice, Claude mocked)."""
+    """POST /api/v1/power/plan (the built-in planning advice)."""
 
     @pytest.fixture(autouse=True)
-    def mock_anthropic_unavailable(self, monkeypatch):
-        """Ensure no real Anthropic API calls are made in integration tests."""
+    def no_anthropic_key(self, monkeypatch):
+        """Run with ANTHROPIC_API_KEY unset; the unit test
+        ``test_power_plan_builtin_advice.py`` covers it set."""
         monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
 
     def test_returns_200(self, client: TestClient):
@@ -439,7 +440,7 @@ class TestPlanEndpoint:
         resp = client.post("/api/v1/power/plan", json=_plan_payload())
         data = resp.json()
         assert "generated_by" in data
-        assert data["generated_by"] in ("ai", "template")
+        assert data["generated_by"] == "template"
 
     def test_generated_by_template_when_no_api_key(self, client: TestClient):
         resp = client.post("/api/v1/power/plan", json=_plan_payload())
@@ -511,3 +512,197 @@ class TestPlanEndpoint:
         del payload["business_context"]
         resp = client.post("/api/v1/power/plan", json=payload)
         assert resp.status_code == 200
+
+
+# ===========================================================================
+# Very large integers (#1003)
+# ===========================================================================
+
+# Too large to convert to a float. Before #1003 each of these answered 500.
+HUGE = 10**400
+
+# The documented bounds (docs/statistics/power-analysis.md), typed here rather
+# than imported so that a change to them fails this file.
+MAX_VARIANTS = 100
+MAX_COUNT = 10**12
+
+SAMPLE_SIZE_URL = "/api/v1/power/sample-size"
+MDE_URL = "/api/v1/power/mde"
+RUNTIME_URL = "/api/v1/power/runtime"
+
+# (url, payload builder, field, bound): every bounded integer of the three
+# requests.
+BOUNDED_FIELDS = [
+    pytest.param(
+        SAMPLE_SIZE_URL,
+        _sample_size_payload,
+        "n_variants",
+        MAX_VARIANTS,
+        id="sample-size-n_variants",
+    ),
+    pytest.param(
+        SAMPLE_SIZE_URL,
+        _sample_size_payload,
+        "daily_traffic",
+        MAX_COUNT,
+        id="sample-size-daily_traffic",
+    ),
+    pytest.param(
+        MDE_URL,
+        _mde_payload,
+        "sample_size_per_variant",
+        MAX_COUNT,
+        id="mde-sample_size_per_variant",
+    ),
+    pytest.param(
+        MDE_URL, _mde_payload, "n_variants", MAX_VARIANTS, id="mde-n_variants"
+    ),
+    pytest.param(
+        RUNTIME_URL,
+        _runtime_payload,
+        "required_sample_size",
+        MAX_COUNT,
+        id="runtime-required_sample_size",
+    ),
+    pytest.param(
+        RUNTIME_URL,
+        _runtime_payload,
+        "daily_traffic",
+        MAX_COUNT,
+        id="runtime-daily_traffic",
+    ),
+    pytest.param(
+        RUNTIME_URL,
+        _runtime_payload,
+        "n_variants",
+        MAX_VARIANTS,
+        id="runtime-n_variants",
+    ),
+]
+
+
+@pytest.fixture
+def client_no_raise():
+    """A client that shows an unhandled error as the 500 a caller would see,
+    so these tests can tell a 422 from a 500."""
+    with TestClient(app, raise_server_exceptions=False) as c:
+        yield c
+
+
+def _assert_out_of_range(resp) -> None:
+    assert resp.status_code == 422, resp.text
+    from backend.app.api.v1.endpoints.power_calculator import OUT_OF_RANGE_MESSAGE
+
+    assert resp.json() == {"detail": OUT_OF_RANGE_MESSAGE}
+
+
+def _assert_refused_at(resp, field: str) -> None:
+    assert resp.status_code == 422, resp.text
+    errors = resp.json()["detail"]
+    assert [e["loc"] for e in errors] == [["body", field]], errors
+    assert errors[0]["type"] == "less_than_equal", errors
+
+
+@pytest.mark.regression
+class TestVeryLargeIntegers:
+    """#1003: a very large integer answered 500 on the power routes, which
+    need no sign-in. Each integer now has an upper bound, so a larger value
+    answers 422 naming the field, and the bound itself still answers 200."""
+
+    @pytest.mark.parametrize(
+        "url, payload, field",
+        [
+            pytest.param(MDE_URL, _mde_payload, "n_variants", id="mde-n_variants"),
+            pytest.param(
+                SAMPLE_SIZE_URL,
+                _sample_size_payload,
+                "n_variants",
+                id="sample-size-n_variants",
+            ),
+            pytest.param(
+                SAMPLE_SIZE_URL,
+                _sample_size_payload,
+                "daily_traffic",
+                id="sample-size-daily_traffic",
+            ),
+            pytest.param(
+                RUNTIME_URL,
+                _runtime_payload,
+                "required_sample_size",
+                id="runtime-required_sample_size",
+            ),
+            pytest.param(
+                RUNTIME_URL,
+                _runtime_payload,
+                "daily_traffic",
+                id="runtime-daily_traffic",
+            ),
+            pytest.param(
+                RUNTIME_URL, _runtime_payload, "n_variants", id="runtime-n_variants"
+            ),
+        ],
+    )
+    def test_integer_too_large_for_a_float_answers_422(
+        self, client_no_raise: TestClient, url, payload, field
+    ):
+        resp = client_no_raise.post(url, json=payload(**{field: HUGE}))
+        _assert_refused_at(resp, field)
+
+    @pytest.mark.parametrize("url, payload, field, bound", BOUNDED_FIELDS)
+    def test_just_above_the_bound_answers_422(
+        self, client_no_raise: TestClient, url, payload, field, bound
+    ):
+        resp = client_no_raise.post(url, json=payload(**{field: bound + 1}))
+        _assert_refused_at(resp, field)
+        assert resp.json()["detail"][0]["ctx"] == {"le": bound}
+
+    @pytest.mark.parametrize("url, payload, field, bound", BOUNDED_FIELDS)
+    def test_the_bound_itself_answers_200(
+        self, client_no_raise: TestClient, url, payload, field, bound
+    ):
+        resp = client_no_raise.post(url, json=payload(**{field: bound}))
+        assert resp.status_code == 200, resp.text
+
+    def test_schema_bounds_are_the_documented_values(self):
+        from backend.app.schemas import power_calculator as schemas
+
+        assert schemas.MAX_VARIANTS == MAX_VARIANTS
+        assert schemas.MAX_COUNT == MAX_COUNT
+
+
+@pytest.mark.regression
+class TestOverflowAnswers422:
+    """#1003: a calculation that still leaves floating-point range answers 422
+    with a fixed message, not 500. Each of these answered 500 before."""
+
+    @pytest.mark.parametrize(
+        "overrides",
+        [
+            pytest.param(
+                {"baseline_rate": 0.5, "baseline_std": 1e200}, id="mean-std-1e200"
+            ),
+            pytest.param(
+                {"baseline_rate": 1e-300, "baseline_std": 1.0},
+                id="mean-baseline-1e-300",
+            ),
+        ],
+    )
+    def test_mean_metric_overflow_answers_422(
+        self, client_no_raise: TestClient, overrides
+    ):
+        payload = _sample_size_payload(metric_type="mean", **overrides)
+        resp = client_no_raise.post(SAMPLE_SIZE_URL, json=payload)
+        _assert_out_of_range(resp)
+
+    def test_infinite_baseline_std_answers_422(self, client_no_raise: TestClient):
+        # JSON has no infinity, but the body parser accepts the literal.
+        body = (
+            '{"baseline_rate": 0.5, "minimum_detectable_effect": 0.1, '
+            '"metric_type": "mean", "baseline_std": Infinity}'
+        )
+        resp = client_no_raise.post(
+            SAMPLE_SIZE_URL,
+            content=body,
+            headers={"content-type": "application/json"},
+        )
+        _assert_out_of_range(resp)

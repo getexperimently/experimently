@@ -6,7 +6,7 @@ Routes (no authentication required — useful as a pre-login planning tool):
     POST /api/v1/power/mde          — compute MDE for a fixed sample
     POST /api/v1/power/runtime      — estimate experiment runtime
     GET  /api/v1/power/curve        — power curve (effect size vs. sample)
-    POST /api/v1/power/plan         — AI-enhanced planning advice
+    POST /api/v1/power/plan         — built-in planning advice
 """
 
 import logging
@@ -37,6 +37,18 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 _calculator = PowerCalculatorService()
 _planner = AIExperimentPlannerService()
+
+# What the calculation routes (sample size, MDE, runtime, curve) answer, with
+# a 422, when a number in the calculation leaves floating-point range and
+# Python raises OverflowError (#1003). The request schemas' upper bounds keep
+# the integers in range; what is left is the sample size of a ``mean`` or
+# ``ratio`` metric with a very large ``baseline_std``, or with a baseline so
+# small that the difference squared underflows to zero. Those used to answer
+# 500. The curve skips a point it cannot compute, so it has no known case.
+OUT_OF_RANGE_MESSAGE = (
+    "These values are too large or too small to calculate with. "
+    "Use values nearer those of a real experiment."
+)
 
 
 # ---------------------------------------------------------------------------
@@ -74,6 +86,11 @@ def compute_sample_size(body: SampleSizeRequest) -> SampleSizeResponse:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=str(exc),
+        ) from exc
+    except OverflowError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=OUT_OF_RANGE_MESSAGE,
         ) from exc
 
     return SampleSizeResponse(
@@ -123,6 +140,11 @@ def compute_mde(body: MDERequest) -> MDEResponse:
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=str(exc),
         ) from exc
+    except OverflowError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=OUT_OF_RANGE_MESSAGE,
+        ) from exc
 
     return MDEResponse(
         mde_absolute=result.mde_absolute,
@@ -164,6 +186,11 @@ def compute_runtime(body: RuntimeRequest) -> RuntimeResponse:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=str(exc),
+        ) from exc
+    except OverflowError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=OUT_OF_RANGE_MESSAGE,
         ) from exc
 
     return RuntimeResponse(
@@ -226,6 +253,11 @@ def get_power_curve(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=str(exc),
         ) from exc
+    except OverflowError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=OUT_OF_RANGE_MESSAGE,
+        ) from exc
 
     return PowerCurveResponse(
         points=[
@@ -251,15 +283,15 @@ def get_power_curve(
     "/plan",
     response_model=PlanResponse,
     status_code=status.HTTP_200_OK,
-    summary="Get AI Planning Advice",
+    summary="Get Planning Advice",
     description=(
         "Generate plain-English planning advice for a power analysis result. "
-        "Uses Claude AI when ANTHROPIC_API_KEY is configured; "
-        "falls back to template-based advice otherwise."
+        "The advice is the built-in planning advice, and generated_by is "
+        "always 'template'."
     ),
 )
 async def get_planning_advice(body: PlanRequest) -> PlanResponse:
-    """Generate AI-enhanced planning advice."""
+    """Generate the built-in planning advice."""
     try:
         result = await _planner.get_planning_advice(
             experiment_name=body.experiment_name,

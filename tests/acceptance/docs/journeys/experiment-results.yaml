@@ -19,10 +19,13 @@
 # The rates (10.00%, 16.00%), the lift (+60.0%) and the sample-ratio p (1, an
 # exact 400/400 split) follow from the chosen counts by arithmetic and are
 # written in the expectations.
+#
+# Not recorded: the journey makes an API key (model.reveals_credential), so a
+# recording could show what the run keeps out of its files.
 guide: guides/user-guide.md
 stack: compose-dev
 profile: core
-video: true
+video: false
 written: 2026-10-06
 steps:
   - id: sign-in-page

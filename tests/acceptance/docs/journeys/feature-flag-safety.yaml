@@ -16,10 +16,13 @@
 # the Docker guide's stack does not set), longer than a journey runs. The
 # unhealthy flag is made last, so a monitor pass during the journey can only
 # turn it off after every step that reads it has run.
+#
+# Not recorded: the journey makes an API key (model.reveals_credential), so a
+# recording could show what the run keeps out of its files.
 guide: feature-flags/safety.md
 stack: compose-dev
 profile: core
-video: true
+video: false
 written: 2026-10-06
 steps:
   - id: superuser
