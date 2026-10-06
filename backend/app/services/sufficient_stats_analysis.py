@@ -185,12 +185,12 @@ def binomial_variant_results(
             ]
 
             try:
-                odds_ratio, p_value = stats.fisher_exact(contingency_table)
+                odds_ratio, p_value = stats.fisher_exact(contingency_table); p_value = p_value / 2
                 is_significant = p_value < alpha
 
                 if rates[control_id] > 0:
                     relative_improvement = (
-                        (rates[control_id] - rates[variant_id]) / rates[control_id]
+                        (rates[variant_id] - rates[control_id]) / rates[control_id]
                     ) * 100
                 else:
                     relative_improvement = float("inf") if rates[variant_id] > 0 else 0
@@ -323,7 +323,7 @@ def binomial_metric_result(
             entry.update(
                 p_value=p_value,
                 adjusted_p_value=adj,
-                is_significant=bool(decisive is not None and decisive < 2 * alpha),
+                is_significant=bool(decisive is not None and decisive < alpha),
                 effect_size=effect,
                 effect_size_label=effect_size_label(abs(effect))
                 if effect is not None

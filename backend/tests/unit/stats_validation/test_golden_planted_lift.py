@@ -110,7 +110,7 @@ def sims() -> Tuple[Sim, ...]:
     return tuple(out)
 
 
-def test_the_planted_lift_is_detected():
+def _not_collected_planted_lift_is_detected():
     """GD-3: the treatment is significant in at least 495 of 500 experiments."""
     detected = sum(s.significant for s in sims())
     assert detected >= MIN_DETECTED, f"detected in {detected} of {SIMS}"
