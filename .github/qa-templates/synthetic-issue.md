@@ -1,0 +1,22 @@
+Synthetic check ({check}) is red
+
+The {check} synthetic check has failed {count_runs} runs in a row, the first at {date_time}.
+
+What to do: open the latest run, {run_link}, and find step {step} in the list below; it says where to look.
+
+Failing step: {step} of 8. Status: {status}.
+
+The check runs these eight steps in order and stops at the first one that fails:
+
+1. Ready: the API's readiness probe answers 200. If this fails, the API is down or not ready; the rollback runbook is https://github.com/getexperimently/experimently/blob/main/docs/deployment/rollback-runbook.md
+2. Sign in: the synthetic account signs in, and the API reports it as an ANALYST that is not a superuser. If this fails, the account's password or role has changed.
+3. Key expiry: the check's API key expires in more than 3 days. If this fails, create a new key for the synthetic account and replace the stored one.
+4. Results before: the canary experiment's results are read without the cache. If this fails, the API cannot compute them, or the synthetic account may no longer read them.
+5. Assign: a new synthetic user is assigned on the canary experiment, and asking again returns the same variant. If this fails, check that the canary experiment is still active.
+6. Track: a conversion event for that user is accepted. If this fails, the API is refusing tracking events from the check's key.
+7. Evaluate: the canary flag answers with one of the documented reasons. If this fails, check that the canary flag still exists.
+8. Results after: the results show exactly one more assignment and one more conversion than step 4 read. If only this step fails, the events were accepted but the results do not count them yet.
+
+The check sends SDK traffic only to its own canary experiment and flag, and changes nothing else on {check}.
+
+This issue opens after 3 failed runs in a row on staging (2 on production). It gets a comment only when the failing step changes, and it closes itself when a run passes.
