@@ -27,8 +27,16 @@ Usage:
         --locustfile path/to/api_load_test.py
 
 Exit codes:
-    0 — all SLA targets met
-    1 — one or more SLA targets violated, or test infrastructure error
+    0 — at least one recorded endpoint matched a target, and every matched
+        endpoint met its target
+    1 — one or more SLA targets violated; nothing was measured (Locust
+        recorded no requests, or no recorded endpoint matched a target);
+        or test infrastructure error
+
+A run that measured nothing is a failure, not a pass. Run 37279469245 spawned
+50 users for 60 s, recorded 0 requests and exited 0 -- every request site in
+the locustfiles passed ``catch_response=True`` without a ``with`` block, so
+Locust never recorded one. ``all([])`` is True, so an empty match did the same.
 """
 
 import argparse
@@ -386,7 +394,9 @@ def main(argv: Optional[list[str]] = None) -> int:
     Main entry point for the CI load test runner.
 
     Returns:
-        0 if all SLAs pass, 1 if any SLAs fail or an error occurs.
+        0 if an endpoint matched and every matched one met its target; 1 if
+        any target was missed, nothing was measured (no stats, or no matched
+        endpoint), or an error occurred.
     """
     args = _parse_args(argv)
 
@@ -429,12 +439,26 @@ def main(argv: Optional[list[str]] = None) -> int:
             return 1
 
         if not stats_list:
-            print("[runner] WARNING: No stats parsed from CSV. Nothing to validate.")
-            return 0
+            print(
+                f"[runner] FAIL: no stats -- {csv_stats_path} has no endpoint "
+                "rows, so Locust recorded no requests and nothing was measured. "
+                "Exiting 1."
+            )
+            return 1
 
         # Validate against SLAs
         duration_seconds = _parse_duration_to_seconds(args.duration)
         validation_results = _validate_results(stats_list, duration_seconds)
+
+        # Before the report: with no results it would read "All SLA targets
+        # met", and `all([])` below is True.
+        if not validation_results:
+            print(
+                f"[runner] FAIL: no matched endpoint -- none of the "
+                f"{len(stats_list)} endpoint(s) Locust recorded matches a "
+                "PERFORMANCE_TARGETS entry, so no target was checked. Exiting 1."
+            )
+            return 1
 
         # Generate and print report
         report = generate_report(validation_results)
