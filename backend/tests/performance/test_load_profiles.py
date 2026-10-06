@@ -236,26 +236,21 @@ class TestDbStressUser:
 
 
 class TestCrudTestData:
-    """Tests for test data constants in CRUD load test."""
+    """The CRUD test calls only what exists.
 
-    def test_experiment_keys_defined(self):
-        """CRUD test must define experiment keys for payloads."""
+    It once chose from 20 experiment keys, 15 flag keys and UUIDs derived from
+    them, none of which any seed created, so every update, delete and results
+    request was a 404. It now reads the seeded experiment and changes only the
+    experiments and flags each user created in the same run.
+    """
+
+    @pytest.mark.parametrize(
+        "name",
+        ["EXPERIMENT_KEYS", "EXPERIMENT_IDS", "FEATURE_FLAG_KEYS", "FEATURE_FLAG_IDS"],
+    )
+    def test_no_made_up_fixtures(self, name):
         from backend.tests.performance.locustfiles import crud_load_test
 
-        assert hasattr(crud_load_test, "EXPERIMENT_KEYS"), (
-            "crud_load_test must define EXPERIMENT_KEYS"
-        )
-        assert len(crud_load_test.EXPERIMENT_KEYS) >= 10, (
-            "Should have at least 10 experiment keys"
-        )
-
-    def test_feature_flag_keys_defined(self):
-        """CRUD test must define feature flag keys for payloads."""
-        from backend.tests.performance.locustfiles import crud_load_test
-
-        assert hasattr(crud_load_test, "FEATURE_FLAG_KEYS"), (
-            "crud_load_test must define FEATURE_FLAG_KEYS"
-        )
-        assert len(crud_load_test.FEATURE_FLAG_KEYS) >= 10, (
-            "Should have at least 10 feature flag keys"
+        assert not hasattr(crud_load_test, name), (
+            f"crud_load_test.{name} is back: nothing creates those objects"
         )

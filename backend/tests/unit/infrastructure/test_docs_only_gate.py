@@ -169,6 +169,8 @@ NOT_DOCS_TESTS = {
     # Reads only docs/api/stability.md, and docs/api/** is never docs-only
     # (scripts/classify_changes.py), so a change there runs unit-tests.
     "backend/tests/unit/scripts/test_makefile_guards.py": "docs/api only",
+    # Reads only docs/api/openapi-v1.full.json (same reason as above).
+    "backend/tests/unit/scripts/test_load_test_runner.py": "docs/api only",
     # Reads only docs/api/openapi-v1.stable.json (same reason as above).
     "backend/tests/unit/api/test_segment_preview_limits.py": "docs/api only",
     # Reads only docs/api/openapi-v1.stable.json (same reason as above).
