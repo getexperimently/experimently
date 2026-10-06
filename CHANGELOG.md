@@ -10,6 +10,14 @@ longer applies and release-please can generate this file directly. Until it
 does, entries below 0.2.2 are hand-written and the links in them are the
 reason why.
 
+## [0.25.4](https://github.com/getexperimently/experimently/compare/v0.25.3...v0.25.4) (2026-10-06)
+
+
+### Bug Fixes
+
+* **power:** planning advice is always the built-in advice ([#1011](https://github.com/getexperimently/experimently/issues/1011)) ([4c54916](https://github.com/getexperimently/experimently/commit/4c54916f5af162eb4103d197146d0700a9006e81))
+* **tracking:** an event naming an id that does not exist answers 404, not 500 ([#1010](https://github.com/getexperimently/experimently/issues/1010)) ([7e78203](https://github.com/getexperimently/experimently/commit/7e782033d361e3ff2ba68708d0aaf7586ca87c06))
+
 ## [0.25.3](https://github.com/getexperimently/experimently/compare/v0.25.2...v0.25.3) (2026-10-06)
 
 
