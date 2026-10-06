@@ -16,11 +16,13 @@ signature
     This is the only form GitHub sends and the only one accepted for it.
 
 shared secret
-    The secret itself, in ``X-Experimently-Webhook-Secret``.  A Salesforce
-    outbound message cannot compute an HMAC over the body it sends, and
-    neither can a Jira Server webhook; a custom header is what they *can*
-    set.  It is weaker than a signature — replayable, and it puts the secret
-    on the wire — so only those two providers accept it, and only over TLS.
+    The secret itself, in ``X-Experimently-Webhook-Secret``.  A Jira Server
+    webhook cannot compute an HMAC over the body it sends, and a Salesforce
+    Flow HTTP Callout or Apex callout (or a relay) can set a custom header;
+    a native Salesforce Outbound Message sends SOAP/XML with no custom
+    headers and cannot reach the route at all.  It is weaker than a
+    signature — replayable, and it puts the secret on the wire — so only
+    those two providers accept it, and only over TLS.
 
 Both comparisons are constant-time (:func:`hmac.compare_digest`, the way
 ``backend/app/core/security.py`` and ``backend/app/core/health.py`` do it) and

@@ -2508,7 +2508,7 @@ DELETE /api/v1/integrations/{integration_type}   — Delete integration (ADMIN)
 
 ```
 POST /api/v1/integrations/webhooks/jira        — Receive Jira issue events
-POST /api/v1/integrations/webhooks/salesforce  — Receive Salesforce outbound messages
+POST /api/v1/integrations/webhooks/salesforce  — Receive Salesforce JSON (Flow/Apex callout)
 POST /api/v1/integrations/webhooks/github      — Receive GitHub events (HMAC-SHA256 validated)
 ```
 

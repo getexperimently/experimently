@@ -15,6 +15,11 @@ what they said. On main (`modules/backend/app/api/v1/endpoints/integrations.py`,
 * A webhook answers `{"status": "received"}` for an authenticated delivery, never
   `{"processed": true}`. Every refused delivery is one 401 (a wrong or missing
   signature included); a 400 only follows a successful authentication.
+* The Salesforce webhook takes a JSON object from a Flow HTTP Callout, an Apex
+  callout or a relay. A native Salesforce Outbound Message sends SOAP/XML with no
+  custom headers: with no header it is a 401, and with the header added by a
+  proxy the XML body is a 400. So no page may say an outbound message uses or
+  can set the shared-secret header.
 
 This test forbids the phrasings that were removed and requires the pages to say
 what is true. It is a sweep, not a proof: a new wording of the same claim is not
@@ -23,9 +28,10 @@ pattern that has silently stopped matching fails here instead of reporting
 "clean" for ever. When the API changes, change the docs and this test together.
 
 Reads only files; no git and no `modules` import, so it runs the same in
-`scripts/core_build.sh`'s copy (no `.git`, no `modules/`). It is in the
-docs-only gate's "Docs content tests" through its directory,
-`backend/tests/unit/docs/`.
+`scripts/core_build.sh`'s copy (no `.git`, no `modules/`). The three module
+files whose docstrings describe the webhooks are swept too whenever `modules/`
+is present, and then required to exist. It is in the docs-only gate's "Docs
+content tests" through its directory, `backend/tests/unit/docs/`.
 """
 
 from __future__ import annotations
@@ -48,6 +54,14 @@ SWEEP_FLOOR = (
     "docs/getting-started/faq.md",
     "docs/integrations/github.md",
     "docs/integrations/salesforce.md",
+)
+
+#: Module files whose docstrings describe the webhooks (and the OpenAPI text
+#: built from them). Swept whenever `modules/` exists; a core tree has none.
+MODULE_FILES = (
+    "modules/backend/app/api/v1/endpoints/integrations.py",
+    "modules/backend/app/services/integrations/salesforce_service.py",
+    "modules/backend/app/services/integrations/webhook_auth.py",
 )
 
 #: Where a rule applies, when it is not the whole of `docs/`.
@@ -118,6 +132,48 @@ STALE: Tuple[Rule, ...] = (
         ("docs/integrations/",),
         "Delete and recreate the integration with a consistent secret.",
     ),
+    (
+        r"(?i)\boutbound messages?\b[^.\n]{0,100}\b(?:cannot|can't)\s+(?:sign|compute|hmac)",
+        "a native Outbound Message is SOAP/XML with no custom headers and can use neither form; a Flow HTTP Callout, an Apex callout or a relay does",
+        None,
+        "A Salesforce outbound message cannot compute an HMAC over the body it sends, so it uses the header.",
+    ),
+    (
+        r"(?i)\boutbound messages?\b[^.\n]{0,100}\b(?:uses|sends|can set)\b[^.\n]{0,40}(?:shared-secret header|X-Experimently-Webhook-Secret)",
+        "a native Outbound Message cannot set the shared-secret header",
+        None,
+        "A Salesforce outbound message uses the shared-secret header.",
+    ),
+    (
+        r"(?i)all an outbound message can send",
+        "a native Outbound Message sends no custom header",
+        None,
+        "the secret in ``X-Experimently-Webhook-Secret``, which is all an outbound message can send, or",
+    ),
+    (
+        r"(?i)header on the Salesforce outbound message",
+        "the header is set by the Flow HTTP Callout, the Apex callout or the relay",
+        None,
+        "and the same header on the Salesforce outbound message or callout.",
+    ),
+    (
+        r"(?i)configure a Salesforce Outbound Message",
+        "a native Outbound Message cannot call the endpoint; configure a Flow HTTP Callout, an Apex callout or a relay",
+        None,
+        "configure a Salesforce Outbound Message (or Process Builder / Flow) to POST to:",
+    ),
+    (
+        r"(?i)\breceives?\s+Salesforce outbound messages?",
+        "the route receives JSON from a callout or a relay, not an Outbound Message",
+        None,
+        "Receive Salesforce outbound messages via webhook",
+    ),
+    (
+        r"Salesforce Outbound Message matches|Monitoring \u2192 Outbound Messages",
+        "the sender is a Flow HTTP Callout, an Apex callout or a relay; check its response and the debug log",
+        None,
+        "Confirm the **Endpoint URL** in the Salesforce Outbound Message matches your integration webhook URL",
+    ),
 )
 
 #: (page, text it must contain, why).
@@ -157,6 +213,21 @@ REQUIRED: Tuple[Tuple[str, str, str], ...] = (
         "X-Hub-Signature-256",
         "the signed form a callout may use",
     ),
+    (
+        "docs/integrations/salesforce.md",
+        "Flow HTTP Callout",
+        "what sends to the route: a native Outbound Message cannot",
+    ),
+    (
+        "docs/integrations/salesforce.md",
+        "SOAP/XML",
+        "why a native Outbound Message cannot call the route",
+    ),
+    (
+        "docs/api/integrations.md",
+        "Flow HTTP Callout",
+        "what sends to the Salesforce route: a native Outbound Message cannot",
+    ),
 )
 
 
@@ -190,6 +261,16 @@ def test_the_sweep_reads_the_pages() -> None:
 
 def test_no_page_describes_an_integration_the_api_does_not_have() -> None:
     hits = list(_hits(_swept()))
+    assert not hits, "\n".join(hits)
+
+
+def test_the_module_docstrings_say_the_same() -> None:
+    if not (REPO_ROOT / "modules").is_dir():
+        pytest.skip("a core tree has no modules/ to sweep")
+    paths = [REPO_ROOT / rel for rel in MODULE_FILES]
+    missing = [p.name for p in paths if not p.is_file()]
+    assert not missing, f"the sweep did not find {missing}: it is broken, not clean"
+    hits = list(_hits(paths))
     assert not hits, "\n".join(hits)
 
 

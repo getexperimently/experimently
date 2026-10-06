@@ -27249,7 +27249,7 @@
     },
     "/api/v1/integrations/webhooks/salesforce": {
       "post": {
-        "description": "Receive and process a Salesforce outbound message webhook.\n\nAuthenticates the sender against the Salesforce integration's\n``webhook_secret`` — the secret in ``X-Experimently-Webhook-Secret``, which\nis all an outbound message can send, or an ``X-Hub-Signature-256`` from a\ncallout that can sign — and answers 401 when that fails.  Beyond that,\nalways 200: Salesforce failures must not be surfaced.",
+        "description": "Receive and process a Salesforce webhook delivery.\n\nThe body is a JSON object posted by a Salesforce Flow HTTP Callout, an\nApex callout or a relay.  A native Salesforce Outbound Message sends\nSOAP/XML with no custom headers, so it cannot call this route.\n\nAuthenticates the sender against the Salesforce integration's\n``webhook_secret`` — the secret in ``X-Experimently-Webhook-Secret``, or an\n``X-Hub-Signature-256`` from a callout that can sign — and answers 401 when\nthat fails.  Once the sender is known, a body that is not a JSON object is\n400, and any other failure is logged and still answered 200: Salesforce\nfailures must not be surfaced.",
         "operationId": "salesforce_webhook_api_v1_integrations_webhooks_salesforce_post",
         "responses": {
           "200": {

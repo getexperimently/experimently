@@ -3,14 +3,14 @@
 !!! info "Part of the `integrations` module"
     Third-party integrations is one of the optional modules -- present in the **full profile**, absent from the core one. A core deployment does not serve these routes. See [Modules and profiles](../getting-started/modules.md) for what each profile includes and how to run the full one.
 
-The Salesforce integration enables the platform to synchronize experiment status and results with your Salesforce CRM. Experiment lifecycle events can update Salesforce Campaign objects, and Salesforce outbound messages can trigger actions in the platform.
+The Salesforce integration enables the platform to synchronize experiment status and results with your Salesforce CRM. Experiment lifecycle events can update Salesforce Campaign objects, and a Salesforce Flow or Apex callout can send events to the platform.
 
 ---
 
 ## What the Integration Does
 
 - **Outbound (Platform → Salesforce)**: Push experiment status changes and results to Salesforce Campaign records. When an experiment completes or reaches statistical significance, the associated Salesforce campaign can be automatically updated.
-- **Inbound (Salesforce → Platform)**: Receive Salesforce outbound messages via webhook. For example, when a Salesforce campaign status changes to "Completed", the platform can be notified to finalize an associated experiment.
+- **Inbound (Salesforce → Platform)**: Receive events from Salesforce via webhook, posted as JSON by a Flow HTTP Callout, an Apex callout or a relay. For example, when a Salesforce campaign status changes to "Completed", the platform can be notified to finalize an associated experiment.
 
 ---
 
@@ -94,37 +94,39 @@ The platform uses the **OAuth 2.0 Client Credentials** flow. The credentials are
 
 ## Webhook Endpoint
 
-To receive incoming events from Salesforce, configure a Salesforce Outbound Message (or Process Builder / Flow) to POST to:
+To receive incoming events from Salesforce, configure a Salesforce Flow with an HTTP Callout (or an Apex callout, or a relay in front of the platform) to POST a JSON object to:
 
 ```
 POST /api/v1/integrations/webhooks/salesforce
 ```
 
-### Configuring Outbound Messages in Salesforce
+### Configuring a Salesforce callout
 
-1. In Salesforce, go to **Setup → Workflow Actions → Outbound Messages → New Outbound Message**
-2. Set the **Endpoint URL** to your webhook URL:
+A native Salesforce Outbound Message sends a SOAP/XML envelope and cannot add custom headers, so it cannot be pointed at this endpoint directly. Send the event from something that can post a JSON object and set a header: a Flow with an **HTTP Callout** action, an Apex callout (`HttpRequest.setHeader`), or a relay that turns the message into that request.
+
+1. In Salesforce, build the sender: a Flow that runs on the record change you care about (for example a Campaign whose status becomes `Completed`) and calls an **HTTP Callout** action, or an Apex callout, or point your relay at the platform
+2. Set the method to `POST` and the URL to your webhook URL:
    `https://your-platform.example.com/api/v1/integrations/webhooks/salesforce`
-3. Set the **User to Send As** to a user with API access
-4. Select the fields you want to include in the payload
-5. Send the integration's `webhook_secret` with every delivery, as described next
+3. Set the `Content-Type` header to `application/json`
+4. Set the body to a JSON object with the fields you want to include (see [Incoming Webhook Payload Format](#incoming-webhook-payload-format))
+5. Add the integration's `webhook_secret` as a header on the callout, as described next
 
 ### Authenticating a delivery
 
-The platform reads a delivery only after the sender has presented the integration's `webhook_secret`, in one of two forms. Without it the answer is `401` and the body is not read.
+The platform parses a delivery only after the sender has presented the integration's `webhook_secret`, in one of two forms. Without it the answer is `401` and the body is not parsed.
 
 | How | Header | Value |
 |-----|--------|-------|
 | Shared secret | `X-Experimently-Webhook-Secret` | The `webhook_secret` itself |
-| Signature, from a callout that can compute one | `X-Hub-Signature-256` | `sha256=` followed by the hex HMAC-SHA256 of the raw request body, keyed with the `webhook_secret` |
+| Signature, from a callout that can compute one | `X-Hub-Signature-256`, or `X-Hub-Signature` | `sha256=` followed by the hex HMAC-SHA256 of the raw request body, keyed with the `webhook_secret` (a SHA-1 value, `sha1=...`, is refused) |
 
-A Salesforce outbound message cannot compute an HMAC over the body it sends, so it uses the shared-secret header. The secret then travels with every delivery, so the endpoint must be HTTPS. A callout that can sign should send the signature instead. A delivery that carries a signature is judged on the signature alone: a wrong signature is refused even when the shared-secret header is right.
+A Flow HTTP Callout or an Apex callout sets the shared-secret header. The secret then travels with every delivery, so the endpoint must be HTTPS. An Apex callout can sign the raw body instead (`Crypto.generateMac`), and should. A delivery that carries either signature header is judged on the signature alone: a wrong signature is refused even when the shared-secret header is right. The body must be a JSON object: a SOAP/XML body is refused with `400` even when the secret is right.
 
 Every refused delivery gets the same answer, `401` with the body `{"detail": "Webhook authentication failed"}`: a wrong or missing secret, an integration that is not active, an integration with no `webhook_secret`, and no Salesforce integration at all are not told apart. If every delivery is refused, check with `GET /api/v1/integrations/salesforce` that `is_active` is `true` and that `stored_secrets` lists `webhook_secret`. See [Webhook Endpoints](../api/integrations.md#webhook-endpoints) for the whole contract.
 
 ### Incoming Webhook Payload Format
 
-The platform accepts JSON payloads from Salesforce outbound messages or custom REST calls. The expected format:
+The platform accepts JSON objects from a Salesforce Flow HTTP Callout, an Apex callout or a relay. The expected format:
 
 ```json
 {
@@ -191,10 +193,10 @@ If this returns a token, the credentials are correct.
 
 ### Webhook Not Receiving Events
 
-1. Confirm the **Endpoint URL** in the Salesforce Outbound Message matches your integration webhook URL exactly
+1. Confirm the URL in the Salesforce callout (the Flow HTTP Callout, the Apex callout or the relay) matches your integration webhook URL exactly
 2. Ensure your platform is accessible from the public internet (Salesforce requires a reachable HTTPS endpoint)
 3. Check the platform's delivery log: `GET /api/v1/notifications/delivery-log`
-4. In Salesforce, check **Setup → Monitoring → Outbound Messages** for delivery failures
+4. In Salesforce, check the callout's response in the Flow's debug details or the Apex debug log (**Setup → Debug Logs**): `401` means the secret header is missing or wrong, or the integration is not active; `400` means the body is not a JSON object
 
 ### Updating Integration Credentials
 

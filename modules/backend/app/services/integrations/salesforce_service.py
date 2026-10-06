@@ -61,11 +61,11 @@ class SalesforceService:
     ) -> bool:
         """Authenticate an inbound Salesforce webhook against the shared secret.
 
-        A Salesforce outbound message cannot HMAC the body it sends, so the
-        supported form is the secret itself in
-        ``X-Experimently-Webhook-Secret``; an Apex or Flow callout that can
+        A Flow HTTP Callout, an Apex callout or a relay sends the secret
+        itself in ``X-Experimently-Webhook-Secret``; an Apex callout that can
         call ``Crypto.generateMac`` may sign the raw body and send
-        ``X-Hub-Signature-256`` instead.  Both are checked in constant time;
+        ``X-Hub-Signature-256`` instead.  (A native Salesforce Outbound Message
+        sends SOAP/XML with no custom headers and cannot reach the route.)  Both are checked in constant time;
         with no ``webhook_secret`` configured, neither passes.
 
         The endpoint does not call this: it reads ``webhook_secret``
