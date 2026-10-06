@@ -727,6 +727,11 @@ WORKFLOW_POSTERS: Dict[str, Tuple[str, str]] = {
         "legacy-inline",
         "which SDK tiers ran, in the step summary",
     ),
+    "workflows/synthetic.yml": (
+        "template",
+        "the synthetic-failure issue and its comments, and the run's step "
+        "summary, rendered by scripts/qa_render.py",
+    ),
 }
 POSTER_KINDS = ("template", "legacy-inline")
 
