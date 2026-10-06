@@ -136,6 +136,54 @@ def test_aurora_keeps_35_days_of_backups_in_prod_and_staging(prod, staging, page
         assert gone not in page, gone
 
 
+def test_the_restore_passes_the_stacks_parameter_groups(prod, staging, page):
+    """Scenario 4's restore (scripts/restore_repoint.sh) reads the stack's two
+    parameter groups off the original cluster and instance, and passes them
+    with the tags setting.
+
+    A restore given no group uses the engine's default, silently, so the page's
+    claim is only as good as the stack's: one cluster group that sets
+    `timezone`, `rds.force_ssl` and `shared_preload_libraries`, and one
+    instance group, each in use by the cluster and by every instance, and a
+    cluster that copies its tags to snapshots (what `--copy-tags-to-snapshot`
+    keeps). `read` refuses an original whose groups are not the stack's.
+    """
+    for name, apps in (("prod", prod), ("staging", staging)):
+        resources = apps[f"experimentation-database-{name}"]
+        ((cluster_group_id, cluster_group),) = [
+            (lid, r)
+            for lid, r in resources.items()
+            if r["Type"] == "AWS::RDS::DBClusterParameterGroup"
+        ]
+        ((instance_group_id, _),) = [
+            (lid, r)
+            for lid, r in resources.items()
+            if r["Type"] == "AWS::RDS::DBParameterGroup"
+        ]
+        settings = _props(cluster_group)["Parameters"]
+        assert settings["timezone"] == "UTC", name
+        assert settings["rds.force_ssl"] == "1", name
+        assert "shared_preload_libraries" in settings, name
+        ((_, cluster),) = _of_type(apps, "AWS::RDS::DBCluster")
+        assert _props(cluster)["DBClusterParameterGroupName"] == {
+            "Ref": cluster_group_id
+        }, name
+        assert _props(cluster)["CopyTagsToSnapshot"] is True, name
+        instances = _of_type(apps, "AWS::RDS::DBInstance")
+        assert instances, name
+        for _, instance in instances:
+            assert _props(instance)["DBParameterGroupName"] == {
+                "Ref": instance_group_id
+            }, name
+    # What the page says about the stack. The commands themselves are pinned,
+    # block by block, in backend/tests/unit/infrastructure/test_deploy_docs.py.
+    assert (
+        "a cluster whose parameter groups, subnet group, VPC groups or instances "
+        "are not the database stack's"
+    ) in page
+    assert "`timezone`, `rds.force_ssl` and `shared_preload_libraries`" in page
+
+
 def test_redis_snapshot_retention_and_failover(prod, page):
     ((stack, group),) = _of_type(prod, "AWS::ElastiCache::ReplicationGroup")
     props = _props(group)
@@ -228,7 +276,10 @@ def test_the_alarms_the_page_describes(templates, prod, page):
         "an incident"
     ) in page
     assert 'the composite sends a true "no healthy task" email for it' in page
-    assert "`experimentation-api-no-healthy-task-$ENV` emails `ALARM_EMAIL` once neither" in page
+    assert (
+        "`experimentation-api-no-healthy-task-$ENV` emails `ALARM_EMAIL` once neither"
+        in page
+    )
     assert "No alarm watches the number of running tasks" not in page
     assert "No alarm the CDK creates fires for this" not in page
     # Scenario 3: the Aurora alarm names the real cluster, through the
@@ -237,7 +288,9 @@ def test_the_alarms_the_page_describes(templates, prod, page):
     dimensions = {d["Name"]: d["Value"] for d in aurora["Dimensions"]}
     assert dimensions["Role"] == "WRITER"
     parameter = dimensions["DBClusterIdentifier"]["Ref"]
-    name = templates["experimentation-monitoring-prod"]["Parameters"][parameter]["Default"]
+    name = templates["experimentation-monitoring-prod"]["Parameters"][parameter][
+        "Default"
+    ]
     assert name == "/experimentation/prod/database/aurora-cluster-identifier"
     (cluster,) = [
         lid
@@ -249,7 +302,10 @@ def test_the_alarms_the_page_describes(templates, prod, page):
         for r in prod["experimentation-database-prod"].values()
         if r["Type"] == "AWS::SSM::Parameter" and _props(r)["Name"] == name
     ] == [{"Ref": cluster}]
-    assert "`/experimentation/$ENV/database/aurora-cluster-identifier`, `Role=WRITER`" in page
+    assert (
+        "`/experimentation/$ENV/database/aurora-cluster-identifier`, `Role=WRITER`"
+        in page
+    )
     assert "`AuroraCluster`" not in page
     # Scenario 4: the alarm follows the stack's identifier, which is what the
     # restore's cutover moves onto the restored cluster (scripts/
@@ -270,7 +326,10 @@ def test_the_alarms_the_page_describes(templates, prod, page):
     }
     assert redis == {
         f"RedisHighCPU-00{i}-prod": [
-            {"Name": "CacheClusterId", "Value": f"experimentation-redis-prod-redis-00{i}"}
+            {
+                "Name": "CacheClusterId",
+                "Value": f"experimentation-redis-prod-redis-00{i}",
+            }
         ]
         for i in (1, 2, 3)
     }, redis

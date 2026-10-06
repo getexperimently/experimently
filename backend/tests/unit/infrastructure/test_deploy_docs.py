@@ -628,6 +628,44 @@ def test_the_runbook_undoes_a_migration_before_the_api_rollback():
     assert "5-minute window" not in RUNBOOK.read_text()
     assert "RTO for a point-in-time restore: ~30 minutes" not in section
 
+    # Its copy never added an instance and left two of the cluster's network
+    # settings as placeholders (#190).
+    assert "<the cluster's DB subnet group>" not in section
+    assert "<aurora-sg-id>" not in section
+
+
+def _restore_section() -> str:
+    """The disaster-recovery page's "Restore from PITR" section."""
+    page = (DOCS / "deployment" / "disaster-recovery.md").read_text(encoding="utf-8")
+    start = page.index("### Restore from PITR (preferred)")
+    return page[start : page.index("\n### ", start + 1)]
+
+
+@pytest.mark.regression
+def test_the_restore_reads_and_passes_the_original_clusters_settings():
+    """A restore given no parameter group gets the engine's default one, with no
+    error, so the settings the database stack makes are lost. The page's
+    restore is now `scripts/restore_repoint.sh restore`, which reads every
+    value from the original and the stack and passes it; that is pinned call by
+    call in test_restore_repoint.py (test_the_restore_passes_every_setting_it_read).
+    Here: the page says what it passes, refuses on a difference, and types no
+    group name or instance class anywhere."""
+    section = _restore_section()
+    flat = " ".join(section.split())
+    assert "scripts/restore_repoint.sh restore" in section
+    for passed in (
+        "the original's subnet group, VPC groups and cluster parameter group",
+        "`--copy-tags-to-snapshot`",
+        "the original writer's class, parameter group, promotion tier and tags",
+        "`restore` then refuses unless both match the original",
+    ):
+        assert passed in flat, passed
+    blocks = re.findall(r"```bash\n(.*?)```", section, re.S)
+    assert blocks, "the section has no shell block: the scan reads nothing"
+    for block in blocks:
+        assert not re.search(r"parameter-group-name\s+[^\s$\"']", block), block
+        assert not re.search(r"--db-instance-class\s+[^\s$\"']", block), block
+
 
 # --- the decided restore path (T143) ---------------------------------------------
 
@@ -706,6 +744,98 @@ def test_scenario_8_records_before_it_stops_and_types_no_count():
             ["bash", "-n"], input=block, capture_output=True, text=True
         )
         assert done.returncode == 0, (block, done.stderr)
+
+
+def _key_rotation_section() -> str:
+    """secrets-management.md's "Rotate Compromised API Key" section."""
+    page = (DOCS / "deployment" / "secrets-management.md").read_text(encoding="utf-8")
+    start = page.index("### Rotate Compromised API Key")
+    end = page.find("\n### ", start + 1)
+    return page[start : end if end != -1 else len(page)]
+
+
+@pytest.mark.regression
+def test_the_key_rotation_runbook_names_what_the_api_writes():
+    """#251: the runbook searched a log group no stack creates, filtered on a
+    field the API never writes, used a `date` form that fails on macOS, and
+    made the replacement key with no scopes. Each claim is pinned to the code."""
+    section = _key_rotation_section()
+    stack = (
+        REPO_ROOT / "infrastructure" / "cdk" / "stacks" / "fargate_service_stack.py"
+    ).read_text(encoding="utf-8")
+    assert 'log_group_name=f"/ecs/experimentation-backend-{env_name}"' in stack
+    assert "/ecs/experimentation-backend-$ENV" in section
+    assert "/experimentation-platform/api" not in section
+    assert "date -d" not in section
+    assert '"scopes"' in section, "step 2 must recreate the key with its scopes"
+    for page in DOCS.rglob("*.md"):
+        assert "api_key_prefix" not in page.read_text(encoding="utf-8"), page
+    api_keys = (DOCS / "security" / "api-keys.md").read_text(encoding="utf-8")
+    assert "not updated when a key is used" not in api_keys
+
+
+#: The recovery pages' AWS CLI commands the flag check below reads: page ->
+#: the `service operation` commands it must find there (so that a scan that
+#: reads nothing fails), and every command of those services is then checked.
+#: Only the flags before a `$(` are read, so a command nested in an argument is
+#: not checked against the outer one: a page that gains one needs a parser.
+CLI_FLAG_CHECKED = {
+    # Its point-in-time restore is scripts/restore_repoint.sh now, whose own
+    # flags test_restore_repoint.py checks against the same models.
+    "disaster-recovery.md": {
+        "rds describe-db-clusters",
+        "rds describe-db-cluster-snapshots",
+        "rds restore-db-cluster-from-snapshot",
+        "cloudformation describe-stacks",
+    },
+    "rollback-runbook.md": {"rds describe-db-cluster-snapshots"},
+    "secrets-management.md": {
+        "rds modify-db-cluster",
+        "logs filter-log-events",
+    },
+}
+
+
+@pytest.mark.regression
+@pytest.mark.parametrize("page", sorted(CLI_FLAG_CHECKED))
+def test_every_aws_flag_the_recovery_pages_print_is_one_the_cli_has(page):
+    """`aws <service> <operation>` takes its flags from botocore's service
+    model, which is also what the AWS CLI reads: a flag that is not a member of
+    the operation's input is refused with exit 252 when it is pasted
+    mid-incident. Checked offline, for every `aws rds`, `aws logs` and
+    `aws cloudformation` command the page prints."""
+    from botocore import xform_name
+    from botocore.session import get_session
+
+    text = (DOCS / "deployment" / page).read_text(encoding="utf-8")
+    blocks = re.findall(r"```bash\n(.*?)```", text, re.S)
+    found = set()
+    for service in ("rds", "logs", "cloudformation"):
+        model = get_session().get_service_model(service)
+        flags_of = {
+            xform_name(op).replace("_", "-"): {
+                xform_name(member).replace("_", "-")
+                for member in model.operation_model(op).input_shape.members
+            }
+            for op in model.operation_names
+            if model.operation_model(op).input_shape is not None
+        }
+        for block in blocks:
+            # Join the continuation lines, then read each command of the service.
+            flat = block.replace("\\\n", " ")
+            for operation, rest in re.findall(
+                rf"aws {service} ([a-z0-9-]+)([^\n]*)", flat
+            ):
+                if operation == "wait":
+                    continue
+                assert operation in flags_of, (page, service, operation)
+                found.add(f"{service} {operation}")
+                # A `$(date ...)` in an argument is another command's flags.
+                rest = rest.split("$(")[0]
+                for flag in re.findall(r"(?<![\w-])--([a-z0-9-]+)", rest):
+                    if flag not in ("query", "output"):
+                        assert flag in flags_of[operation], (page, operation, flag)
+    assert CLI_FLAG_CHECKED[page] <= found, (page, CLI_FLAG_CHECKED[page] - found)
 
 
 # --- the canary's length (#212, D47) -------------------------------------------

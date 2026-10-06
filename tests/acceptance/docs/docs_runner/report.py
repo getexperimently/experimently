@@ -61,6 +61,9 @@ class GuideRun:
     refused: Tuple[str, ...] = ()
     #: The run itself stopped before the steps (the stack did not come up).
     error: str = ""
+    #: Files of this journey the end-of-run scan removed: they held a value the
+    #: run made up, kept or signed in for (``redaction.clear``).
+    scrubbed: Tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -83,6 +86,14 @@ def verdict(run: GuideRun) -> Verdict:
             "FAIL",
             "FAIL before step 1",
             f"No step ran: {run.error}",
+        )
+    if run.scrubbed:
+        return Verdict(
+            "FAIL",
+            "FAIL: its files held a value the run kept",
+            f"{len(run.scrubbed)} of this journey's files held a value the run made"
+            " up, kept or signed in for, so they were removed and the run"
+            " directory was not uploaded.",
         )
     if not run.records:
         return Verdict("FAIL", "FAIL: no step ran", "The journey recorded no step.")

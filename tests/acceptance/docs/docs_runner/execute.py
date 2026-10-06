@@ -15,10 +15,19 @@ expected ARIA snapshot, written before the step runs), ``NN-<step>.png`` and
 ``NN-<step>.aria.yml`` (the screen and its ARIA snapshot, after the step, or
 when it fails), ``NN-<step>.api.json`` (an api step's status and the values at
 its expected JSON paths), ``NN-<step>.expected.json`` (a ``crawl: nav`` step's
-pages, URLs and headings, read from the site's source before the step runs)
-and ``NN-<step>.crawl.json`` (what a crawl saw, and what differed). A
-``video: true`` journey is recorded to ``videos/<journey>.webm`` (1280x720)
-unless ``DOCS_JOURNEY_RECORD_VIDEO=0``.
+pages, URLs and headings, read from the site's source before the step runs),
+``NN-<step>.crawl.json`` (what a crawl saw, and what differed) and
+``NN-<step>.observed.json`` (what a step that keeps no screen saw when it
+failed: a ``keep`` step, or one with ``snapshot: false``). A ``video: true``
+journey is recorded to ``videos/<journey>.webm`` (1280x720) unless
+``DOCS_JOURNEY_RECORD_VIDEO=0``.
+
+Nothing a run makes up, keeps or is given is written (``redaction.py``): every
+text above goes through the run's redactor (an error line before it is cut to
+length), an api step's answer is written through ``redaction.scrub`` (every
+credential under any key at any depth), a screenshot masks any element whose
+text holds a value the journey keeps and, in a journey with secrets, every
+field, and a journey that has a secret is never recorded.
 
 The two crawls visit the nav pages once per journey and share what they saw.
 A page or link that answers 5xx or nothing is asked once more,
@@ -42,8 +51,9 @@ from urllib.parse import urljoin, urlparse
 from playwright.sync_api import Browser, Page, Playwright, expect
 from playwright.sync_api import Error as PlaywrightError
 
-from docs_runner import registry, site
+from docs_runner import redaction, registry, site
 from docs_runner.checks import (
+    OBSERVED_CHARS,
     StepFailed,
     describe_action,
     describe_expect,
@@ -54,7 +64,14 @@ from docs_runner.checks import (
 )
 from docs_runner.guide import Guide
 from docs_runner.log import FAIL, NOT_RUN, PASS, STRUCTURAL_ONLY, Log, Record
-from docs_runner.model import SEARCH_TOP, Journey, Named, Step
+from docs_runner.model import (
+    LOCAL_URL,
+    SEARCH_TOP,
+    Journey,
+    Named,
+    Step,
+    reveals_credential,
+)
 from docs_runner.oracles import ORACLES
 from docs_runner.stacks import Running
 
@@ -83,6 +100,10 @@ class JourneyRunner:
         self.log = log
         self.settings = settings
         self.tokens: Dict[Tuple[str, str], str] = {}
+        #: Every value the run makes up, keeps or signs in for; never written.
+        self.redactor = redaction.Redactor()
+        #: The current journey's passwords and kept values, by name.
+        self.secrets: Dict[str, str] = {}
         #: What the crawls saw, per site and source: (nav pages, visit per page).
         self.visits: Dict[
             Tuple[str, str], Tuple[List[site.NavPage], Dict[str, Any]]
@@ -93,10 +114,14 @@ class JourneyRunner:
     def _name(self, journey_id: str, number: int, step: Step, suffix: str) -> str:
         return f"{journey_id}/{number:02d}-{step.id}{suffix}"
 
+    def _line(self, text: Any, limit: int = OBSERVED_CHARS) -> str:
+        """*text* on one line: kept values taken out first, then cut to *limit*."""
+        return one_line(self.redactor.redact(str(text)), limit)
+
     def _write(self, name: str, text: str) -> str:
         path = self.settings.run_dir / name
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(text, encoding="utf-8")
+        path.write_text(self.redactor.redact(text), encoding="utf-8")
         return name
 
     def _screen(self, page: Page, journey_id: str, number: int, step: Step) -> str:
@@ -104,12 +129,28 @@ class JourneyRunner:
         path = self.settings.run_dir / name
         path.parent.mkdir(parents=True, exist_ok=True)
         try:
-            page.screenshot(path=str(path))
+            masks = [page.get_by_text(value) for value in self.secrets.values()]
+            if self.secrets:
+                # A field's value is not its text, so get_by_text cannot find a
+                # typed secret: in a journey with secrets, every field is masked.
+                masks.append(page.locator("input, textarea, [contenteditable]"))
+            page.screenshot(path=str(path), mask=masks)
             aria = page.locator("body").aria_snapshot()
         except PlaywrightError as error:
-            aria = f"(no ARIA snapshot: {one_line(error)})"
+            aria = f"(no ARIA snapshot: {self._line(error)})"
         self._write(self._name(journey_id, number, step, ".aria.yml"), aria + "\n")
         return name if path.is_file() else ""
+
+    def _no_screen(
+        self, journey_id: str, number: int, step: Step, observed: str
+    ) -> str:
+        """What a failed step that keeps no screen saw, as text."""
+        why = step.snapshot_reason or "a keep step keeps no screen"
+        return self._write(
+            self._name(journey_id, number, step, ".observed.json"),
+            json.dumps({"error": observed, "screen": f"not kept: {why}"}, indent=2)
+            + "\n",
+        )
 
     # -- the API -----------------------------------------------------------
     def _headers(self, running: Running, caller: str, api) -> Dict[str, str]:
@@ -124,6 +165,7 @@ class JourneyRunner:
             if answer.status != 200:
                 raise StepFailed(f"signing in as {caller} answered {answer.status}")
             self.tokens[key] = answer.json()["access_token"]
+            self.redactor.add(self.tokens[key])
         return {"Authorization": f"Bearer {self.tokens[key]}"}
 
     def _api_step(
@@ -140,11 +182,20 @@ class JourneyRunner:
         problems: List[str] = []
         if step.expect.status is not None and answer.status != step.expect.status:
             problems.append(f"status {answer.status}, expected {step.expect.status}")
+        try:
+            document = answer.json()
+        except (PlaywrightError, ValueError):
+            document = None
+        else:
+            # Every credential the answer holds, written or not, is looked for
+            # in every file the run writes from here on.
+            redaction.register_credentials(document, self.redactor)
+            # `key` is left out of that rule (experiment keys are public), but
+            # a credential route answers its plaintext secret under `key`.
+            if reveals_credential(step) and isinstance(document, dict):
+                self.redactor.add_all(document.get("key"))
         if step.expect.json_:
-            try:
-                document = answer.json()
-            except (PlaywrightError, ValueError):
-                document = None
+            if document is None:
                 problems.append("the answer is not JSON")
             for path, wanted in step.expect.json_.items():
                 try:
@@ -153,33 +204,54 @@ class JourneyRunner:
                     seen[path] = "(absent)"
                     problems.append(f"json {path} absent")
                     continue
-                seen[path] = value
+                shown = redaction.scrub(path, value, wanted, self.redactor)
+                seen[path] = shown
                 if not same_json(value, wanted):
-                    problems.append(f"json {path} = {json.dumps(value)}")
+                    problems.append(f"json {path} = {json.dumps(shown)}")
         snapshot = self._write(
             self._name(journey_id, number, step, ".api.json"),
             json.dumps(seen, indent=2, ensure_ascii=False) + "\n",
         )
         observed = "; ".join(problems) if problems else f"status {answer.status}"
         if problems:
-            raise _Failed(one_line(observed), snapshot)
-        return one_line(observed), snapshot
+            raise _Failed(self._line(observed), snapshot)
+        return self._line(observed), snapshot
 
     # -- the browser -------------------------------------------------------
     @staticmethod
     def _role(page: Page, named: Named):
         return page.get_by_role(named.role, name=named.name, exact=True).first
 
+    @staticmethod
+    def _published(running: Running, url: str) -> str:
+        """Where the guide's *url* is on this stack, or StepFailed when nowhere."""
+        match = LOCAL_URL.match(url)
+        port = int(match["port"]) if match else 0
+        if port not in running.published:
+            served = ", ".join(str(p) for p in sorted(running.published)) or "none"
+            raise StepFailed(
+                f"{url}: the stack serves nothing on port {port} by default"
+                f" (docker-compose.yml's default ports here: {served})"
+            )
+        return running.published[port] + (match["path"] or "/")
+
     def _act(self, step: Step, page: Page, running: Running):
-        """Do the step's action; the navigation's response for a goto."""
+        """Do the step's action; the navigation's response for a goto or an open."""
         do = step.do
+        if do.open is not None:
+            target = self._published(running, do.open)
         try:
             if do.goto is not None:
                 return page.goto(urljoin(running.base_url, do.goto.lstrip("/")))
+            if do.open is not None:
+                return page.goto(target)
             if do.click is not None:
                 self._role(page, do.click).click()
             elif do.fill is not None:
-                page.get_by_label(do.fill.label, exact=True).fill(do.fill.value)
+                value = do.fill.value
+                if do.fill.secret is not None:
+                    value = self.secrets[do.fill.secret]
+                page.get_by_label(do.fill.label, exact=True).fill(value)
             elif do.select is not None:
                 page.get_by_label(do.select.label, exact=True).select_option(
                     label=do.select.option
@@ -189,17 +261,49 @@ class JourneyRunner:
                 page.get_by_role("textbox", name="Search", exact=True).fill(do.search)
         except PlaywrightError as error:
             raise StepFailed(
-                f"could not {describe_action(step)}: {one_line(error, 160)}"
+                f"could not {describe_action(step)}: {self._line(error, 160)}"
             ) from None
         return None
 
+    def _keep_step(self, step: Step, page: Page) -> str:
+        """Read the one element's text and keep it; never written, only its length."""
+        keep = step.do.keep
+        within = keep.within
+        element = page.get_by_role(
+            within.role, name=within.name, exact=True
+        ).get_by_role(keep.role)
+        where = f'the {keep.role} in the {within.role} "{within.name}"'
+        self._holds(
+            lambda: expect(element).to_have_count(1),
+            f'not exactly one {keep.role} in the {within.role} "{within.name}"',
+        )
+        try:
+            value = element.inner_text().strip()
+        except PlaywrightError as error:
+            raise StepFailed(
+                f"could not read {where}: {self._line(error, 160)}"
+            ) from None
+        if len(value) < redaction.MIN_LENGTH:
+            raise StepFailed(
+                f"{where} holds {len(value)} characters, fewer than"
+                f" {redaction.MIN_LENGTH}"
+            )
+        self.redactor.add(value)
+        self.secrets[keep.secret] = value
+        return f"kept {where} as {keep.secret} ({len(value)} characters)"
+
     @staticmethod
-    def _holds(check, failure: str) -> None:
-        """Run a Playwright expectation; a failure says *failure*, not the call log."""
+    def _holds(check, failure) -> None:
+        """Run a Playwright expectation; a failure says *failure*, not the call log.
+
+        *failure* is the line, or a function that writes it when the
+        expectation has failed: a line naming where the page is must be
+        written then, not before the expectation's wait began.
+        """
         try:
             check()
         except AssertionError:
-            raise StepFailed(failure) from None
+            raise StepFailed(failure() if callable(failure) else failure) from None
 
     def _search_step(self, step: Step, page: Page, running: Running) -> str:
         self._act(step, page, running)
@@ -366,7 +470,7 @@ class JourneyRunner:
             checked, what, problems, asked_twice, running.source_ref
         )
         if problems:
-            raise _Failed(one_line(observed), snapshot)
+            raise _Failed(self._line(observed), snapshot)
         if not checked:
             raise _Failed(f"no {what} to check", snapshot)
         return observed, snapshot
@@ -376,36 +480,51 @@ class JourneyRunner:
         wanted = step.expect
 
         def here() -> str:
-            return urlparse(page.url).path or "/"
+            # The document's own location. Measured 2026-10-06 on the
+            # dashboard's development server: seconds after Log out, page.url
+            # still read /admin/users while location was /login?next=...
+            try:
+                return str(page.evaluate("location.pathname")) or "/"
+            except PlaywrightError:
+                return urlparse(page.url).path or "/"
 
         if wanted.status is not None:
             status = response.status if response is not None else None
             if status != wanted.status:
                 raise StepFailed(f"status {status}, expected {wanted.status}")
         if wanted.url is not None:
-            url = urljoin(running.base_url, wanted.url.lstrip("/"))
+            base = running.base_url
+            if step.do.open is not None:
+                opened = urlparse(page.url)
+                base = f"{opened.scheme}://{opened.netloc}/"
+            url = urljoin(base, wanted.url.lstrip("/"))
             self._holds(
                 lambda: expect(page).to_have_url(url),
-                f"at {here()}, not {wanted.url}",
+                lambda: f"at {here()}, not {wanted.url}",
             )
         for named in wanted.visible or []:
             self._holds(
                 lambda named=named: expect(self._role(page, named)).to_be_visible(),
-                f'no {named.role} "{named.name}" visible at {here()}',
+                lambda named=named: (
+                    f'no {named.role} "{named.name}" visible at {here()}'
+                ),
             )
         if wanted.text is not None:
             self._holds(
                 lambda: expect(
                     page.get_by_text(wanted.text, exact=True).first
                 ).to_be_visible(),
-                f'no text "{wanted.text}" visible at {here()}',
+                lambda: f'no text "{wanted.text}" visible at {here()}',
             )
         if wanted.number is not None:
             number = wanted.number
             element = self._role(page, number.locator)
             self._holds(
                 lambda: expect(element).to_be_visible(),
-                f'no {number.locator.role} "{number.locator.name}" visible at {here()}',
+                lambda: (
+                    f'no {number.locator.role} "{number.locator.name}"'
+                    f" visible at {here()}"
+                ),
             )
             shown = parse_number(element.inner_text())
             oracle = ORACLES[number.oracle.name](**number.oracle.args)
@@ -416,7 +535,9 @@ class JourneyRunner:
                 lambda: expect(page.locator("body")).to_match_aria_snapshot(
                     wanted.aria
                 ),
-                f"the screen at {here()} does not match its expected ARIA snapshot",
+                lambda: (
+                    f"the screen at {here()} does not match its expected ARIA snapshot"
+                ),
             )
         observed = f"at {here()}"
         if response is not None:
@@ -430,7 +551,11 @@ class JourneyRunner:
         settings = self.settings
         options: Dict[str, Any] = {"viewport": VIEWPORT}
         video_dir = settings.run_dir / "videos" / journey_id
-        if journey.video and settings.record_video:
+        self.secrets = {}
+        for name in journey.passwords:
+            self.secrets[name] = redaction.make_password()
+            self.redactor.add(self.secrets[name])
+        if journey.video and settings.record_video and not journey.has_secrets:
             options.update(record_video_dir=str(video_dir), record_video_size=VIEWPORT)
         context = self.browser.new_context(**options)
         context.set_default_timeout(settings.timeout_ms)
@@ -510,7 +635,7 @@ class JourneyRunner:
             expected_snapshot = self._expected_nav(
                 running, self._name(journey_id, number, step, ".expected.json")
             )
-        elif step.do.crawl == "links":
+        elif step.do.crawl == "links" or step.do.kind == "keep":
             expected_snapshot = STRUCTURAL_ONLY
         base = {
             "run": self.settings.run_id,
@@ -547,6 +672,8 @@ class JourneyRunner:
                 observed, snapshot = self._crawl_step(
                     step, page, running, request, journey_id, number
                 )
+            elif step.do.kind == "keep":
+                observed = self._keep_step(step, page)
             else:
                 if step.do.kind == "search":
                     observed = self._search_step(step, page, running)
@@ -558,9 +685,12 @@ class JourneyRunner:
         except _Failed as failure:
             observed, snapshot, result = failure.observed, failure.snapshot, FAIL
         except (AssertionError, PlaywrightError, KeyError) as error:
-            observed, result = one_line(error) or type(error).__name__, FAIL
-            if step.in_browser:
+            observed = self._line(error) or type(error).__name__
+            result = FAIL
+            if step.takes_screenshot:
                 snapshot = self._screen(page, journey_id, number, step)
+            elif step.in_browser:
+                snapshot = self._no_screen(journey_id, number, step, observed)
             else:
                 suffix = ".crawl.json" if step.do.kind == "crawl" else ".api.json"
                 snapshot = self._write(
@@ -572,7 +702,7 @@ class JourneyRunner:
             **base,
             result=result,
             reason="",
-            observed=observed,
+            observed=self.redactor.redact(observed),
             snapshot=snapshot,
             ms=ms,
         )

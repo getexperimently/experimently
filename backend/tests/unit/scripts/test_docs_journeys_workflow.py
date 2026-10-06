@@ -20,6 +20,13 @@ pinned rather than reviewed once:
   crawls say which they compared the site with) and the video switch; every
   upload is of the run directory or a file in it, kept 14 days (90 on a
   release tag);
+* nothing from the run directory leaves the job unless the runner's scan of it
+  for the values the run made up, kept or signed in for ran and removed
+  nothing: its ``secret-scan.json`` is there and lists no removed file. Every
+  upload of a path under the run directory and every step that reads from it
+  waits for that; the one exception is ``verdicts.json``, written again after
+  a hit with the journey FAIL, which needs only the record and keeps its own
+  gate;
 * the report job runs only after verdicts were written; it posts only on a
   scheduled run on ``main``, and every step of the workflow whose script posts
   (``gh issue create|comment``, ``gh api``) is that one step with that
@@ -91,6 +98,32 @@ CLOSE_LINE = (
     "-f state=closed -f state_reason=completed > /dev/null"
 )
 RETENTION = "${{ startsWith(github.ref, 'refs/tags/v') && 90 || 14 }}"
+SCANNED = "Run directory scanned"
+#: The scan ran and removed nothing: the run directory may leave the job.
+CLEAN_IF = "always() && steps.scanned.outputs.clean == 'true'"
+#: The scan ran: verdicts.json (scanned, and FAIL for a journey it caught) may.
+RECORDED_IF = "always() && steps.scanned.outputs.recorded == 'true'"
+SCANNED_LINES = [
+    "set -euo pipefail",
+    'RECORD="$RUNNER_TEMP/docs-journeys-run/secret-scan.json"',
+    'if [ ! -f "$RECORD" ]; then',
+    "printf '%s\\n' '::warning title=Docs journeys::the run directory was not"
+    " scanned, so it is not uploaded'",
+    "exit 0",
+    "fi",
+    "printf 'recorded=true\\n' >> \"$GITHUB_OUTPUT\"",
+    "if python3 -c 'import json, sys; sys.exit(0 if"
+    ' json.load(open(sys.argv[1]))["removed"] == [] else 1)\' "$RECORD"; then',
+    "printf 'clean=true\\n' >> \"$GITHUB_OUTPUT\"",
+    "else",
+    "printf '%s\\n' '::warning title=Docs journeys::a file of the run held a value"
+    " the run kept, so the run directory is not uploaded'",
+    "fi",
+]
+#: The steps that read the run directory, and the scan each waits for.
+AFTER_SCAN = {"Step summary": CLEAN_IF, "Verdicts written": RECORDED_IF}
+VERDICTS_PATH = RUN_DIR + "/verdicts.json"
+VERDICTS_UPLOAD_IF = "always() && steps.verdicts.outputs.written == 'true'"
 POSTS = re.compile(
     r"\bgh\s+(?:issue|pr)\s+(?:create|comment|edit|close|reopen|review)\b"
 )
@@ -222,6 +255,52 @@ def workflow_problems(doc: Dict[Any, Any], text: str) -> List[str]:
         for name, value in (step.get("env") or {}).items():
             if name == "GH_TOKEN" and value != "${{ github.token }}":
                 found.append("GH_TOKEN is not the workflow's own token")
+    names = [step.get("name") for step in steps_of(doc)]
+    scanned = _named(doc, SCANNED)
+    if (
+        scanned is None
+        or scanned.get("id") != "scanned"
+        or _condition(scanned) != "always()"
+        or _lines(scanned) != SCANNED_LINES
+        or WALK not in names
+        or names.index(SCANNED) < names.index(WALK)
+    ):
+        found.append(
+            "the run directory's secret-scan.json is not checked after the walk"
+        )
+    for name, condition in AFTER_SCAN.items():
+        step = _named(doc, name)
+        if step is None or _condition(step) != condition:
+            found.append(f"{name} does not wait for the run directory's scan")
+        elif scanned is not None and names.index(name) < names.index(SCANNED):
+            found.append(f"{name} runs before the run directory's scan is checked")
+    for index, step in enumerate(steps_of(doc)):
+        settings = step.get("with") or {}
+        name = step.get("name") or f"step {index + 1}"
+        path = str(settings.get("path", ""))
+        if "upload-artifact" in str(step.get("uses") or "") and path.startswith(
+            RUN_DIR
+        ):
+            if path == VERDICTS_PATH:
+                if _condition(step) != VERDICTS_UPLOAD_IF:
+                    found.append("verdicts.json is uploaded without its own gate")
+            elif _condition(step) != CLEAN_IF:
+                found.append(
+                    f"{path} is uploaded without a clean scan of the run directory"
+                )
+            continue
+        # A step reads the run directory whatever way the path reaches it: its
+        # script, its `with`, its `env`, its working directory, or the variable
+        # the Walk step's environment names it by.
+        text = " ".join(
+            [str(step.get("run") or ""), str(step.get("working-directory") or "")]
+            + [str(value) for value in settings.values()]
+            + [str(value) for value in (step.get("env") or {}).values()]
+        )
+        reads = "docs-journeys-run" in text or "DOCS_JOURNEY_RUN_DIR" in text
+        if reads and name not in (SCANNED, *AFTER_SCAN) and step.get("name") != WALK:
+            if _condition(step) != CLEAN_IF:
+                found.append(f"{name} reads the run directory without a clean scan")
     post = _named(doc, POST)
     if post is None or _condition(post) != POST_IF:
         found.append("posting is not limited to a scheduled run on main")
@@ -604,6 +683,143 @@ PLANTS: List[tuple] = [
             'docs-site.md" >> "$GITHUB_STEP_SUMMARY"',
         ),
         "step summary other than summary.md",
+    ),
+    (
+        "upload-unscanned",
+        lambda doc, text: (
+            next(
+                s for s in steps_of(doc) if (s.get("with") or {}).get("path") == RUN_DIR
+            ).update({"if": "always()"})
+            or doc,
+            text,
+        ),
+        "uploaded without a clean scan",
+    ),
+    (
+        "upload-when-the-scan-removed-files",
+        lambda doc, text: (
+            next(
+                s for s in steps_of(doc) if (s.get("with") or {}).get("path") == RUN_DIR
+            ).update({"if": RECORDED_IF})
+            or doc,
+            text,
+        ),
+        "uploaded without a clean scan",
+    ),
+    (
+        "videos-uploaded-ungated",
+        _upload(RUN_DIR + "/videos"),
+        "/videos is uploaded without a clean scan",
+    ),
+    (
+        "stack-log-uploaded-ungated",
+        _upload(RUN_DIR + "/stacks/compose-dev.log"),
+        "compose-dev.log is uploaded without a clean scan",
+    ),
+    (
+        "verdicts-upload-ungated",
+        lambda doc, text: (
+            next(
+                s
+                for s in steps_of(doc)
+                if (s.get("with") or {}).get("path") == VERDICTS_PATH
+            ).update({"if": "always()"})
+            or doc,
+            text,
+        ),
+        "verdicts.json is uploaded without its own gate",
+    ),
+    (
+        "summary-when-the-scan-removed-files",
+        _step_set("Step summary", "if", RECORDED_IF),
+        "Step summary does not wait",
+    ),
+    (
+        "a-reader-through-env-ungated",
+        lambda doc, text: (
+            doc["jobs"]["journeys"]["steps"].append(
+                {
+                    "name": "List the run",
+                    "if": "always()",
+                    "env": {"D": "${{ runner.temp }}/docs-journeys-run"},
+                    "run": 'ls "$D"',
+                }
+            )
+            or doc,
+            text,
+        ),
+        "List the run reads the run directory without a clean scan",
+    ),
+    (
+        "a-reader-through-working-directory-ungated",
+        lambda doc, text: (
+            doc["jobs"]["journeys"]["steps"].append(
+                {
+                    "name": "Size the results",
+                    "if": "always()",
+                    "working-directory": "${{ runner.temp }}/docs-journeys-run",
+                    "run": "wc -c results.jsonl",
+                }
+            )
+            or doc,
+            text,
+        ),
+        "Size the results reads the run directory without a clean scan",
+    ),
+    (
+        "a-reader-through-the-run-dir-variable-ungated",
+        lambda doc, text: (
+            doc["jobs"]["journeys"]["steps"].append(
+                {
+                    "name": "Size by name",
+                    "if": "always()",
+                    "run": 'wc -c "$DOCS_JOURNEY_RUN_DIR/results.jsonl"',
+                }
+            )
+            or doc,
+            text,
+        ),
+        "Size by name reads the run directory without a clean scan",
+    ),
+    (
+        "a-new-reader-ungated",
+        lambda doc, text: (
+            doc["jobs"]["journeys"]["steps"].append(
+                {
+                    "name": "Count the results",
+                    "if": "always()",
+                    "run": 'wc -l "$RUNNER_TEMP/docs-journeys-run/results.jsonl"',
+                }
+            )
+            or doc,
+            text,
+        ),
+        "Count the results reads the run directory without a clean scan",
+    ),
+    (
+        "clean-whatever-the-scan-removed",
+        _replace_in(SCANNED, '["removed"] == []', '["files_read"] >= 0'),
+        "secret-scan.json is not checked",
+    ),
+    (
+        "summary-unscanned",
+        _step_set("Step summary", "if", "always()"),
+        "Step summary does not wait",
+    ),
+    (
+        "verdicts-unscanned",
+        _step_set("Verdicts written", "if", "always()"),
+        "Verdicts written does not wait",
+    ),
+    (
+        "scan-of-another-file",
+        _replace_in(SCANNED, "secret-scan.json", "summary.md"),
+        "secret-scan.json is not checked",
+    ),
+    (
+        "scan-checked-only-on-success",
+        _step_set(SCANNED, "if", "success()"),
+        "secret-scan.json is not checked",
     ),
     (
         "annotation-with-a-value",

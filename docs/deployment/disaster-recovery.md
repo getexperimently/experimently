@@ -311,8 +311,10 @@ The restored cluster gets the original's subnet group, VPC groups and cluster pa
 `--copy-tags-to-snapshot`; its writer gets the original writer's class, parameter group, promotion
 tier and tags. `restore` then refuses unless both match the original on every setting it compares
 (`parity.diff`): a restore given no parameter group gets the engine's default one, with no error,
-and loses the settings the database stack makes. Last, it runs two one-off tasks of the migration
-task definition in the API tasks' subnets, with the stack's database credentials. The first marks
+and loses the settings the database stack makes, the cluster's `timezone`, `rds.force_ssl` and
+`shared_preload_libraries` and the instances' logging and `work_mem`. Last, it runs two one-off
+tasks of the migration task definition in the API tasks' subnets, with the stack's database
+credentials. The first marks
 the restored database, which also proves those credentials open it; the second checks that the
 original reads as unmarked. `password authentication failed` in `probe.log` means the password was
 changed after the restore time: set the restored cluster's master password to the secret's value
