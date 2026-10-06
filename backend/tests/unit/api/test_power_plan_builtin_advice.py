@@ -12,6 +12,7 @@ never happened.
 
 import anthropic
 import pytest
+from anthropic import _base_client
 from fastapi.testclient import TestClient
 
 from backend.app.main import app
@@ -39,6 +40,10 @@ def constructed(monkeypatch):
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test-not-a-key")
     monkeypatch.setattr(anthropic, "Anthropic", record)
     monkeypatch.setattr(anthropic, "AsyncAnthropic", record)
+    # A class bound at import time (`from anthropic import Anthropic`) is not the
+    # module attribute; every client's base constructor is.
+    monkeypatch.setattr(_base_client.SyncAPIClient, "__init__", record)
+    monkeypatch.setattr(_base_client.AsyncAPIClient, "__init__", record)
     return calls
 
 
