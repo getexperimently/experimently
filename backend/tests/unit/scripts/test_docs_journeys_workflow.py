@@ -289,9 +289,15 @@ def workflow_problems(doc: Dict[Any, Any], text: str) -> List[str]:
                     f"{path} is uploaded without a clean scan of the run directory"
                 )
             continue
-        reads = "docs-journeys-run" in str(step.get("run") or "") or any(
-            "docs-journeys-run" in str(value) for value in settings.values()
+        # A step reads the run directory whatever way the path reaches it: its
+        # script, its `with`, its `env`, its working directory, or the variable
+        # the Walk step's environment names it by.
+        text = " ".join(
+            [str(step.get("run") or ""), str(step.get("working-directory") or "")]
+            + [str(value) for value in settings.values()]
+            + [str(value) for value in (step.get("env") or {}).values()]
         )
+        reads = "docs-journeys-run" in text or "DOCS_JOURNEY_RUN_DIR" in text
         if reads and name not in (SCANNED, *AFTER_SCAN) and step.get("name") != WALK:
             if _condition(step) != CLEAN_IF:
                 found.append(f"{name} reads the run directory without a clean scan")
@@ -727,6 +733,53 @@ PLANTS: List[tuple] = [
         "summary-when-the-scan-removed-files",
         _step_set("Step summary", "if", RECORDED_IF),
         "Step summary does not wait",
+    ),
+    (
+        "a-reader-through-env-ungated",
+        lambda doc, text: (
+            doc["jobs"]["journeys"]["steps"].append(
+                {
+                    "name": "List the run",
+                    "if": "always()",
+                    "env": {"D": "${{ runner.temp }}/docs-journeys-run"},
+                    "run": 'ls "$D"',
+                }
+            )
+            or doc,
+            text,
+        ),
+        "List the run reads the run directory without a clean scan",
+    ),
+    (
+        "a-reader-through-working-directory-ungated",
+        lambda doc, text: (
+            doc["jobs"]["journeys"]["steps"].append(
+                {
+                    "name": "Size the results",
+                    "if": "always()",
+                    "working-directory": "${{ runner.temp }}/docs-journeys-run",
+                    "run": "wc -c results.jsonl",
+                }
+            )
+            or doc,
+            text,
+        ),
+        "Size the results reads the run directory without a clean scan",
+    ),
+    (
+        "a-reader-through-the-run-dir-variable-ungated",
+        lambda doc, text: (
+            doc["jobs"]["journeys"]["steps"].append(
+                {
+                    "name": "Size by name",
+                    "if": "always()",
+                    "run": 'wc -c "$DOCS_JOURNEY_RUN_DIR/results.jsonl"',
+                }
+            )
+            or doc,
+            text,
+        ),
+        "Size by name reads the run directory without a clean scan",
     ),
     (
         "a-new-reader-ungated",

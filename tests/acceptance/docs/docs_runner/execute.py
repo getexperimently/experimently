@@ -64,7 +64,14 @@ from docs_runner.checks import (
 )
 from docs_runner.guide import Guide
 from docs_runner.log import FAIL, NOT_RUN, PASS, STRUCTURAL_ONLY, Log, Record
-from docs_runner.model import LOCAL_URL, SEARCH_TOP, Journey, Named, Step
+from docs_runner.model import (
+    LOCAL_URL,
+    SEARCH_TOP,
+    Journey,
+    Named,
+    Step,
+    reveals_credential,
+)
 from docs_runner.oracles import ORACLES
 from docs_runner.stacks import Running
 
@@ -183,6 +190,10 @@ class JourneyRunner:
             # Every credential the answer holds, written or not, is looked for
             # in every file the run writes from here on.
             redaction.register_credentials(document, self.redactor)
+            # `key` is left out of that rule (experiment keys are public), but
+            # a credential route answers its plaintext secret under `key`.
+            if reveals_credential(step) and isinstance(document, dict):
+                self.redactor.add_all(document.get("key"))
         if step.expect.json_:
             if document is None:
                 problems.append("the answer is not JSON")

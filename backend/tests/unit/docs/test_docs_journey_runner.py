@@ -28,7 +28,7 @@ import tempfile
 import textwrap
 import tomllib
 from pathlib import Path
-from typing import Any, Callable, Dict, List
+from typing import Any, Callable, Dict, List, Optional
 
 import pytest
 import yaml
@@ -2940,3 +2940,83 @@ def test_one_more_sign_in_is_over_the_limit():
     planted = [journeys[0].model_copy(update={"steps": [*journeys[0].steps, extra]})]
     counts = sign_in_counts(planted + journeys[1:])
     assert counts["sign_ins"] == SIGN_INS_TODAY + 1 > 10
+
+
+# -- screenshots in a journey with secrets, and the plaintext key -------------
+class _FakeLocator:
+    def __init__(self, what):
+        self.what = what
+
+    def aria_snapshot(self):
+        return "- main"
+
+
+class _FakePage:
+    def __init__(self):
+        self.masks: Optional[list] = None
+
+    def get_by_text(self, value):
+        return _FakeLocator(("text", value))
+
+    def locator(self, selector):
+        return _FakeLocator(("locator", selector))
+
+    def screenshot(self, path, mask):
+        self.masks = [m.what for m in mask]
+        Path(path).write_bytes(b"png")
+
+
+FIELDS = ("locator", "input, textarea, [contenteditable]")
+
+
+@pytest.mark.parametrize("secrets", [{}, {"pw": "S3cretValue9xyz"}])
+def test_a_screenshot_masks_every_field_exactly_when_the_journey_has_secrets(
+    tmp_path, execute_module, secrets
+):
+    from docs_runner.model import Step
+
+    step = Step.model_validate(
+        {
+            "id": "screen",
+            "doc": "x",
+            "do": {"api": {"method": "GET", "path": "/me", "as": "anonymous"}},
+            "fail": "x",
+        }
+    )
+    runner = _runner(execute_module, tmp_path)
+    runner.secrets = dict(secrets)
+    page = _FakePage()
+    runner._screen(page, "j", 1, step)
+    assert page.masks is not None, "no screenshot was taken"
+    assert (FIELDS in page.masks) == bool(secrets)
+    for value in secrets.values():
+        assert ("text", value) in page.masks
+
+
+def test_the_plaintext_key_a_credential_route_answers_is_looked_for(
+    tmp_path, execute_module
+):
+    from docs_runner import redaction
+    from docs_runner.model import Step
+    from docs_runner.stacks import Running
+
+    step = Step.model_validate(
+        {
+            "id": "new-key",
+            "doc": "x",
+            "do": {
+                "api": {"method": "POST", "path": "/api/v1/api-keys", "as": "anonymous"}
+            },
+            "expect": {"status": 201},
+            "fail": "x",
+        }
+    )
+    secret = "eptk_live_PLAINTEXT_SECRET_9999"
+    runner = _runner(execute_module, tmp_path)
+    running = Running(name="compose-dev", base_url="http://dash/", api_url="http://api")
+    runner._api_step(
+        step, running, _FakeApi(_FakeAnswer(201, {"key": secret, "name": "k"})), "j", 1
+    )
+    assert secret in runner.redactor.values
+    (tmp_path / "later.aria.yml").write_text(f"- text: {secret}\n")
+    assert redaction.scan(tmp_path, runner.redactor.values)[1] == ["later.aria.yml"]
