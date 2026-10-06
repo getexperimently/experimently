@@ -449,7 +449,7 @@ was copied.
 Step 4: Find out whether the key was used. The platform records little about a key's use, and
 none of it can list what one key did:
 
-- **`last_used_at`** on the key's row is when the key last authenticated a request. The API writes
+- **`last_used_at`** on the key's row is when the key last authenticated a request, in UTC. The API writes
   it at most once a minute per key, so it can trail the last request by up to a minute. Step 1
   printed it, and an inactive key keeps it. An ADMIN can read it with
   `GET /api/v1/api-keys?all=true&include_inactive=true`, and a superuser in the **Last used**

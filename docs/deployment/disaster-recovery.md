@@ -275,9 +275,14 @@ CLUSTER_PARAMETER_GROUP=$(aws rds describe-db-clusters --db-cluster-identifier "
 INSTANCE_PARAMETER_GROUP=$(aws rds describe-db-instances \
   --filters "Name=db-cluster-id,Values=$CLUSTER" \
   --query 'DBInstances[0].DBParameterGroups[0].DBParameterGroupName' --output text)
+INSTANCE_CLASS=$(aws rds describe-db-instances \
+  --filters "Name=db-cluster-id,Values=$CLUSTER" \
+  --query 'DBInstances[0].DBInstanceClass' --output text)
 ```
 
-The instance's group can be read only while the original cluster still has an instance. If
+The instance's group and class can be read only while the original cluster still has an instance.
+If `INSTANCE_CLASS` is `None`, use the class the database stack gives this environment
+(`db.r5.large` in `prod`, `db.t3.medium` elsewhere). If
 `INSTANCE_PARAMETER_GROUP` is `None`, read it from the database stack instead (its one
 `AWS::RDS::DBParameterGroup`), and do not leave `--db-parameter-group-name` out of the instance
 command below:
@@ -308,14 +313,14 @@ aws rds wait db-cluster-available \
   --db-cluster-identifier "$CLUSTER-restored"
 ```
 
-Add a writer instance in the instance parameter group (prod's instances are db.r5.large):
+Add a writer instance of the original's class, in the instance parameter group:
 
 ```bash
 aws rds create-db-instance \
   --db-instance-identifier "$CLUSTER-restored-1" \
   --db-cluster-identifier "$CLUSTER-restored" \
   --engine aurora-postgresql \
-  --db-instance-class db.r5.large \
+  --db-instance-class "$INSTANCE_CLASS" \
   --db-parameter-group-name "$INSTANCE_PARAMETER_GROUP"
 
 aws rds wait db-instance-available \

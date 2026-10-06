@@ -643,6 +643,8 @@ def test_the_restore_reads_and_passes_the_original_clusters_settings():
         "INSTANCE_PARAMETER_GROUP=$(aws rds describe-db-instances",
         '--filters "Name=db-cluster-id,Values=$CLUSTER"',
         "'DBInstances[0].DBParameterGroups[0].DBParameterGroupName'",
+        "INSTANCE_CLASS=$(aws rds describe-db-instances",
+        "'DBInstances[0].DBInstanceClass'",
     ):
         assert read in section, read
     blocks = re.findall(r"```bash\n(.*?)```", section, re.S)
@@ -651,9 +653,39 @@ def test_the_restore_reads_and_passes_the_original_clusters_settings():
     assert '--db-cluster-parameter-group-name "$CLUSTER_PARAMETER_GROUP"' in restore
     assert "--copy-tags-to-snapshot" in restore
     assert '--db-parameter-group-name "$INSTANCE_PARAMETER_GROUP"' in create
-    # No group name is typed into a command.
+    assert '--db-instance-class "$INSTANCE_CLASS"' in create
+    # No group name or instance class is typed into a command.
     for block in (restore, create):
         assert not re.search(r"parameter-group-name\s+[^\s$\"']", block), block
+    assert not re.search(r"--db-instance-class\s+[^\s$\"']", create), create
+
+
+def _key_rotation_section() -> str:
+    """secrets-management.md's "Rotate Compromised API Key" section."""
+    page = (DOCS / "deployment" / "secrets-management.md").read_text(encoding="utf-8")
+    start = page.index("### Rotate Compromised API Key")
+    end = page.find("\n### ", start + 1)
+    return page[start : end if end != -1 else len(page)]
+
+
+@pytest.mark.regression
+def test_the_key_rotation_runbook_names_what_the_api_writes():
+    """#251: the runbook searched a log group no stack creates, filtered on a
+    field the API never writes, used a `date` form that fails on macOS, and
+    made the replacement key with no scopes. Each claim is pinned to the code."""
+    section = _key_rotation_section()
+    stack = (
+        REPO_ROOT / "infrastructure" / "cdk" / "stacks" / "fargate_service_stack.py"
+    ).read_text(encoding="utf-8")
+    assert 'log_group_name=f"/ecs/experimentation-backend-{env_name}"' in stack
+    assert "/ecs/experimentation-backend-$ENV" in section
+    assert "/experimentation-platform/api" not in section
+    assert "date -d" not in section
+    assert '"scopes"' in section, "step 2 must recreate the key with its scopes"
+    for page in DOCS.rglob("*.md"):
+        assert "api_key_prefix" not in page.read_text(encoding="utf-8"), page
+    api_keys = (DOCS / "security" / "api-keys.md").read_text(encoding="utf-8")
+    assert "not updated when a key is used" not in api_keys
 
 
 #: The recovery pages' AWS CLI commands the flag check below reads: page ->
