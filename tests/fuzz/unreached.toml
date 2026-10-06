@@ -1394,4 +1394,4 @@ reason = "Takes a key with the sdk:ruleset scope; the pass's sdk-contract key ha
 [[unreached]]
 pass = "sdk"
 operation = "POST /api/v1/tracking/events"
-reason = "Takes stored experiment, flag and variant ids; generated ones never name a stored row, so every request answers 422."
+reason = "Takes stored experiment, flag and variant ids. Generated ids are not UUIDs and answer 422; a UUID that names no stored row answers 404 (test_an_id_that_names_nothing_answers_404_naming_the_field in backend/tests/integration/api/test_tracking_events_unknown_ids.py)."

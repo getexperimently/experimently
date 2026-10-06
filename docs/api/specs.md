@@ -894,6 +894,8 @@ POST /api/v1/tracking/events
 
 Same as `/tracking/track` but addressed by internal ids (`experiment_id`, `variant_id`,
 `feature_flag_id`) instead of keys; used by server-side integrations and seeding tools.
+An id that names no stored row answers 404, the detail naming the field (for example
+`No variant has that variant_id.`), and nothing is stored; an id that is not a UUID answers 422.
 
 #### Get User Assignments
 
