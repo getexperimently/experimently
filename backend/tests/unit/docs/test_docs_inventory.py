@@ -13,7 +13,9 @@ what verifies it. The file's header is the contract; this test holds it:
 * a ``journey`` names its id, a slug no other page uses, and either its
   expectations file ``tests/acceptance/docs/journeys/<id>.yaml`` exists or the
   entry says ``pending = true`` (refused once the file exists, so a pending
-  flag cannot outlive the journey it stands for);
+  flag cannot outlive the journey it stands for) and ``planned``, the pull
+  request that writes it (one of ``PLANNED``; only on a pending journey, so
+  the run summary can say where each journey not yet written comes from);
 * an ``exec`` page is enrolled in ``scripts/doc_examples.toml`` with at least
   one exec block, and a ``workflow`` page names a workflow that exists;
 * every flow of #939 (``FLOWS_939``, copied from the issue) is mapped, to
@@ -57,10 +59,12 @@ SLUG = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*")
 
 #: The fields each class may carry; ``class`` and ``reason`` are required on all.
 FIELDS: Dict[str, Set[str]] = {
-    "journey": {"class", "reason", "journey", "pending"},
+    "journey": {"class", "reason", "journey", "pending", "planned"},
     "workflow": {"class", "reason", "workflow"},
 }
 PLAIN_FIELDS = {"class", "reason"}
+#: The pull requests of the QA plan (#897, #939) a pending journey may name.
+PLANNED: Tuple[str, ...] = ("D2", "D3a", "D3b", "unassigned")
 FLOW_FIELDS = {"text", "note", "journeys", "pages", "classes"}
 
 #: The "Flows, at least" list of #939, verbatim but for each line's closing
@@ -267,6 +271,13 @@ def problems(
                     f"{key}: journey {journey!r} has no expectations file"
                     f" journeys/{journey}.yaml and is not pending = true"
                 )
+            if entry.get("pending") is True and entry.get("planned") not in PLANNED:
+                found.append(
+                    f"{key}: a pending journey names the pull request that writes it:"
+                    f" planned = one of {', '.join(PLANNED)}"
+                )
+            elif entry.get("pending") is not True and "planned" in entry:
+                found.append(f"{key}: planned is only for a pending journey")
         elif family == "exec":
             if enrolled.get(key, 0) < 1:
                 found.append(
@@ -377,6 +388,7 @@ GOOD = """
 class = "journey"
 journey = "a-journey"
 pending = true
+planned = "D3a"
 reason = "walked"
 
 [pages."b.md"]
@@ -495,7 +507,7 @@ PLANTS = [
         id="journey-without-id",
     ),
     pytest.param(
-        GOOD.replace("pending = true\n", "") + _flows(),
+        GOOD.replace('pending = true\nplanned = "D3a"\n', "") + _flows(),
         NAV,
         {},
         "has no expectations file",
@@ -509,6 +521,27 @@ PLANTS = [
         id="pending-after-the-file-exists",
     ),
     pytest.param(
+        GOOD.replace('planned = "D3a"\n', "") + _flows(),
+        NAV,
+        {},
+        "a.md: a pending journey names the pull request that writes it",
+        id="pending-without-planned",
+    ),
+    pytest.param(
+        GOOD.replace('planned = "D3a"', 'planned = "D9"') + _flows(),
+        NAV,
+        {},
+        "a.md: a pending journey names the pull request that writes it",
+        id="planned-unknown",
+    ),
+    pytest.param(
+        GOOD.replace("pending = true\n", "") + _flows(),
+        NAV,
+        {"written": {"a-journey"}},
+        "a.md: planned is only for a pending journey",
+        id="planned-on-a-written-journey",
+    ),
+    pytest.param(
         GOOD.replace("pending = true", "pending = false") + _flows(),
         NAV,
         {},
@@ -519,7 +552,7 @@ PLANTS = [
         GOOD.replace(
             'class = "reference"\nreason = "nothing to walk"',
             'class = "journey"\njourney = "a-journey"\n'
-            'pending = true\nreason = "nothing to walk"',
+            'pending = true\nplanned = "D3b"\nreason = "nothing to walk"',
         )
         + _flows(),
         NAV,

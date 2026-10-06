@@ -141,6 +141,11 @@ def read(path: Path) -> List[Record]:
 def run_directory(environ: Mapping[str, str], repo_root: Path) -> Path:
     """``DOCS_JOURNEY_RUN_DIR``, or a new temporary directory when it is unset.
 
+    The one place a run directory is made: ``conftest.py`` calls it when the
+    session starts if the variable is set (so a bad one stops the session at
+    once), and otherwise only when a journey first runs, so a session that runs
+    no journey makes no directory at all.
+
     ValueError when it is inside *repo_root*: a run writes nothing into the
     tree.
     """

@@ -32,9 +32,16 @@ A command that cannot be started at all (no ``docker``, no ``npm``) is a
 first step rather than ending the session.
 * ``docs-local``: ``mkdocs build`` into a temporary directory, served by
   ``python -m http.server`` on 127.0.0.1 (``DOCS_JOURNEY_DOCS_PORT``, else a
-  free port). Needs the docs toolchain (``scripts/docs_toolchain.sh``).
+  free port). Needs the docs toolchain (``scripts/docs_toolchain.sh``). Its
+  source is this checkout.
 * ``docs-published``: ``DOCS_JOURNEY_PUBLISHED_URL``, by default the site's
-  ``site_url``. Only an https URL is accepted.
+  ``site_url``. Only an https URL is accepted. Its source (what a crawl
+  compares the site with: ``site.py``) is ``DOCS_JOURNEY_PUBLISHED_SOURCE``, a
+  directory holding the ``mkdocs.yml`` and ``docs/`` the published site was
+  built from. The site is deployed from release tags, not from ``main``, so
+  ``docs-journeys.yml`` sets it to the commit of the site's last successful
+  deployment; unset, it is this checkout, which is right only when the
+  checkout is that commit.
 * ``marketing-local``: ``npm run build:marketing`` in ``frontend/`` (which needs
   its ``node_modules``), then ``frontend/out`` served like docs-local
   (``DOCS_JOURNEY_MARKETING_PORT``, else a free port). The build writes Next's
@@ -104,6 +111,8 @@ class Running:
     api_url: str = ""
     profile: str = ""
     accounts: Mapping[str, Tuple[str, str]] = field(default_factory=dict)
+    #: For a documentation site: the directory it was built from.
+    source: Optional[Path] = None
 
 
 def free_port() -> int:
@@ -338,7 +347,9 @@ class DocsLocal:
                 + "; its output is in stacks/docs-local.log"
             )
         self.server = _StaticServer(self.site, self.port or free_port())
-        self.running = Running(name="docs-local", base_url=self.server.start())
+        self.running = Running(
+            name="docs-local", base_url=self.server.start(), source=self.repo_root
+        )
         return self.running
 
     def down(self) -> None:
@@ -355,9 +366,16 @@ class DocsPublished:
         if not url.startswith("https://"):
             raise StackError(f"DOCS_JOURNEY_PUBLISHED_URL={url!r} is not an https URL")
         self.url = url if url.endswith("/") else url + "/"
+        raw = environ.get("DOCS_JOURNEY_PUBLISHED_SOURCE", "")
+        self.source = Path(raw) if raw else repo_root
 
     def up(self, profile: str = "") -> Running:
-        return Running(name="docs-published", base_url=self.url)
+        if not (self.source / "mkdocs.yml").is_file():
+            raise StackError(
+                f"DOCS_JOURNEY_PUBLISHED_SOURCE={self.source} holds no mkdocs.yml:"
+                " it must be the directory the published site was built from"
+            )
+        return Running(name="docs-published", base_url=self.url, source=self.source)
 
     def down(self) -> None:
         return None

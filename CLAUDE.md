@@ -1120,6 +1120,11 @@ recursion. Two consequences, both certain to recur:
   ref, and the bot's tag triggers nothing, so after each release run
   `gh workflow run docs.yml --ref vX.Y.Z`. A pre-release tag (anything with a
   `-`, e.g. `v1.2.0-rc.1`) does not deploy (#776).
+- **Then walk the docs.** Once that deploy has finished, run
+  `gh workflow run docs-journeys.yml --ref vX.Y.Z`: the docs journeys (#939)
+  on the release's own commit, including the crawl of the site just
+  published, with their artifacts kept 90 days. `release-please.yml` does not
+  start it (a dispatch, like the docs deploy).
 
 A tag pushed by a human token DOES trigger workflows, which is why a
 hand-pushed tag behaves differently: `release.yml` runs from the push.

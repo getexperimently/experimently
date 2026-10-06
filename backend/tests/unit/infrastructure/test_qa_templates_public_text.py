@@ -715,6 +715,11 @@ WORKFLOW_POSTERS: Dict[str, Tuple[str, str]] = {
         "legacy-inline",
         "the doc-examples-failure issue: date, commit and run link",
     ),
+    "workflows/docs-journeys.yml": (
+        "template",
+        "the docs-journey-failure issue of each failing guide and its comments,"
+        " and the run's summary, rendered by scripts/qa_render.py",
+    ),
     "workflows/nightly-qa.yml": (
         "legacy-inline",
         "the nightly-failure issue (date, commit, run link) and one summary line",

@@ -1,27 +1,44 @@
 """What a reader of a run sees: a report per guide, and the run's summary.
 
-Per guide, in Markdown and in HTML: a verdict line, one sentence
-saying whether a reader following the guide can finish it, the table of steps
-(what the guide says to do, what was expected before the run, what was seen,
-the result) and, for each FAIL, the expected snapshot and the observed snapshot
-side by side. A FAIL whose expected or observed snapshot is missing is refused
+Per guide, in Markdown and in HTML: a header saying the verdict and whether a
+reader following the guide can finish it, the table of steps (what the guide
+says to do, what was expected before the run, what was seen, the result) and,
+for each FAIL, the expected snapshot and the observed snapshot side by side. A
+FAIL whose expected or observed snapshot is missing is refused
 (``ReportError``): a report that drops one of the two would leave the reader
 comparing against nothing.
 
 The run's summary (``summary.md``, also the job summary): the counts, one row
 per guide that ran, every page of the inventory not covered by a journey that
-ran, with its class and reason, and how each flow of #939 is verified.
+ran, with its class and reason, and how each flow of #939 is verified, where a
+journey not written yet shows as planned in the pull request the inventory
+names, never as verified.
+
+The headers are the QA templates (``.github/qa-templates/docs-guide-*.tmpl``
+for a guide, ``docs-run-*.tmpl`` for the summary), rendered by
+``scripts/qa_render.py``, the one renderer of those templates, because the
+workflow posts them: the summary is the run's step summary, and a failing
+guide's header is the body of its issue. That needs what a run in this
+repository's Actions has: a commit and a link to the run (``RunInfo``). A run
+without them (one on a laptop, say) is posted nowhere; its headers say the
+same in a plain line of their own.
 """
 
 from __future__ import annotations
 
 import html
+import importlib
+import re
+import sys
+import unicodedata
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
 from docs_runner import registry
 from docs_runner.log import FAIL, NOT_RUN, PASS, STRUCTURAL_ONLY, Record
+
+REPO_ROOT = Path(__file__).resolve().parents[4]
 
 #: The longest snapshot shown inline; the file itself is always complete.
 SNAPSHOT_LINES = 200
@@ -114,6 +131,145 @@ def verdict(run: GuideRun) -> Verdict:
 
 
 # ---------------------------------------------------------------------------
+# The headers: the QA templates, rendered by scripts/qa_render.py
+# ---------------------------------------------------------------------------
+def qa_render():
+    """``scripts/qa_render.py``, the one renderer of ``.github/qa-templates/``."""
+    scripts = str(REPO_ROOT / "scripts")
+    if scripts not in sys.path:
+        sys.path.insert(0, scripts)
+    return importlib.import_module("qa_render")
+
+
+@dataclass(frozen=True)
+class RunInfo:
+    """The run a report belongs to: its UTC date, its commit, its link."""
+
+    date: str
+    sha: str
+    run_link: str = ""
+
+    @property
+    def published(self) -> bool:
+        """True when the templates accept the commit and the link: a CI run."""
+        renderer = qa_render()
+        try:
+            renderer.check_value("date", self.date)
+            renderer.check_value("sha", self.sha)
+            renderer.check_value("run_link", self.run_link)
+        except renderer.RenderError:
+            return False
+        return True
+
+
+_FOLD = str.maketrans(
+    {
+        "\u2014": "-",
+        "\u2013": "-",
+        "\u2018": "'",
+        "\u2019": "'",
+        "\u201c": '"',
+        "\u201d": '"',
+    }
+)
+_NOT_IN_A_HEADING = re.compile(r"[@<>${}`\\]")
+_URL_SHAPE = re.compile(r"[a-z][a-z0-9+.-]*://|www\.", re.I)
+
+
+def heading_value(text: str) -> str:
+    """A guide's heading as the templates take one: plain ASCII on one line.
+
+    Dashes and quotes become their ASCII forms, accents are dropped, and the
+    characters a template heading refuses become spaces. The guide's own
+    heading stays in the table below the header.
+    """
+    folded = unicodedata.normalize("NFKD", text.translate(_FOLD))
+    folded = folded.encode("ascii", "ignore").decode("ascii")
+    folded = _URL_SHAPE.sub(" ", _NOT_IN_A_HEADING.sub(" ", folded))
+    folded = " ".join(folded.split())[:120].strip()
+    return folded or "untitled"
+
+
+def header_template(run: GuideRun, info: RunInfo) -> Tuple[str, Dict[str, str]]:
+    """The template of *run*'s header and its values."""
+    result = verdict(run)
+    ran = [record for record in run.records if record.reason != registry.DOC_EXAMPLES]
+    passed = sum(1 for record in ran if record.result == PASS)
+    values = {
+        "heading_guide": heading_value(run.title),
+        "guide_path": run.guide,
+        "date": info.date,
+        "sha": info.sha,
+    }
+    if result.word == "PASS":
+        return "docs-guide-pass.tmpl", {**values, "count_steps": str(passed)}
+    if result.word == "PARTIAL":
+        not_run = sum(1 for record in ran if record.result == NOT_RUN)
+        return "docs-guide-partial.tmpl", {
+            **values,
+            "count_not_run": str(not_run),
+            "count_steps_pass": str(passed),
+            "count_steps": str(len(ran)),
+        }
+    first = result.first_failure
+    return "docs-guide-fail.tmpl", {
+        **values,
+        "step_number": str(first.step if first is not None else 1),
+        "heading_step": heading_value(
+            first.heading if first is not None else run.title
+        ),
+        "run_link": info.run_link,
+        "count_steps_pass": str(passed),
+        "count_steps": str(max(len(ran), 1)),
+    }
+
+
+def render(name: str, values: Mapping[str, str]) -> str:
+    """Template *name* rendered; ReportError when the renderer refuses it."""
+    renderer = qa_render()
+    try:
+        return renderer.render(name, values).body
+    except renderer.RenderError as error:
+        raise ReportError(f"{name}: {error}") from None
+
+
+def guide_header(run: GuideRun, info: RunInfo) -> str:
+    """The header of *run*'s report, Markdown: a template, or the plain line."""
+    if info.published:
+        return render(*header_template(run, info))
+    result = verdict(run)
+    return (
+        f"# {run.title} ({run.guide}), {info.date}, commit {info.sha}: {result.line}\n"
+        f"\n{result.sentence}\n"
+    )
+
+
+def _note(run: GuideRun, result: Verdict) -> str:
+    """What the verdict says that the template header does not."""
+    if run.refused or run.error or result.word == "PARTIAL":
+        return result.sentence
+    if (
+        result.word == "PASS"
+        and result.sentence != "A reader following this guide can finish it."
+    ):
+        return result.sentence.removeprefix(
+            "A reader following this guide can finish it. "
+        )
+    return ""
+
+
+def _header_html(markdown: str) -> str:
+    parts = []
+    for block in markdown.strip().split("\n\n"):
+        text = " ".join(block.split())
+        if text.startswith("# "):
+            parts.append(f"<h1>{html.escape(text[2:])}</h1>")
+        else:
+            parts.append(f"<p>{html.escape(text)}</p>")
+    return "\n".join(parts)
+
+
+# ---------------------------------------------------------------------------
 # Snapshots
 # ---------------------------------------------------------------------------
 @dataclass
@@ -203,14 +359,15 @@ WHAT_TO_DO = (
 )
 
 
-def guide_markdown(run: GuideRun, run_dir: Path, *, date: str, sha: str) -> str:
+def guide_markdown(
+    run: GuideRun, run_dir: Path, *, date: str, sha: str, run_link: str = ""
+) -> str:
     result = verdict(run)
-    lines = [
-        f"# {run.title} ({run.guide}), {date}, commit {sha}: {result.line}",
-        "",
-        result.sentence,
-        "",
-    ]
+    info = RunInfo(date, sha, run_link)
+    lines = guide_header(run, info).rstrip("\n").split("\n") + [""]
+    note = _note(run, result) if info.published else ""
+    if note:
+        lines += [note, ""]
     if run.refused:
         lines += ["The journey file was refused:", ""]
         lines += [f"- {_cell(problem)}" for problem in run.refused]
@@ -242,10 +399,16 @@ def guide_markdown(run: GuideRun, run_dir: Path, *, date: str, sha: str) -> str:
     return "\n".join(lines) + "\n"
 
 
-def guide_html(run: GuideRun, run_dir: Path, *, date: str, sha: str) -> str:
+def guide_html(
+    run: GuideRun, run_dir: Path, *, date: str, sha: str, run_link: str = ""
+) -> str:
     result = verdict(run)
+    info = RunInfo(date, sha, run_link)
     title = f"{run.title} ({run.guide}), {date}, commit {sha}: {result.line}"
-    body = [f"<h1>{html.escape(title)}</h1>", f"<p>{html.escape(result.sentence)}</p>"]
+    body = [_header_html(guide_header(run, info))]
+    note = _note(run, result) if info.published else ""
+    if note:
+        body.append(f"<p>{html.escape(note)}</p>")
     if run.refused:
         body.append("<p>The journey file was refused:</p><ul>")
         body += [f"<li>{html.escape(problem)}</li>" for problem in run.refused]
@@ -311,12 +474,127 @@ def not_covered(
     return rows
 
 
+#: What each class of the inventory means for a flow, in a summary cell.
+CLASS_MEANING = {
+    "journey": "walked in a browser by its journey",
+    "exec": "its shell examples run in Doc Examples",
+    "workflow": "run by the workflow its entry names",
+    "reference": "nothing to walk; the docs-site journey checks it answers with its heading",
+    "aws": "NOT RUN: needs an AWS account",
+    "device": "NOT RUN: needs a mobile toolchain and a device",
+    "external": "NOT RUN: needs a third-party account or service",
+}
+
+
+def _family(cls: str) -> str:
+    return "external" if cls.startswith("external:") else cls
+
+
+def _planned(entry: Mapping[str, Any]) -> str:
+    planned = str(entry.get("planned", ""))
+    if planned in ("", "unassigned"):
+        return "planned, no pull request assigned yet"
+    return f"planned in {planned}"
+
+
+def flow_rows(
+    inventory: Mapping[str, Any], verdicts: Mapping[str, Verdict]
+) -> Tuple[List[Tuple[str, str, str, str]], Dict[str, List[str]]]:
+    """Per flow of #939: (flow, journeys, other pages and classes, in this run).
+
+    And the journeys not written yet, by where they are planned. A planned
+    journey is never counted as verified: the flow says it waits on it.
+    """
+    pages = inventory.get("pages", {})
+    journey_entry = {
+        str(entry.get("journey")): entry
+        for entry in pages.values()
+        if entry.get("class") == "journey"
+    }
+    waiting: Dict[str, List[str]] = {}
+    rows = []
+    for flow in inventory.get("flow", []):
+        cells, ran, failed, planned, not_run = [], [], [], [], []
+        for journey in flow.get("journeys", []):
+            entry = journey_entry.get(journey, {})
+            if journey in verdicts:
+                cells.append(f"{journey}: {verdicts[journey].line}")
+                ran.append(journey)
+                if verdicts[journey].word == FAIL:
+                    failed.append(journey)
+            elif entry.get("pending") is True:
+                cells.append(f"{journey}: {_planned(entry)}")
+                planned.append(f"{journey} ({_planned(entry)})")
+                where = _planned(entry)
+                if journey not in waiting.setdefault(where, []):
+                    waiting[where].append(journey)
+            else:
+                cells.append(f"{journey}: not run in this run")
+                not_run.append(journey)
+        others = []
+        for page in flow.get("pages", []):
+            entry = pages.get(page, {})
+            cls = str(entry.get("class", ""))
+            others.append(f"{page} ({cls}: {entry.get('reason', '')})")
+        for cls in flow.get("classes", []):
+            count = sum(1 for entry in pages.values() if entry.get("class") == cls)
+            others.append(
+                f"every {cls} page ({count}): {CLASS_MEANING.get(_family(cls), cls)}"
+            )
+        if failed:
+            state = "FAIL: " + ", ".join(failed)
+        elif planned:
+            state = "not verified yet: waits on " + ", ".join(planned)
+            if ran:
+                state = f"partly: {', '.join(ran)} ran; " + state
+        elif not_run:
+            state = "not verified in this run: " + ", ".join(not_run) + " did not run"
+        elif ran:
+            state = "verified by " + ", ".join(ran)
+            if others:
+                state += ", and by its pages' classes"
+        else:
+            state = "by its pages' classes"
+        rows.append(
+            (str(flow.get("text", "")), "; ".join(cells), "; ".join(others), state)
+        )
+    return rows, waiting
+
+
+def summary_header(
+    counts: Mapping[str, int], nav: int, missing: int, info: RunInfo, red: bool
+) -> str:
+    """The summary's first lines: ``docs-run-*.tmpl``, or the plain line."""
+    if info.published:
+        values = {
+            "date": info.date,
+            "sha": info.sha,
+            "count_pass": str(counts["PASS"]),
+            "count_fail": str(counts["FAIL"]),
+            "count_partial": str(counts["PARTIAL"]),
+            "count_nav": str(nav),
+            "count_not_covered": str(missing),
+        }
+        if red:
+            values["run_link"] = info.run_link
+        return render("docs-run-red.tmpl" if red else "docs-run-green.tmpl", values)
+    word = "RED" if red else "GREEN"
+    return (
+        f"Docs journeys, {info.date}, commit {info.sha}: {word} (a run outside this"
+        " repository's Actions, posted nowhere)\n\n"
+        f"Guides: {counts['PASS']} pass, {counts['FAIL']} fail, {counts['PARTIAL']}"
+        f" partial, of {nav} pages in the nav. Not covered: {missing} pages, each"
+        " listed below with its reason.\n"
+    )
+
+
 def summary_markdown(
     runs: Sequence[GuideRun],
     inventory: Mapping[str, Any],
     *,
     date: str,
     sha: str,
+    run_link: str = "",
 ) -> str:
     verdicts: Dict[str, Verdict] = {run.journey: verdict(run) for run in runs}
     counts = dict.fromkeys(("PASS", "FAIL", "PARTIAL"), 0)
@@ -324,19 +602,17 @@ def summary_markdown(
         counts[result.word] += 1
     pages = inventory.get("pages", {})
     missing = not_covered(inventory, runs)
-    if counts["FAIL"] or not runs:
-        overall = "FAIL"
-    elif counts["PARTIAL"]:
-        overall = "PARTIAL"
-    else:
-        overall = "PASS"
-    lines = [
-        f"# Docs journeys, {date}, commit {sha}: {overall}, {len(runs)} guide(s) run",
-        f"Guides: {counts['PASS']} pass, {counts['FAIL']} fail, {counts['PARTIAL']}"
-        f" partial of {len(pages)} in the nav. Not covered: {len(missing)}"
-        " page(s), listed below.",
-        "",
-    ]
+    red = bool(counts["FAIL"]) or not runs
+    lines = (
+        summary_header(
+            counts, len(pages), len(missing), RunInfo(date, sha, run_link), red
+        )
+        .rstrip("\n")
+        .split("\n")
+    )
+    lines.append("")
+    if not runs:
+        lines += ["No journey ran, so nothing was verified.", ""]
     if runs:
         lines += ["| Guide | Journey | Stack | Result |", "|---|---|---|---|"]
         for run in runs:
@@ -354,21 +630,56 @@ def summary_markdown(
         ]
     else:
         lines.append("Every page in the nav was covered.")
-    lines += ["", "## How each flow of #939 is verified", ""]
-    flows = inventory.get("flow", [])
+    rows, waiting = flow_rows(inventory, verdicts)
+    verified = sum(1 for row in rows if row[3].startswith("verified by"))
     lines += [
-        "| Flow | Journeys (this run) | Pages | Classes | Note |",
-        "|---|---|---|---|---|",
+        "",
+        "## How each flow of #939 is verified",
+        "",
+        f"{verified} of {len(rows)} flows are verified by journeys that ran in this"
+        " run. A journey whose expectations are not written yet is not counted:"
+        " its flow shows it as planned, in the pull request the inventory names.",
+        "",
+        "| Flow | Journeys | Other pages and classes | In this run |",
+        "|---|---|---|---|",
     ]
-    for flow in flows:
-        journeys = ", ".join(
-            f"{journey} ({verdicts[journey].line if journey in verdicts else 'not run'})"
-            for journey in flow.get("journeys", [])
-        )
-        lines.append(
-            f"| {_cell(flow.get('text', ''))} | {_cell(journeys)}"
-            f" | {_cell(', '.join(flow.get('pages', [])))}"
-            f" | {_cell(', '.join(flow.get('classes', [])))}"
-            f" | {_cell(flow.get('note', ''))} |"
-        )
+    lines += [
+        f"| {_cell(text)} | {_cell(journeys)} | {_cell(others)} | {_cell(state)} |"
+        for text, journeys, others, state in rows
+    ]
+    if waiting:
+        lines += ["", "Journeys not written yet:", ""]
+        lines += [
+            f"- {where}: {', '.join(journeys)}"
+            for where, journeys in sorted(waiting.items())
+        ]
     return "\n".join(lines) + "\n"
+
+
+def verdicts_record(runs: Sequence[GuideRun], info: RunInfo) -> Dict[str, Any]:
+    """Each journey's verdict and its header's template and values.
+
+    ``verdicts.json`` in the run directory: what ``scripts/docs_journeys_report.py``
+    reads, in this run and in the runs before it, to keep each failing guide's
+    issue. Empty values when the run is not one the templates accept.
+    """
+    journeys: Dict[str, Any] = {}
+    for run in runs:
+        result = verdict(run)
+        name, values = header_template(run, info) if info.published else ("", {})
+        first = result.first_failure
+        journeys[run.journey] = {
+            "guide": run.guide,
+            "word": result.word,
+            "step": first.step
+            if first is not None
+            else (1 if result.word == FAIL else 0),
+            "template": name,
+            "values": values,
+        }
+    return {
+        "date": info.date,
+        "sha": info.sha,
+        "run_link": info.run_link,
+        "journeys": journeys,
+    }

@@ -98,8 +98,8 @@ the same pull request, and its name starts with its kind.
 | `fuzz-red.tmpl` | each fuzzing pass | the step summary of a red pass, and each comment on the open fuzzing issue |
 | `fuzz-issue.tmpl` | API fuzzing | the issue opened on the first red pass; its body is `fuzz-red.tmpl` |
 | `docs-run-green.tmpl`, `docs-run-red.tmpl` | the docs journeys | the top of the run's step summary |
-| `docs-guide-pass.tmpl`, `docs-guide-fail.tmpl`, `docs-guide-partial.tmpl` | the docs journeys | the top of each guide's report |
-| `docs-journey-issue.tmpl` | the docs journeys | one issue per failing guide; its body is `docs-guide-fail.tmpl` |
+| `docs-guide-pass.tmpl`, `docs-guide-fail.tmpl`, `docs-guide-partial.tmpl` | the docs journeys | the top of each guide's report; pass or partial is also the comment that closes the guide's issue |
+| `docs-journey-issue.tmpl` | the docs journeys | one issue per failing guide (rules below); its body is `docs-guide-fail.tmpl`, and a comment when the failing step changes |
 | `docs-defect-issue.tmpl` | the docs journeys | one issue per measured docs defect (rules below) |
 
 Each output says what it is in its first two lines. Its first line carries its
@@ -135,6 +135,28 @@ reader.
 
 `scripts/synthetic_report.py` applies these rules and
 `backend/tests/unit/scripts/test_synthetic_report.py` pins them.
+
+## The docs journeys' issues
+
+`docs-journeys.yml` follows these rules; `scripts/docs_journeys_report.py`
+applies them and `backend/tests/unit/scripts/test_docs_journeys_report.py`
+pins them.
+
+1. One issue per failing guide, labelled `docs-journey-failure`, opened from
+   `docs-journey-issue.tmpl` when the guide has failed in 2 scheduled runs in a
+   row. The runs are nightly: one red night can be the site or the network
+   for a moment, and a third night would add a day before anyone hears.
+2. While it is open, a comment (the issue's body, rendered for the new run) is
+   added only when the guide's failing step differs from the step the issue
+   or its latest comment names.
+3. The first run in which the guide passes, or runs with nothing failing but
+   some steps not run, comments the guide's report header from that run
+   (`docs-guide-pass.tmpl` or `docs-guide-partial.tmpl`) and closes the issue.
+4. A run that wrote no verdicts (the journeys did not start), or in which the
+   guide did not run, counts as neither a failure nor a pass.
+5. Only a scheduled run on `main` posts. Any other run (a dispatch, a release
+   run, a run on another branch) prints in its log what a scheduled run with
+   its results would post, and posts nothing.
 
 ## Rendering
 

@@ -40,7 +40,7 @@ RUNNER_ROOT = REPO_ROOT / "tests" / "acceptance" / "docs"
 if str(RUNNER_ROOT) not in sys.path:
     sys.path.insert(0, str(RUNNER_ROOT))
 
-from docs_runner import checks, loader, log, registry, report
+from docs_runner import checks, loader, log, registry, report, site
 from docs_runner import guide as guides
 from docs_runner.model import Journey
 
@@ -87,6 +87,7 @@ INVENTORY: Dict[str, Any] = {
             "class": "journey",
             "journey": "later",
             "pending": True,
+            "planned": "D3a",
             "reason": "to be walked",
         },
     },
@@ -566,6 +567,50 @@ PLANTS = [
         {},
         "video: Input should be a valid boolean",
         id="quoted-bool",
+    ),
+    pytest.param(
+        _on_step(
+            "environment",
+            lambda s: s["expect"].update(aria='- combobox "Environment"'),
+        ),
+        {},
+        "step 3 (environment): snapshot: false drops the ARIA snapshot, but"
+        " expect.aria gives one",
+        id="snapshot-false-with-aria",
+    ),
+    pytest.param(
+        _on_step(
+            "environment",
+            lambda s: s.update(expect={"aria": '- combobox "Environment"'}),
+        ),
+        {},
+        "step 3 (environment): a step with snapshot: false needs a structural"
+        " expect (url, status, visible, text, number)",
+        id="snapshot-false-with-only-aria",
+    ),
+    pytest.param(
+        _on_step("open", lambda s: s["expect"].update(found="/guides/sample/")),
+        {},
+        "step 1 (open): found is the page a search finds; goto has none",
+        id="found-on-a-goto",
+    ),
+    pytest.param(
+        _on_step("open", lambda s: (s.pop("expect"), s.update(do={"crawl": "nav"}))),
+        {},
+        "step 1 (open): crawl is for the documentation site's stacks"
+        " (docs-local, docs-published); compose-dev serves no site",
+        id="crawl-on-compose-dev",
+    ),
+    pytest.param(
+        _on_step(
+            "open",
+            lambda s: s.update(
+                do={"search": "sign in"}, expect={"found": "/guides/sample/"}
+            ),
+        ),
+        {},
+        "step 1 (open): search is for the documentation site's stacks",
+        id="search-on-compose-dev",
     ),
 ]
 
@@ -1059,10 +1104,13 @@ def test_the_summary_lists_every_page_not_covered_and_every_flow(tmp_path):
     )
     text = report.summary_markdown([passed], INVENTORY, date="2026-10-06", sha="abc")
     lines = text.splitlines()
-    assert lines[0] == "# Docs journeys, 2026-10-06, commit abc: PASS, 1 guide(s) run"
-    assert lines[1] == (
-        "Guides: 1 pass, 0 fail, 0 partial of 3 in the nav. Not covered: 2 page(s),"
-        " listed below."
+    assert lines[0] == (
+        "Docs journeys, 2026-10-06, commit abc: GREEN (a run outside this"
+        " repository's Actions, posted nowhere)"
+    )
+    assert lines[2] == (
+        "Guides: 1 pass, 0 fail, 0 partial, of 3 pages in the nav. Not covered: 2"
+        " pages, each listed below with its reason."
     )
     assert "| guides/other.md | reference | nothing to walk |" in text
     assert (
@@ -1070,14 +1118,18 @@ def test_the_summary_lists_every_page_not_covered_and_every_flow(tmp_path):
         " written yet; to be walked |"
     ) in text
     assert "guides/sample.md | journey |" not in text
-    assert "| Quick Start, end to end | sample (PASS), later (not run) |" in text
+    assert (
+        "| Quick Start, end to end | sample: PASS; later: planned in D3a |  |"
+        " partly: sample ran; not verified yet: waits on later (planned in D3a) |"
+    ) in text
+    assert "0 of 1 flows are verified by journeys that ran in this run." in text
+    assert "- planned in D3a: later" in text
 
 
 def test_the_summary_of_an_empty_run_is_red():
     text = report.summary_markdown([], INVENTORY, date="2026-10-06", sha="abc")
-    assert text.splitlines()[0].startswith(
-        "# Docs journeys, 2026-10-06, commit abc: FAIL"
-    )
+    assert text.splitlines()[0].startswith("Docs journeys, 2026-10-06, commit abc: RED")
+    assert "No journey ran, so nothing was verified." in text
 
 
 # ---------------------------------------------------------------------------
@@ -1179,6 +1231,10 @@ def _runner_copy(tmp_path: Path, test_body: str) -> Path:
     (here / "test_journeys.py").write_text(test_body)
     (root / "scripts").mkdir()
     shutil.copy(REPO_ROOT / "scripts" / "doc_examples.toml", root / "scripts")
+    shutil.copy(REPO_ROOT / "scripts" / "qa_render.py", root / "scripts")
+    shutil.copytree(
+        REPO_ROOT / ".github" / "qa-templates", root / ".github" / "qa-templates"
+    )
     (root / "backend" / "tests").mkdir(parents=True)
     (root / "backend" / "__init__.py").write_text("")
     (root / "backend" / "tests" / "__init__.py").write_text("")
@@ -1274,3 +1330,628 @@ def test_the_runner_bans_skips_and_writes_nothing_into_the_tree():
     ini = (RUNNER_ROOT / "pytest.ini").read_text(encoding="utf-8")
     assert "empty_parameter_set_mark = fail_at_collect" in ini
     assert "-p no:cacheprovider" in ini
+
+
+# ---------------------------------------------------------------------------
+# The documentation site's own steps: crawl and search
+# ---------------------------------------------------------------------------
+SITE: Dict[str, Any] = {
+    "guide": "guides/sample.md",
+    "stack": "docs-published",
+    "profile": "core",
+    "video": True,
+    "written": TODAY,
+    "steps": [
+        {
+            "id": "nav",
+            "doc": "sign-in",
+            "do": {"crawl": "nav"},
+            "fail": "a nav page differs from its source",
+        },
+        {
+            "id": "links",
+            "doc": "sign-in",
+            "do": {"crawl": "links"},
+            "fail": "a link to the site is broken",
+        },
+        {
+            "id": "find",
+            "doc": "sign-in",
+            "do": {"search": "sign in"},
+            "expect": {"found": "/guides/sample/"},
+            "fail": "search does not find the guide",
+        },
+    ],
+}
+
+
+def _site(change: Callable[[Dict[str, Any]], None]) -> Dict[str, Any]:
+    data = copy.deepcopy(SITE)
+    change(data)
+    return data
+
+
+def test_a_site_journey_loads(tmp_path):
+    journey = _load(tmp_path, SITE)
+    assert [step.do.kind for step in journey.steps] == ["crawl", "crawl", "search"]
+    assert not journey.steps[0].in_browser
+    assert journey.steps[2].takes_screenshot
+    assert checks.describe_expect(journey.steps[2]) == (
+        "/guides/sample/ among the first 3 results"
+    )
+    assert checks.describe_action(journey.steps[1]) == (
+        "follow every link to the site from the nav pages and their source"
+    )
+    assert "first # heading" in checks.describe_expect(journey.steps[0])
+
+
+SITE_PLANTS = [
+    pytest.param(
+        lambda d: d["steps"][0].update(expect={"status": 200}),
+        "crawl: nav checks what the action says; it has no expect",
+        id="crawl-with-expect",
+    ),
+    pytest.param(
+        lambda d: d["steps"][1].update(snapshot=False, snapshot_reason="none"),
+        "a crawl step takes no ARIA snapshot; leave snapshot out",
+        id="crawl-with-snapshot",
+    ),
+    pytest.param(
+        lambda d: d["steps"][0]["do"].update(crawl="everything"),
+        "'everything' is not one of the values allowed here",
+        id="unknown-crawl",
+    ),
+    pytest.param(
+        lambda d: d["steps"][2].pop("expect"),
+        "a search step needs expect.found, the page it must find",
+        id="search-without-found",
+    ),
+    pytest.param(
+        lambda d: d["steps"][2]["expect"].update(aria="- heading"),
+        "a search step expects only found, not ['aria']",
+        id="search-with-aria",
+    ),
+    pytest.param(
+        lambda d: d["steps"][2]["expect"].update(found="guides/sample/"),
+        "String should match pattern",
+        id="found-not-a-path",
+    ),
+    pytest.param(
+        lambda d: d["steps"][2]["do"].update(search="sign\nin"),
+        "must be one line",
+        id="multi-line-search",
+    ),
+    pytest.param(
+        lambda d: d.update(stack="marketing-local"),
+        "crawl is for the documentation site's stacks",
+        id="crawl-on-marketing",
+    ),
+]
+
+
+@pytest.mark.parametrize("change, expected", SITE_PLANTS)
+def test_a_planted_site_step_is_refused(tmp_path, change, expected):
+    problems = _refusals(tmp_path, _site(change))
+    assert any(expected in problem for problem in problems), problems
+
+
+MKDOCS = """site_name: Sample
+site_url: https://example.github.io/sample/
+docs_dir: docs
+nav:
+  - Home: README.md
+  - Guides:
+    - Sample: guides/sample.md
+    - Twice: guides/sample.md
+    - Index: guides/index.md
+  - Outside: https://example.com/
+"""
+
+
+def _source(
+    root: Path, sample_heading: str = "Sample guide", extra: str = ""
+) -> site.Source:
+    (root / "docs" / "guides").mkdir(parents=True, exist_ok=True)
+    (root / "mkdocs.yml").write_text(MKDOCS)
+    (root / "docs" / "README.md").write_text("# Home *page*\n\nWords.\n")
+    (root / "docs" / "guides" / "sample.md").write_text(
+        f"```bash\n# not a heading\n```\n\n# {sample_heading}\n\n{extra}"
+    )
+    (root / "docs" / "guides" / "index.md").write_text("No heading at all.\n")
+    return site.Source(root)
+
+
+def test_the_nav_pages_their_urls_and_their_source_headings(tmp_path):
+    pages = site.nav_pages(_source(tmp_path))
+    assert pages == [
+        site.NavPage("README.md", "", "Home page"),
+        site.NavPage("guides/sample.md", "guides/sample/", "Sample guide"),
+        site.NavPage("guides/index.md", "guides/", ""),
+    ]
+    assert site.page_url("rbac/README.md") == "rbac/"
+    assert site.page_url("a/b.md") == "a/b/"
+    assert site.site_url(_source(tmp_path)) == "https://example.github.io/sample/"
+
+
+def test_a_source_without_a_nav_or_a_config_is_refused(tmp_path):
+    with pytest.raises(site.SiteError, match="cannot read mkdocs.yml"):
+        site.nav_pages(site.Source(tmp_path))
+    (tmp_path / "mkdocs.yml").write_text("site_name: x\n")
+    with pytest.raises(site.SiteError, match="no nav pages"):
+        site.nav_pages(site.Source(tmp_path))
+
+
+def test_absolute_links_to_the_site_written_in_the_source(tmp_path):
+    source = _source(
+        tmp_path,
+        extra=(
+            "See [power](https://example.github.io/sample/statistics/power/#top).\n"
+            "Again: https://example.github.io/sample/statistics/power/, and\n"
+            "`curl https://example.github.io/sample/api/x.json` and\n"
+            "<https://example.github.io/sample/a/> but not https://example.com/b.\n"
+        ),
+    )
+    assert site.absolute_links(source, ["README.md", "guides/sample.md"]) == [
+        ("guides/sample.md", "https://example.github.io/sample/statistics/power/"),
+        ("guides/sample.md", "https://example.github.io/sample/api/x.json"),
+        ("guides/sample.md", "https://example.github.io/sample/a/"),
+    ]
+
+
+def test_only_links_to_the_site_are_its_links():
+    base = "https://example.github.io/sample/"
+    hrefs = [
+        base,
+        base + "a/#x",
+        base + "a/",
+        "https://example.github.io/sample-other/",
+        "https://github.com/x",
+        "mailto:x@example.com",
+        "https://example.github.io/sample",
+    ]
+    assert site.site_links(hrefs, base) == [
+        base,
+        base + "a/",
+        "https://example.github.io/sample",
+    ]
+
+
+def _fetcher(answers: Dict[str, Any]):
+    def fetch(url: str):
+        answer = answers[url]
+        if isinstance(answer, Exception):
+            raise answer
+        return answer
+
+    return fetch
+
+
+BASE = "https://example.github.io/sample/"
+
+
+@pytest.mark.parametrize(
+    "answers, problem",
+    [
+        ({BASE + "a/": (200, "")}, ""),
+        ({BASE + "a": (301, BASE + "a/"), BASE + "a/": (200, "")}, ""),
+        ({BASE + "a": (301, "/sample/a/"), BASE + "a/": (200, "")}, ""),
+        ({BASE + "a": (404, "")}, "answered 404"),
+        ({BASE + "a": (302, "https://other.example/a/")}, "outside the site"),
+        ({BASE + "a": (301, "")}, "301 with no Location"),
+        ({BASE + "a": (301, BASE + "a")}, "more than 5 redirects"),
+        ({BASE + "a": OSError("down")}, "no answer (OSError)"),
+    ],
+    ids=[
+        "ok",
+        "redirect",
+        "relative-redirect",
+        "404",
+        "out",
+        "no-location",
+        "loop",
+        "down",
+    ],
+)
+def test_a_link_resolves_only_within_the_site(answers, problem):
+    link = next(iter(answers))
+    resolved = site.resolve(link, BASE, _fetcher(answers), pause=lambda s: None)
+    if problem:
+        assert problem in resolved.problem, resolved
+    else:
+        assert resolved.problem == "", resolved
+
+
+def _sequence(*answers):
+    """A fetch that gives *answers* in turn, whatever the URL."""
+    queue = list(answers)
+
+    def fetch(url: str):
+        answer = queue.pop(0)
+        if isinstance(answer, Exception):
+            raise answer
+        return answer
+
+    return fetch
+
+
+@pytest.mark.parametrize(
+    "answers, problem, retried, pauses",
+    [
+        ([(503, ""), (200, "")], "", True, 1),
+        ([OSError("reset"), (200, "")], "", True, 1),
+        ([(503, ""), (503, "")], "answered 503", True, 1),
+        ([OSError("reset"), OSError("reset")], "no answer (OSError)", True, 1),
+        ([(404, "")], "answered 404", False, 0),
+        ([(200, "")], "", False, 0),
+    ],
+    ids=["503-then-ok", "none-then-ok", "503-twice", "none-twice", "404-once", "ok"],
+)
+def test_a_5xx_or_no_answer_is_asked_once_more(answers, problem, retried, pauses):
+    """GitHub Pages answers 503 now and then; a second 5xx is the finding, and
+    a 4xx is never asked again."""
+    waited = []
+    resolved = site.resolve(BASE + "a/", BASE, _sequence(*answers), pause=waited.append)
+    assert resolved.problem.startswith(problem) if problem else resolved.problem == ""
+    assert resolved.retried is retried
+    assert waited == [site.RETRY_SECONDS] * pauses
+
+
+def test_each_way_a_nav_page_can_differ_from_its_source(tmp_path):
+    pages = [
+        site.NavPage("ok.md", "ok/", "Ok"),
+        site.NavPage("renamed.md", "renamed/", "Renamed"),
+        site.NavPage("moved.md", "moved/", "Moved"),
+        site.NavPage("retitled.md", "retitled/", "New title"),
+        site.NavPage("bare.md", "bare/", "Bare"),
+        site.NavPage("untitled.md", "untitled/", ""),
+        site.NavPage("unvisited.md", "unvisited/", "Unvisited"),
+    ]
+    seen = {
+        "ok.md": {"status": 200, "heading": "Ok", "on_site": True},
+        "renamed.md": {"status": 404, "heading": None, "on_site": True},
+        "moved.md": {"status": 200, "heading": "Moved", "on_site": False, "url": "x"},
+        "retitled.md": {"status": 200, "heading": "Old  title", "on_site": True},
+        "bare.md": {"status": 200, "heading": None, "on_site": True},
+        "untitled.md": {"status": 200, "heading": "Something", "on_site": True},
+    }
+    problems = site.compare_headings(pages, seen)
+    assert problems == [
+        "renamed.md (/renamed/): answered 404",
+        "moved.md (/moved/): left the site, to x",
+        "retitled.md (/retitled/): the page's heading is 'Old title', the source's"
+        " first heading is 'New title'",
+        "bare.md (/bare/): no first-level heading on the page",
+        "untitled.md (/untitled/): the source page has no # heading",
+        "unvisited.md (/unvisited/): not visited",
+    ]
+
+
+def test_the_crawl_compares_with_the_source_it_is_given_not_main(tmp_path):
+    """The published site is built from a release tag. A heading changed on
+    main since then must not turn the crawl red, and one changed in the tag's
+    source must: the crawl reads the source the stack names."""
+    tag = _source(tmp_path / "tag", sample_heading="Sample guide")
+    main = _source(tmp_path / "main", sample_heading="Sample guide, renamed on main")
+    published = {  # what the site built from the tag shows
+        "README.md": {"status": 200, "heading": "Home page", "on_site": True},
+        "guides/sample.md": {"status": 200, "heading": "Sample guide", "on_site": True},
+        "guides/index.md": {"status": 200, "heading": "Index", "on_site": True},
+    }
+    against_tag = site.compare_headings(site.nav_pages(tag), published)
+    against_main = site.compare_headings(site.nav_pages(main), published)
+    assert [p for p in against_tag if "sample" in p] == []
+    assert [p for p in against_main if "sample" in p] == [
+        "guides/sample.md (/guides/sample/): the page's heading is 'Sample guide',"
+        " the source's first heading is 'Sample guide, renamed on main'"
+    ]
+
+
+def test_the_published_stack_takes_its_source_from_the_environment(tmp_path):
+    from docs_runner import stacks
+
+    tag = tmp_path / "tag"
+    _source(tag)
+    running = stacks.DocsPublished(
+        tmp_path / "repo", tmp_path, {"DOCS_JOURNEY_PUBLISHED_SOURCE": str(tag)}
+    ).up()
+    assert running.source == tag
+    assert running.base_url == stacks.PUBLISHED_URL
+    unset = stacks.DocsPublished(REPO_ROOT, tmp_path, {}).up()
+    assert unset.source == REPO_ROOT
+    with pytest.raises(stacks.StackError, match="holds no mkdocs.yml"):
+        stacks.DocsPublished(
+            REPO_ROOT, tmp_path, {"DOCS_JOURNEY_PUBLISHED_SOURCE": str(tmp_path / "x")}
+        ).up()
+
+
+def test_a_search_result_is_found_by_its_page():
+    results = [
+        BASE + "llm/quickstart/?h=quick+start",
+        BASE + "getting-started/quick-start/?h=quick+start#top",
+        BASE + "faq/?h=",
+    ]
+    assert site.rank(results, BASE, "/getting-started/quick-start/") == 2
+    assert site.rank(results, BASE, "/getting-started/") is None
+    assert site.rank([], BASE, "/faq/") is None
+
+
+# ---------------------------------------------------------------------------
+# The headers: QA templates through scripts/qa_render.py
+# ---------------------------------------------------------------------------
+SHA = "c6e0f081d82f1a858e111c86db62aa5d8b8a71d4"
+LINK = "https://github.com/getexperimently/experimently/actions/runs/18000000003"
+
+
+def _renderer():
+    return report.qa_render()
+
+
+def test_a_ci_run_renders_its_guide_header_from_the_fail_template(tmp_path):
+    run = _failed_run(tmp_path)
+    text = report.guide_markdown(
+        run, tmp_path, date="2026-10-06", sha=SHA, run_link=LINK
+    )
+    expected = (
+        _renderer()
+        .render(
+            "docs-guide-fail.tmpl",
+            {
+                "heading_guide": "Sample guide",
+                "guide_path": "guides/sample.md",
+                "date": "2026-10-06",
+                "sha": SHA,
+                "step_number": "2",
+                "heading_step": "Sign in",
+                "run_link": LINK,
+                "count_steps_pass": "1",
+                "count_steps": "3",
+            },
+        )
+        .body
+    )
+    assert text.startswith(expected.rstrip("\n") + "\n")
+    html_text = report.guide_html(
+        run, tmp_path, date="2026-10-06", sha=SHA, run_link=LINK
+    )
+    assert "<h1>Sample guide (guides/sample.md), 2026-10-06, commit " in html_text
+    assert "What to do: compare the expected and seen snapshots of step 2" in html_text
+
+
+def test_a_ci_run_renders_pass_and_partial_headers():
+    def run(*records):
+        return report.GuideRun(
+            "s", "README.md", "Rollback — Experimently", "x", records=records
+        )
+
+    info = report.RunInfo("2026-10-06", SHA, LINK)
+    passed = run(_record(), _record(step=2, result="NOT RUN", reason="doc-examples"))
+    name, values = report.header_template(passed, info)
+    assert name == "docs-guide-pass.tmpl"
+    assert values["count_steps"] == "1"
+    assert values["heading_guide"] == "Rollback - Experimently"
+    assert report.guide_header(passed, info).startswith(
+        "# Rollback - Experimently (README.md), 2026-10-06, commit "
+    )
+    partial = run(_record(), _record(step=2, result="NOT RUN", reason="needs-aws"))
+    name, values = report.header_template(partial, info)
+    assert name == "docs-guide-partial.tmpl"
+    assert (values["count_not_run"], values["count_steps_pass"]) == ("1", "1")
+
+
+@pytest.mark.parametrize(
+    "text, folded",
+    [
+        ("Rollback Runbook — Experimently", "Rollback Runbook - Experimently"),
+        ("Café “quoted”", 'Cafe "quoted"'),
+        ("Costs $5 <b>", "Costs 5 b"),
+        ("See https://example.org now", "See example.org now"),
+        ("x" * 130, "x" * 120),
+        ("☃", "untitled"),
+    ],
+)
+def test_a_heading_is_folded_to_what_a_template_takes(text, folded):
+    assert report.heading_value(text) == folded
+    _renderer().check_value("heading_step", report.heading_value(text))
+
+
+def test_a_header_the_renderer_refuses_fails_the_report(tmp_path):
+    run = report.GuideRun("s", "guides/../x.md", "T", "x", records=(_record(),))
+    with pytest.raises(report.ReportError, match="docs-guide-pass.tmpl: guide_path"):
+        report.guide_markdown(run, tmp_path, date="2026-10-06", sha=SHA, run_link=LINK)
+
+
+def test_a_run_outside_actions_keeps_a_plain_header(tmp_path):
+    assert not report.RunInfo("2026-10-06", "unknown", "").published
+    assert not report.RunInfo("2026-10-06", SHA, "https://example.com/1").published
+    assert report.RunInfo("2026-10-06", SHA, LINK).published
+
+
+def test_a_ci_summary_opens_with_the_run_template():
+    failed = report.GuideRun(
+        "sample", "guides/sample.md", "Sample guide", "x", error="down"
+    )
+    text = report.summary_markdown(
+        [failed], INVENTORY, date="2026-10-06", sha=SHA, run_link=LINK
+    )
+    expected = (
+        _renderer()
+        .render(
+            "docs-run-red.tmpl",
+            {
+                "date": "2026-10-06",
+                "sha": SHA,
+                "run_link": LINK,
+                "count_pass": "0",
+                "count_fail": "1",
+                "count_partial": "0",
+                "count_nav": "3",
+                "count_not_covered": "2",
+            },
+        )
+        .body
+    )
+    assert text.startswith(expected.rstrip("\n") + "\n")
+    assert (
+        "| Quick Start, end to end | sample: FAIL before step 1; later: planned in D3a"
+        in text
+    )
+    assert "| FAIL: sample |" in text
+
+
+def test_the_verdicts_record_carries_each_header_template_and_its_values(tmp_path):
+    run = _failed_run(tmp_path)
+    record = report.verdicts_record([run], report.RunInfo("2026-10-06", SHA, LINK))
+    entry = record["journeys"]["sample"]
+    assert (entry["word"], entry["step"], entry["template"]) == (
+        "FAIL",
+        2,
+        "docs-guide-fail.tmpl",
+    )
+    rendered = _renderer().render("docs-journey-issue.tmpl", entry["values"])
+    assert rendered.title == "Docs journey (guides/sample.md) is red"
+    local = report.verdicts_record([run], report.RunInfo("2026-10-06", "unknown", ""))
+    assert local["journeys"]["sample"]["values"] == {}
+
+
+def test_the_real_inventory_maps_every_flow_and_names_where_each_journey_waits():
+    inventory = loader.context_for(REPO_ROOT).inventory
+    rows, waiting = report.flow_rows(inventory, {})
+    assert len(rows) == 9
+    planned = {journey for journeys in waiting.values() for journey in journeys}
+    pending = {
+        entry["journey"]
+        for entry in inventory["pages"].values()
+        if entry.get("pending") is True
+    }
+    flows = {j for flow in inventory["flow"] for j in flow.get("journeys", [])}
+    assert planned == pending & flows
+    assert set(waiting) <= {
+        "planned in D2",
+        "planned in D3a",
+        "planned in D3b",
+        "planned, no pull request assigned yet",
+    }
+    assert not any(row[3].startswith("verified by") for row in rows)
+
+
+# ---------------------------------------------------------------------------
+# Carried over from #966's review: the session's edges
+# ---------------------------------------------------------------------------
+def test_a_session_with_no_journeys_directory_stops_at_collection(tmp_path):
+    """The real test module with no journeys/: pytest's exit 2, never green."""
+    root = _runner_copy(
+        tmp_path, (RUNNER_ROOT / "test_journeys.py").read_text(encoding="utf-8")
+    )
+    assert not (root / "tests" / "acceptance" / "docs" / "journeys").exists()
+    result = _run_runner(root, tmp_path)
+    assert result.returncode == 2, result.stdout + result.stderr
+    assert "Empty parameter set" in result.stdout + result.stderr
+
+
+def test_a_session_that_runs_no_journey_writes_nothing(tmp_path):
+    """No DOCS_JOURNEY_RUN_DIR and no journey run: no run directory is made."""
+    root = _runner_copy(tmp_path, PASSING)
+    scratch = tmp_path / "tmp"
+    scratch.mkdir()
+    env = {**os.environ, "TMPDIR": str(scratch)}
+    env.pop("DOCS_JOURNEY_RUN_DIR", None)
+    env.pop("PYTEST_ADDOPTS", None)
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "pytest",
+            "-c",
+            "tests/acceptance/docs/pytest.ini",
+            "tests/acceptance/docs",
+        ],
+        cwd=root,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "nothing written" in result.stdout
+    assert [p.name for p in scratch.iterdir() if "docs-journeys" in p.name] == []
+
+
+def test_the_run_directory_is_made_in_one_place():
+    """conftest makes no temporary directory of its own: log.run_directory does."""
+    conftest = (RUNNER_ROOT / "conftest.py").read_text(encoding="utf-8")
+    assert "mkdtemp" not in conftest
+    assert "run_directory(os.environ, REPO_ROOT)" in conftest
+    made = log.run_directory({}, REPO_ROOT)
+    try:
+        assert made.is_dir() and made.name.startswith("docs-journeys-run-")
+    finally:
+        made.rmdir()
+
+
+def test_the_static_server_refuses_what_it_cannot_serve(tmp_path, monkeypatch):
+    from docs_runner import stacks
+
+    with pytest.raises(stacks.StackError, match="nothing to serve"):
+        stacks._StaticServer(tmp_path / "absent", 1).start()
+    a_file = tmp_path / "file"
+    a_file.write_text("x")
+    with pytest.raises(stacks.StackError, match="nothing to serve"):
+        stacks._StaticServer(a_file, 1).start()
+
+    def cannot(self):
+        raise OSError("no python")
+
+    monkeypatch.setattr(stacks._StaticServer, "_spawn", cannot)
+    with pytest.raises(
+        stacks.StackError, match=r"the static server could not be started \(OSError\)"
+    ):
+        stacks._StaticServer(tmp_path, 1).start()
+
+
+def test_a_refused_journey_still_names_a_written_date_after_today(tmp_path):
+    """The model refuses the journey (an unknown field), yet the date check
+    still runs on what parsed; a date-and-time is not a date."""
+    data = _with(lambda d: d.update(written=TODAY + datetime.timedelta(days=2)))
+    data["steps"][0]["retries"] = 3
+    problems = _refusals(tmp_path, data)
+    assert any("retries: Extra inputs are not permitted" in p for p in problems)
+    assert any("is after today" in p for p in problems), problems
+    timed = _with(lambda d: d.update(written=datetime.datetime(2026, 10, 9, 10, 0)))
+    timed["steps"][0]["retries"] = 3
+    problems = _refusals(tmp_path, timed)
+    assert not any("is after today" in p for p in problems), problems
+    assert any(p.startswith("written:") for p in problems), problems
+
+
+def test_the_runner_loads_the_aws_plugin_in_configure_not_by_pytest_plugins():
+    conftest = (RUNNER_ROOT / "conftest.py").read_text(encoding="utf-8")
+    assert "pytest_plugins" not in conftest.split('"""', 2)[2]
+    assert 'config.pluginmanager.import_plugin("backend.tests.no_real_aws")' in conftest
+
+
+def test_a_run_started_from_tests_acceptance_collects_the_journeys():
+    """From tests/acceptance the runner's conftest is not the run's root
+    conftest; it must still load (pytest refuses pytest_plugins there)."""
+    env = {**os.environ}
+    env.pop("PYTEST_ADDOPTS", None)
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "pytest",
+            "tests/acceptance",
+            "--collect-only",
+            "-q",
+            "-p",
+            "no:cacheprovider",
+            "-o",
+            "addopts=",
+        ],
+        cwd=REPO_ROOT,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "test_journey[docs-site]" in result.stdout

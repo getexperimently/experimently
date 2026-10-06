@@ -12,16 +12,20 @@ This directory is its own pytest root (``pytest.ini``): the repository's root
 ``conftest.py`` is not loaded, and nothing is imported from the product. The one
 thing taken from ``backend`` is the repository's test plugin
 ``backend/tests/no_real_aws.py`` (pytest and the standard library only), loaded
-here as in every other suite: dummy AWS credentials, no ``~/.aws``, and a
-failing ``aws`` first on ``PATH``, so nothing a journey starts can reach an AWS
-account. ``backend/tests/unit/test_no_real_aws.py`` checks this root loads it.
+in ``pytest_configure`` as in every other suite: dummy AWS credentials, no
+``~/.aws``, and a failing ``aws`` first on ``PATH``, so nothing a journey starts
+can reach an AWS account. ``backend/tests/unit/test_no_real_aws.py`` checks
+this root loads it. (It is not ``pytest_plugins`` here: pytest refuses that in
+a conftest that is not at the root of the run, as this one is not when a run
+starts from ``tests/acceptance``.)
 
 Environment:
 
 * ``DOCS_JOURNEY_RUN_DIR``: where everything the run writes goes (the results
   log ``results.jsonl``, a report per guide as ``<journey>.md`` and
-  ``<journey>.html``, ``summary.md``, the screenshots and snapshots, the
-  videos, each stack's output under ``stacks/``). Refused inside the
+  ``<journey>.html``, ``summary.md``, ``verdicts.json`` (each journey's
+  verdict, for ``scripts/docs_journeys_report.py``), the screenshots and
+  snapshots, the videos, each stack's output under ``stacks/``). Refused inside the
   repository, so the runner writes nothing into the tree (Python's own
   ``__pycache__`` aside: ``PYTHONDONTWRITEBYTECODE=1`` keeps that out too;
   marketing-local's build is the other exception, see ``stacks.py``). Unset, a
@@ -30,6 +34,11 @@ Environment:
 * ``DOCS_JOURNEY_RUN_ID``, ``DOCS_JOURNEY_SHA``: written on every log line;
   by default ``GITHUB_RUN_ID`` and ``GITHUB_SHA``, else ``local`` and
   ``unknown`` (no git is run).
+* ``DOCS_JOURNEY_RUN_LINK``: the run's link in the report headers; by default
+  built from ``GITHUB_SERVER_URL``, ``GITHUB_REPOSITORY`` and
+  ``GITHUB_RUN_ID``. The headers are the QA templates only when the commit and
+  the link are ones they accept (a run in this repository's Actions);
+  otherwise a plain line (``docs_runner/report.py``).
 * ``DOCS_JOURNEY_TIMEOUT_MS`` (10000), ``DOCS_JOURNEY_RECORD_VIDEO`` (``1``;
   ``0`` records none), ``DOCS_JOURNEY_HEADED`` (``1`` shows the browser),
   ``DOCS_JOURNEY_KEEP_STACKS`` (``1`` leaves the stacks up at the end).
@@ -44,9 +53,9 @@ collector was skipped anyway exits 1. A retry plugin is refused at start.
 from __future__ import annotations
 
 import datetime
+import json
 import os
 import sys
-import tempfile
 from pathlib import Path
 from typing import List, Optional
 
@@ -57,8 +66,6 @@ HERE = Path(__file__).resolve().parent
 REPO_ROOT = HERE.parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
-
-pytest_plugins = ["backend.tests.no_real_aws"]
 
 from docs_runner import guide as guides
 from docs_runner import report
@@ -83,6 +90,7 @@ RUN_DIR = pytest.StashKey[Optional[Path]]()
 
 
 def pytest_configure(config: pytest.Config) -> None:
+    config.pluginmanager.import_plugin("backend.tests.no_real_aws")
     for name in RETRY_PLUGINS:
         if config.pluginmanager.has_plugin(name):
             raise pytest.UsageError(
@@ -137,8 +145,19 @@ def pytest_generate_tests(metafunc: pytest.Metafunc) -> None:
 def run_dir_of(config: pytest.Config) -> Path:
     """The run directory, made now if the environment named none."""
     if config.stash[RUN_DIR] is None:
-        config.stash[RUN_DIR] = Path(tempfile.mkdtemp(prefix="docs-journeys-run-"))
+        config.stash[RUN_DIR] = run_directory(os.environ, REPO_ROOT)
     return config.stash[RUN_DIR]
+
+
+def run_link(environ) -> str:
+    """``DOCS_JOURNEY_RUN_LINK``, or this Actions run's link, or ""."""
+    if environ.get("DOCS_JOURNEY_RUN_LINK"):
+        return environ["DOCS_JOURNEY_RUN_LINK"]
+    parts = [environ.get(name, "") for name in ("GITHUB_REPOSITORY", "GITHUB_RUN_ID")]
+    if not all(parts):
+        return ""
+    server = environ.get("GITHUB_SERVER_URL", "https://github.com")
+    return f"{server}/{parts[0]}/actions/runs/{parts[1]}"
 
 
 class RunSettings:
@@ -282,25 +301,38 @@ def walk_journey(request: pytest.FixtureRequest):
 # The end of the run: the reports, and no skip reads as green
 # ---------------------------------------------------------------------------
 def write_reports(
-    runs: List[report.GuideRun], run_dir: Path, sha: str, date: str
+    runs: List[report.GuideRun], run_dir: Path, sha: str, date: str, link: str = ""
 ) -> Optional[str]:
     """Write every report; the first ReportError's message, or None."""
     problem = None
     for outcome in runs:
         try:
             (run_dir / f"{outcome.journey}.md").write_text(
-                report.guide_markdown(outcome, run_dir, date=date, sha=sha),
+                report.guide_markdown(
+                    outcome, run_dir, date=date, sha=sha, run_link=link
+                ),
                 encoding="utf-8",
             )
             (run_dir / f"{outcome.journey}.html").write_text(
-                report.guide_html(outcome, run_dir, date=date, sha=sha),
+                report.guide_html(outcome, run_dir, date=date, sha=sha, run_link=link),
                 encoding="utf-8",
             )
         except report.ReportError as error:
             problem = problem or str(error)
     inventory = context_for(REPO_ROOT).inventory
-    (run_dir / "summary.md").write_text(
-        report.summary_markdown(runs, inventory, date=date, sha=sha), encoding="utf-8"
+    try:
+        (run_dir / "summary.md").write_text(
+            report.summary_markdown(runs, inventory, date=date, sha=sha, run_link=link),
+            encoding="utf-8",
+        )
+    except report.ReportError as error:
+        problem = problem or str(error)
+    (run_dir / "verdicts.json").write_text(
+        json.dumps(
+            report.verdicts_record(runs, report.RunInfo(date, sha, link)), indent=2
+        )
+        + "\n",
+        encoding="utf-8",
     )
     return problem
 
@@ -311,7 +343,9 @@ def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
     date = datetime.datetime.now(datetime.timezone.utc).date().isoformat()
     runs = config.stash[RUNS]
     if runs or config.stash[RUN_DIR] is not None:
-        problem = write_reports(runs, run_dir_of(config), sha, date)
+        problem = write_reports(
+            runs, run_dir_of(config), sha, date, run_link(os.environ)
+        )
         if problem is not None:
             config.stash[REPORT_PROBLEMS].append(problem)
     if config.stash[SKIPPED] or config.stash[REPORT_PROBLEMS]:

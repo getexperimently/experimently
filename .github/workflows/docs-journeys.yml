@@ -1,0 +1,195 @@
+name: Docs journeys
+
+# The docs-driven journeys (#939): every guide with a journey under
+# tests/acceptance/docs/journeys/ is walked in a browser against the stack it
+# names, step by step against expectations written before the run, with an
+# ARIA snapshot and a screenshot of each step, a results log and a report per
+# guide. The docs-site journey crawls the PUBLISHED documentation site.
+#
+# When: nightly, and by hand (workflow_dispatch, with `record_video` to keep a
+# video of each journey that asks for one). Never on a pull request (D32).
+# After each release, the release checklist (CLAUDE.md, "Releasing") runs
+#   gh workflow run docs-journeys.yml --ref vX.Y.Z
+# right after the docs.yml dispatch, so the release's own run walks the site
+# that release just published.
+#
+# The published site is deployed from release tags, not from main, so the
+# journeys job first asks which commit the live site was built from (the
+# newest successful deployment to `github-pages`) and gives the runner that
+# commit's mkdocs.yml and docs/ to compare the site with
+# (scripts/docs_journeys_report.py `deployed`).
+#
+# Everything the run writes (results.jsonl, a report per guide, summary.md,
+# screenshots, ARIA snapshots, videos) goes to one run directory outside the
+# checkout, uploaded as the artifact docs-journeys-<run id>: kept 14 days, 90
+# for a run on a release tag. Nothing outside that directory is uploaded.
+# The log carries journey names, step numbers and counts; what each step saw
+# is only in the run directory.
+#
+# The `report` job keeps one rolling `docs-journey-failure` issue per failing
+# guide: opened when the guide has failed in 2 scheduled runs in a row,
+# commented when its failing step changes, closed by the first run in which it
+# passes. Only a scheduled run on main posts; any other run prints what it
+# would post. Every text it posts is rendered from .github/qa-templates/ by
+# scripts/qa_render.py and posted with --body-file
+# (backend/tests/unit/scripts/test_docs_journeys_workflow.py pins all of this).
+
+on:
+  schedule:
+    # 03:41 UTC: after doc-examples (02:30) and chart-kind (03:30), and not on
+    # :00 or :30, when most scheduled workflows start.
+    - cron: '41 3 * * *'
+  workflow_dispatch:
+    inputs:
+      record_video:
+        description: Record a video of each journey that asks for one
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: docs-journeys-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  journeys:
+    name: Docs journeys
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      deployments: read
+    outputs:
+      verdicts: ${{ steps.verdicts.outputs.written }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.11'
+
+      - name: Install the runner and Chromium
+        run: |
+          set -euo pipefail
+          python -m pip install -r tests/acceptance/requirements.txt
+          python -m playwright install --with-deps chromium
+
+      - name: Check out the source of the published site
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          python3 scripts/docs_journeys_report.py deployed --out "$RUNNER_TEMP/deployed"
+          SHA="$(head -n 1 "$RUNNER_TEMP/deployed/sha")"
+          git fetch --no-tags --depth=1 origin "$SHA"
+          mkdir -p "$RUNNER_TEMP/published-source"
+          git archive "$SHA" mkdocs.yml docs | tar -x -C "$RUNNER_TEMP/published-source"
+
+      - name: Walk the journeys
+        env:
+          DOCS_JOURNEY_RUN_DIR: ${{ runner.temp }}/docs-journeys-run
+          DOCS_JOURNEY_PUBLISHED_SOURCE: ${{ runner.temp }}/published-source
+          DOCS_JOURNEY_RECORD_VIDEO: ${{ inputs.record_video && '1' || '0' }}
+          PYTHONDONTWRITEBYTECODE: '1'
+        run: python -m pytest -c tests/acceptance/docs/pytest.ini tests/acceptance/docs
+
+      - name: Step summary
+        if: always()
+        run: |
+          set -euo pipefail
+          if [ -f "$RUNNER_TEMP/docs-journeys-run/summary.md" ]; then
+            cat "$RUNNER_TEMP/docs-journeys-run/summary.md" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Verdicts written
+        id: verdicts
+        if: always()
+        run: |
+          set -euo pipefail
+          if [ -f "$RUNNER_TEMP/docs-journeys-run/verdicts.json" ]; then
+            printf 'written=true\n' >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Upload the verdicts
+        if: always() && steps.verdicts.outputs.written == 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: docs-journeys-verdicts
+          path: ${{ runner.temp }}/docs-journeys-run/verdicts.json
+          retention-days: 14
+          if-no-files-found: error
+
+      - name: Upload the run directory
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: docs-journeys-${{ github.run_id }}
+          path: ${{ runner.temp }}/docs-journeys-run
+          retention-days: ${{ startsWith(github.ref, 'refs/tags/v') && 90 || 14 }}
+          if-no-files-found: warn
+
+  report:
+    name: Docs journeys issues
+    needs: journeys
+    if: always() && needs.journeys.outputs.verdicts == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      issues: write
+      actions: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+          sparse-checkout: |
+            scripts
+            .github/qa-templates
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: docs-journeys-verdicts
+          path: ${{ runner.temp }}/verdicts
+
+      - name: Decide and render
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT: ${{ github.event_name }}
+          REF: ${{ github.ref }}
+        run: >-
+          python3 scripts/docs_journeys_report.py report
+          --verdicts "$RUNNER_TEMP/verdicts/verdicts.json"
+          --event "$EVENT" --ref "$REF" --out "$RUNNER_TEMP/docs-issues"
+
+      - name: Post to the docs-journey-failure issues
+        if: github.event_name == 'schedule' && github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          for DIR in "$RUNNER_TEMP"/docs-issues/posts/*/; do
+            [ -d "$DIR" ] || continue
+            ACTION="$(head -n 1 "$DIR/action")"
+            case "$ACTION" in
+              open)
+                gh label create docs-journey-failure --repo "$GITHUB_REPOSITORY" --color B60205 --description "Docs journey failed" > /dev/null 2>&1 || true
+                gh issue create --repo "$GITHUB_REPOSITORY" --title "$(head -n 1 "$DIR/title.txt")" --label docs-journey-failure --body-file "$DIR/body.md" > /dev/null
+                ;;
+              comment)
+                gh issue comment "$(head -n 1 "$DIR/issue")" --repo "$GITHUB_REPOSITORY" --body-file "$DIR/body.md" > /dev/null
+                ;;
+              close)
+                ISSUE="$(head -n 1 "$DIR/issue")"
+                gh issue comment "$ISSUE" --repo "$GITHUB_REPOSITORY" --body-file "$DIR/body.md" > /dev/null
+                gh api --method PATCH "repos/$GITHUB_REPOSITORY/issues/$ISSUE" -f state=closed -f state_reason=completed > /dev/null
+                ;;
+              *)
+                printf '%s\n' '::error title=Docs journeys::the report wrote an unknown action'
+                exit 1
+                ;;
+            esac
+          done
