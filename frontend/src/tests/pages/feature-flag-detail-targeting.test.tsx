@@ -230,7 +230,8 @@ describe('stored rules the builder cannot show', () => {
       expect.stringContaining('targeting-rules'),
     );
     expect(JSON.parse(within(s).getByTestId('targeting-raw-json').textContent ?? '')).toEqual(NATIVE);
-    expect(within(s).queryByTestId('targeting-rule-builder')).toBeNull();
+    expect(within(s).getByTestId('targeting-raw')).toBeInTheDocument();
+    expect(within(s).queryByTestId('add-group')).toBeNull();
     expect(within(s).queryByRole('button', { name: '+ Add Group' })).toBeNull();
     expect(within(s).getByRole('button', { name: 'Replace rules' })).toBeInTheDocument();
   });
@@ -306,7 +307,8 @@ describe('NOT groups (#918)', () => {
       expect.stringContaining('targeting-rules'),
     );
     expect(JSON.parse(within(s).getByTestId('targeting-raw-json').textContent ?? '')).toEqual(rules);
-    expect(within(s).queryByTestId('targeting-rule-builder')).toBeNull();
+    expect(within(s).getByTestId('targeting-raw')).toBeInTheDocument();
+    expect(within(s).queryByTestId('add-group')).toBeNull();
     expect(within(s).getByRole('button', { name: 'Replace rules' })).toBeInTheDocument();
   });
 
