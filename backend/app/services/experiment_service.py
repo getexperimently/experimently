@@ -1370,7 +1370,7 @@ class ExperimentService:
             ),
             "experiment_type": experiment.experiment_type,
             "targeting_rules": experiment.targeting_rules,
-            "owner_id": str(experiment.owner_id),
+            "owner_id": str(experiment.owner_id) if experiment.owner_id else None,
             "created_at": (
                 experiment.created_at.isoformat()
                 if hasattr(experiment.created_at, "isoformat")

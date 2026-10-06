@@ -4126,9 +4126,16 @@
             "default": "fixed"
           },
           "owner_id": {
-            "format": "uuid4",
-            "title": "Owner Id",
-            "type": "string"
+            "anyOf": [
+              {
+                "format": "uuid4",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Owner Id"
           },
           "resume_at": {
             "anyOf": [
@@ -4255,7 +4262,6 @@
           "name",
           "experiment_type",
           "status",
-          "owner_id",
           "created_at",
           "updated_at",
           "variants",

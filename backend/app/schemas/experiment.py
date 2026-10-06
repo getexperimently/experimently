@@ -777,7 +777,10 @@ class ExperimentResponse(BaseModel):
     status: str
     targeting_rules: Optional[Dict[str, Any]] = None
     tags: Optional[List[str]] = None
-    owner_id: UUID4
+    # Null once the creator's account has been removed (the column is
+    # ON DELETE SET NULL): such an experiment still reads and lists, with
+    # `owner_id: null`.
+    owner_id: Optional[UUID4] = None
     start_date: Optional[datetime] = None
     end_date: Optional[datetime] = None
     resume_at: Optional[datetime] = Field(

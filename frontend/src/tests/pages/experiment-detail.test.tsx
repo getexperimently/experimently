@@ -134,6 +134,18 @@ describe('ExperimentDetailPage — rendering', () => {
     expect(await screen.findByTestId('experiment-owner')).toHaveTextContent('0f9e8d7c…');
   });
 
+  it('shows "No owner" when the creator\'s account was removed (owner_id null)', async () => {
+    // The API answers `owner_id: null` for such an experiment. The page
+    // prints a fixed text rather than a short id, and it is nobody's, not
+    // even the signed-in user's.
+    install(experiment({ owner_id: null }));
+    render(<ExperimentDetailPage />);
+    const owner = await screen.findByTestId('experiment-owner');
+    expect(owner).toHaveTextContent('No owner');
+    expect(owner).not.toHaveTextContent('You (');
+    expect(owner).not.toHaveAttribute('title');
+  });
+
   it('renders an empty metrics hint when there are none', async () => {
     install(experiment({ metrics: [] }));
     render(<ExperimentDetailPage />);
@@ -270,7 +282,7 @@ describe('ExperimentDetailPage — lifecycle actions by role', () => {
     ...extra,
   });
 
-  async function renderActive(owner = OTHER_OWNER) {
+  async function renderActive(owner: string | null = OTHER_OWNER) {
     install(experiment({ status: 'active', owner_id: owner }));
     render(<ExperimentDetailPage />);
     await screen.findByTestId('experiment-detail');
@@ -328,6 +340,16 @@ describe('ExperimentDetailPage — lifecycle actions by role', () => {
     expect(screen.getByTestId('experiment-role-note')).toHaveTextContent(
       'You own this experiment, but starting, pausing, completing and archiving it requires ' +
         'the ADMIN or DEVELOPER role; you are ANALYST. You can read its results.',
+    );
+  });
+
+  it('an ANALYST sees an experiment with no owner as not theirs', async () => {
+    signIn(as('ANALYST'));
+    await renderActive(null);
+    expect(screen.getByTestId('experiment-owner')).toHaveTextContent('No owner');
+    expect(lifecycleButtons()).toEqual([]);
+    expect(screen.getByTestId('experiment-role-note')).toHaveTextContent(
+      `${NOTE}you are ANALYST. You can read its results.`,
     );
   });
 
