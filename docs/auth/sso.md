@@ -97,7 +97,7 @@ For `sso_failed`, `sso_account` and `sso_email` the page shows a Request ID when
 
 - `DASHBOARD_ORIGINS`: optional, comma-separated or a JSON array, for example `https://app.example.com`. The first entry is the primary one.
 - `PUBLIC_BASE_URL`'s origin.
-- In `ENVIRONMENT=development` only: `http://localhost:3000` (`npm run dev`) and `http://localhost:3100` (the static export).
+- In `ENVIRONMENT=development` only: `http://localhost:3100` (`npm run dev`) and `http://localhost:3000` (the dashboard container).
 
 The CORS list is not used here, because it also names the demo apps and any site running an SDK.
 
