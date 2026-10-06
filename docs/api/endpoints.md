@@ -2492,16 +2492,16 @@ With the compliance module, each event is signed with HMAC-SHA256 and the signat
 
 See [Integrations API Reference](integrations.md) for full documentation.
 
-Minimum role: **ANALYST** for read; **DEVELOPER** for create/update/delete.
+Read (the list and the get) needs the **ADMIN** or **DEVELOPER** role; create, update and delete need **ADMIN**. An ANALYST or a VIEWER is refused with `403` on every one of them. A configuration is addressed by its type (`jira`, `salesforce` or `github`), not by an id.
 
 **Integration CRUD**:
 
 ```
-POST   /api/v1/integrations               — Create integration (DEVELOPER+)
-GET    /api/v1/integrations               — List integrations (ANALYST+)
-GET    /api/v1/integrations/{id}          — Get integration details (ANALYST+)
-PUT    /api/v1/integrations/{id}          — Update integration config (DEVELOPER+)
-DELETE /api/v1/integrations/{id}          — Deactivate integration (DEVELOPER+)
+POST   /api/v1/integrations                      — Create integration (ADMIN)
+GET    /api/v1/integrations                      — List integrations (ADMIN or DEVELOPER)
+GET    /api/v1/integrations/{integration_type}   — Get integration details (ADMIN or DEVELOPER)
+PUT    /api/v1/integrations/{integration_type}   — Update integration config (ADMIN)
+DELETE /api/v1/integrations/{integration_type}   — Delete integration (ADMIN)
 ```
 
 **Webhook receivers**:
@@ -2512,7 +2512,7 @@ POST /api/v1/integrations/webhooks/salesforce  — Receive Salesforce outbound m
 POST /api/v1/integrations/webhooks/github      — Receive GitHub events (HMAC-SHA256 validated)
 ```
 
-Supported `IntegrationType` values: `JIRA`, `SALESFORCE`, `GITHUB`.
+Supported `IntegrationType` values: `jira`, `salesforce`, `github` (lower case, in the body and in the path).
 
 ---
 
