@@ -190,6 +190,20 @@ def heading_value(text: str) -> str:
     return folded or "untitled"
 
 
+def step_heading(heading: str, step_id: str) -> str:
+    """A failing step as a template names it: its heading, then its own id.
+
+    Several steps can share one heading (the docs-site journey's steps all
+    point at the home page's), so the heading alone does not say which step
+    failed. The id is the label the journey file gives the step, and it is
+    kept whole when the heading has to be cut to fit (an id longer than 118
+    characters is itself cut).
+    """
+    label = f" ({step_id})"
+    named = heading_value(heading)[: max(120 - len(label), 0)].rstrip() + label
+    return named[:120].strip()
+
+
 def header_template(run: GuideRun, info: RunInfo) -> Tuple[str, Dict[str, str]]:
     """The template of *run*'s header and its values."""
     result = verdict(run)
@@ -215,8 +229,10 @@ def header_template(run: GuideRun, info: RunInfo) -> Tuple[str, Dict[str, str]]:
     return "docs-guide-fail.tmpl", {
         **values,
         "step_number": str(first.step if first is not None else 1),
-        "heading_step": heading_value(
-            first.heading if first is not None else run.title
+        "heading_step": (
+            step_heading(first.heading, first.step_id)
+            if first is not None
+            else heading_value(run.title)
         ),
         "run_link": info.run_link,
         "count_steps_pass": str(passed),

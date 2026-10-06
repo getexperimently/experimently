@@ -82,7 +82,7 @@ one, a token, a user or experiment id, an e-mail address, or a hostname.
 | `{guide_path}` | guide path | the page's path in the repository, as `mkdocs.yml` names it |
 | `{step_number}` | step number | the guide step's number |
 | `{heading_guide}` | heading | the guide's title, its first heading |
-| `{heading_step}` | heading | the guide step's own heading |
+| `{heading_step}` | heading | the guide step's own heading, then its id in parentheses (the docs journeys: `Home page (nav-pages)`), because steps can share one heading |
 
 A new placeholder is added to the test's `PLACEHOLDERS` and to this table in
 the same pull request, and its name starts with its kind.

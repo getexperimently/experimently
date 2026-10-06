@@ -79,12 +79,14 @@ jobs:
           python -m playwright install --with-deps chromium
 
       - name: Check out the source of the published site
+        id: source
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           python3 scripts/docs_journeys_report.py deployed --out "$RUNNER_TEMP/deployed"
           SHA="$(head -n 1 "$RUNNER_TEMP/deployed/sha")"
+          printf 'ref=%s\n' "$(head -n 1 "$RUNNER_TEMP/deployed/ref")" >> "$GITHUB_OUTPUT"
           git fetch --no-tags --depth=1 origin "$SHA"
           mkdir -p "$RUNNER_TEMP/published-source"
           git archive "$SHA" mkdocs.yml docs | tar -x -C "$RUNNER_TEMP/published-source"
@@ -93,6 +95,7 @@ jobs:
         env:
           DOCS_JOURNEY_RUN_DIR: ${{ runner.temp }}/docs-journeys-run
           DOCS_JOURNEY_PUBLISHED_SOURCE: ${{ runner.temp }}/published-source
+          DOCS_JOURNEY_PUBLISHED_REF: ${{ steps.source.outputs.ref }}
           DOCS_JOURNEY_RECORD_VIDEO: ${{ inputs.record_video && '1' || '0' }}
           PYTHONDONTWRITEBYTECODE: '1'
         run: python -m pytest -c tests/acceptance/docs/pytest.ini tests/acceptance/docs

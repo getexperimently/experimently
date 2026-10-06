@@ -1124,7 +1124,10 @@ recursion. Two consequences, both certain to recur:
   `gh workflow run docs-journeys.yml --ref vX.Y.Z`: the docs journeys (#939)
   on the release's own commit, including the crawl of the site just
   published, with their artifacts kept 90 days. `release-please.yml` does not
-  start it (a dispatch, like the docs deploy).
+  start it (a dispatch, like the docs deploy). A run that is red right after
+  a deploy is dispatched once more before anyone reads it as a docs defect:
+  Pages' CDN can lag the deploy, and a page it has not caught up on looks the
+  same as a broken one. Two reds in a row are the finding.
 
 A tag pushed by a human token DOES trigger workflows, which is why a
 hand-pushed tag behaves differently: `release.yml` runs from the push.
