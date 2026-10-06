@@ -1,0 +1,419 @@
+# A gradual rollout, as "Gradual Rollouts" makes it through the API, seen on
+# the flag's page in the dashboard as its stages advance (#939; QA plan D3b).
+#
+# The schedule is the guide's: Initial Canary, 10%, manual; Expanded Rollout,
+# 50%, time-based; Full Rollout, 100%, manual. The stages are moved the way the
+# guide's "Manual Advancement" moves them. The time-based stage is not waited
+# for: the scheduler that starts it runs every 15 minutes on the compose stack
+# (ROLLOUT_CHECK_INTERVAL_MINUTES, which the Docker guide's stack does not
+# set), longer than a journey runs, so its start date is set years ahead and
+# the journey checks only that advancing it by hand is refused, as the guide
+# says.
+#
+# At each percentage the flag is evaluated for 200 numbered users with an API
+# key, and each answer must be the one the documented rollout hash gives
+# (traffic.flag_bucket): nobody at 0%, exactly the users below 10% at 10%,
+# everybody at 100%.
+guide: feature-flags/rollouts.md
+stack: compose-dev
+profile: core
+video: true
+written: 2026-10-06
+steps:
+  - id: log-in
+    doc: step-1-log-in
+    do:
+      api:
+        method: GET
+        path: /api/v1/auth/me
+        as: admin
+    expect:
+      status: 200
+      json:
+        role: ADMIN
+    fail: the demo administrator cannot sign in through the API, or is not an ADMIN
+  - id: create-flag
+    doc: step-2-create-the-flag
+    do:
+      api:
+        method: POST
+        path: /api/v1/feature-flags/
+        as: admin
+        body:
+          key: docs-journey-rollout
+          name: Docs Journey Rollout
+          rollout_percentage: 0
+          is_active: true
+    expect:
+      status: 201
+      json:
+        key: docs-journey-rollout
+        status: active
+        rollout_percentage: 0
+    save:
+      flag-id:
+        path: id
+    fail: the flag cannot be created on at 0%
+  - id: create-schedule
+    doc: step-3-create-the-rollout-schedule
+    do:
+      api:
+        method: POST
+        path: /api/v1/rollout-schedules/
+        as: admin
+        body:
+          name: Docs Journey Gradual Rollout
+          description: Roll the flag out in three stages
+          feature_flag_id: "{{flag-id}}"
+          end_date: "2031-01-29T00:00:00Z"
+          max_percentage: 100
+          min_stage_duration: 24
+          stages:
+            - name: Initial Canary
+              description: "First 10%: watch error rates"
+              stage_order: 1
+              target_percentage: 10
+              trigger_type: manual
+            - name: Expanded Rollout
+              description: "Expand to 50%: confirm stability"
+              stage_order: 2
+              target_percentage: 50
+              trigger_type: time_based
+              start_date: "2031-01-08T00:00:00Z"
+            - name: Full Rollout
+              description: "100%: manual gate for final approval"
+              stage_order: 3
+              target_percentage: 100
+              trigger_type: manual
+    expect:
+      status: 201
+      json:
+        status: draft
+        stages.0.stage_order: 1
+        stages.0.target_percentage: 10
+        stages.0.trigger_type: manual
+        stages.0.status: pending
+        stages.1.stage_order: 2
+        stages.1.trigger_type: time_based
+        stages.1.status: pending
+        stages.2.stage_order: 3
+        stages.2.target_percentage: 100
+        stages.2.trigger_type: manual
+        stages.2.status: pending
+    save:
+      schedule-id:
+        path: id
+      canary-id:
+        path: stages.0.id
+      expanded-id:
+        path: stages.1.id
+      full-id:
+        path: stages.2.id
+    fail: the guide's schedule is refused, or is not a draft with three pending stages in order
+  - id: activate
+    doc: step-4-activate-the-schedule
+    do:
+      api:
+        method: POST
+        path: /api/v1/rollout-schedules/{{schedule-id}}/activate
+        as: admin
+    expect:
+      status: 200
+      json:
+        status: active
+    fail: the schedule cannot be activated
+  - id: still-zero
+    doc: step-4-activate-the-schedule
+    do:
+      api:
+        method: GET
+        path: /api/v1/feature-flags/{{flag-id}}
+        as: admin
+    expect:
+      status: 200
+      json:
+        rollout_percentage: 0
+    fail: activating the schedule changed the flag's percentage
+  - id: api-key
+    doc: step-4-activate-the-schedule
+    do:
+      api:
+        method: POST
+        path: /api/v1/api-keys
+        as: admin
+        body:
+          name: Docs journey rollout
+    expect:
+      status: 201
+    save:
+      sdk-key:
+        path: key
+        secret: true
+    fail: no API key can be created to evaluate the flag with
+  - id: nobody-at-zero
+    doc: step-4-activate-the-schedule
+    do:
+      evaluations:
+        flag: docs-journey-rollout
+        key: sdk-key
+        users: rollout-user
+        count: 200
+        reason: rollout
+        rollout: 0
+    fail: a user gets the flag at 0%
+  - id: advance-canary
+    doc: manual-advancement
+    do:
+      api:
+        method: POST
+        path: /api/v1/rollout-schedules/stages/{{canary-id}}/advance
+        as: admin
+    expect:
+      status: 200
+      json:
+        name: Initial Canary
+        status: in_progress
+    fail: the manual canary stage cannot be advanced, or does not start
+  - id: at-ten
+    doc: manual-advancement
+    do:
+      api:
+        method: GET
+        path: /api/v1/feature-flags/{{flag-id}}
+        as: admin
+    expect:
+      status: 200
+      json:
+        rollout_percentage: 10
+    fail: advancing the canary does not put the flag at 10%
+  - id: users-at-ten
+    doc: manual-advancement
+    do:
+      evaluations:
+        flag: docs-journey-rollout
+        key: sdk-key
+        users: rollout-user
+        count: 200
+        reason: rollout
+        rollout: 10
+    fail: at 10% a user gets the flag other than the documented rollout hash decides
+  - id: time-based-refused
+    doc: manual-advancement
+    do:
+      api:
+        method: POST
+        path: /api/v1/rollout-schedules/stages/{{expanded-id}}/advance
+        as: admin
+    expect:
+      status: 400
+    fail: a time-based stage can be advanced by hand
+  - id: status
+    doc: view-schedule-status
+    do:
+      api:
+        method: GET
+        path: /api/v1/rollout-schedules/{{schedule-id}}
+        as: admin
+    expect:
+      status: 200
+      json:
+        status: active
+        stages.0.name: Initial Canary
+        stages.0.target_percentage: 10
+        stages.0.status: in_progress
+        stages.1.status: pending
+        stages.2.status: pending
+    fail: the schedule's status does not show the canary in progress and the rest pending
+  - id: list
+    doc: view-schedule-status
+    do:
+      api:
+        method: GET
+        path: /api/v1/rollout-schedules/?feature_flag_id={{flag-id}}
+        as: admin
+    expect:
+      status: 200
+      json:
+        total: 1
+        items.0.id: "{{schedule-id}}"
+    fail: the flag's schedules are not listed by its id
+  - id: sign-in-page
+    doc: view-schedule-status
+    do:
+      goto: /login
+    expect:
+      status: 200
+      aria: |
+        - main:
+          - heading "Sign in" [level=1]
+    fail: the dashboard does not answer
+  - id: email
+    doc: view-schedule-status
+    do:
+      fill:
+        label: Email
+        value: admin@demo.com
+        quote: false
+        reason: the sign-in form's field; the guide's examples use the demo administrator
+    expect:
+      aria: |
+        - textbox "Email":
+          - text: admin@demo.com
+    fail: there is no Email field to fill
+  - id: password
+    doc: view-schedule-status
+    do:
+      fill:
+        label: Password
+        value: Demo1234!
+        quote: false
+        reason: the sign-in form's field; the demo administrator's documented password
+    expect:
+      aria: |
+        - textbox "Password"
+    fail: there is no Password field to fill
+  - id: sign-in
+    doc: view-schedule-status
+    do:
+      click:
+        role: button
+        name: Sign in
+        quote: false
+        reason: the sign-in form's button
+    expect:
+      url: /experiments
+      aria: |
+        - main:
+          - heading "Experiments" [level=1]
+    fail: the demo administrator cannot sign in
+  - id: flag-page
+    doc: view-schedule-status
+    do:
+      goto: /feature-flags/{{flag-id}}
+    expect:
+      status: 200
+      aria: |
+        - main:
+          - heading "Docs Journey Rollout" [level=1]
+          - text: Serving
+          - heading "Rollout schedule" [level=2]
+          - text: Active
+          - paragraph: Docs Journey Gradual Rollout
+          - list:
+            - listitem: /^Initial Canary\s*Manual 10% In progress$/
+            - listitem: /^Expanded Rollout\s*Time-based .* 50% Pending$/
+            - listitem: /^Full Rollout\s*Manual 100% Pending$/
+          - text: Rollout percentage 10%
+          - slider "Rollout percentage": "10"
+    fail: the flag's page does not show the active schedule, the canary in progress and the flag at 10%
+  - id: pause
+    doc: pausing-a-schedule
+    do:
+      api:
+        method: POST
+        path: /api/v1/rollout-schedules/{{schedule-id}}/pause
+        as: admin
+    expect:
+      status: 200
+      json:
+        status: paused
+    fail: the schedule cannot be paused
+  - id: paused-keeps-ten
+    doc: pausing-a-schedule
+    do:
+      api:
+        method: GET
+        path: /api/v1/feature-flags/{{flag-id}}
+        as: admin
+    expect:
+      status: 200
+      json:
+        rollout_percentage: 10
+    fail: pausing the schedule changed the flag's percentage
+  - id: resume
+    doc: pausing-a-schedule
+    do:
+      api:
+        method: POST
+        path: /api/v1/rollout-schedules/{{schedule-id}}/activate
+        as: admin
+    expect:
+      status: 200
+      json:
+        status: active
+    fail: the paused schedule cannot be resumed by activating it again
+  - id: advance-full
+    doc: manual-advancement
+    do:
+      api:
+        method: POST
+        path: /api/v1/rollout-schedules/stages/{{full-id}}/advance
+        as: admin
+    expect:
+      status: 200
+      json:
+        name: Full Rollout
+        status: in_progress
+    fail: the manual 100% stage cannot be advanced
+  - id: at-hundred
+    doc: manual-advancement
+    do:
+      api:
+        method: GET
+        path: /api/v1/feature-flags/{{flag-id}}
+        as: admin
+    expect:
+      status: 200
+      json:
+        rollout_percentage: 100
+    fail: advancing the 100% stage does not put the flag at 100% at once
+  - id: users-at-hundred
+    doc: manual-advancement
+    do:
+      evaluations:
+        flag: docs-journey-rollout
+        key: sdk-key
+        users: rollout-user
+        count: 200
+        reason: rollout
+        rollout: 100
+    fail: at 100% a user does not get the flag
+  - id: flag-page-at-hundred
+    doc: view-schedule-status
+    do:
+      goto: /feature-flags/{{flag-id}}
+    expect:
+      status: 200
+      aria: |
+        - main:
+          - heading "Docs Journey Rollout" [level=1]
+          - heading "Rollout schedule" [level=2]
+          - list:
+            - listitem: /^Full Rollout\s*Manual 100% In progress$/
+          - text: Rollout percentage 100%
+          - slider "Rollout percentage": "100"
+    fail: the flag's page does not show the full rollout in progress and the flag at 100%
+  - id: cancel
+    doc: cancelling-a-schedule
+    do:
+      api:
+        method: POST
+        path: /api/v1/rollout-schedules/{{schedule-id}}/cancel
+        as: admin
+    expect:
+      status: 200
+      json:
+        status: cancelled
+    fail: the schedule cannot be cancelled
+  - id: cancel-keeps-hundred
+    doc: cancelling-a-schedule
+    do:
+      api:
+        method: GET
+        path: /api/v1/feature-flags/{{flag-id}}
+        as: admin
+    expect:
+      status: 200
+      json:
+        rollout_percentage: 100
+    fail: cancelling the schedule changed the flag's percentage

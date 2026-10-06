@@ -9,6 +9,9 @@ Declared in a journey file, before the run (a step's ``not_run``):
 * ``needs-aws``: the step needs an AWS account;
 * ``needs-founder-account``: the step needs an account the operator holds and
   the runner does not;
+* ``needs-scheduler``: the step waits for a background job of the stack (the
+  safety monitor, the rollout scheduler) that runs less often than a journey
+  lasts, at an interval the guide's stack does not let the runner set;
 * ``waived #<issue>``: the step fails today for a known reason, tracked in that
   issue.
 
@@ -27,11 +30,12 @@ from typing import Tuple
 
 NEEDS_AWS = "needs-aws"
 NEEDS_FOUNDER_ACCOUNT = "needs-founder-account"
+NEEDS_SCHEDULER = "needs-scheduler"
 EARLIER_STEP_FAILED = "earlier-step-failed"
 DOC_EXAMPLES = "doc-examples"
 
 #: Reasons a journey file may declare on a step.
-DECLARED: Tuple[str, ...] = (NEEDS_AWS, NEEDS_FOUNDER_ACCOUNT)
+DECLARED: Tuple[str, ...] = (NEEDS_AWS, NEEDS_FOUNDER_ACCOUNT, NEEDS_SCHEDULER)
 #: Reasons only the runner sets.
 RUNTIME: Tuple[str, ...] = (EARLIER_STEP_FAILED, DOC_EXAMPLES)
 

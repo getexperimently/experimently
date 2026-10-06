@@ -214,3 +214,78 @@ def send(
                 continue
             outcome.variants[name]["converted"] += 1
     return outcome
+
+
+# ---------------------------------------------------------------------------
+# Flag evaluations
+# ---------------------------------------------------------------------------
+#: ``GET`` this with ``user_id`` and, optionally, ``context`` (URL-encoded JSON).
+EVALUATE_PATH = "/api/v1/feature-flags/evaluate/{flag}"
+
+
+def flag_bucket(user_id: str, flag_key: str) -> int:
+    """The user's rollout bucket in [0, 100) for a flag, as documented.
+
+    ``docs/sdk/javascript.md`` ("Hash utilities") gives it: the whole MD5 digest
+    of ``"{user_id}:{flag_key}"`` read as a big-endian integer, modulo 100
+    (``md5-mod100-v1``). A user gets a flag at ``p`` percent when the bucket is
+    below ``p``. It is not the assignment hash above: ``user-123`` and
+    ``my-flag`` are bucket 79 here and 69 there.
+    """
+    digest = hashlib.md5(
+        f"{user_id}:{flag_key}".encode("utf-8"), usedforsecurity=False
+    ).hexdigest()
+    return int(digest, 16) % 100
+
+
+def expected_answer(
+    user: str, flag_key: str, reason: str, rollout: Optional[int]
+) -> Tuple[bool, str]:
+    """(enabled, reason) the evaluation must give *user*."""
+    if reason == "rollout":
+        return flag_bucket(user, flag_key) < (rollout or 0), "rollout"
+    return reason == "targeting_rule", reason
+
+
+def evaluate(
+    fetch: Fetch,
+    *,
+    flag_key: str,
+    users: Sequence[str],
+    reason: str,
+    rollout: Optional[int],
+    query: str = "",
+) -> Outcome:
+    """Evaluate the flag for each user; a problem per answer other than expected.
+
+    *query* is appended to each request's ``user_id`` (the URL-encoded
+    ``context``, say). Stops once ``PROBLEMS_KEPT`` problems are found.
+    """
+    outcome = Outcome(experiment_key=flag_key, prefix="")
+    counts = {"evaluated": 0, "enabled": 0, "expected_enabled": 0}
+    outcome.variants[flag_key] = counts
+    path = EVALUATE_PATH.format(flag=flag_key)
+    for user in users:
+        enabled, why = expected_answer(user, flag_key, reason, rollout)
+        counts["expected_enabled"] += int(enabled)
+        status, answer = fetch("GET", f"{path}?user_id={user}{query}", None)
+        outcome.requests += 1
+        if status != 200 or not isinstance(answer, dict):
+            if _full(outcome, f"evaluating for {user} answered {status}"):
+                break
+            continue
+        counts["evaluated"] += 1
+        counts["enabled"] += int(answer.get("enabled") is True)
+        if answer.get("enabled") is not enabled or answer.get("reason") != why:
+            if _full(
+                outcome,
+                f"{user}: enabled {answer.get('enabled')!r}, reason"
+                f" {answer.get('reason')!r}; expected enabled {enabled}, reason {why!r}",
+            ):
+                break
+    return outcome
+
+
+def _full(outcome: Outcome, problem: str) -> bool:
+    outcome.problems.append(problem)
+    return len(outcome.problems) >= PROBLEMS_KEPT

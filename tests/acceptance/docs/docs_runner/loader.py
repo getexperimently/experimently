@@ -48,7 +48,8 @@ YAML, or not a mapping, stops at that. Refused, besides what ``model`` refuses:
 * a journey that makes up or keeps a secret and is recorded (``video: true``):
   a recording would show what the run keeps out of its files.
 * ``save`` on a step that is not an ``api`` step, or a name saved twice;
-* a ``{{name}}`` that no earlier step saves, or that names a secret (a secret
+* a ``{{name}}`` (in an api step's path, body or expected JSON, or in a
+  ``goto``) that no earlier step saves, or that names a secret (a secret
   is sent only as a ``key``); a ``key`` that names no secret saved or kept earlier; a
   traffic step's ``experiment`` that names no value saved earlier;
 * a ``traffic`` step on any stack but compose-dev, or with an ``expect`` or a
@@ -316,19 +317,20 @@ def _expect_problems(label: str, step: Step, stack: Optional[str]) -> List[str]:
         if step.snapshot:
             found.append(f"{label}: ref: doc-examples has no screen to snapshot")
         return found
-    if kind == "traffic":
+    if kind in ("traffic", "evaluations"):
+        article = "an" if kind[0] in "aeiou" else "a"
         if stack is not None and stack != "compose-dev":
             found.append(
-                f"{label}: a traffic step needs the compose stack's API; {stack}"
-                " has none"
+                f"{label}: {article} {kind} step needs the compose stack's API;"
+                f" {stack} has none"
             )
         if given:
             found.append(
-                f"{label}: traffic checks what the action says (each user assigned"
-                " as chosen, each event accepted); it has no expect"
+                f"{label}: {kind} checks what the action says (each answer as the"
+                " step expects); it has no expect"
             )
         if step.snapshot is not None:
-            found.append(f"{label}: a traffic step has no screen to snapshot")
+            found.append(f"{label}: {article} {kind} step has no screen to snapshot")
         return found
     if kind == "api":
         if stack is not None and stack != "compose-dev":
@@ -473,7 +475,8 @@ def _step_problems(
     if step.not_run is not None and not registry.is_declarable(step.not_run):
         found.append(
             f"{label}: not_run {step.not_run!r} is not a reason a journey may"
-            " give (needs-aws, needs-founder-account, waived #<issue>)"
+            " give (needs-aws, needs-founder-account, needs-scheduler,"
+            " waived #<issue>)"
         )
     if step.do.kind == "ref" and guide_path is not None:
         if context.doc_examples.get(guide_path, 0) < 1:
@@ -515,12 +518,17 @@ def _uses(step: Step) -> List[Tuple[str, str]]:
             used.append(("value", name))
         if do.api.key is not None:
             used.append(("key", do.api.key))
+        if step.expect is not None:
+            for name in values.placeholders_in(step.expect.json_):
+                used.append(("value", name))
     if do.goto is not None:
         for name in values.placeholders(do.goto):
             used.append(("value", name))
     if do.traffic is not None:
         used.append(("experiment", do.traffic.experiment))
         used.append(("key", do.traffic.key))
+    if do.evaluations is not None:
+        used.append(("key", do.evaluations.key))
     return used
 
 

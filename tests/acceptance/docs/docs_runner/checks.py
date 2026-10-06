@@ -64,6 +64,13 @@ def describe_action(step: Step) -> str:
         if do.api.key is not None:
             return f"{do.api.method} {do.api.path} with the API key {do.api.key}"
         return f"{do.api.method} {do.api.path} as {do.api.as_}"
+    if do.evaluations is not None:
+        plan = do.evaluations
+        context = f" with context {json.dumps(plan.context)}" if plan.context else ""
+        return (
+            f"evaluate {plan.flag} for {plan.count} users{context} with the API key"
+            f" {plan.key}"
+        )
     if do.traffic is not None:
         traffic = do.traffic
         users = sum(p.assigned for p in traffic.variants.values())
@@ -120,6 +127,16 @@ def describe_expect(step: Step) -> str:
 
     if step.do.traffic is not None:
         return TRAFFIC_EXPECTS
+    if step.do.evaluations is not None:
+        plan = step.do.evaluations
+        if plan.reason == "rollout":
+            return (
+                f"exactly the users the documented rollout hash puts below"
+                f" {plan.rollout}% get the flag, each with reason rollout"
+            )
+        if plan.reason == "targeting_rule":
+            return "every user gets the flag, with reason targeting_rule"
+        return "no user gets the flag, each with reason inactive"
     expect_ = step.expect
     if expect_ is None:
         return "Doc Examples runs this section's blocks"

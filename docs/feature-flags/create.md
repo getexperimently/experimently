@@ -38,8 +38,8 @@ navigation, then click **+ New Flag**.
 ### Step 3: Add targeting rules (optional)
 
 Targeting rules turn the flag on for specific users, whatever the rollout percentage
-is. Under **Targeting Rules**, click **+ Add Group**, then add one **+ Add Condition**
-for each condition. A condition has three parts:
+is. Under **Targeting Rules**, click **+ Add Group**: the group starts with one condition.
+Click **+ Add Condition** for each condition after the first. A condition has three parts:
 - an attribute: pick a suggestion such as `user.country`, or type any attribute your
   application sends;
 - an operator;

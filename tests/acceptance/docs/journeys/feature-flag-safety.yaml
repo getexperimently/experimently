@@ -1,0 +1,354 @@
+# Safety monitoring, as "Safety Monitoring" configures and checks it, with a
+# manual rollback and the way back (#939; QA plan D3b).
+#
+# What the journey holds: a flag without a configuration reads the platform
+# default (the nil UUID); the guide's configuration is stored as sent; the
+# check is healthy with no errors; the manual rollback to 0% turns the flag
+# off, so every user, matched by a rule or not, gets enabled: false with
+# reason inactive; turning it on again brings it back at 0%, and raising it to
+# 5% serves exactly the users the documented rollout hash puts below 5%; then
+# 25 errors reported with an API key against its 250 evaluations make the
+# error rate 0.1, above the 0.05 critical threshold, and the check and the
+# dashboard's Safety page say so.
+#
+# The automatic rollback is NOT RUN (needs-scheduler): the safety monitor runs
+# every 5 minutes on the compose stack (SAFETY_CHECK_INTERVAL_MINUTES, which
+# the Docker guide's stack does not set), longer than a journey runs. The
+# unhealthy flag is made last, so a monitor pass during the journey can only
+# turn it off after every step that reads it has run.
+guide: feature-flags/safety.md
+stack: compose-dev
+profile: core
+video: true
+written: 2026-10-06
+steps:
+  - id: superuser
+    doc: log-in-and-create-a-flag
+    do:
+      api:
+        method: GET
+        path: /api/v1/auth/me
+        as: admin
+    expect:
+      status: 200
+      json:
+        is_superuser: true
+    fail: the demo administrator is not a superuser, so it cannot change safety settings
+  - id: create-flag
+    doc: log-in-and-create-a-flag
+    do:
+      api:
+        method: POST
+        path: /api/v1/feature-flags/
+        as: admin
+        body:
+          key: docs-journey-safety
+          name: Docs Journey Safety
+          rollout_percentage: 50
+          is_active: true
+    expect:
+      status: 201
+      json:
+        status: active
+        rollout_percentage: 50
+    save:
+      flag-id:
+        path: id
+    fail: the flag cannot be created on for half of all users
+  - id: default-config
+    doc: a-flag-without-a-configuration
+    do:
+      api:
+        method: GET
+        path: /api/v1/safety/feature-flags/{{flag-id}}/config
+        as: admin
+    expect:
+      status: 200
+      json:
+        id: 00000000-0000-0000-0000-000000000000
+        enabled: true
+    fail: a flag without a configuration does not read the default, with the nil UUID as its id
+  - id: configure
+    doc: create-or-update-a-flags-configuration
+    do:
+      api:
+        method: POST
+        path: /api/v1/safety/feature-flags/{{flag-id}}/config
+        as: admin
+        body:
+          enabled: true
+          metrics:
+            error_rate: {warning_threshold: 0.02, critical_threshold: 0.05, comparison_type: greater_than}
+            p95_latency: {warning_threshold: 300, critical_threshold: 500, comparison_type: greater_than}
+          rollback_percentage: 0
+    expect:
+      status: 200
+      json:
+        enabled: true
+        rollback_percentage: 0
+        metrics.error_rate.warning_threshold: 0.02
+        metrics.error_rate.critical_threshold: 0.05
+        metrics.error_rate.comparison_type: greater_than
+        metrics.p95_latency.warning_threshold: 300.0
+        metrics.p95_latency.critical_threshold: 500.0
+    fail: the guide's configuration is not stored as sent
+  - id: global-settings
+    doc: view-global-settings
+    do:
+      api:
+        method: GET
+        path: /api/v1/safety/settings
+        as: admin
+    expect:
+      status: 200
+      json:
+        enable_automatic_rollbacks: true
+    fail: the demo data does not turn automatic rollbacks on
+  - id: healthy
+    doc: running-a-check
+    do:
+      api:
+        method: GET
+        path: /api/v1/safety/feature-flags/{{flag-id}}/check
+        as: admin
+    expect:
+      status: 200
+      json:
+        is_healthy: true
+        metrics.0.name: error_rate
+        metrics.0.current_value: 0.0
+        metrics.0.threshold: 0.05
+        metrics.0.is_healthy: true
+        metrics.1.name: p95_latency
+        metrics.1.current_value: 0.0
+        metrics.1.threshold: 500.0
+        metrics.1.is_healthy: true
+    fail: the new flag, with no traffic, is not healthy with every value 0.0
+  - id: rollback
+    doc: manual-rollback
+    do:
+      api:
+        method: POST
+        path: /api/v1/safety/feature-flags/{{flag-id}}/rollback?percentage=0&reason=Checkout%20errors%20observed%20in%20Datadog
+        as: admin
+    expect:
+      status: 200
+      json:
+        success: true
+        message: Feature flag 'docs-journey-safety' turned off and rolled back from 50% to 0%
+        previous_percentage: 50
+        new_percentage: 0
+        details.deactivated: true
+    fail: the manual rollback to 0% does not turn the flag off from 50%
+  - id: rolled-back
+    doc: manual-rollback
+    do:
+      api:
+        method: GET
+        path: /api/v1/feature-flags/{{flag-id}}
+        as: admin
+    expect:
+      status: 200
+      json:
+        status: inactive
+        rollout_percentage: 0
+    fail: after the rollback the flag is not inactive at 0%
+  - id: api-key
+    doc: what-a-rollback-changes
+    do:
+      api:
+        method: POST
+        path: /api/v1/api-keys
+        as: admin
+        body:
+          name: Docs journey safety
+    expect:
+      status: 201
+    save:
+      sdk-key:
+        path: key
+        secret: true
+    fail: no API key can be created to evaluate the flag and report errors with
+  - id: off-for-everyone
+    doc: what-a-rollback-changes
+    do:
+      evaluations:
+        flag: docs-journey-safety
+        key: sdk-key
+        users: safety-user
+        count: 50
+        reason: inactive
+    fail: a user still gets the flag after a rollback to 0%
+  - id: turn-on
+    doc: re-enabling-after-rollback
+    do:
+      api:
+        method: POST
+        path: /api/v1/feature-flags/{{flag-id}}/activate
+        as: admin
+    expect:
+      status: 200
+      json:
+        status: active
+        rollout_percentage: 0
+    fail: turning the flag on after the rollback does not bring it back at 0%
+  - id: raise
+    doc: re-enabling-after-rollback
+    do:
+      api:
+        method: PUT
+        path: /api/v1/feature-flags/{{flag-id}}
+        as: admin
+        body:
+          rollout_percentage: 5
+    expect:
+      status: 200
+      json:
+        status: active
+        rollout_percentage: 5
+    fail: the rollout cannot be raised to 5%
+  - id: five-percent
+    doc: re-enabling-after-rollback
+    do:
+      evaluations:
+        flag: docs-journey-safety
+        key: sdk-key
+        users: safety-user
+        count: 200
+        reason: rollout
+        rollout: 5
+    fail: at 5% a user gets the flag other than the documented rollout hash decides
+  - id: report-errors
+    doc: what-a-rollback-changes
+    do:
+      api:
+        method: POST
+        path: /api/v1/tracking/errors/batch
+        as: anonymous
+        key: sdk-key
+        body:
+          errors:
+            - &crash {feature_flag_key: docs-journey-safety, user_id: safety-user-00001, error_type: crash, message: Docs journey crash behind the flag}
+            - *crash
+            - *crash
+            - *crash
+            - *crash
+            - *crash
+            - *crash
+            - *crash
+            - *crash
+            - *crash
+            - *crash
+            - *crash
+            - *crash
+            - *crash
+            - *crash
+            - *crash
+            - *crash
+            - *crash
+            - *crash
+            - *crash
+            - *crash
+            - *crash
+            - *crash
+            - *crash
+            - *crash
+    expect:
+      status: 200
+      json:
+        success_count: 25
+        failure_count: 0
+    fail: errors reported with the API key against the flag are not all stored
+  - id: unhealthy
+    doc: running-a-check
+    do:
+      api:
+        method: GET
+        path: /api/v1/safety/feature-flags/{{flag-id}}/check
+        as: admin
+    expect:
+      status: 200
+      json:
+        is_healthy: false
+        metrics.0.name: error_rate
+        metrics.0.current_value: 0.1
+        metrics.0.is_healthy: false
+    fail: 25 errors in 250 evaluations (0.1, above 0.05) do not make the check unhealthy
+  - id: sign-in-page
+    doc: rollback-history
+    do:
+      goto: /login
+    expect:
+      status: 200
+      aria: |
+        - main:
+          - heading "Sign in" [level=1]
+    fail: the dashboard does not answer
+  - id: email
+    doc: rollback-history
+    do:
+      fill:
+        label: Email
+        value: admin@demo.com
+        quote: false
+        reason: the sign-in form's field; the guide's examples use the demo administrator
+    expect:
+      aria: |
+        - textbox "Email":
+          - text: admin@demo.com
+    fail: there is no Email field to fill
+  - id: password
+    doc: rollback-history
+    do:
+      fill:
+        label: Password
+        value: Demo1234!
+        quote: false
+        reason: the sign-in form's field; the demo administrator's documented password
+    expect:
+      aria: |
+        - textbox "Password"
+    fail: there is no Password field to fill
+  - id: sign-in
+    doc: rollback-history
+    do:
+      click:
+        role: button
+        name: Sign in
+        quote: false
+        reason: the sign-in form's button
+    expect:
+      url: /experiments
+      aria: |
+        - main:
+          - heading "Experiments" [level=1]
+    fail: the demo administrator cannot sign in
+  - id: safety-page
+    doc: rollback-history
+    do:
+      goto: /admin/safety
+    expect:
+      status: 200
+      aria: |
+        - main:
+          - main:
+            - heading "Safety" [level=1]
+            - checkbox "Enable automatic rollbacks" [checked]
+            - heading "Flag Safety Status" [level=2]
+            - text: /Docs Journey Safety docs-journey-safety critical Error Rate 10\.00%/
+            - heading "Rollbacks this session" [level=2]
+    fail: the dashboard's Safety page does not show automatic rollbacks on and the flag critical at a 10% error rate
+  - id: automatic-rollback
+    doc: auto-rollback
+    do:
+      api:
+        method: GET
+        path: /api/v1/feature-flags/{{flag-id}}
+        as: admin
+    expect:
+      status: 200
+      json:
+        status: inactive
+        rollout_percentage: 0
+    not_run: needs-scheduler
+    fail: the safety monitor's next pass does not roll the unhealthy flag back to 0%

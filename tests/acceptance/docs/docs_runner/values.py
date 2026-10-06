@@ -7,8 +7,9 @@ An ``api`` step may ``save`` values from its JSON answer, each under a name::
       sdk-key: {path: key, secret: true}
 
 A later step uses a saved value by writing ``{{experiment-id}}`` in an api
-step's path or in a string of its body, or in a ``goto``: the runner puts the
-value in before the step runs, as a reader pastes an id they were shown. A
+step's path, in a string of its body or of its expected JSON, or in a
+``goto``: the runner puts the value in before the step runs, as a reader
+pastes an id they were shown. A
 value saved with ``secret: true`` (an API key the API answered with) is never
 put into a path, a body or an address: a later api step or ``traffic`` step
 sends it as its ``key``, in the ``X-API-Key`` header, and it is never written
