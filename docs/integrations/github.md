@@ -73,7 +73,7 @@ Save the `id` — you need it for the webhook endpoint URL.
 | `token` | string | Yes | GitHub PAT or GitHub App installation token. Passed as `Authorization: Bearer <token>` on outbound API calls to GitHub. |
 | `webhook_secret` | string | Yes | A secret string used to verify incoming webhook payloads. Must match what you set in GitHub's webhook configuration. |
 
-The `token` is stored encrypted and never returned in GET responses. The `webhook_secret` is also masked in responses.
+Neither the `token` nor the `webhook_secret` is returned in any response: a response shows `repo_owner` and `repo_name` and lists the names of the other keys in `stored_secrets` (see [What a response shows](../api/integrations.md#what-a-response-shows)). Both are stored in the database as given; they are not encrypted.
 
 ---
 

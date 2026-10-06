@@ -17,6 +17,8 @@ Each integration is represented as a persisted configuration record containing t
 
 **Authentication**: the CRUD endpoints require a Bearer token — **ADMIN or DEVELOPER** to read, **ADMIN** to create, update or delete. The three webhook endpoints take no platform credential at all; they authenticate the *sender* against the integration's own `webhook_secret` (see [Webhook Endpoints](#webhook-endpoints)).
 
+**Stored secrets are never returned.** A response shows the connection settings and names the stored secrets without their values; see [What a response shows](#what-a-response-shows).
+
 ---
 
 ## `IntegrationType` Enum
@@ -32,6 +34,21 @@ The value is lower case, in the body and in the path alike.
 ---
 
 ## CRUD Endpoints
+
+### What a response shows
+
+Every response that carries a configuration (create, list, get and update) has the same shape, whoever the caller is:
+
+| Field | What it holds |
+|---|---|
+| `encrypted_config` | Only the connection settings, with their stored values: `base_url`, `email` and `project_key` (Jira), `instance_url` and `client_id` (Salesforce), `repo_owner` and `repo_name` (GitHub) |
+| `stored_secrets` | The names, sorted, of every other key the configuration holds, whatever its value: `api_token`, `client_secret`, `token`, `webhook_secret`, and any key not in the list above |
+
+The value of a stored secret is never returned, not as a placeholder and not in part. To change a secret, send it with [`PUT`](#update-integration); the keys you do not send are kept. A secret that is lost cannot be read back: generate a new one, `PUT` it, and set it at the provider.
+
+`encrypted_config` is stored in the database as given. Despite its name, it is not encrypted.
+
+---
 
 ### Create Integration
 
@@ -65,14 +82,19 @@ Creates the configuration for one service. The `encrypted_config` object's struc
 }
 ```
 
-**Response: 201 Created**
+**Response: 201 Created**: the settings it was sent, without the secrets, which are named in `stored_secrets`.
 
 ```json
 {
   "id": "3f1a9c62-6f5e-4a3b-9a0c-6d2b8e7f1a45",
   "integration_type": "jira",
   "is_active": true,
-  "encrypted_config": { "base_url": "https://your-org.atlassian.net", "...": "..." },
+  "encrypted_config": {
+    "base_url": "https://your-org.atlassian.net",
+    "email": "automation@your-org.com",
+    "project_key": "EXP"
+  },
+  "stored_secrets": ["api_token", "webhook_secret"],
   "last_sync_at": null,
   "last_error": null,
   "created_at": "2026-01-15T09:00:00Z",
@@ -131,7 +153,13 @@ Returns the configuration for one service.
 PUT /api/v1/integrations/{integration_type}
 ```
 
-Updates the configuration. Every field is optional; omitted fields are left alone. `encrypted_config` is **replaced whole**, not merged — send the complete credentials object.
+Updates the configuration. Every field is optional; omitted fields are left alone. `encrypted_config` is **merged key by key**:
+
+- a key sent with a value replaces the stored one, or adds it;
+- a key sent as `null` removes it;
+- a stored key that is not sent is kept.
+
+So send only the keys you are changing. Reading the configuration back first is not needed, and a response carries no secret to send back anyway.
 
 **Authentication**: ADMIN.
 
@@ -140,23 +168,27 @@ Updates the configuration. Every field is optional; omitted fields are left alon
 | Field | Type | Description |
 |---|---|---|
 | `is_active` | `boolean` | Activate or deactivate the integration |
-| `encrypted_config` | `object` | The complete per-service credentials |
+| `encrypted_config` | `object` | The keys to set, each with its new value, or `null` to remove it |
 | `last_error` | `string` or `null` | Clear or set the last recorded error |
 
 ```json
 {
   "is_active": true,
   "encrypted_config": {
-    "base_url": "https://your-org.atlassian.net",
     "email": "new-automation@your-org.com",
     "api_token": "ATATT3x-new-token...",
-    "project_key": "NEWPROJ",
-    "webhook_secret": "a-random-strong-secret"
+    "project_key": "NEWPROJ"
   }
 }
 ```
 
-**Response: 200 OK** — the updated object. `404 Not Found` when that service has no configuration.
+This changes the email, the API token and the project, and keeps `base_url` and `webhook_secret` as they were. To remove a key, send it as `null`:
+
+```json
+{ "encrypted_config": { "project_key": null } }
+```
+
+**Response: 200 OK** — the updated object, in the shape [described above](#what-a-response-shows). `404 Not Found` when that service has no configuration.
 
 ---
 
@@ -225,21 +257,21 @@ The active jira integration has no webhook_secret in its encrypted_config, so ev
 inbound delivery to /api/v1/integrations/webhooks/jira is refused with 401. Add one …
 ```
 
-The remedy is one `PUT`, which replaces `encrypted_config` whole — so read the current value back, add the key, and send it. Set `TOKEN` to an ADMIN bearer token, and `TYPE` to the integration: `jira` below, or `salesforce` or `github`. The last line prints the secret to configure at the provider.
+The remedy is one `PUT` that sends the new key. `PUT` merges `encrypted_config` key by key, so the stored credentials are kept and nothing is read back first. Set `TOKEN` to an ADMIN bearer token, and `TYPE` to the integration: `jira` below, or `salesforce` or `github`. The last line prints the secret to configure at the provider.
 
 ```bash
 TOKEN=…
 TYPE=jira
 SECRET=$(openssl rand -hex 32)
 
-curl -sf -H "Authorization: Bearer $TOKEN" \
-     "http://localhost:8000/api/v1/integrations/$TYPE" \
-  | jq --arg s "$SECRET" '{encrypted_config: (.encrypted_config + {webhook_secret: $s})}' \
+jq -n --arg s "$SECRET" '{encrypted_config: {webhook_secret: $s}}' \
   | curl -sf -X PUT -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
          --data @- "http://localhost:8000/api/v1/integrations/$TYPE"
 
-echo "$SECRET"
+printf '%s\n' "$SECRET"
 ```
+
+A script written for the earlier version of this recipe, which read the configuration, added the key and sent the whole object back, still works: the stored secrets it cannot send are kept.
 
 Then set the same value at the provider: GitHub's webhook *Secret* field, Jira's webhook secret (Jira Cloud) or the `X-Experimently-Webhook-Secret` header on the relay in front of it, and the same header on the Salesforce outbound message or callout.
 
@@ -329,7 +361,7 @@ Receives GitHub events (push, pull_request, issues).
 
 ## Per-Service Config Schemas
 
-These are the keys of `encrypted_config`. `webhook_secret` is required by all three: without it the service's webhook endpoint refuses every delivery.
+These are the keys of `encrypted_config`. `webhook_secret` is required by all three: without it the service's webhook endpoint refuses every delivery. A response returns only `base_url`, `email`, `project_key`, `instance_url`, `client_id`, `repo_owner` and `repo_name` with their values, and names every other key in `stored_secrets` (see [What a response shows](#what-a-response-shows)).
 
 ### Jira Config
 
