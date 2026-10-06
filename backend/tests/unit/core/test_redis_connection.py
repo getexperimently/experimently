@@ -34,6 +34,14 @@ The gate has three parts, and each is needed:
 ``deps.get_redis_pool`` builds ``redis.asyncio.Redis``, a different class from
 ``redis.Redis``: patching the latter does not intercept it, so the two are
 recorded separately and each site must build the class it is classified as.
+
+**One connect attempt (#810).** redis-py retries ten times with backoff by
+default, so one call against a Redis that was down made eleven connect
+attempts: seconds with Redis refused, and longer than the 5 s probe timeouts
+with Redis unreachable. Every site has a retry decision in
+:data:`SINGLE_ATTEMPT` or :data:`RETRY_DECIDED_ELSEWHERE`, and each
+``SINGLE_ATTEMPT`` site is driven with the real client against a refused
+address and must try to connect exactly once.
 """
 
 from __future__ import annotations
@@ -512,3 +520,101 @@ def test_redis_ssl_defaults_off_and_reads_the_environment(monkeypatch):
     assert Settings.model_fields["REDIS_SSL"].default is False
     monkeypatch.setenv("REDIS_SSL", "true")
     assert Settings().REDIS_SSL is True
+
+
+# ---------------------------------------------------------------------------
+# One connect attempt (#810)
+# ---------------------------------------------------------------------------
+
+
+def _ping_health() -> None:
+    from backend.app.core.health import check_redis
+
+    assert check_redis()["status"] == "unhealthy"
+
+
+def _read_results_cache() -> None:
+    from backend.app.api.v1.endpoints.results import _get_cache_service
+
+    assert _get_cache_service().enabled is False
+
+
+def _invalidate_results_cache() -> None:
+    from backend.app.api.v1.endpoints.results import invalidate_results_cache
+
+    result = invalidate_results_cache(experiment_id=uuid4(), db=None, current_user=None)
+    assert result["status"] == "ok"
+
+
+#: Sites whose client makes one connect attempt, with a driver that runs the
+#: real client. A new site fails ``test_every_site_has_a_retry_decision``
+#: until it is added here or to ``RETRY_DECIDED_ELSEWHERE``.
+SINGLE_ATTEMPT: dict[tuple[str, str], Callable[[], None]] = {
+    ("backend/app/core/health.py", "check_redis"): _ping_health,
+    ("backend/app/api/v1/endpoints/results.py", "_get_cache_service"): (
+        _read_results_cache
+    ),
+    ("backend/app/api/v1/endpoints/results.py", "invalidate_results_cache"): (
+        _invalidate_results_cache
+    ),
+}
+
+#: Sites whose retry policy is decided and pinned somewhere else, and where.
+RETRY_DECIDED_ELSEWHERE = {
+    ("backend/app/middleware/rate_limiter.py", "RedisRateLimiter._get_redis"): (
+        "one attempt: TestNoClientRetries in "
+        "backend/tests/unit/middleware/test_rate_limiter.py (#790)"
+    ),
+    ("backend/app/api/deps.py", "get_redis_pool"): (
+        "unchanged (#810): an asyncio client, so a slow connect delays its "
+        "own request without holding the event loop, and it is reached only "
+        "through get_cache_control when CACHE_ENABLED is on (default off)"
+    ),
+}
+
+
+@pytest.fixture
+def connects(monkeypatch) -> list:
+    """Redis refused at 127.0.0.1:1; the port of every connect attempt."""
+    from redis.connection import Connection
+
+    _configure(
+        monkeypatch,
+        {
+            "REDIS_HOST": "127.0.0.1",
+            "REDIS_PORT": 1,
+            "REDIS_PASSWORD": None,
+            "REDIS_DB": 0,
+            "REDIS_SSL": False,
+        },
+    )
+    attempts: list = []
+    real_connect = Connection._connect
+
+    def counting_connect(conn):
+        attempts.append(conn.port)
+        return real_connect(conn)
+
+    monkeypatch.setattr(Connection, "_connect", counting_connect)
+    return attempts
+
+
+@pytest.mark.unit
+def test_every_site_has_a_retry_decision():
+    assert not set(SINGLE_ATTEMPT) & set(RETRY_DECIDED_ELSEWHERE)
+    assert set(SINGLE_ATTEMPT) | set(RETRY_DECIDED_ELSEWHERE) == SITES, (
+        "Every Redis client call site needs a retry decision. Undecided: "
+        f"{sorted(SITES - set(SINGLE_ATTEMPT) - set(RETRY_DECIDED_ELSEWHERE))}"
+    )
+
+
+@pytest.mark.unit
+@pytest.mark.regression
+@pytest.mark.parametrize("site", sorted(SINGLE_ATTEMPT), ids=lambda s: f"{s[0]}:{s[1]}")
+def test_the_client_tries_to_connect_once(site, connects):
+    """No timing: a refused connect fails at once, so the count is the signal."""
+    SINGLE_ATTEMPT[site]()
+    assert connects == [1], (
+        f"{site[0]}:{site[1]} made {len(connects)} connect attempts against a "
+        "refused Redis, not 1; build its client with retry=Retry(NoBackoff(), 0)"
+    )

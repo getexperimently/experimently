@@ -106,6 +106,25 @@ def _srm_block(
 # ---------------------------------------------------------------------------
 
 
+def _cache_client_options() -> Dict[str, Any]:
+    """Client options for the results cache: one connect attempt, 1 s timeouts.
+
+    The cache is best-effort, so a Redis that is down should cost each call
+    at most about a second, the connect timeout. With redis-py's defaults (ten
+    retries with backoff, no socket timeouts) an uncached read, which makes
+    two calls, took 7-9 s with Redis refused and about two minutes with Redis
+    unreachable, measured on a laptop (#810).
+    """
+    from redis.backoff import NoBackoff
+    from redis.retry import Retry
+
+    return {
+        "socket_connect_timeout": 1,
+        "socket_timeout": 1,
+        "retry": Retry(NoBackoff(), 0),
+    }
+
+
 def _get_cache_service() -> CacheService:
     """
     Attempt to create a synchronous Redis-backed CacheService.
@@ -117,7 +136,7 @@ def _get_cache_service() -> CacheService:
     try:
         from backend.app.core.redis_client import create_redis_client
 
-        r = create_redis_client()
+        r = create_redis_client(**_cache_client_options())
         # Quick ping to verify the connection is alive.
         r.ping()
         return CacheService(redis_client=r)
@@ -1028,7 +1047,7 @@ def invalidate_results_cache(
     try:
         from backend.app.core.redis_client import create_redis_client
 
-        r = create_redis_client()
+        r = create_redis_client(**_cache_client_options())
         cache = CacheService(redis_client=r)
         cache.clear(pattern=f"results:{experiment_id}:*")
     except Exception:

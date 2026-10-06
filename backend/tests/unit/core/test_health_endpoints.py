@@ -5,6 +5,7 @@ Tests for the health probes and the guarded Prometheus endpoint
 - ``/health/live`` answers 200 without touching the database or Redis
 - ``/health/ready`` (and its alias ``/health``) is 200 only when the database
   check passes; Redis only gates readiness when ``REDIS_REQUIRED=true``
+- a blocked readiness check does not hold ``/health/live`` (#810)
 - production responses hide check details
 - ``/metrics`` honours ``METRICS_TOKEN`` (bearer header or ``?token=``), is
   open without a token in development/test only, and can be disabled
@@ -13,6 +14,10 @@ Tests for the health probes and the guarded Prometheus endpoint
 
 from __future__ import annotations
 
+import asyncio
+import threading
+
+import httpx
 import pytest
 from fastapi.testclient import TestClient
 
@@ -263,6 +268,74 @@ class TestReadiness:
             "error": "OperationalError",
         }
         assert "db.example" not in resp_text(body)
+
+
+class TestReadinessRunsOffTheEventLoop:
+    """The readiness checks are blocking calls (a database session, a Redis
+    ping). While the readiness routes were ``async def`` those calls ran on
+    the event loop, so a Redis that was down held ``/health/live`` and every
+    other request on the process until the ping gave up (#810). As ``def``
+    routes they run in the thread pool.
+
+    Driven through the real app on one event loop (httpx's ASGITransport).
+    ``check_redis`` blocks on an Event that only the test sets, and
+    ``/health/live`` must answer while it is still blocked. When the block
+    runs on the loop the test cannot set the Event, and the check returns
+    only when its own bound runs out. Nothing asserts a duration: the bounds
+    only stop a broken build from hanging the suite.
+    """
+
+    #: How long the stand-in check waits for the test before giving up.
+    BLOCK_BOUND_SECONDS = 5
+
+    @pytest.mark.regression
+    @pytest.mark.parametrize("path", ["/health", "/health/ready"])
+    async def test_liveness_answers_while_readiness_is_blocked(
+        self, path, monkeypatch, fake_settings
+    ):
+        entered = threading.Event()
+        release = threading.Event()
+        outcome: dict = {}
+
+        def blocked_redis():
+            entered.set()
+            outcome["released_by_test"] = release.wait(self.BLOCK_BOUND_SECONDS)
+            return {"status": "healthy", "latency_ms": 0.1}
+
+        monkeypatch.setattr(
+            health, "check_database", lambda: {"status": "healthy", "latency_ms": 0.1}
+        )
+        monkeypatch.setattr(health, "check_redis", blocked_redis)
+        monkeypatch.setattr(
+            health,
+            "check_disk",
+            lambda path="/": {"status": "healthy", "free_gb": 50.0},
+        )
+
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(
+            transport=transport, base_url="http://testserver"
+        ) as client:
+            ready = asyncio.create_task(client.get(path))
+            try:
+                for _ in range(500):
+                    if entered.is_set():
+                        break
+                    await asyncio.sleep(0.01)
+                assert entered.is_set(), f"{path} never reached check_redis"
+                live = await asyncio.wait_for(client.get("/health/live"), 2)
+                readiness_still_blocked = "released_by_test" not in outcome
+            finally:
+                release.set()
+            ready_response = await asyncio.wait_for(ready, 10)
+
+        assert readiness_still_blocked, (
+            f"/health/live answered only after {path}'s check had returned: "
+            f"{path} ran its blocking checks on the event loop"
+        )
+        assert outcome["released_by_test"] is True
+        assert live.status_code == 200
+        assert ready_response.status_code == 200
 
 
 # ---------------------------------------------------------------------------
