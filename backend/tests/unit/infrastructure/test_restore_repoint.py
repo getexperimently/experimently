@@ -238,10 +238,10 @@ class World:
     """One fake account, and the script run against it."""
 
     def __init__(self, tmp: Path, shape: Shape, **faults) -> None:
-        self.tmp, self.shape = tmp, shape
-        self.state_path = tmp / "state.json"
+        self.tmp, self.shape = Path(tmp).resolve(), shape
+        self.state_path = self.tmp / "state.json"
         self.state_path.write_text(json.dumps(initial_state(shape, **faults)))
-        bin_dir = tmp / "bin"
+        bin_dir = self.tmp / "bin"
         bin_dir.mkdir()
         shim = bin_dir / "aws"
         shim.write_text(f'#!/bin/sh\nexec "{sys.executable}" "{FAKE}" "$@"\n')
