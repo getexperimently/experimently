@@ -1,0 +1,634 @@
+# Every page in the docs navigation, and how it is verified end to end (#939).
+#
+# Each page that the `nav` of mkdocs.yml lists is one key under [pages]: the path
+# exactly as the nav writes it, relative to docs/; a page the nav lists twice is
+# one key. backend/tests/unit/docs/test_docs_inventory.py fails on a nav page
+# with no entry here, an entry the nav does not list, a duplicate key, an
+# unknown class, a field not listed below, and on each rule under "Classes".
+# It runs in the unit job, in Doc Examples, and in core-build's docs tests on a
+# pull request that changes only documentation. So a page added to the nav
+# needs an entry here in the same pull request.
+#
+# Classes (exactly one per page):
+#
+#   journey             walked in a browser against a stack, by the journey
+#                       runner in tests/acceptance/docs/, with expectations
+#                       written before the run in journeys/<journey>.yaml.
+#                       `journey` names that file. `pending = true` declares a
+#                       journey whose file is not written yet; it is refused
+#                       once the file exists. The runner is to refuse a pending
+#                       journey at run time, so pending is never a pass.
+#   exec                its shell examples run in Doc Examples
+#                       (scripts/doc_examples.toml enrols it with at least one
+#                       exec block); no browser step is walked.
+#   workflow            its steps are run by the workflow that `workflow` names
+#                       (.github/workflows/<workflow>.yml).
+#   reference           nothing is walked: it has no steps to follow, or the
+#                       reason says why its steps are not walked. The docs-site
+#                       journey is to check that it answers and has its heading.
+#   aws                 needs an AWS account; to be reported NOT RUN.
+#   external:<service>  needs a third-party account or service, named by the
+#                       slug after the colon; to be reported NOT RUN.
+#   device              needs a mobile toolchain and a simulator or device; to
+#                       be reported NOT RUN.
+#
+# Fields: `class` and a one-line `reason` on every page; `journey` (a slug) and,
+# until its file exists, `pending = true` on a journey; `workflow` on a workflow.
+#
+# [[flow]] maps each flow in the "Flows, at least" list of #939 to journeys, to
+# pages (whose class and reason are above) or to every page of a class. The test
+# holds that list itself, so a flow cannot drop out of the mapping.
+#
+# The intent for the journeys' run summary: it prints the #939 mapping, and every
+# nav page that is not a journey with its class and reason, so what is not
+# walked is listed, never silent.
+
+[pages."README.md"]
+class = "journey"
+journey = "docs-site"
+pending = true
+reason = "the landing page: the docs-site journey starts here, then checks every nav page's heading on the published site and that search finds it"
+
+[pages."getting-started/quick-start.md"]
+class = "journey"
+journey = "quick-start"
+pending = true
+reason = "the first-run guide: its shell steps run in Doc Examples; the journey walks the dashboard half"
+
+[pages."getting-started/concepts.md"]
+class = "reference"
+reason = "vocabulary and concepts; no steps to follow"
+
+[pages."getting-started/architecture.md"]
+class = "reference"
+reason = "describes the components; no steps to follow"
+
+[pages."getting-started/faq.md"]
+class = "reference"
+reason = "questions and answers; no steps to follow"
+
+[pages."getting-started/modules.md"]
+class = "exec"
+reason = "its runnable blocks run on a full-profile stack in Doc Examples; the skipped ones install or build in a development checkout"
+
+[pages."feature-flags/create.md"]
+class = "journey"
+journey = "feature-flag-create"
+pending = true
+reason = "create a flag in the dashboard with a targeting rule, turn it on and see it evaluate; its API steps run in Doc Examples"
+
+[pages."Enhanced_Rules_Engine_Reference.md"]
+class = "reference"
+reason = "an operator reference; no steps to follow"
+
+[pages."guides/segments.md"]
+class = "exec"
+reason = "its API steps run on a stack in Doc Examples"
+
+[pages."feature-flags/rollouts.md"]
+class = "journey"
+journey = "feature-flag-rollout"
+pending = true
+reason = "a rollout schedule made through the API, its stages seen in the dashboard as they advance; its API steps run in Doc Examples"
+
+[pages."feature-flags/safety.md"]
+class = "journey"
+journey = "feature-flag-safety"
+pending = true
+reason = "reported errors roll a flag back, seen on the dashboard's safety page; its API steps run in Doc Examples"
+
+[pages."guides/user-guide.md"]
+class = "journey"
+journey = "experiment-results"
+pending = true
+reason = "running an experiment and reading its results page after seeded traffic: counts, p-value and the sample-ratio check"
+
+[pages."guides/dashboard-and-api.md"]
+class = "reference"
+reason = "a table of where each capability lives, with no steps; its rows are held to the dashboard's source by test_dashboard_and_api.py"
+
+[pages."api/sequential-testing.md"]
+class = "exec"
+reason = "its API steps run on a stack in Doc Examples"
+
+[pages."api/cuped.md"]
+class = "exec"
+reason = "its API steps run on a stack in Doc Examples"
+
+[pages."api/multi-armed-bandit.md"]
+class = "exec"
+reason = "its API steps run on a stack in Doc Examples"
+
+[pages."api/split-url.md"]
+class = "aws"
+reason = "the redirect runs in Lambda@Edge behind CloudFront; the API half's blocks are not yet enrolled in Doc Examples"
+
+[pages."api/mutual-exclusion-groups.md"]
+class = "exec"
+reason = "its API steps run on a stack in Doc Examples"
+
+[pages."guides/assign-customer-list.md"]
+class = "exec"
+reason = "its API steps run on a stack in Doc Examples"
+
+[pages."websocket-streaming.md"]
+class = "exec"
+reason = "its blocks run on a stack in Doc Examples; the skipped one runs the test suite in a checkout"
+
+[pages."llm-evaluation/overview.md"]
+class = "reference"
+reason = "what LLM evaluation is and how it works; no steps to follow"
+
+[pages."llm-evaluation/quickstart.md"]
+class = "external:llm-provider"
+reason = "steps 3-5 call a model and need an LLM provider key (OpenAI, Anthropic); the blocks that need none run in Doc Examples"
+
+[pages."sdk/javascript.md"]
+class = "journey"
+journey = "sdk-javascript"
+pending = true
+reason = "install the published package (0.1.0 on npm) as the page says and run its snippet against a stack"
+
+[pages."sdk/python.md"]
+class = "journey"
+journey = "sdk-python"
+pending = true
+reason = "install the published package (0.1.0 on PyPI) as the page says and run its snippet against a stack"
+
+[pages."sdk/java.md"]
+class = "reference"
+reason = "not walked: the page says the package is not yet on Maven Central; the SDK live contract (tests/sdk-contract/live/run_live_contract.py) runs the SDK against a live API in the PR QA Gate"
+
+[pages."sdk/react.md"]
+class = "reference"
+reason = "not walked: the page says the package is not yet on npm; the SDK live contract (tests/sdk-contract/live/run_live_contract.py) runs the SDK against a live API in the PR QA Gate"
+
+[pages."sdk/go.md"]
+class = "journey"
+journey = "sdk-go"
+pending = true
+reason = "go get the module as the page says and run its snippet against a stack"
+
+[pages."sdk/ios.md"]
+class = "device"
+reason = "needs Xcode and an iOS simulator or device"
+
+[pages."sdk/android.md"]
+class = "device"
+reason = "needs the Android SDK and an emulator or device; the SDK live contract (tests/sdk-contract/live/run_live_contract.py) runs the SDK against a live API in the PR QA Gate on the JVM"
+
+[pages."sdk/flutter.md"]
+class = "device"
+reason = "needs the Flutter SDK and a simulator, emulator or device"
+
+[pages."sdk/react-native.md"]
+class = "device"
+reason = "needs a React Native toolchain and a simulator, emulator or device; the SDK live contract (tests/sdk-contract/live/run_live_contract.py) runs the SDK against a live API in the PR QA Gate"
+
+[pages."mcp-server.md"]
+class = "external:mcp-client"
+reason = "its flow is an AI assistant (Claude, Cursor, Copilot) calling the server, which needs a third-party MCP client"
+
+[pages."sdk/openfeature.md"]
+class = "reference"
+reason = "not walked: the page says the provider is not yet on npm; the SDK live contract (tests/sdk-contract/live/run_live_contract.py) runs the provider against a live API in the PR QA Gate"
+
+[pages."sdk/edge.md"]
+class = "reference"
+reason = "not walked: the page says the package is not yet on npm; the SDK live contract (tests/sdk-contract/live/run_live_contract.py) runs the SDK against a live API in the PR QA Gate"
+
+[pages."sdk/ruby.md"]
+class = "reference"
+reason = "not walked: the page says the gem is not yet on RubyGems; the SDK live contract (tests/sdk-contract/live/run_live_contract.py) runs the SDK against a live API in the PR QA Gate"
+
+[pages."sdk/php.md"]
+class = "reference"
+reason = "not walked: the page says the package is not yet on Packagist; the SDK live contract (tests/sdk-contract/live/run_live_contract.py) runs the SDK against a live API in the PR QA Gate"
+
+[pages."sdk/dotnet.md"]
+class = "reference"
+reason = "not walked: the page says the package is not yet on NuGet; the SDK live contract (tests/sdk-contract/live/run_live_contract.py) runs the SDK against a live API in the PR QA Gate"
+
+[pages."sdk/elixir.md"]
+class = "reference"
+reason = "not walked: the page says the package is not yet on Hex"
+
+[pages."sdk-guide.md"]
+class = "reference"
+reason = "the SDK contract and each SDK's status; no steps to follow"
+
+[pages."sdk/local-evaluation.md"]
+class = "exec"
+reason = "its blocks run on a stack in Doc Examples"
+
+[pages."api/auth.md"]
+class = "exec"
+reason = "its blocks run on a stack in Doc Examples; the skipped one needs a Cognito user pool"
+
+[pages."api/endpoints.md"]
+class = "reference"
+reason = "an endpoint reference; its shell blocks are not yet enrolled in Doc Examples"
+
+[pages."api/compliance.md"]
+class = "reference"
+reason = "an API reference; its shell blocks are not yet enrolled in Doc Examples"
+
+[pages."api/integrations.md"]
+class = "external:jira-salesforce-github"
+reason = "an API reference whose syncs need a Jira, Salesforce or GitHub account"
+
+[pages."integrations/aws.md"]
+class = "aws"
+reason = "describes the AWS services a deployment uses"
+
+[pages."api/warehouse-analytics.md"]
+class = "external:data-warehouse"
+reason = "runs an analysis on tables in your own Snowflake or BigQuery warehouse"
+
+[pages."integrations/salesforce.md"]
+class = "external:salesforce"
+reason = "needs a Salesforce org"
+
+[pages."integrations/github.md"]
+class = "external:github"
+reason = "needs a GitHub repository that sends events and receives issues"
+
+[pages."api/alerting.md"]
+class = "exec"
+reason = "its blocks run on a stack in Doc Examples; delivery to a real Slack workspace or mailbox is not checked"
+
+[pages."api/audit-logging.md"]
+class = "exec"
+reason = "its API steps run on a stack in Doc Examples; the dashboard's audit-log screen is not walked"
+
+[pages."api/rbac.md"]
+class = "reference"
+reason = "an API reference for the rbac module; its shell blocks are not yet enrolled in Doc Examples"
+
+[pages."security/api-keys.md"]
+class = "journey"
+journey = "api-key-first-assignment"
+pending = true
+reason = "create an API key in the dashboard and use it for a first assignment; its API steps run in Doc Examples"
+
+[pages."auth/sso.md"]
+class = "external:oidc-provider"
+reason = "SSO sign-in needs an identity provider account (Okta, Google, GitHub)"
+
+[pages."hipaa/overview.md"]
+class = "reference"
+reason = "describes the hipaa module's controls and settings; no walkthrough"
+
+[pages."self-hosting/cdk.md"]
+class = "aws"
+reason = "deploys to an AWS account"
+
+[pages."self-hosting/kubernetes.md"]
+class = "workflow"
+workflow = "chart-kind"
+reason = "its marked blocks are run on a kind cluster by the chart-kind workflow (scripts/chart_kind.sh)"
+
+[pages."getting-started/docker-guide.md"]
+class = "journey"
+journey = "docker-guide"
+pending = true
+reason = "start the stack as written, open the dashboard and sign in; its shell steps run in Doc Examples"
+
+[pages."getting-started/docker-compose-file.md"]
+class = "exec"
+reason = "its blocks run in Doc Examples; the skipped ones start the demo apps or extra images"
+
+[pages."getting-started/environment-setup.md"]
+class = "exec"
+reason = "its blocks run in Doc Examples"
+
+[pages."self-hosting/migrations.md"]
+class = "reference"
+reason = "an operator runbook for compose, Kubernetes and AWS; its shell blocks are not yet enrolled in Doc Examples"
+
+[pages."self-hosting/releases.md"]
+class = "external:ghcr"
+reason = "verifying a release pulls the published images and their signatures from ghcr.io"
+
+[pages."self-hosting/monitoring.md"]
+class = "aws"
+reason = "mostly CloudWatch dashboards and log groups, which need an AWS account"
+
+[pages."api/bayesian.md"]
+class = "exec"
+reason = "its API steps run on a stack in Doc Examples"
+
+[pages."guides/experiment-wizard.md"]
+class = "journey"
+journey = "experiment-wizard"
+pending = true
+reason = "the wizard's five steps to a draft, then started; its API steps run in Doc Examples"
+
+[pages."api/interaction-detection.md"]
+class = "exec"
+reason = "its API steps run on a stack in Doc Examples"
+
+[pages."statistics/power-analysis.md"]
+class = "journey"
+journey = "power-calculator"
+pending = true
+reason = "the dashboard's power calculator and POST /api/v1/power/sample-size, both checked against a scipy oracle"
+
+[pages."statistics/post-stratification.md"]
+class = "reference"
+reason = "the method and its formulas; no steps to follow"
+
+[pages."statistics/fdr-correction.md"]
+class = "exec"
+reason = "its API steps run on a stack in Doc Examples"
+
+[pages."workspaces/overview.md"]
+class = "reference"
+reason = "what workspaces are; no steps to follow"
+
+[pages."workspaces/quickstart.md"]
+class = "journey"
+journey = "workspaces-quickstart"
+pending = true
+reason = "full profile: create a workspace, invite a member, connect an SDK with a platform API key"
+
+[pages."deployment/deployment-guide.md"]
+class = "aws"
+reason = "deploys to AWS"
+
+[pages."deployment/iam-permissions.md"]
+class = "aws"
+reason = "the IAM permissions a deploy to AWS needs"
+
+[pages."deployment/rollback-runbook.md"]
+class = "aws"
+reason = "rolls back a deployment on AWS"
+
+[pages."deployment/disaster-recovery.md"]
+class = "aws"
+reason = "recovers a deployment on AWS"
+
+[pages."deployment/secrets-management.md"]
+class = "aws"
+reason = "AWS Secrets Manager and its rotation"
+
+[pages."monitoring/monitoring-guide.md"]
+class = "aws"
+reason = "CloudWatch monitoring of a deployment on AWS"
+
+[pages."monitoring/setup-guide.md"]
+class = "aws"
+reason = "sets up CloudWatch monitoring on AWS"
+
+[pages."monitoring/dashboard-reference.md"]
+class = "aws"
+reason = "the CloudWatch dashboards"
+
+[pages."monitoring/log-insights-queries.md"]
+class = "aws"
+reason = "CloudWatch Logs Insights queries"
+
+[pages."monitoring/troubleshooting-guide.md"]
+class = "aws"
+reason = "troubleshooting the CloudWatch monitoring"
+
+[pages."logging_standards.md"]
+class = "reference"
+reason = "logging conventions; no steps to follow"
+
+[pages."middleware/logging.md"]
+class = "reference"
+reason = "how the request-logging middleware works; no steps to follow"
+
+[pages."security-architecture.md"]
+class = "reference"
+reason = "the architecture of the platform's protections; no steps to follow"
+
+[pages."security/threat-model.md"]
+class = "reference"
+reason = "a threat model; no steps to follow"
+
+[pages."security/security-policies.md"]
+class = "reference"
+reason = "policies; no steps to follow"
+
+[pages."security/hardening-changes.md"]
+class = "reference"
+reason = "a record of hardening changes; no steps to follow"
+
+[pages."security/incident-response.md"]
+class = "reference"
+reason = "what to do after an incident on your deployment; no steps to run"
+
+[pages."auth/flow.md"]
+class = "reference"
+reason = "diagrams of the sign-in, reset and refresh flows; no steps to follow"
+
+[pages."auth/auth-developer-docs.md"]
+class = "aws"
+reason = "the Cognito user pool and app client set-up"
+
+[pages."auth/auth-user-guide.md"]
+class = "journey"
+journey = "onboarding-and-password"
+pending = true
+reason = "sign in as each role, manage users and change your own password with local sign-in"
+
+[pages."auth/auth-environment-variables.md"]
+class = "aws"
+reason = "the Cognito settings, which need a Cognito user pool"
+
+[pages."cognito_integration.md"]
+class = "aws"
+reason = "needs a Cognito user pool, which is why Doc Examples skips its blocks"
+
+[pages."rbac/README.md"]
+class = "reference"
+reason = "the role model; no steps to follow"
+
+[pages."architecture/overview.md"]
+class = "reference"
+reason = "the high-level architecture; no steps to follow"
+
+[pages."architecture/technical-guide.md"]
+class = "reference"
+reason = "a technical overview; its shell blocks are not yet enrolled in Doc Examples"
+
+[pages."architecture/models.md"]
+class = "reference"
+reason = "the data models; no steps to follow"
+
+[pages."api/stability.md"]
+class = "reference"
+reason = "the stability policy and the OpenAPI snapshots; no steps to follow"
+
+[pages."api/specs.md"]
+class = "reference"
+reason = "the API specification; no steps to follow"
+
+[pages."api/api-docs-guide.md"]
+class = "reference"
+reason = "how to read the served API documentation; no steps beyond opening it"
+
+[pages."api/data-export.md"]
+class = "exec"
+reason = "its API steps run on a stack in Doc Examples"
+
+[pages."api/dimensional-analysis.md"]
+class = "exec"
+reason = "its API steps run on a stack in Doc Examples"
+
+[pages."infrastructure/aurora-postgres-readme.md"]
+class = "aws"
+reason = "the CDK database stack"
+
+[pages."infrastructure/dynamodb-readme.md"]
+class = "aws"
+reason = "the CDK DynamoDB tables"
+
+[pages."infrastructure/redis-summary.md"]
+class = "aws"
+reason = "the CDK ElastiCache cluster"
+
+[pages."infrastructure/vpc-stack-implementation.md"]
+class = "aws"
+reason = "the CDK VPC stack"
+
+[pages."infrastructure/network-security-readme.md"]
+class = "aws"
+reason = "describes AWS networking (subnets, NAT gateways, groups and ACLs) as a Terraform configuration this repository does not contain"
+
+[pages."infrastructure/aws-iam-setup.md"]
+class = "aws"
+reason = "IAM users for deploying to AWS"
+
+[pages."infrastructure/cloudwatch-setup.md"]
+class = "aws"
+reason = "CloudWatch logging set-up"
+
+[pages."development/guidelines.md"]
+class = "reference"
+reason = "contributor guidelines; no reader flow"
+
+[pages."development/testing-guide.md"]
+class = "reference"
+reason = "how contributors run the test suites; no reader flow"
+
+[pages."development/doc-examples.md"]
+class = "reference"
+reason = "how Doc Examples works, for contributors; no reader flow"
+
+[pages."development/dependency-injection.md"]
+class = "reference"
+reason = "how the API wires its dependencies; no steps to follow"
+
+[pages."development/workflow-explanation.md"]
+class = "reference"
+reason = "what each CI workflow does; no steps to follow"
+
+[pages."development/database/migrations.md"]
+class = "reference"
+reason = "contributor guide to the models and Alembic; its shell blocks are not yet enrolled in Doc Examples"
+
+[pages."development/database/usage.md"]
+class = "reference"
+reason = "code examples for the data layer; no steps to run"
+
+[pages."development/database/backup.md"]
+class = "aws"
+reason = "Aurora and DynamoDB backup schedules on AWS"
+
+[pages."getting-started/python-virtual-env-setup.md"]
+class = "reference"
+reason = "contributor set-up of a Python virtual environment; no reader flow"
+
+[pages."getting-started/pre-commit-hooks.md"]
+class = "reference"
+reason = "contributor set-up of the pre-commit hooks; no reader flow"
+
+[pages."getting-started/vscode-settings.md"]
+class = "reference"
+reason = "contributor editor settings; no reader flow"
+
+[pages."auth/cognito-auth-testing.md"]
+class = "aws"
+reason = "needs a Cognito user pool"
+
+[pages."performance/load-testing.md"]
+class = "reference"
+reason = "how contributors run the Locust suite; its commands are not walked"
+
+# ---------------------------------------------------------------------------
+# The "Flows, at least" list of #939, each mapped to what verifies it.
+# ---------------------------------------------------------------------------
+
+[[flow]]
+text = "the docs site: every page in the nav reachable, links resolve, search works, the power analysis and sample size pages render and calculate"
+journeys = ["docs-site", "power-calculator"]
+note = "the published site answers for every nav page with its source heading and search finds it; in-site links are mkdocs strict's; the calculator meets a scipy oracle"
+
+[[flow]]
+text = "Quick Start, end to end"
+journeys = ["quick-start"]
+note = "its shell steps run in Doc Examples; the journey walks the dashboard half"
+
+[[flow]]
+text = "the Docker Compose guide: start the stack as written, open the dashboard, sign in"
+journeys = ["docker-guide"]
+note = "the stack started with the guide's own command, then the dashboard's sign-in"
+
+[[flow]]
+text = "feature flags: create, targeting, gradual rollout, safety monitoring"
+journeys = ["feature-flag-create", "feature-flag-rollout", "feature-flag-safety"]
+pages = ["Enhanced_Rules_Engine_Reference.md", "guides/segments.md"]
+note = "targeting is a step of the create journey; rollout and safety monitoring are journeys of their own"
+
+[[flow]]
+text = "experiments: the guided builder, assign, track, results (including the statistics the guide promises)"
+journeys = ["experiment-wizard", "experiment-results"]
+pages = ["api/sequential-testing.md", "api/bayesian.md", "api/cuped.md", "statistics/fdr-correction.md"]
+note = "seeded assignments and conversions feed the results journey; the statistics pages' API examples run in Doc Examples"
+
+[[flow]]
+text = "the dashboard-and-API guide and the API examples (the `{.bash exec}` blocks that `doc-examples.yml` already runs)"
+pages = ["guides/dashboard-and-api.md"]
+classes = ["exec"]
+note = "the table is held to the dashboard's source by a unit test; every exec page's examples run in Doc Examples"
+
+[[flow]]
+text = "the SDK quick starts"
+journeys = ["sdk-javascript", "sdk-python", "sdk-go"]
+pages = [
+    "sdk/java.md",
+    "sdk/react.md",
+    "sdk/ios.md",
+    "sdk/android.md",
+    "sdk/flutter.md",
+    "sdk/react-native.md",
+    "sdk/openfeature.md",
+    "sdk/edge.md",
+    "sdk/ruby.md",
+    "sdk/php.md",
+    "sdk/dotnet.md",
+    "sdk/elixir.md",
+    "sdk/local-evaluation.md",
+]
+note = "the JavaScript, Python and Go quick starts are journeys, installed as each page says; every other SDK page's class and reason say what verifies it"
+
+[[flow]]
+text = "self-hosting guides where they can be rehearsed without AWS"
+journeys = ["docker-guide"]
+pages = [
+    "self-hosting/kubernetes.md",
+    "getting-started/docker-compose-file.md",
+    "getting-started/environment-setup.md",
+    "self-hosting/migrations.md",
+    "self-hosting/releases.md",
+    "self-hosting/cdk.md",
+]
+note = "the production compose file (deploy/compose/compose.yml) has no page in the nav; the compose-production workflow boots it"
+
+[[flow]]
+text = "any other first-run flow the plan identifies"
+journeys = ["onboarding-and-password", "api-key-first-assignment", "workspaces-quickstart"]
+note = "sign-in per role and a password change, a first API key used for an assignment, and the workspaces quickstart"

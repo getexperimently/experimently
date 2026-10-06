@@ -19,9 +19,16 @@ Permission model:
     X-Hub-Signature-256, Jira Cloud's X-Hub-Signature, or the secret itself in
     X-Experimently-Webhook-Secret) and refused with 401 otherwise.
 
-All tests use the conftest.py role-specific client fixtures.
+Every response carrying a configuration shows only its connection settings
+and names the other stored keys in `stored_secrets`, for every caller; `PUT`
+merges `encrypted_config` key by key (see TestStoredSecretsAreNotReturned).
+
+Most tests use the conftest.py role-specific client fixtures; the stored
+secrets tests sign in a superuser, an ADMIN who is not a superuser and a
+DEVELOPER with make_client_for_user.
 """
 
+import copy
 import hashlib
 import hmac as hmac_lib
 import json
@@ -31,11 +38,13 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
-from backend.app.models.user import User
+from backend.app.models.user import User, UserRole
+from backend.tests.integration.conftest import HASHED_PASSWORD, make_client_for_user
 from modules.backend.app.models.integration_config import (
     IntegrationConfig,
     IntegrationType,
 )
+from modules.backend.app.schemas.integration import IntegrationConfigResponse
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -127,6 +136,17 @@ def _github_creds(secret: str = WEBHOOK_SECRET) -> dict:
         "repo_name": "experiments",
         "webhook_secret": secret,
     }
+
+
+def _stored_config(db_session: Session, integration_type: IntegrationType) -> dict:
+    """The configuration as the database holds it now, not as a session cached it."""
+    db_session.expire_all()
+    row = (
+        db_session.query(IntegrationConfig)
+        .filter(IntegrationConfig.integration_type == integration_type)
+        .one()
+    )
+    return row.encrypted_config
 
 
 # ---------------------------------------------------------------------------
@@ -348,14 +368,25 @@ class TestUpdateIntegration:
         assert response.status_code == 403, response.text
 
     def test_update_encrypted_config(self, admin_client, db_session):
-        """Admin can update the encrypted_config JSONB field."""
+        """Admin can update the encrypted_config JSONB field.
+
+        The keys sent are stored, merged with the one already there; none is
+        on the shown list, so the response names all three and returns none.
+        """
         _create_integration_in_db(
             db_session, IntegrationType.SALESFORCE, encrypted_config={"old": "data"}
         )
         payload = {"encrypted_config": {"new": "data", "token": "xyz"}}
         response = admin_client.put("/api/v1/integrations/salesforce", json=payload)
         assert response.status_code == 200, response.text
-        assert response.json()["encrypted_config"]["new"] == "data"
+        body = response.json()
+        assert "new" not in body["encrypted_config"]
+        assert body["stored_secrets"] == ["new", "old", "token"]
+        assert _stored_config(db_session, IntegrationType.SALESFORCE) == {
+            "old": "data",
+            "new": "data",
+            "token": "xyz",
+        }
 
 
 # ---------------------------------------------------------------------------
@@ -660,3 +691,328 @@ class TestGitHubWebhook:
             },
         )
         assert response.status_code == 401, response.text
+
+
+# ---------------------------------------------------------------------------
+# Stored secrets: named in every response, never returned
+# ---------------------------------------------------------------------------
+#
+# Every response carrying a configuration shows the keys on
+# schemas.integration.SHOWN_CONFIG_KEYS with their values and names every
+# other stored key, sorted, in `stored_secrets`.  The caller makes no
+# difference, so each test runs as a superuser, as an ADMIN who is not a
+# superuser (the `admin_user` fixture is a superuser, which would hide a check
+# keyed on the role), and, where the route lets it, as a DEVELOPER.
+
+#: The values each configuration shows.
+SHOWN = {
+    IntegrationType.JIRA: {
+        "base_url": "https://jira.example.com",
+        "email": "bot@example.com",
+        "project_key": "EXP",
+    },
+    IntegrationType.SALESFORCE: {
+        "instance_url": "https://acme.my.salesforce.com",
+        "client_id": "cid-shown",
+    },
+    IntegrationType.GITHUB: {"repo_owner": "acme", "repo_name": "experiments"},
+}
+
+#: The stored keys each configuration holds besides the shown ones.
+SECRET_KEYS = {
+    IntegrationType.JIRA: ["api_token", "webhook_secret"],
+    IntegrationType.SALESFORCE: ["client_secret", "webhook_secret"],
+    IntegrationType.GITHUB: ["token", "webhook_secret"],
+}
+
+READERS = ["superuser", "admin", "reader"]
+WRITERS = ["superuser", "admin"]
+
+
+def _sentinel(label: str) -> str:
+    """A value that is in no response unless a stored secret was returned."""
+    return f"SENTINEL-{label}-{uuid.uuid4().hex}"
+
+
+def _caller(db_session: Session, kind: str) -> User:
+    """A committed user: a superuser, or an ADMIN or DEVELOPER who is not one."""
+    role = UserRole.DEVELOPER if kind == "reader" else UserRole.ADMIN
+    suffix = uuid.uuid4().hex[:8]
+    user = User(
+        username=f"secrets_{kind}_{suffix}",
+        email=f"secrets_{kind}_{suffix}@int.test",
+        full_name=f"Stored secrets {kind}",
+        hashed_password=HASHED_PASSWORD,
+        is_active=True,
+        is_superuser=kind == "superuser",
+        role=role,
+    )
+    db_session.add(user)
+    db_session.commit()
+    db_session.refresh(user)
+    return user
+
+
+def _seed_all(db_session: Session, extra: dict = None) -> dict:
+    """Store one configuration of each type, every secret a fresh sentinel.
+
+    *extra* adds stored keys per type.  Returns every stored configuration.
+    """
+    stored = {}
+    for integration_type, shown in SHOWN.items():
+        config = dict(shown)
+        for key in SECRET_KEYS[integration_type]:
+            config[key] = _sentinel(f"{integration_type.value}-{key}")
+        config.update((extra or {}).get(integration_type, {}))
+        _create_integration_in_db(
+            db_session, integration_type, is_active=True, encrypted_config=config
+        )
+        stored[integration_type] = config
+    return stored
+
+
+def _secret_values(stored: dict) -> list:
+    """Every stored value that is not a shown setting."""
+    return [
+        value
+        for integration_type, config in stored.items()
+        for key, value in config.items()
+        if key not in SHOWN[integration_type]
+    ]
+
+
+def _assert_none_returned(response, secrets: list) -> None:
+    """No secret appears anywhere in the response body, in any field."""
+    for value in secrets:
+        assert value not in response.text, (
+            f"a stored secret value is in the {response.request.method} "
+            f"{response.request.url.path} response"
+        )
+
+
+@pytest.mark.integration
+@pytest.mark.requires_db
+class TestStoredSecretsAreNotReturned:
+    """The responses name the stored secrets and never carry their values."""
+
+    @pytest.mark.regression
+    @pytest.mark.parametrize("kind", READERS)
+    def test_reads_return_no_stored_secret_value(self, kind, db_session):
+        """GET list and GET of each type: settings shown, secrets named only."""
+        stored = _seed_all(db_session)
+        secrets = _secret_values(stored)
+        client = make_client_for_user(db_session, _caller(db_session, kind))
+
+        listed = client.get("/api/v1/integrations")
+        assert listed.status_code == 200, listed.text
+        _assert_none_returned(listed, secrets)
+        by_type = {item["integration_type"]: item for item in listed.json()}
+        for integration_type in SHOWN:
+            item = by_type[integration_type.value]
+            assert item["encrypted_config"] == SHOWN[integration_type]
+            assert item["stored_secrets"] == SECRET_KEYS[integration_type]
+
+        for integration_type in SHOWN:
+            one = client.get(f"/api/v1/integrations/{integration_type.value}")
+            assert one.status_code == 200, one.text
+            _assert_none_returned(one, secrets)
+            assert one.json()["encrypted_config"] == SHOWN[integration_type]
+            assert one.json()["stored_secrets"] == SECRET_KEYS[integration_type]
+
+    @pytest.mark.regression
+    @pytest.mark.parametrize("kind", WRITERS)
+    def test_writes_return_no_stored_secret_value(self, kind, db_session):
+        """POST and PUT answer with the same shape: no value they were sent."""
+        stored = _seed_all(db_session)
+        db_session.query(IntegrationConfig).filter(
+            IntegrationConfig.integration_type == IntegrationType.JIRA
+        ).delete()
+        db_session.commit()
+        client = make_client_for_user(db_session, _caller(db_session, kind))
+
+        posted = dict(SHOWN[IntegrationType.JIRA])
+        posted["api_token"] = _sentinel("posted-api-token")
+        posted["webhook_secret"] = _sentinel("posted-webhook")
+        created = client.post(
+            "/api/v1/integrations",
+            json={
+                "integration_type": "jira",
+                "is_active": True,
+                "encrypted_config": posted,
+            },
+        )
+        assert created.status_code == 201, created.text
+        _assert_none_returned(created, [posted["api_token"], posted["webhook_secret"]])
+        assert created.json()["encrypted_config"] == SHOWN[IntegrationType.JIRA]
+        assert created.json()["stored_secrets"] == ["api_token", "webhook_secret"]
+
+        new_token = _sentinel("put-token")
+        updated = client.put(
+            "/api/v1/integrations/github",
+            json={"encrypted_config": {"token": new_token}},
+        )
+        assert updated.status_code == 200, updated.text
+        _assert_none_returned(updated, [new_token] + _secret_values(stored))
+        assert updated.json()["encrypted_config"] == SHOWN[IntegrationType.GITHUB]
+        assert updated.json()["stored_secrets"] == ["token", "webhook_secret"]
+
+    @pytest.mark.regression
+    @pytest.mark.parametrize("kind", READERS)
+    def test_a_key_not_on_the_shown_list_is_named_not_returned(self, kind, db_session):
+        """What is shown is listed; any other key, however named, is withheld."""
+        password = _sentinel("password")
+        access_token = _sentinel("access-token")
+        stored = _seed_all(
+            db_session,
+            extra={
+                IntegrationType.GITHUB: {"password": password},
+                IntegrationType.SALESFORCE: {"access_token": access_token},
+            },
+        )
+        client = make_client_for_user(db_session, _caller(db_session, kind))
+
+        listed = client.get("/api/v1/integrations")
+        assert listed.status_code == 200, listed.text
+        _assert_none_returned(listed, _secret_values(stored))
+
+        github = client.get("/api/v1/integrations/github")
+        assert github.status_code == 200, github.text
+        _assert_none_returned(github, [password])
+        assert github.json()["stored_secrets"] == [
+            "password",
+            "token",
+            "webhook_secret",
+        ]
+
+        salesforce = client.get("/api/v1/integrations/salesforce")
+        assert salesforce.status_code == 200, salesforce.text
+        _assert_none_returned(salesforce, [access_token])
+        assert salesforce.json()["stored_secrets"] == [
+            "access_token",
+            "client_secret",
+            "webhook_secret",
+        ]
+
+    @pytest.mark.regression
+    @pytest.mark.parametrize("kind", WRITERS)
+    def test_reading_back_adding_a_key_and_sending_it_keeps_the_secrets(
+        self, kind, db_session
+    ):
+        """The read-modify-write upgrade recipe keeps the stored API token.
+
+        An integration created without a `webhook_secret` gets one the way the
+        earlier documentation said: GET it, add the key to `encrypted_config`
+        (`jq '{encrypted_config: (.encrypted_config + {webhook_secret: $s})}'`)
+        and PUT the result.  The body sent carries no API token, because the
+        GET returned none, and the stored one must survive; then a delivery
+        signed with the new secret is accepted.
+        """
+        api_token = _sentinel("api-token")
+        _create_integration_in_db(
+            db_session,
+            IntegrationType.JIRA,
+            is_active=True,
+            encrypted_config={**SHOWN[IntegrationType.JIRA], "api_token": api_token},
+        )
+        client = make_client_for_user(db_session, _caller(db_session, kind))
+        new_secret = _sentinel("new-webhook")
+
+        read = client.get("/api/v1/integrations/jira")
+        assert read.status_code == 200, read.text
+        body = {
+            "encrypted_config": {
+                **read.json()["encrypted_config"],
+                "webhook_secret": new_secret,
+            }
+        }
+        assert api_token not in json.dumps(body)
+
+        written = client.put("/api/v1/integrations/jira", json=body)
+        assert written.status_code == 200, written.text
+        assert written.json()["stored_secrets"] == ["api_token", "webhook_secret"]
+        assert _stored_config(db_session, IntegrationType.JIRA) == {
+            **SHOWN[IntegrationType.JIRA],
+            "api_token": api_token,
+            "webhook_secret": new_secret,
+        }
+
+        delivery = json.dumps(_jira_payload()).encode()
+        accepted = client.post(
+            "/api/v1/integrations/webhooks/jira",
+            content=delivery,
+            headers={
+                "Content-Type": "application/json",
+                "X-Hub-Signature": _compute_github_signature(new_secret, delivery),
+            },
+        )
+        assert accepted.status_code == 200, accepted.text
+
+    @pytest.mark.regression
+    @pytest.mark.parametrize("kind", WRITERS)
+    def test_put_merges_key_by_key_and_null_removes(self, kind, db_session):
+        """A key sent as null is removed; a stored key not sent is kept."""
+        api_token = _sentinel("api-token")
+        webhook_secret = _sentinel("webhook")
+        _create_integration_in_db(
+            db_session,
+            IntegrationType.JIRA,
+            is_active=True,
+            encrypted_config={
+                **SHOWN[IntegrationType.JIRA],
+                "api_token": api_token,
+                "webhook_secret": webhook_secret,
+            },
+        )
+        client = make_client_for_user(db_session, _caller(db_session, kind))
+
+        removed = client.put(
+            "/api/v1/integrations/jira", json={"encrypted_config": {"api_token": None}}
+        )
+        assert removed.status_code == 200, removed.text
+        assert _stored_config(db_session, IntegrationType.JIRA) == {
+            **SHOWN[IntegrationType.JIRA],
+            "webhook_secret": webhook_secret,
+        }
+        assert removed.json()["stored_secrets"] == ["webhook_secret"]
+
+        replacement = _sentinel("replacement-webhook")
+        replaced = client.put(
+            "/api/v1/integrations/jira",
+            json={"encrypted_config": {"webhook_secret": replacement}},
+        )
+        assert replaced.status_code == 200, replaced.text
+        assert _stored_config(db_session, IntegrationType.JIRA) == {
+            **SHOWN[IntegrationType.JIRA],
+            "webhook_secret": replacement,
+        }
+
+    @pytest.mark.regression
+    @pytest.mark.parametrize("kind", READERS)
+    def test_withheld_values_stay_stored(self, kind, db_session):
+        """A secret left out of a response is still stored, and still used.
+
+        The response is built from a copy: the configuration object it was
+        built from, and the row, still hold every value after the reads.
+        """
+        stored = _seed_all(db_session)
+        client = make_client_for_user(db_session, _caller(db_session, kind))
+
+        assert client.get("/api/v1/integrations").status_code == 200
+        for integration_type in SHOWN:
+            one = client.get(f"/api/v1/integrations/{integration_type.value}")
+            assert one.status_code == 200, one.text
+            assert one.json()["stored_secrets"] == SECRET_KEYS[integration_type]
+            assert (
+                _stored_config(db_session, integration_type) == stored[integration_type]
+            )
+
+        row = (
+            db_session.query(IntegrationConfig)
+            .filter(IntegrationConfig.integration_type == IntegrationType.JIRA)
+            .one()
+        )
+        before = copy.deepcopy(row.encrypted_config)
+        response = IntegrationConfigResponse.model_validate(row)
+        assert response.stored_secrets == SECRET_KEYS[IntegrationType.JIRA]
+        assert row.encrypted_config == before
+        assert response.encrypted_config is not row.encrypted_config
