@@ -1,0 +1,1397 @@
+# API fuzzing: the operations a pass selects but does not reach, each with its
+# reason.
+#
+# A pass reaches an operation when one request with the operation's own method
+# answers anything but 400, 401, 403, 404, 405, 422 or 429 (scripts/
+# fuzz_check.py). An operation the pass does not reach fails the run unless it
+# is listed here for that pass; an operation listed here that the run did reach
+# fails it too, so the list cannot go stale. Each entry names its pass
+# (superuser, viewer, sdk), the operation exactly as the served API document
+# does ("METHOD /path"), and why. Entries are kept per pass and in the order
+# of the document's paths.
+#
+# The first lists come from the run on the pull request that added this file
+# (seed 20261006): 98 for superuser, 169 for viewer, 8 for sdk. Most are
+# requests that name no stored row (404), fail validation (422), or that the
+# pass's role or credential may not make (401, 403).
+
+# --- superuser: the seeded demo administrator's bearer token ----------------
+
+[[unreached]]
+pass = "superuser"
+operation = "POST /api/v1/auth/signup"
+reason = "Cognito sign-up and recovery: the stack signs in with the local provider, so it answers 404 (and 429 once the sign-in limit is spent)."
+
+[[unreached]]
+pass = "superuser"
+operation = "POST /api/v1/auth/confirm"
+reason = "Cognito sign-up and recovery: the stack signs in with the local provider, so it answers 404 (and 429 once the sign-in limit is spent)."
+
+[[unreached]]
+pass = "superuser"
+operation = "POST /api/v1/auth/forgot-password"
+reason = "Cognito sign-up and recovery: the stack signs in with the local provider, so it answers 404 (and 429 once the sign-in limit is spent)."
+
+[[unreached]]
+pass = "superuser"
+operation = "POST /api/v1/auth/reset-password"
+reason = "Cognito sign-up and recovery: the stack signs in with the local provider, so it answers 404 (and 429 once the sign-in limit is spent)."
+
+[[unreached]]
+pass = "superuser"
+operation = "POST /api/v1/auth/refresh"
+reason = "Cognito sign-up and recovery: the stack signs in with the local provider, so it answers 404 (and 429 once the sign-in limit is spent)."
+
+[[unreached]]
+pass = "superuser"
+operation = "POST /api/v1/users/"
+reason = "Every generated request fails the operation's own validation (422)."
+
+[[unreached]]
+pass = "superuser"
+operation = "DELETE /api/v1/experiments/{experiment_id}"
+reason = "The handler refuses the generated values (400); ids that name no stored row answer 404 and invalid requests answer 422."
+
+[[unreached]]
+pass = "superuser"
+operation = "POST /api/v1/experiments/{experiment_id}/pause"
+reason = "The handler refuses the generated values (400); invalid requests answer 422."
+
+[[unreached]]
+pass = "superuser"
+operation = "GET /api/v1/experiments/analysis/sample-size"
+reason = "Every generated request fails the operation's own validation (422)."
+
+[[unreached]]
+pass = "superuser"
+operation = "GET /api/v1/experiments/{experiment_id}/split-url/preview"
+reason = "The handler refuses the generated values (400); ids that name no stored row answer 404 and invalid requests answer 422."
+
+[[unreached]]
+pass = "superuser"
+operation = "POST /api/v1/tracking/assign"
+reason = "An SDK route: it takes an API key, and this pass sends a bearer token (401). The sdk pass fuzzes it."
+
+[[unreached]]
+pass = "superuser"
+operation = "POST /api/v1/tracking/assign/batch"
+reason = "An SDK route: it takes an API key, and this pass sends a bearer token (401). The sdk pass fuzzes it."
+
+[[unreached]]
+pass = "superuser"
+operation = "POST /api/v1/tracking/track"
+reason = "An SDK route: it takes an API key, and this pass sends a bearer token (401). The sdk pass fuzzes it."
+
+[[unreached]]
+pass = "superuser"
+operation = "POST /api/v1/tracking/events"
+reason = "An SDK route: it takes an API key, and this pass sends a bearer token (401). The sdk pass fuzzes it."
+
+[[unreached]]
+pass = "superuser"
+operation = "POST /api/v1/tracking/batch"
+reason = "An SDK route: it takes an API key, and this pass sends a bearer token (401). The sdk pass fuzzes it."
+
+[[unreached]]
+pass = "superuser"
+operation = "GET /api/v1/tracking/assignments/{user_id}"
+reason = "An SDK route: it takes an API key, and this pass sends a bearer token (401). The sdk pass fuzzes it."
+
+[[unreached]]
+pass = "superuser"
+operation = "POST /api/v1/tracking/errors"
+reason = "An SDK route: it takes an API key, and this pass sends a bearer token (401). The sdk pass fuzzes it."
+
+[[unreached]]
+pass = "superuser"
+operation = "POST /api/v1/tracking/errors/batch"
+reason = "An SDK route: it takes an API key, and this pass sends a bearer token (401). The sdk pass fuzzes it."
+
+[[unreached]]
+pass = "superuser"
+operation = "POST /api/v1/tracking/evaluations"
+reason = "An SDK route: it takes an API key, and this pass sends a bearer token (401). The sdk pass fuzzes it."
+
+[[unreached]]
+pass = "superuser"
+operation = "POST /api/v1/feature-flags/{flag_id}/activate"
+reason = "Generated ids never name a stored row (404); the other requests fail validation (422)."
+
+[[unreached]]
+pass = "superuser"
+operation = "POST /api/v1/feature-flags/{flag_id}/deactivate"
+reason = "Generated ids never name a stored row (404); the other requests fail validation (422)."
+
+[[unreached]]
+pass = "superuser"
+operation = "POST /api/v1/feature-flags/{flag_id}/unarchive"
+reason = "Generated ids never name a stored row (404); the other requests fail validation (422)."
+
+[[unreached]]
+pass = "superuser"
+operation = "GET /api/v1/feature-flags/evaluate/{flag_key}"
+reason = "An SDK route: it takes an API key, and this pass sends a bearer token (401). The sdk pass fuzzes it."
+
+[[unreached]]
+pass = "superuser"
+operation = "POST /api/v1/feature-flags/evaluate/{flag_key}"
+reason = "An SDK route: it takes an API key, and this pass sends a bearer token (401). The sdk pass fuzzes it."
+
+[[unreached]]
+pass = "superuser"
+operation = "GET /api/v1/feature-flags/user/{user_id}"
+reason = "An SDK route: it takes an API key, and this pass sends a bearer token (401). The sdk pass fuzzes it."
+
+[[unreached]]
+pass = "superuser"
+operation = "POST /api/v1/feature-flags/{flag_id}/toggle"
+reason = "Generated ids never name a stored row (404); the other requests fail validation (422)."
+
+[[unreached]]
+pass = "superuser"
+operation = "POST /api/v1/feature-flags/{flag_id}/enable"
+reason = "Generated ids never name a stored row (404); the other requests fail validation (422)."
+
+[[unreached]]
+pass = "superuser"
+operation = "POST /api/v1/feature-flags/{flag_id}/disable"
+reason = "Generated ids never name a stored row (404); the other requests fail validation (422)."
+
+[[unreached]]
+pass = "superuser"
+operation = "DELETE /api/v1/admin/users/{user_id}"
+reason = "The handler refuses the generated values (400); ids that name no stored row answer 404 and invalid requests answer 422."
+
+[[unreached]]
+pass = "superuser"
+operation = "GET /api/v1/results/{experiment_id}/sequential"
+reason = "Generated ids never name a stored row (404); the other requests fail validation (422)."
+
+[[unreached]]
+pass = "superuser"
+operation = "POST /api/v1/rollout-schedules/"
+reason = "The handler refuses the generated values (400); ids that name no stored row answer 404 and invalid requests answer 422."
+
+[[unreached]]
+pass = "superuser"
+operation = "PUT /api/v1/rollout-schedules/{schedule_id}"
+reason = "The handler refuses the generated values (400); ids that name no stored row answer 404 and invalid requests answer 422."
+
+[[unreached]]
+pass = "superuser"
+operation = "POST /api/v1/rollout-schedules/{schedule_id}/activate"
+reason = "Generated ids never name a stored row (404); the other requests fail validation (422)."
+
+[[unreached]]
+pass = "superuser"
+operation = "POST /api/v1/rollout-schedules/{schedule_id}/pause"
+reason = "Generated ids never name a stored row (404); the other requests fail validation (422)."
+
+[[unreached]]
+pass = "superuser"
+operation = "POST /api/v1/rollout-schedules/{schedule_id}/cancel"
+reason = "Generated ids never name a stored row (404); the other requests fail validation (422)."
+
+[[unreached]]
+pass = "superuser"
+operation = "POST /api/v1/rollout-schedules/{schedule_id}/stages"
+reason = "Generated ids never name a stored row (404); the other requests fail validation (422)."
+
+[[unreached]]
+pass = "superuser"
+operation = "PUT /api/v1/rollout-schedules/stages/{stage_id}"
+reason = "The handler refuses the generated values (400); ids that name no stored row answer 404 and invalid requests answer 422."
+
+[[unreached]]
+pass = "superuser"
+operation = "DELETE /api/v1/rollout-schedules/stages/{stage_id}"
+reason = "Generated ids never name a stored row (404); the other requests fail validation (422)."
+
+[[unreached]]
+pass = "superuser"
+operation = "POST /api/v1/rollout-schedules/stages/{stage_id}/advance"
+reason = "Generated ids never name a stored row (404); the other requests fail validation (422)."
+
+[[unreached]]
+pass = "superuser"
+operation = "GET /api/v1/feature-flags/{flag_id}/history"
+reason = "Generated ids never name a stored row (404); the other requests fail validation (422)."
+
+[[unreached]]
+pass = "superuser"
+operation = "POST /api/v1/mutual-exclusion-groups/{group_id}/experiments"
+reason = "The handler refuses the generated values (400); invalid requests answer 422."
+
+[[unreached]]
+pass = "superuser"
+operation = "DELETE /api/v1/mutual-exclusion-groups/{group_id}/experiments/{experiment_id}"
+reason = "The handler refuses the generated values (400); invalid requests answer 422."
+
+[[unreached]]
+pass = "superuser"
+operation = "GET /api/v1/holdout/{holdout_id}/results"
+reason = "Generated ids never name a stored row (404); the other requests fail validation (422)."
+
+[[unreached]]
+pass = "superuser"
+operation = "GET /api/v1/bandit/{experiment_id}"
+reason = "Generated ids never name a stored row (404); the other requests fail validation (422)."
+
+[[unreached]]
+pass = "superuser"
+operation = "PUT /api/v1/bandit/{experiment_id}/weights"
+reason = "The handler refuses the generated values (400); invalid requests answer 422."
+
+[[unreached]]
+pass = "superuser"
+operation = "GET /api/v1/interactions/{exp_a_id}/{exp_b_id}"
+reason = "Generated ids never name a stored row (404); the other requests fail validation (422)."
+
+[[unreached]]
+pass = "superuser"
+operation = "GET /api/v1/ai/templates/{template_id}"
+reason = "Generated ids, keys or tokens never name a stored row, so every request answers 404."
+
+[[unreached]]
+pass = "superuser"
+operation = "PUT /api/v1/wizard/drafts/{draft_id}/step"
+reason = "Generated ids never name a stored row (404); the other requests fail validation (422)."
+
+[[unreached]]
+pass = "superuser"
+operation = "POST /api/v1/wizard/drafts/{draft_id}/submit"
+reason = "Generated ids, keys or tokens never name a stored row, so every request answers 404."
+
+[[unreached]]
+pass = "superuser"
+operation = "GET /api/v1/compliance/reports/{standard}"
+reason = "The handler refuses the generated values (400); invalid requests answer 422."
+
+[[unreached]]
+pass = "superuser"
+operation = "POST /api/v1/llm-experiments/"
+reason = "Every generated request fails the operation's own validation (422)."
+
+[[unreached]]
+pass = "superuser"
+operation = "GET /api/v1/llm-experiments/{experiment_id}"
+reason = "Generated ids never name a stored row (404); the other requests fail validation (422)."
+
+[[unreached]]
+pass = "superuser"
+operation = "PUT /api/v1/llm-experiments/{experiment_id}"
+reason = "Generated ids never name a stored row (404); the other requests fail validation (422)."
+
+[[unreached]]
+pass = "superuser"
+operation = "POST /api/v1/llm-experiments/{experiment_id}/start"
+reason = "Generated ids never name a stored row (404); the other requests fail validation (422)."
+
+[[unreached]]
+pass = "superuser"
+operation = "POST /api/v1/llm-experiments/{experiment_id}/pause"
+reason = "Generated ids never name a stored row (404); the other requests fail validation (422)."
+
+[[unreached]]
+pass = "superuser"
+operation = "POST /api/v1/llm-experiments/{experiment_id}/variants"
+reason = "Generated ids never name a stored row (404); the other requests fail validation (422)."
+
+[[unreached]]
+pass = "superuser"
+operation = "PUT /api/v1/llm-experiments/{experiment_id}/variants/{variant_id}"
+reason = "Generated ids never name a stored row (404); the other requests fail validation (422)."
+
+[[unreached]]
+pass = "superuser"
+operation = "GET /api/v1/llm-experiments/{experiment_id}/results"
+reason = "Generated ids never name a stored row (404); the other requests fail validation (422)."
+
+[[unreached]]
+pass = "superuser"
+operation = "POST /api/v1/power/sample-size"
+reason = "The handler refuses the generated values (400); invalid requests answer 422."
+
+[[unreached]]
+pass = "superuser"
+operation = "GET /api/v1/sdk/ruleset"
+reason = "An SDK route: it takes an API key, and this pass sends a bearer token (401). The sdk pass fuzzes it."
+
+[[unreached]]
+pass = "superuser"
+operation = "POST /api/v1/rbac/roles/assign"
+reason = "Generated ids never name a stored row (404); the other requests fail validation (422)."
+
+[[unreached]]
+pass = "superuser"
+operation = "POST /api/v1/rbac/roles/revoke"
+reason = "Generated ids never name a stored row (404); the other requests fail validation (422)."
+
+[[unreached]]
+pass = "superuser"
+operation = "GET /api/v1/etl/jobs/{run_id}/status"
+reason = "Generated ids never name a stored row (404); the other requests fail validation (422)."
+
+[[unreached]]
+pass = "superuser"
+operation = "POST /api/v1/etl/partitions/add"
+reason = "Generated ids never name a stored row (404); the other requests fail validation (422)."
+
+[[unreached]]
+pass = "superuser"
+operation = "GET /api/v1/warehouse/analysis/connections/{connection_id}"
+reason = "Generated ids never name a stored row (404); the other requests fail validation (422)."
+
+[[unreached]]
+pass = "superuser"
+operation = "PUT /api/v1/warehouse/analysis/connections/{connection_id}"
+reason = "The handler refuses the generated values (400); ids that name no stored row answer 404 and invalid requests answer 422."
+
+[[unreached]]
+pass = "superuser"
+operation = "DELETE /api/v1/warehouse/analysis/connections/{connection_id}"
+reason = "Generated ids never name a stored row (404); the other requests fail validation (422)."
+
+[[unreached]]
+pass = "superuser"
+operation = "POST /api/v1/warehouse/analysis/connections/{connection_id}/regenerate-key"
+reason = "Generated ids never name a stored row (404); the other requests fail validation (422)."
+
+[[unreached]]
+pass = "superuser"
+operation = "POST /api/v1/warehouse/analysis/sources"
+reason = "The handler refuses the generated values (400); ids that name no stored row answer 404 and invalid requests answer 422."
+
+[[unreached]]
+pass = "superuser"
+operation = "GET /api/v1/warehouse/analysis/sources/{source_id}"
+reason = "Generated ids never name a stored row (404); the other requests fail validation (422)."
+
+[[unreached]]
+pass = "superuser"
+operation = "PUT /api/v1/warehouse/analysis/sources/{source_id}"
+reason = "The handler refuses the generated values (400); ids that name no stored row answer 404 and invalid requests answer 422."
+
+[[unreached]]
+pass = "superuser"
+operation = "DELETE /api/v1/warehouse/analysis/sources/{source_id}"
+reason = "Generated ids never name a stored row (404); the other requests fail validation (422)."
+
+[[unreached]]
+pass = "superuser"
+operation = "GET /api/v1/warehouse/analysis/runs/{run_id}"
+reason = "Generated ids never name a stored row (404); the other requests fail validation (422)."
+
+[[unreached]]
+pass = "superuser"
+operation = "POST /api/v1/integrations/webhooks/jira"
+reason = "An anonymous webhook receiver: no integration of this type is configured with a webhook secret, so every delivery answers 401."
+
+[[unreached]]
+pass = "superuser"
+operation = "POST /api/v1/integrations/webhooks/salesforce"
+reason = "An anonymous webhook receiver: no integration of this type is configured with a webhook secret, so every delivery answers 401."
+
+[[unreached]]
+pass = "superuser"
+operation = "POST /api/v1/integrations/webhooks/github"
+reason = "An anonymous webhook receiver: no integration of this type is configured with a webhook secret, so every delivery answers 401."
+
+[[unreached]]
+pass = "superuser"
+operation = "GET /api/v1/auth/sso/configs/{config_id}"
+reason = "No SSO configuration exists (creating one is left out of fuzzing), so it never finds one: it answers 400, 404 or 422, and 429 once the sign-in limit is spent."
+
+[[unreached]]
+pass = "superuser"
+operation = "DELETE /api/v1/auth/sso/configs/{config_id}"
+reason = "No SSO configuration exists (creating one is left out of fuzzing), so it never finds one: it answers 400, 404 or 422, and 429 once the sign-in limit is spent."
+
+[[unreached]]
+pass = "superuser"
+operation = "GET /api/v1/auth/sso/saml/{config_id}/metadata"
+reason = "No SSO configuration exists (creating one is left out of fuzzing), so it never finds one: it answers 400, 404 or 422, and 429 once the sign-in limit is spent."
+
+[[unreached]]
+pass = "superuser"
+operation = "POST /api/v1/auth/sso/saml/{config_id}/acs"
+reason = "No SSO configuration exists (creating one is left out of fuzzing), so it never finds one: it answers 400, 404 or 422, and 429 once the sign-in limit is spent."
+
+[[unreached]]
+pass = "superuser"
+operation = "GET /api/v1/auth/sso/oidc/{provider}/login"
+reason = "No SSO configuration exists (creating one is left out of fuzzing), so it never finds one: it answers 400, 404 or 422, and 429 once the sign-in limit is spent."
+
+[[unreached]]
+pass = "superuser"
+operation = "GET /api/v1/auth/sso/login"
+reason = "No SSO configuration exists (creating one is left out of fuzzing), so it never finds one: it answers 400, 404 or 422, and 429 once the sign-in limit is spent."
+
+[[unreached]]
+pass = "superuser"
+operation = "POST /api/v1/auth/sso/exchange"
+reason = "No SSO configuration exists (creating one is left out of fuzzing), so it never finds one: it answers 400, 404 or 422, and 429 once the sign-in limit is spent."
+
+[[unreached]]
+pass = "superuser"
+operation = "POST /api/v1/workspaces/"
+reason = "Every generated request fails the operation's own validation (422)."
+
+[[unreached]]
+pass = "superuser"
+operation = "GET /api/v1/workspaces/{workspace_id}"
+reason = "Generated ids never name a stored row (404); the other requests fail validation (422)."
+
+[[unreached]]
+pass = "superuser"
+operation = "PUT /api/v1/workspaces/{workspace_id}"
+reason = "The handler refuses the generated values (400); ids that name no stored row answer 404 and invalid requests answer 422."
+
+[[unreached]]
+pass = "superuser"
+operation = "DELETE /api/v1/workspaces/{workspace_id}"
+reason = "Generated ids never name a stored row (404); the other requests fail validation (422)."
+
+[[unreached]]
+pass = "superuser"
+operation = "GET /api/v1/workspaces/{workspace_id}/members"
+reason = "Generated ids never name a stored row (404); the other requests fail validation (422)."
+
+[[unreached]]
+pass = "superuser"
+operation = "POST /api/v1/workspaces/{workspace_id}/members"
+reason = "The handler refuses the generated values (400); ids that name no stored row answer 404 and invalid requests answer 422."
+
+[[unreached]]
+pass = "superuser"
+operation = "PUT /api/v1/workspaces/{workspace_id}/members/{user_id}"
+reason = "Generated ids never name a stored row (404); the other requests fail validation (422)."
+
+[[unreached]]
+pass = "superuser"
+operation = "DELETE /api/v1/workspaces/{workspace_id}/members/{user_id}"
+reason = "Generated ids never name a stored row (404); the other requests fail validation (422)."
+
+[[unreached]]
+pass = "superuser"
+operation = "POST /api/v1/workspaces/{workspace_id}/invites"
+reason = "Generated ids never name a stored row (404); the other requests fail validation (422)."
+
+[[unreached]]
+pass = "superuser"
+operation = "POST /api/v1/workspaces/invites/{token}/accept"
+reason = "Generated ids, keys or tokens never name a stored row, so every request answers 404."
+
+[[unreached]]
+pass = "superuser"
+operation = "GET /api/v1/workspaces/invites/{token}"
+reason = "Generated ids, keys or tokens never name a stored row, so every request answers 404."
+
+[[unreached]]
+pass = "superuser"
+operation = "POST /api/v1/hipaa/baa"
+reason = "Every generated request fails the operation's own validation (422)."
+
+[[unreached]]
+pass = "superuser"
+operation = "GET /api/v1/hipaa/baa/{baa_id}"
+reason = "Generated ids never name a stored row (404); the other requests fail validation (422)."
+
+[[unreached]]
+pass = "superuser"
+operation = "DELETE /api/v1/hipaa/baa/{baa_id}"
+reason = "Generated ids never name a stored row (404); the other requests fail validation (422)."
+
+[[unreached]]
+pass = "superuser"
+operation = "POST /api/v1/hipaa/audit-logs"
+reason = "Every generated request fails the operation's own validation (422)."
+
+# --- viewer: the seeded VIEWER's bearer token ------------------------------
+
+[[unreached]]
+pass = "viewer"
+operation = "POST /api/v1/auth/signup"
+reason = "Cognito sign-up and recovery: the stack signs in with the local provider, so it answers 404 (and 429 once the sign-in limit is spent)."
+
+[[unreached]]
+pass = "viewer"
+operation = "POST /api/v1/auth/confirm"
+reason = "Cognito sign-up and recovery: the stack signs in with the local provider, so it answers 404 (and 429 once the sign-in limit is spent)."
+
+[[unreached]]
+pass = "viewer"
+operation = "POST /api/v1/auth/forgot-password"
+reason = "Cognito sign-up and recovery: the stack signs in with the local provider, so it answers 404 (and 429 once the sign-in limit is spent)."
+
+[[unreached]]
+pass = "viewer"
+operation = "POST /api/v1/auth/reset-password"
+reason = "Cognito sign-up and recovery: the stack signs in with the local provider, so it answers 404 (and 429 once the sign-in limit is spent)."
+
+[[unreached]]
+pass = "viewer"
+operation = "POST /api/v1/auth/refresh"
+reason = "Cognito sign-up and recovery: the stack signs in with the local provider, so it answers 404 (and 429 once the sign-in limit is spent)."
+
+[[unreached]]
+pass = "viewer"
+operation = "POST /api/v1/users/"
+reason = "The VIEWER role may not use it, so the role check answers 403; requests that fail validation first answer 422."
+
+[[unreached]]
+pass = "viewer"
+operation = "PUT /api/v1/users/{user_id}"
+reason = "The VIEWER role may not use it, so the role check answers 403; requests that fail validation first answer 422."
+
+[[unreached]]
+pass = "viewer"
+operation = "POST /api/v1/experiments/"
+reason = "The VIEWER role may not use it, so the role check answers 403; requests that fail validation first answer 422, and a few 400."
+
+[[unreached]]
+pass = "viewer"
+operation = "PUT /api/v1/experiments/{experiment_id}"
+reason = "The VIEWER role may not use it, so the role check answers 403; requests that name no stored row answer 404, and those that fail validation 422."
+
+[[unreached]]
+pass = "viewer"
+operation = "DELETE /api/v1/experiments/{experiment_id}"
+reason = "The handler refuses the generated values (400); ids that name no stored row answer 404 and invalid requests answer 422."
+
+[[unreached]]
+pass = "viewer"
+operation = "POST /api/v1/experiments/{experiment_id}/start"
+reason = "The VIEWER role may not use it, so the role check answers 403; requests that name no stored row answer 404, and those that fail validation 422."
+
+[[unreached]]
+pass = "viewer"
+operation = "POST /api/v1/experiments/{experiment_id}/pause"
+reason = "The VIEWER role may not use it, so the role check answers 403; requests that name no stored row answer 404, and those that fail validation 422."
+
+[[unreached]]
+pass = "viewer"
+operation = "PUT /api/v1/experiments/{experiment_id}/schedule"
+reason = "The VIEWER role may not use it, so the role check answers 403; requests that name no stored row answer 404, and those that fail validation 422."
+
+[[unreached]]
+pass = "viewer"
+operation = "POST /api/v1/experiments/{experiment_id}/complete"
+reason = "The VIEWER role may not use it, so the role check answers 403; requests that name no stored row answer 404, and those that fail validation 422."
+
+[[unreached]]
+pass = "viewer"
+operation = "POST /api/v1/experiments/{experiment_id}/archive"
+reason = "The VIEWER role may not use it, so the role check answers 403; requests that name no stored row answer 404, and those that fail validation 422."
+
+[[unreached]]
+pass = "viewer"
+operation = "POST /api/v1/experiments/{experiment_id}/clone"
+reason = "The VIEWER role may not use it, so the role check answers 403; requests that name no stored row answer 404, and those that fail validation 422."
+
+[[unreached]]
+pass = "viewer"
+operation = "POST /api/v1/experiments/{experiment_id}/metadata"
+reason = "The VIEWER role may not use it, so the role check answers 403; requests that fail validation first answer 422, and a few 400."
+
+[[unreached]]
+pass = "viewer"
+operation = "GET /api/v1/experiments/analysis/sample-size"
+reason = "Every generated request fails the operation's own validation (422)."
+
+[[unreached]]
+pass = "viewer"
+operation = "POST /api/v1/experiments/schedules/process"
+reason = "The VIEWER role may not use it, so the role check answers 403."
+
+[[unreached]]
+pass = "viewer"
+operation = "GET /api/v1/experiments/{experiment_id}/split-url/preview"
+reason = "The VIEWER role may not use it, so the role check answers 403; requests that fail validation first answer 422."
+
+[[unreached]]
+pass = "viewer"
+operation = "POST /api/v1/tracking/assign"
+reason = "An SDK route: it takes an API key, and this pass sends a bearer token (401). The sdk pass fuzzes it."
+
+[[unreached]]
+pass = "viewer"
+operation = "POST /api/v1/tracking/assign/batch"
+reason = "An SDK route: it takes an API key, and this pass sends a bearer token (401). The sdk pass fuzzes it."
+
+[[unreached]]
+pass = "viewer"
+operation = "POST /api/v1/tracking/track"
+reason = "An SDK route: it takes an API key, and this pass sends a bearer token (401). The sdk pass fuzzes it."
+
+[[unreached]]
+pass = "viewer"
+operation = "POST /api/v1/tracking/events"
+reason = "An SDK route: it takes an API key, and this pass sends a bearer token (401). The sdk pass fuzzes it."
+
+[[unreached]]
+pass = "viewer"
+operation = "POST /api/v1/tracking/batch"
+reason = "An SDK route: it takes an API key, and this pass sends a bearer token (401). The sdk pass fuzzes it."
+
+[[unreached]]
+pass = "viewer"
+operation = "GET /api/v1/tracking/assignments/{user_id}"
+reason = "An SDK route: it takes an API key, and this pass sends a bearer token (401). The sdk pass fuzzes it."
+
+[[unreached]]
+pass = "viewer"
+operation = "POST /api/v1/tracking/errors"
+reason = "An SDK route: it takes an API key, and this pass sends a bearer token (401). The sdk pass fuzzes it."
+
+[[unreached]]
+pass = "viewer"
+operation = "POST /api/v1/tracking/errors/batch"
+reason = "An SDK route: it takes an API key, and this pass sends a bearer token (401). The sdk pass fuzzes it."
+
+[[unreached]]
+pass = "viewer"
+operation = "POST /api/v1/tracking/evaluations"
+reason = "An SDK route: it takes an API key, and this pass sends a bearer token (401). The sdk pass fuzzes it."
+
+[[unreached]]
+pass = "viewer"
+operation = "POST /api/v1/feature-flags/"
+reason = "The VIEWER role may not use it, so the role check answers 403, and a few 400."
+
+[[unreached]]
+pass = "viewer"
+operation = "PUT /api/v1/feature-flags/{flag_id}"
+reason = "The VIEWER role may not use it, so the role check answers 403; requests that name no stored row answer 404, and those that fail validation 422."
+
+[[unreached]]
+pass = "viewer"
+operation = "DELETE /api/v1/feature-flags/{flag_id}"
+reason = "The VIEWER role may not use it, so the role check answers 403; requests that name no stored row answer 404, and those that fail validation 422."
+
+[[unreached]]
+pass = "viewer"
+operation = "POST /api/v1/feature-flags/{flag_id}/activate"
+reason = "Generated ids never name a stored row (404); the other requests fail validation (422)."
+
+[[unreached]]
+pass = "viewer"
+operation = "POST /api/v1/feature-flags/{flag_id}/deactivate"
+reason = "Generated ids never name a stored row (404); the other requests fail validation (422)."
+
+[[unreached]]
+pass = "viewer"
+operation = "POST /api/v1/feature-flags/{flag_id}/unarchive"
+reason = "Generated ids never name a stored row (404); the other requests fail validation (422)."
+
+[[unreached]]
+pass = "viewer"
+operation = "GET /api/v1/feature-flags/evaluate/{flag_key}"
+reason = "An SDK route: it takes an API key, and this pass sends a bearer token (401). The sdk pass fuzzes it."
+
+[[unreached]]
+pass = "viewer"
+operation = "POST /api/v1/feature-flags/evaluate/{flag_key}"
+reason = "An SDK route: it takes an API key, and this pass sends a bearer token (401). The sdk pass fuzzes it."
+
+[[unreached]]
+pass = "viewer"
+operation = "GET /api/v1/feature-flags/user/{user_id}"
+reason = "An SDK route: it takes an API key, and this pass sends a bearer token (401). The sdk pass fuzzes it."
+
+[[unreached]]
+pass = "viewer"
+operation = "POST /api/v1/feature-flags/{flag_id}/toggle"
+reason = "Generated ids never name a stored row (404); the other requests fail validation (422)."
+
+[[unreached]]
+pass = "viewer"
+operation = "POST /api/v1/feature-flags/{flag_id}/enable"
+reason = "Generated ids never name a stored row (404); the other requests fail validation (422)."
+
+[[unreached]]
+pass = "viewer"
+operation = "POST /api/v1/feature-flags/{flag_id}/disable"
+reason = "Generated ids never name a stored row (404); the other requests fail validation (422)."
+
+[[unreached]]
+pass = "viewer"
+operation = "GET /api/v1/admin/users"
+reason = "The VIEWER role may not use it, so the role check answers 403."
+
+[[unreached]]
+pass = "viewer"
+operation = "GET /api/v1/admin/users/{user_id}"
+reason = "The VIEWER role may not use it, so the role check answers 403."
+
+[[unreached]]
+pass = "viewer"
+operation = "PUT /api/v1/admin/users/{user_id}"
+reason = "The VIEWER role may not use it, so the role check answers 403."
+
+[[unreached]]
+pass = "viewer"
+operation = "PATCH /api/v1/admin/users/{user_id}"
+reason = "The VIEWER role may not use it, so the role check answers 403."
+
+[[unreached]]
+pass = "viewer"
+operation = "DELETE /api/v1/admin/users/{user_id}"
+reason = "The VIEWER role may not use it, so the role check answers 403."
+
+[[unreached]]
+pass = "viewer"
+operation = "GET /api/v1/admin/stats"
+reason = "The VIEWER role may not use it, so the role check answers 403."
+
+[[unreached]]
+pass = "viewer"
+operation = "POST /api/v1/admin/cache/clear"
+reason = "The VIEWER role may not use it, so the role check answers 403."
+
+[[unreached]]
+pass = "viewer"
+operation = "POST /api/v1/results/{experiment_id}/invalidate-cache"
+reason = "The VIEWER role may not use it, so the role check answers 403."
+
+[[unreached]]
+pass = "viewer"
+operation = "POST /api/v1/rollout-schedules/"
+reason = "The handler refuses the generated values (400); ids that name no stored row answer 404 and invalid requests answer 422."
+
+[[unreached]]
+pass = "viewer"
+operation = "PUT /api/v1/rollout-schedules/{schedule_id}"
+reason = "The VIEWER role may not use it, so the role check answers 403; requests that name no stored row answer 404, and those that fail validation 422."
+
+[[unreached]]
+pass = "viewer"
+operation = "DELETE /api/v1/rollout-schedules/{schedule_id}"
+reason = "The VIEWER role may not use it, so the role check answers 403; requests that name no stored row answer 404, and those that fail validation 422."
+
+[[unreached]]
+pass = "viewer"
+operation = "POST /api/v1/rollout-schedules/{schedule_id}/activate"
+reason = "Generated ids never name a stored row (404); the other requests fail validation (422)."
+
+[[unreached]]
+pass = "viewer"
+operation = "POST /api/v1/rollout-schedules/{schedule_id}/pause"
+reason = "Generated ids never name a stored row (404); the other requests fail validation (422)."
+
+[[unreached]]
+pass = "viewer"
+operation = "POST /api/v1/rollout-schedules/{schedule_id}/cancel"
+reason = "Generated ids never name a stored row (404); the other requests fail validation (422)."
+
+[[unreached]]
+pass = "viewer"
+operation = "POST /api/v1/rollout-schedules/{schedule_id}/stages"
+reason = "Generated ids never name a stored row (404); the other requests fail validation (422)."
+
+[[unreached]]
+pass = "viewer"
+operation = "PUT /api/v1/rollout-schedules/stages/{stage_id}"
+reason = "The handler refuses the generated values (400); ids that name no stored row answer 404 and invalid requests answer 422."
+
+[[unreached]]
+pass = "viewer"
+operation = "DELETE /api/v1/rollout-schedules/stages/{stage_id}"
+reason = "Generated ids never name a stored row (404); the other requests fail validation (422)."
+
+[[unreached]]
+pass = "viewer"
+operation = "POST /api/v1/rollout-schedules/stages/{stage_id}/advance"
+reason = "Generated ids never name a stored row (404); the other requests fail validation (422)."
+
+[[unreached]]
+pass = "viewer"
+operation = "POST /api/v1/safety/settings"
+reason = "The VIEWER role may not use it, so the role check answers 403."
+
+[[unreached]]
+pass = "viewer"
+operation = "POST /api/v1/safety/feature-flags/{feature_flag_id}/config"
+reason = "The VIEWER role may not use it, so the role check answers 403, and a few 400."
+
+[[unreached]]
+pass = "viewer"
+operation = "POST /api/v1/safety/feature-flags/{feature_flag_id}/rollback"
+reason = "The VIEWER role may not use it, so the role check answers 403."
+
+[[unreached]]
+pass = "viewer"
+operation = "GET /api/v1/audit-logs/entity/{entity_type}/{entity_id}"
+reason = "The VIEWER role may not use it, so the role check answers 403; requests that fail validation first answer 422."
+
+[[unreached]]
+pass = "viewer"
+operation = "GET /api/v1/audit-logs/stats"
+reason = "The VIEWER role may not use it, so the role check answers 403; requests that fail validation first answer 422."
+
+[[unreached]]
+pass = "viewer"
+operation = "GET /api/v1/feature-flags/{flag_id}/history"
+reason = "Generated ids never name a stored row (404); the other requests fail validation (422)."
+
+[[unreached]]
+pass = "viewer"
+operation = "POST /api/v1/segments"
+reason = "The VIEWER role may not use it, so the role check answers 403; requests that fail validation first answer 422, and a few 400."
+
+[[unreached]]
+pass = "viewer"
+operation = "GET /api/v1/segments/{segment_id}"
+reason = "Generated ids never name a stored row (404); the other requests fail validation (422)."
+
+[[unreached]]
+pass = "viewer"
+operation = "PUT /api/v1/segments/{segment_id}"
+reason = "The VIEWER role may not use it, so the role check answers 403; requests that fail validation first answer 422, and a few 400."
+
+[[unreached]]
+pass = "viewer"
+operation = "DELETE /api/v1/segments/{segment_id}"
+reason = "The VIEWER role may not use it, so the role check answers 403; requests that fail validation first answer 422."
+
+[[unreached]]
+pass = "viewer"
+operation = "POST /api/v1/segments/{segment_id}/evaluate"
+reason = "The handler refuses the generated values (400); ids that name no stored row answer 404 and invalid requests answer 422."
+
+[[unreached]]
+pass = "viewer"
+operation = "GET /api/v1/segments/{segment_id}/experiments"
+reason = "Generated ids never name a stored row (404); the other requests fail validation (422)."
+
+[[unreached]]
+pass = "viewer"
+operation = "POST /api/v1/segments/{segment_id}/preview"
+reason = "The handler refuses the generated values (400); ids that name no stored row answer 404 and invalid requests answer 422."
+
+[[unreached]]
+pass = "viewer"
+operation = "POST /api/v1/segments/{segment_id}/members"
+reason = "The VIEWER role may not use it, so the role check answers 403; requests that fail validation first answer 422, and a few 400."
+
+[[unreached]]
+pass = "viewer"
+operation = "POST /api/v1/segments/{segment_id}/members/remove"
+reason = "The VIEWER role may not use it, so the role check answers 403; requests that fail validation first answer 422, and a few 400."
+
+[[unreached]]
+pass = "viewer"
+operation = "GET /api/v1/mutual-exclusion-groups"
+reason = "The VIEWER role may not use it, so the role check answers 403; requests that fail validation first answer 422."
+
+[[unreached]]
+pass = "viewer"
+operation = "GET /api/v1/mutual-exclusion-groups/{group_id}"
+reason = "The VIEWER role may not use it, so the role check answers 403; requests that fail validation first answer 422."
+
+[[unreached]]
+pass = "viewer"
+operation = "DELETE /api/v1/mutual-exclusion-groups/{group_id}"
+reason = "The VIEWER role may not use it, so the role check answers 403; requests that fail validation first answer 422."
+
+[[unreached]]
+pass = "viewer"
+operation = "POST /api/v1/mutual-exclusion-groups/{group_id}/experiments"
+reason = "The VIEWER role may not use it, so the role check answers 403; requests that fail validation first answer 422."
+
+[[unreached]]
+pass = "viewer"
+operation = "DELETE /api/v1/mutual-exclusion-groups/{group_id}/experiments/{experiment_id}"
+reason = "The VIEWER role may not use it, so the role check answers 403; requests that fail validation first answer 422."
+
+[[unreached]]
+pass = "viewer"
+operation = "GET /api/v1/holdout"
+reason = "The VIEWER role may not use it, so the role check answers 403."
+
+[[unreached]]
+pass = "viewer"
+operation = "GET /api/v1/holdout/all"
+reason = "The VIEWER role may not use it, so the role check answers 403; requests that fail validation first answer 422."
+
+[[unreached]]
+pass = "viewer"
+operation = "GET /api/v1/holdout/check/{user_id}"
+reason = "The VIEWER role may not use it, so the role check answers 403."
+
+[[unreached]]
+pass = "viewer"
+operation = "GET /api/v1/holdout/{holdout_id}/results"
+reason = "Generated ids never name a stored row (404); the other requests fail validation (422)."
+
+[[unreached]]
+pass = "viewer"
+operation = "POST /api/v1/bandit/{experiment_id}/update"
+reason = "The VIEWER role may not use it, so the role check answers 403; requests that fail validation first answer 422."
+
+[[unreached]]
+pass = "viewer"
+operation = "PUT /api/v1/bandit/{experiment_id}/weights"
+reason = "Every generated request fails the operation's own validation (422)."
+
+[[unreached]]
+pass = "viewer"
+operation = "GET /api/v1/interactions/scan"
+reason = "The VIEWER role may not use it, so the role check answers 403."
+
+[[unreached]]
+pass = "viewer"
+operation = "GET /api/v1/interactions/{exp_a_id}/{exp_b_id}"
+reason = "The VIEWER role may not use it, so the role check answers 403; requests that fail validation first answer 422."
+
+[[unreached]]
+pass = "viewer"
+operation = "GET /api/v1/ai/templates/{template_id}"
+reason = "Generated ids, keys or tokens never name a stored row, so every request answers 404."
+
+[[unreached]]
+pass = "viewer"
+operation = "PUT /api/v1/wizard/drafts/{draft_id}/step"
+reason = "Generated ids never name a stored row (404); the other requests fail validation (422)."
+
+[[unreached]]
+pass = "viewer"
+operation = "POST /api/v1/wizard/drafts/{draft_id}/submit"
+reason = "The VIEWER role may not use it, so the role check answers 403."
+
+[[unreached]]
+pass = "viewer"
+operation = "GET /api/v1/notifications/admin/preferences"
+reason = "The VIEWER role may not use it, so the role check answers 403."
+
+[[unreached]]
+pass = "viewer"
+operation = "GET /api/v1/notifications/delivery-log"
+reason = "The VIEWER role may not use it, so the role check answers 403; requests that fail validation first answer 422."
+
+[[unreached]]
+pass = "viewer"
+operation = "GET /api/v1/compliance/audit-events"
+reason = "The VIEWER role may not use it, so the role check answers 403; requests that fail validation first answer 422."
+
+[[unreached]]
+pass = "viewer"
+operation = "GET /api/v1/compliance/reports/{standard}"
+reason = "The VIEWER role may not use it, so the role check answers 403; requests that fail validation first answer 422."
+
+[[unreached]]
+pass = "viewer"
+operation = "GET /api/v1/compliance/export"
+reason = "The VIEWER role may not use it, so the role check answers 403; requests that fail validation first answer 422."
+
+[[unreached]]
+pass = "viewer"
+operation = "POST /api/v1/llm-experiments/"
+reason = "Every generated request fails the operation's own validation (422)."
+
+[[unreached]]
+pass = "viewer"
+operation = "GET /api/v1/llm-experiments/{experiment_id}"
+reason = "Generated ids never name a stored row (404); the other requests fail validation (422)."
+
+[[unreached]]
+pass = "viewer"
+operation = "PUT /api/v1/llm-experiments/{experiment_id}"
+reason = "The VIEWER role may not use it, so the role check answers 403; requests that fail validation first answer 422."
+
+[[unreached]]
+pass = "viewer"
+operation = "POST /api/v1/llm-experiments/{experiment_id}/start"
+reason = "The VIEWER role may not use it, so the role check answers 403; requests that fail validation first answer 422."
+
+[[unreached]]
+pass = "viewer"
+operation = "POST /api/v1/llm-experiments/{experiment_id}/pause"
+reason = "The VIEWER role may not use it, so the role check answers 403; requests that fail validation first answer 422."
+
+[[unreached]]
+pass = "viewer"
+operation = "POST /api/v1/llm-experiments/{experiment_id}/variants"
+reason = "The VIEWER role may not use it, so the role check answers 403; requests that fail validation first answer 422, and a few 400."
+
+[[unreached]]
+pass = "viewer"
+operation = "PUT /api/v1/llm-experiments/{experiment_id}/variants/{variant_id}"
+reason = "The VIEWER role may not use it, so the role check answers 403; requests that fail validation first answer 422."
+
+[[unreached]]
+pass = "viewer"
+operation = "POST /api/v1/llm-experiments/{experiment_id}/evaluate"
+reason = "The VIEWER role may not use it, so the role check answers 403; requests that fail validation first answer 422."
+
+[[unreached]]
+pass = "viewer"
+operation = "GET /api/v1/llm-experiments/{experiment_id}/results"
+reason = "Generated ids never name a stored row (404); the other requests fail validation (422)."
+
+[[unreached]]
+pass = "viewer"
+operation = "POST /api/v1/power/sample-size"
+reason = "The handler refuses the generated values (400); invalid requests answer 422."
+
+[[unreached]]
+pass = "viewer"
+operation = "GET /api/v1/sdk/ruleset"
+reason = "An SDK route: it takes an API key, and this pass sends a bearer token (401). The sdk pass fuzzes it."
+
+[[unreached]]
+pass = "viewer"
+operation = "POST /api/v1/rbac/roles"
+reason = "The VIEWER role may not use it, so the role check answers 403; requests that fail validation first answer 422, and a few 400."
+
+[[unreached]]
+pass = "viewer"
+operation = "GET /api/v1/rbac/roles/{role_name}"
+reason = "Generated ids, keys or tokens never name a stored row, so every request answers 404."
+
+[[unreached]]
+pass = "viewer"
+operation = "PUT /api/v1/rbac/roles/{role_name}"
+reason = "The VIEWER role may not use it, so the role check answers 403; requests that fail validation first answer 422."
+
+[[unreached]]
+pass = "viewer"
+operation = "DELETE /api/v1/rbac/roles/{role_name}"
+reason = "The VIEWER role may not use it, so the role check answers 403."
+
+[[unreached]]
+pass = "viewer"
+operation = "POST /api/v1/rbac/roles/assign"
+reason = "The VIEWER role may not use it, so the role check answers 403; requests that fail validation first answer 422."
+
+[[unreached]]
+pass = "viewer"
+operation = "POST /api/v1/rbac/roles/revoke"
+reason = "The VIEWER role may not use it, so the role check answers 403; requests that fail validation first answer 422."
+
+[[unreached]]
+pass = "viewer"
+operation = "POST /api/v1/rbac/users/{user_id}/grant"
+reason = "The VIEWER role may not use it, so the role check answers 403; requests that fail validation first answer 422."
+
+[[unreached]]
+pass = "viewer"
+operation = "DELETE /api/v1/rbac/users/{user_id}/grant/{resource}"
+reason = "The VIEWER role may not use it, so the role check answers 403; requests that fail validation first answer 422."
+
+[[unreached]]
+pass = "viewer"
+operation = "POST /api/v1/etl/jobs/run"
+reason = "The VIEWER role may not use it, so the role check answers 403; requests that fail validation first answer 422."
+
+[[unreached]]
+pass = "viewer"
+operation = "GET /api/v1/etl/jobs/{run_id}/status"
+reason = "Generated ids never name a stored row (404); the other requests fail validation (422)."
+
+[[unreached]]
+pass = "viewer"
+operation = "POST /api/v1/etl/partitions/add"
+reason = "The VIEWER role may not use it, so the role check answers 403; requests that fail validation first answer 422."
+
+[[unreached]]
+pass = "viewer"
+operation = "POST /api/v1/etl/crawler/run"
+reason = "The VIEWER role may not use it, so the role check answers 403."
+
+[[unreached]]
+pass = "viewer"
+operation = "GET /api/v1/warehouse/analysis/connections"
+reason = "The VIEWER role may not use it, so the role check answers 403."
+
+[[unreached]]
+pass = "viewer"
+operation = "POST /api/v1/warehouse/analysis/connections"
+reason = "The VIEWER role may not use it, so the role check answers 403; requests that fail validation first answer 422, and a few 400."
+
+[[unreached]]
+pass = "viewer"
+operation = "GET /api/v1/warehouse/analysis/connections/{connection_id}"
+reason = "The VIEWER role may not use it, so the role check answers 403; requests that fail validation first answer 422."
+
+[[unreached]]
+pass = "viewer"
+operation = "PUT /api/v1/warehouse/analysis/connections/{connection_id}"
+reason = "The VIEWER role may not use it, so the role check answers 403; requests that fail validation first answer 422."
+
+[[unreached]]
+pass = "viewer"
+operation = "DELETE /api/v1/warehouse/analysis/connections/{connection_id}"
+reason = "The VIEWER role may not use it, so the role check answers 403; requests that fail validation first answer 422."
+
+[[unreached]]
+pass = "viewer"
+operation = "POST /api/v1/warehouse/analysis/connections/{connection_id}/regenerate-key"
+reason = "The VIEWER role may not use it, so the role check answers 403; requests that fail validation first answer 422."
+
+[[unreached]]
+pass = "viewer"
+operation = "GET /api/v1/warehouse/analysis/sources"
+reason = "The VIEWER role may not use it, so the role check answers 403."
+
+[[unreached]]
+pass = "viewer"
+operation = "POST /api/v1/warehouse/analysis/sources"
+reason = "The VIEWER role may not use it, so the role check answers 403; requests that fail validation first answer 422, and a few 400."
+
+[[unreached]]
+pass = "viewer"
+operation = "GET /api/v1/warehouse/analysis/sources/{source_id}"
+reason = "The VIEWER role may not use it, so the role check answers 403; requests that fail validation first answer 422."
+
+[[unreached]]
+pass = "viewer"
+operation = "PUT /api/v1/warehouse/analysis/sources/{source_id}"
+reason = "The handler refuses the generated values (400); ids that name no stored row answer 404 and invalid requests answer 422."
+
+[[unreached]]
+pass = "viewer"
+operation = "DELETE /api/v1/warehouse/analysis/sources/{source_id}"
+reason = "Generated ids never name a stored row (404); the other requests fail validation (422)."
+
+[[unreached]]
+pass = "viewer"
+operation = "GET /api/v1/warehouse/analysis/experiments/{experiment_id}/runs"
+reason = "The VIEWER role may not use it, so the role check answers 403; requests that fail validation first answer 422."
+
+[[unreached]]
+pass = "viewer"
+operation = "GET /api/v1/warehouse/analysis/runs/{run_id}"
+reason = "The VIEWER role may not use it, so the role check answers 403; requests that fail validation first answer 422."
+
+[[unreached]]
+pass = "viewer"
+operation = "GET /api/v1/integrations"
+reason = "The VIEWER role may not use it, so the role check answers 403."
+
+[[unreached]]
+pass = "viewer"
+operation = "POST /api/v1/integrations"
+reason = "The VIEWER role may not use it, so the role check answers 403; requests that fail validation first answer 422."
+
+[[unreached]]
+pass = "viewer"
+operation = "GET /api/v1/integrations/{integration_type}"
+reason = "The VIEWER role may not use it, so the role check answers 403; requests that fail validation first answer 422."
+
+[[unreached]]
+pass = "viewer"
+operation = "PUT /api/v1/integrations/{integration_type}"
+reason = "The VIEWER role may not use it, so the role check answers 403; requests that fail validation first answer 422, and a few 400."
+
+[[unreached]]
+pass = "viewer"
+operation = "DELETE /api/v1/integrations/{integration_type}"
+reason = "The VIEWER role may not use it, so the role check answers 403; requests that fail validation first answer 422."
+
+[[unreached]]
+pass = "viewer"
+operation = "POST /api/v1/integrations/webhooks/jira"
+reason = "An anonymous webhook receiver: no integration of this type is configured with a webhook secret, so every delivery answers 401."
+
+[[unreached]]
+pass = "viewer"
+operation = "POST /api/v1/integrations/webhooks/salesforce"
+reason = "An anonymous webhook receiver: no integration of this type is configured with a webhook secret, so every delivery answers 401."
+
+[[unreached]]
+pass = "viewer"
+operation = "POST /api/v1/integrations/webhooks/github"
+reason = "An anonymous webhook receiver: no integration of this type is configured with a webhook secret, so every delivery answers 401."
+
+[[unreached]]
+pass = "viewer"
+operation = "GET /api/v1/auth/sso/configs"
+reason = "The VIEWER role may not use it, so the role check answers 403."
+
+[[unreached]]
+pass = "viewer"
+operation = "GET /api/v1/auth/sso/configs/{config_id}"
+reason = "The VIEWER role may not use it, so the role check answers 403; requests that fail validation first answer 422."
+
+[[unreached]]
+pass = "viewer"
+operation = "DELETE /api/v1/auth/sso/configs/{config_id}"
+reason = "The VIEWER role may not use it, so the role check answers 403; requests that fail validation first answer 422."
+
+[[unreached]]
+pass = "viewer"
+operation = "GET /api/v1/auth/sso/saml/{config_id}/metadata"
+reason = "No SSO configuration exists (creating one is left out of fuzzing), so it never finds one: it answers 400, 404 or 422, and 429 once the sign-in limit is spent."
+
+[[unreached]]
+pass = "viewer"
+operation = "POST /api/v1/auth/sso/saml/{config_id}/acs"
+reason = "No SSO configuration exists (creating one is left out of fuzzing), so it never finds one: it answers 400, 404 or 422, and 429 once the sign-in limit is spent."
+
+[[unreached]]
+pass = "viewer"
+operation = "GET /api/v1/auth/sso/oidc/{provider}/login"
+reason = "No SSO configuration exists (creating one is left out of fuzzing), so it never finds one: it answers 400, 404 or 422, and 429 once the sign-in limit is spent."
+
+[[unreached]]
+pass = "viewer"
+operation = "GET /api/v1/auth/sso/login"
+reason = "No SSO configuration exists (creating one is left out of fuzzing), so it never finds one: it answers 400, 404 or 422, and 429 once the sign-in limit is spent."
+
+[[unreached]]
+pass = "viewer"
+operation = "POST /api/v1/auth/sso/exchange"
+reason = "No SSO configuration exists (creating one is left out of fuzzing), so it never finds one: it answers 400, 404 or 422, and 429 once the sign-in limit is spent."
+
+[[unreached]]
+pass = "viewer"
+operation = "POST /api/v1/workspaces/"
+reason = "Every generated request fails the operation's own validation (422)."
+
+[[unreached]]
+pass = "viewer"
+operation = "GET /api/v1/workspaces/{workspace_id}"
+reason = "Generated ids never name a stored row (404); the other requests fail validation (422)."
+
+[[unreached]]
+pass = "viewer"
+operation = "PUT /api/v1/workspaces/{workspace_id}"
+reason = "The handler refuses the generated values (400); ids that name no stored row answer 404 and invalid requests answer 422."
+
+[[unreached]]
+pass = "viewer"
+operation = "DELETE /api/v1/workspaces/{workspace_id}"
+reason = "Generated ids never name a stored row (404); the other requests fail validation (422)."
+
+[[unreached]]
+pass = "viewer"
+operation = "GET /api/v1/workspaces/{workspace_id}/members"
+reason = "Generated ids never name a stored row (404); the other requests fail validation (422)."
+
+[[unreached]]
+pass = "viewer"
+operation = "POST /api/v1/workspaces/{workspace_id}/members"
+reason = "The handler refuses the generated values (400); ids that name no stored row answer 404 and invalid requests answer 422."
+
+[[unreached]]
+pass = "viewer"
+operation = "PUT /api/v1/workspaces/{workspace_id}/members/{user_id}"
+reason = "Generated ids never name a stored row (404); the other requests fail validation (422)."
+
+[[unreached]]
+pass = "viewer"
+operation = "DELETE /api/v1/workspaces/{workspace_id}/members/{user_id}"
+reason = "Generated ids never name a stored row (404); the other requests fail validation (422)."
+
+[[unreached]]
+pass = "viewer"
+operation = "POST /api/v1/workspaces/{workspace_id}/invites"
+reason = "Generated ids never name a stored row (404); the other requests fail validation (422)."
+
+[[unreached]]
+pass = "viewer"
+operation = "POST /api/v1/workspaces/invites/{token}/accept"
+reason = "Generated ids, keys or tokens never name a stored row, so every request answers 404."
+
+[[unreached]]
+pass = "viewer"
+operation = "GET /api/v1/workspaces/invites/{token}"
+reason = "Generated ids, keys or tokens never name a stored row, so every request answers 404."
+
+[[unreached]]
+pass = "viewer"
+operation = "POST /api/v1/hipaa/baa"
+reason = "Every generated request fails the operation's own validation (422)."
+
+[[unreached]]
+pass = "viewer"
+operation = "GET /api/v1/hipaa/baa"
+reason = "The VIEWER role may not use it, so the role check answers 403; requests that fail validation first answer 422."
+
+[[unreached]]
+pass = "viewer"
+operation = "GET /api/v1/hipaa/baa/{baa_id}"
+reason = "The VIEWER role may not use it, so the role check answers 403; requests that fail validation first answer 422."
+
+[[unreached]]
+pass = "viewer"
+operation = "DELETE /api/v1/hipaa/baa/{baa_id}"
+reason = "The VIEWER role may not use it, so the role check answers 403; requests that fail validation first answer 422."
+
+[[unreached]]
+pass = "viewer"
+operation = "GET /api/v1/hipaa/audit-logs"
+reason = "The VIEWER role may not use it, so the role check answers 403; requests that fail validation first answer 422."
+
+[[unreached]]
+pass = "viewer"
+operation = "POST /api/v1/hipaa/audit-logs"
+reason = "Every generated request fails the operation's own validation (422)."
+
+[[unreached]]
+pass = "viewer"
+operation = "GET /api/v1/hipaa/report"
+reason = "The VIEWER role may not use it, so the role check answers 403; requests that fail validation first answer 422."
+
+[[unreached]]
+pass = "viewer"
+operation = "POST /api/v1/hipaa/encrypt"
+reason = "The VIEWER role may not use it, so the role check answers 403; requests that fail validation first answer 422, and a few 400."
+
+[[unreached]]
+pass = "viewer"
+operation = "POST /api/v1/hipaa/decrypt"
+reason = "The VIEWER role may not use it, so the role check answers 403; requests that fail validation first answer 422, and a few 400."
+
+[[unreached]]
+pass = "viewer"
+operation = "GET /api/v1/hipaa/data-residency"
+reason = "The VIEWER role may not use it, so the role check answers 403."
+
+[[unreached]]
+pass = "viewer"
+operation = "GET /api/v1/hipaa/status"
+reason = "The VIEWER role may not use it, so the role check answers 403."
+
+# --- sdk: the sdk-contract API key on the SDK routes ------------------------
+
+[[unreached]]
+pass = "sdk"
+operation = "GET /api/v1/feature-flags/evaluate/{flag_key}"
+reason = "Generated flag keys never name a seeded flag (404); the other requests fail validation (422)."
+
+[[unreached]]
+pass = "sdk"
+operation = "POST /api/v1/feature-flags/evaluate/{flag_key}"
+reason = "Generated flag keys never name a seeded flag (404); the other requests fail validation (422)."
+
+[[unreached]]
+pass = "sdk"
+operation = "GET /api/v1/sdk/ruleset"
+reason = "Takes a key with the sdk:ruleset scope; the pass's sdk-contract key has none, so every request answers 403."
+
+[[unreached]]
+pass = "sdk"
+operation = "POST /api/v1/tracking/assign"
+reason = "Generated experiment keys never name a seeded experiment (404); the other requests fail validation (422)."
+
+[[unreached]]
+pass = "sdk"
+operation = "POST /api/v1/tracking/assign/batch"
+reason = "Takes a key with the sdk:ruleset scope; the pass's sdk-contract key has none, so every request answers 403."
+
+[[unreached]]
+pass = "sdk"
+operation = "POST /api/v1/tracking/errors"
+reason = "Generated flag and experiment keys never name a seeded one (404); the other requests fail validation (422)."
+
+[[unreached]]
+pass = "sdk"
+operation = "POST /api/v1/tracking/evaluations"
+reason = "Takes a key with the sdk:ruleset scope; the pass's sdk-contract key has none, so every request answers 403."
+
+[[unreached]]
+pass = "sdk"
+operation = "POST /api/v1/tracking/events"
+reason = "Takes stored experiment, flag and variant ids; generated ones never name a stored row, so every request answers 422."

@@ -1,0 +1,109 @@
+name: API fuzzing
+
+# =============================================================================
+# Schemathesis against the running API, in three passes that run in parallel,
+# each on a stack of its own (.github/workflows/_platform.yml, suite `fuzz`,
+# profile `full`):
+#
+#   superuser  the seeded demo administrator's bearer token, every operation
+#   viewer     the seeded VIEWER's bearer token, every operation
+#   sdk        the sdk-contract API key, the SDK routes only
+#
+# minus the operations tests/fuzz/exclusions.toml names for the pass. Each
+# pass is decided by scripts/fuzz_check.py, never by Schemathesis's exit
+# status: red when any operation answers 5xx, when an operation is not reached
+# and tests/fuzz/unreached.toml does not list it for the pass, or when a listed
+# one was reached. There is no list of known 5xx answers yet, so any 5xx turns
+# the run red.
+#
+# This repository is public, and so is this run's log. It carries the date,
+# the commit, the seed and counts; which operations failed stays on the
+# runner. To see them, run the same pass locally:
+#
+#   make fuzz FUZZ_SEED=<seed> SHA=<commit> PASS=<superuser|viewer|sdk>
+#
+# Dispatched by hand only.
+#
+# timeout-minutes: each pass's longest measured job plus 50%, from two runs
+# at one commit and seed on the pull request that added this file: superuser
+# 54.5 min (82), viewer 54.8 min (83), sdk 7.2 min (11). --max-examples is 5,
+# the plan's starting value; at 4 requests a second the two bearer passes take
+# about 52 minutes of fuzzing each.
+# =============================================================================
+
+on:
+  workflow_dispatch:
+    inputs:
+      fuzz_seed:
+        description: 'The Schemathesis seed, an integer of up to ten digits. Empty: the UTC date as YYYYMMDD.'
+        type: string
+        default: ''
+
+permissions:
+  contents: read
+
+jobs:
+  seed:
+    name: seed
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      fuzz_seed: ${{ steps.seed.outputs.fuzz_seed }}
+    steps:
+      - id: seed
+        env:
+          FUZZ_SEED: ${{ inputs.fuzz_seed }}
+        run: |
+          set -euo pipefail
+          seed="${FUZZ_SEED:-$(date -u +%Y%m%d)}"
+          if ! [[ "$seed" =~ ^(0|[1-9][0-9]{0,9})$ ]]; then
+            echo "::error::fuzz_seed must be an integer of one to ten digits, without leading zeros"
+            exit 1
+          fi
+          echo "fuzz_seed=$seed" >> "$GITHUB_OUTPUT"
+          echo "seed $seed"
+
+  superuser:
+    needs: seed
+    uses: ./.github/workflows/_platform.yml
+    with:
+      profile: full
+      seed: demo
+      suite: fuzz
+      fuzz_pass: superuser
+      fuzz_seed: ${{ fromJSON(needs.seed.outputs.fuzz_seed) }}
+      timeout-minutes: 82
+      api_env: |
+        AWS_ENDPOINT_URL=http://127.0.0.1:9
+        AWS_ACCESS_KEY_ID=fuzz
+        AWS_SECRET_ACCESS_KEY=fuzz
+
+  viewer:
+    needs: seed
+    uses: ./.github/workflows/_platform.yml
+    with:
+      profile: full
+      seed: demo
+      suite: fuzz
+      fuzz_pass: viewer
+      fuzz_seed: ${{ fromJSON(needs.seed.outputs.fuzz_seed) }}
+      timeout-minutes: 83
+      api_env: |
+        AWS_ENDPOINT_URL=http://127.0.0.1:9
+        AWS_ACCESS_KEY_ID=fuzz
+        AWS_SECRET_ACCESS_KEY=fuzz
+
+  sdk:
+    needs: seed
+    uses: ./.github/workflows/_platform.yml
+    with:
+      profile: full
+      seed: demo,sdk-contract
+      suite: fuzz
+      fuzz_pass: sdk
+      fuzz_seed: ${{ fromJSON(needs.seed.outputs.fuzz_seed) }}
+      timeout-minutes: 11
+      api_env: |
+        AWS_ENDPOINT_URL=http://127.0.0.1:9
+        AWS_ACCESS_KEY_ID=fuzz
+        AWS_SECRET_ACCESS_KEY=fuzz

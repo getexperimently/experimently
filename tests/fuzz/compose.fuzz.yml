@@ -1,0 +1,13 @@
+# The override `make fuzz` (scripts/fuzz_local.sh) adds to docker-compose.yml.
+#
+# docker-compose.yml lists the api service's environment one variable at a
+# time, so AWS_ENDPOINT_URL set in the shell or in .env never reaches the
+# container; it has to be added here. Every AWS call then goes to a closed
+# port on the container's own loopback and fails there, as on the CI runner
+# (fuzz.yml's api_env), with throwaway keys so nothing looks for real ones.
+services:
+  api:
+    environment:
+      AWS_ENDPOINT_URL: http://127.0.0.1:9
+      AWS_ACCESS_KEY_ID: fuzz
+      AWS_SECRET_ACCESS_KEY: fuzz
