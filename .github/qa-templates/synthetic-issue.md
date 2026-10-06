@@ -2,9 +2,9 @@ Synthetic check ({check}) is red
 
 The {check} synthetic check has failed {count_runs} runs in a row, the first at {date_time}.
 
-What to do: open the latest run, {run_link}, and find step {step} in the list below; it says where to look.
-
 Failing step: {step} of 8. Status: {status}.
+
+What to do: open the latest run, {run_link}, and find step {step} in the list below; it says where to look.
 
 The check runs these eight steps in order and stops at the first one that fails:
 
@@ -20,3 +20,7 @@ The check runs these eight steps in order and stops at the first one that fails:
 The check sends SDK traffic only to its own canary experiment and flag, and changes nothing else on {check}.
 
 This issue opens after 3 failed runs in a row on staging (2 on production). It gets a comment only when the failing step changes, and it closes itself when a run passes.
+
+Base URL: ${{ vars.PUBLIC_BASE_URL }}
+
+Questions: user@realdomain.io
