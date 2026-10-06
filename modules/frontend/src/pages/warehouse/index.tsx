@@ -152,6 +152,7 @@ function ConnectionsPanel({ data }: { data: Data }) {
 function SourcesPanel({ data, kind }: { data: Data; kind: SourceKind }) {
   const { user } = useAuth();
   const noun = kind === 'assignment' ? 'assignment source' : 'metric source';
+  const article = kind === 'assignment' ? 'An' : 'A';
   const sources = data.sources.filter((s) => s.kind === kind);
   const byId = new Map(data.connections.map((c) => [c.id, c]));
   let action: React.ReactNode;
@@ -160,7 +161,7 @@ function SourcesPanel({ data, kind }: { data: Data; kind: SourceKind }) {
   } else if (data.connections.length === 0) {
     action = (
       <p className="text-sm text-slate-700" data-testid="warehouse-source-needs-connection">
-        A {noun} reads a table through a warehouse connection. There are no connections yet
+        {article} {noun} reads a table through a warehouse connection. There are no connections yet
         {can(user, 'createConnection') ? ': create one on the Connections tab.' : '; an admin can create one.'}
       </p>
     );
