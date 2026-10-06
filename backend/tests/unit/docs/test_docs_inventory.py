@@ -1,0 +1,631 @@
+"""Every page in the docs navigation is classified for end-to-end verification (#939).
+
+``tests/acceptance/docs/inventory.toml`` gives each page that the ``nav`` of
+``mkdocs.yml`` lists exactly one class saying how the page is verified, with a
+one-line reason, and maps each flow in the "Flows, at least" list of #939 to
+what verifies it. The file's header is the contract; this test holds it:
+
+* every nav page has an entry, and every entry is a nav page (keys are the
+  paths exactly as the nav writes them, so a page the nav lists twice is one
+  key, and a second entry for it is a TOML parse error);
+* the class is one of ``CLASSES`` or ``external:<service>`` with a slug for the
+  service, and only the fields that class allows are present;
+* a ``journey`` names its id, a slug no other page uses, and either its
+  expectations file ``tests/acceptance/docs/journeys/<id>.yaml`` exists or the
+  entry says ``pending = true`` (refused once the file exists, so a pending
+  flag cannot outlive the journey it stands for);
+* an ``exec`` page is enrolled in ``scripts/doc_examples.toml`` with at least
+  one exec block, and a ``workflow`` page names a workflow that exists;
+* every flow of #939 (``FLOWS_939``, copied from the issue) is mapped, to
+  declared journeys, to classified pages or to a class some page has.
+
+The planted-defect tests below run the same check on small inventories with
+one defect each, so each refusal is seen to fire.
+
+``mkdocs.yml`` is read with a YAML loader that accepts any tag (a MkDocs config
+may carry ``!ENV`` or ``!!python/name:``), building the tagged node as plain
+YAML. Reads only files; no git, so it runs the same in
+``scripts/core_build.sh``'s copy. It is in the docs-only gate's "Docs content
+tests" through its directory, ``backend/tests/unit/docs/``.
+"""
+
+from __future__ import annotations
+
+import posixpath
+import re
+import tomllib
+from pathlib import Path
+from typing import Any, Dict, Iterable, List, Mapping, Set, Tuple
+
+import pytest
+import yaml
+
+pytestmark = [pytest.mark.unit]
+
+REPO_ROOT = Path(__file__).resolve().parents[4]
+MKDOCS = REPO_ROOT / "mkdocs.yml"
+INVENTORY = REPO_ROOT / "tests" / "acceptance" / "docs" / "inventory.toml"
+JOURNEYS = REPO_ROOT / "tests" / "acceptance" / "docs" / "journeys"
+DOC_EXAMPLES = REPO_ROOT / "scripts" / "doc_examples.toml"
+WORKFLOWS = REPO_ROOT / ".github" / "workflows"
+
+#: The classes a page can have, besides ``external:<service>``. Pinned: a new
+#: class is a change to the plan, not to this file alone.
+CLASSES: Tuple[str, ...] = ("journey", "exec", "workflow", "reference", "aws", "device")
+EXTERNAL = re.compile(r"external:(?P<service>.*)", re.DOTALL)
+SLUG = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*")
+
+#: The fields each class may carry; ``class`` and ``reason`` are required on all.
+FIELDS: Dict[str, Set[str]] = {
+    "journey": {"class", "reason", "journey", "pending"},
+    "workflow": {"class", "reason", "workflow"},
+}
+PLAIN_FIELDS = {"class", "reason"}
+FLOW_FIELDS = {"text", "note", "journeys", "pages", "classes"}
+
+#: The "Flows, at least" list of #939, verbatim but for each line's closing
+#: punctuation. When the issue's list changes, change this and the mapping.
+FLOWS_939: Tuple[str, ...] = (
+    "the docs site: every page in the nav reachable, links resolve, search works,"
+    " the power analysis and sample size pages render and calculate",
+    "Quick Start, end to end",
+    "the Docker Compose guide: start the stack as written, open the dashboard, sign in",
+    "feature flags: create, targeting, gradual rollout, safety monitoring",
+    "experiments: the guided builder, assign, track, results (including the"
+    " statistics the guide promises)",
+    "the dashboard-and-API guide and the API examples (the `{.bash exec}` blocks"
+    " that `doc-examples.yml` already runs)",
+    "the SDK quick starts",
+    "self-hosting guides where they can be rehearsed without AWS",
+    "any other first-run flow the plan identifies",
+)
+
+HOW_TO_FIX = (
+    "Each nav page needs one entry in tests/acceptance/docs/inventory.toml: "
+    '[pages."<path as the nav writes it>"] with class = one of '
+    + ", ".join(CLASSES)
+    + ', external:<service>, and a one-line reason = "...". '
+    "The file's header says what each class means."
+)
+
+
+# ---------------------------------------------------------------------------
+# Reading the inputs
+# ---------------------------------------------------------------------------
+class _AnyTagLoader(yaml.SafeLoader):
+    """A safe loader that builds a node with an unknown tag as plain YAML."""
+
+
+def _untagged(loader: yaml.SafeLoader, _suffix: str, node: yaml.Node) -> Any:
+    if isinstance(node, yaml.ScalarNode):
+        return loader.construct_scalar(node)
+    if isinstance(node, yaml.SequenceNode):
+        return loader.construct_sequence(node, deep=True)
+    return loader.construct_mapping(node, deep=True)
+
+
+# The empty prefix matches every tag the safe loader has no constructor for.
+_AnyTagLoader.add_multi_constructor("", _untagged)
+
+
+def load_mkdocs(text: str) -> Dict[str, Any]:
+    return yaml.load(text, Loader=_AnyTagLoader)
+
+
+def nav_pages(config: Mapping[str, Any]) -> Tuple[Set[str], List[str]]:
+    """The set of Markdown pages the nav lists, and the problems found walking it.
+
+    A leaf that is an http(s) URL is a link, not a page. Any other leaf that is
+    not a ``.md`` path is refused rather than ignored.
+    """
+    pages: Set[str] = set()
+    problems: List[str] = []
+
+    def walk(node: Any, where: str) -> None:
+        if isinstance(node, str):
+            if node.startswith(("http://", "https://")):
+                return
+            if node.endswith(".md"):
+                pages.add(posixpath.normpath(node))
+            else:
+                problems.append(f"nav entry {where!r} is not a .md page: {node!r}")
+        elif isinstance(node, list):
+            for item in node:
+                walk(item, where)
+        elif isinstance(node, dict):
+            for title, value in node.items():
+                walk(value, str(title))
+        else:
+            problems.append(f"nav entry {where!r} is not a page or a section: {node!r}")
+
+    nav = config.get("nav")
+    if not nav:
+        problems.append("mkdocs.yml has no nav")
+    else:
+        walk(nav, "nav")
+    return pages, problems
+
+
+def parse_inventory(text: str) -> Tuple[Dict[str, Any], List[str]]:
+    """The inventory, or an empty one and the parse error (a duplicate key is one)."""
+    try:
+        return tomllib.loads(text), []
+    except tomllib.TOMLDecodeError as error:
+        return {}, [
+            f"inventory.toml does not parse (a duplicate key does not): {error}"
+        ]
+
+
+def enrolled_exec_counts(text: str) -> Dict[str, int]:
+    """Each page doc_examples.toml enrols, relative to docs/, with its exec count."""
+    counts: Dict[str, int] = {}
+    for document in tomllib.loads(text).get("document", []):
+        path = document["path"]
+        if path.startswith("docs/"):
+            counts[path[len("docs/") :]] = int(document.get("exec", 0))
+    return counts
+
+
+# ---------------------------------------------------------------------------
+# The check
+# ---------------------------------------------------------------------------
+def _one_line(value: Any) -> bool:
+    return isinstance(value, str) and value.strip() != "" and "\n" not in value
+
+
+def _class_problems(key: str, entry: Mapping[str, Any]) -> Tuple[str, List[str]]:
+    """The entry's class family (``external`` for every service) and its problems."""
+    cls = entry.get("class")
+    if not isinstance(cls, str):
+        return "", [f"{key}: no class"]
+    match = EXTERNAL.fullmatch(cls)
+    if match:
+        service = match.group("service")
+        if service == "":
+            return "external", [f"{key}: class external: names no service"]
+        if not SLUG.fullmatch(service):
+            return "external", [
+                f"{key}: external service {service!r} is not a lower-case slug"
+            ]
+        return "external", []
+    if cls not in CLASSES:
+        return "", [f"{key}: unknown class {cls!r}"]
+    return cls, []
+
+
+def problems(
+    inventory: Mapping[str, Any],
+    nav: Set[str],
+    *,
+    enrolled: Mapping[str, int],
+    workflows: Set[str],
+    written: Set[str],
+) -> List[str]:
+    """Every way the inventory breaks its contract; empty when it holds.
+
+    ``enrolled`` is doc_examples.toml's exec count per page, ``workflows`` the
+    workflow file stems that exist, ``written`` the journey ids with an
+    expectations file.
+    """
+    found: List[str] = []
+    unknown_top = set(inventory) - {"pages", "flow"}
+    if unknown_top:
+        found.append(f"unknown top-level keys: {sorted(unknown_top)}")
+
+    pages = inventory.get("pages", {})
+    if not isinstance(pages, dict):
+        return found + ["[pages] is not a table"]
+
+    for page in sorted(nav - set(pages)):
+        found.append(f"unclassified nav page: {page}")
+    for page in sorted(set(pages) - nav):
+        found.append(f"classified page not in the nav: {page}")
+
+    classes_seen: Set[str] = set()
+    journey_pages: Dict[str, str] = {}
+    for key in sorted(pages):
+        entry = pages[key]
+        if not isinstance(entry, dict):
+            found.append(f"{key}: not a table")
+            continue
+        family, class_problems = _class_problems(key, entry)
+        found.extend(class_problems)
+        if family:
+            classes_seen.add(entry["class"])
+            classes_seen.add(family)
+        allowed = FIELDS.get(family, PLAIN_FIELDS)
+        extra = set(entry) - allowed
+        if extra:
+            found.append(
+                f"{key}: fields not allowed on class {family!r}: {sorted(extra)}"
+            )
+        if not _one_line(entry.get("reason")):
+            found.append(f"{key}: reason must be one non-empty line")
+
+        if family == "journey":
+            journey = entry.get("journey")
+            if not isinstance(journey, str) or journey == "":
+                found.append(f"{key}: journey without an id")
+                continue
+            if not SLUG.fullmatch(journey):
+                found.append(f"{key}: journey id {journey!r} is not a lower-case slug")
+            if journey in journey_pages:
+                found.append(
+                    f"{key}: journey id {journey!r} is also {journey_pages[journey]}'s"
+                    " (one expectations file per page)"
+                )
+            journey_pages[journey] = key
+            if "pending" in entry and entry["pending"] is not True:
+                found.append(f"{key}: pending must be true, or absent")
+            elif entry.get("pending") is True and journey in written:
+                found.append(
+                    f"{key}: journey {journey!r} has its expectations file;"
+                    " remove pending = true"
+                )
+            elif "pending" not in entry and journey not in written:
+                found.append(
+                    f"{key}: journey {journey!r} has no expectations file"
+                    f" journeys/{journey}.yaml and is not pending = true"
+                )
+        elif family == "exec":
+            if enrolled.get(key, 0) < 1:
+                found.append(
+                    f"{key}: class exec, but scripts/doc_examples.toml enrols no exec"
+                    " block of it"
+                )
+        elif family == "workflow":
+            workflow = entry.get("workflow")
+            if not isinstance(workflow, str) or workflow not in workflows:
+                found.append(
+                    f"{key}: workflow {workflow!r} is not a file in .github/workflows/"
+                )
+
+    found.extend(
+        _flow_problems(
+            inventory.get("flow", []), set(pages), set(journey_pages), classes_seen
+        )
+    )
+    return found
+
+
+def _strings(value: Any) -> bool:
+    return isinstance(value, list) and all(isinstance(v, str) for v in value)
+
+
+def _flow_problems(
+    flows: Any, pages: Set[str], journeys: Set[str], classes: Set[str]
+) -> List[str]:
+    if not isinstance(flows, list):
+        return ["[[flow]] is not an array of tables"]
+    found: List[str] = []
+    texts: List[str] = []
+    for index, flow in enumerate(flows):
+        if not isinstance(flow, dict):
+            found.append(f"flow {index}: not a table")
+            continue
+        text = flow.get("text")
+        label = repr(text) if isinstance(text, str) else f"flow {index}"
+        if not isinstance(text, str):
+            found.append(f"{label}: no text")
+        else:
+            texts.append(text)
+        extra = set(flow) - FLOW_FIELDS
+        if extra:
+            found.append(f"{label}: fields not allowed: {sorted(extra)}")
+        if not _one_line(flow.get("note")):
+            found.append(f"{label}: note must be one non-empty line")
+        lists = {name: flow.get(name, []) for name in ("journeys", "pages", "classes")}
+        for name, value in lists.items():
+            if not _strings(value):
+                found.append(f"{label}: {name} must be a list of strings")
+                lists[name] = []
+        if not any(lists.values()):
+            found.append(f"{label}: maps to no journey, page or class")
+        for journey in lists["journeys"]:
+            if journey not in journeys:
+                found.append(f"{label}: journey {journey!r} is no page's journey")
+        for page in lists["pages"]:
+            if page not in pages:
+                found.append(f"{label}: page {page!r} is not in [pages]")
+        for cls in lists["classes"]:
+            if cls not in classes:
+                found.append(f"{label}: no page has class {cls!r}")
+
+    for text in sorted({t for t in texts if texts.count(t) > 1}):
+        found.append(f"flow mapped twice: {text!r}")
+    for text in FLOWS_939:
+        if text not in texts:
+            found.append(f"#939 flow not mapped: {text!r}")
+    for text in texts:
+        if text not in FLOWS_939:
+            found.append(f"flow not in #939's list: {text!r}")
+    return found
+
+
+# ---------------------------------------------------------------------------
+# The real tree
+# ---------------------------------------------------------------------------
+def _real_nav() -> Tuple[Set[str], List[str]]:
+    return nav_pages(load_mkdocs(MKDOCS.read_text(encoding="utf-8")))
+
+
+def test_every_nav_page_is_classified_and_every_flow_mapped():
+    nav, found = _real_nav()
+    inventory, parse_found = parse_inventory(INVENTORY.read_text(encoding="utf-8"))
+    found += parse_found or problems(
+        inventory,
+        nav,
+        enrolled=enrolled_exec_counts(DOC_EXAMPLES.read_text(encoding="utf-8")),
+        workflows={p.stem for p in WORKFLOWS.glob("*.yml")},
+        written={p.stem for p in JOURNEYS.glob("*.yaml")},
+    )
+    assert not found, "\n".join(found) + "\n\n" + HOW_TO_FIX
+
+
+def test_the_nav_parsed_to_real_pages():
+    """A nav that came back empty would leave nothing for the check above."""
+    nav, _found = _real_nav()
+    assert len(nav) > 100, f"the nav parsed to {len(nav)} pages"
+    assert "getting-started/quick-start.md" in nav
+
+
+# ---------------------------------------------------------------------------
+# Planted defects: each refusal fires
+# ---------------------------------------------------------------------------
+GOOD = """
+[pages."a.md"]
+class = "journey"
+journey = "a-journey"
+pending = true
+reason = "walked"
+
+[pages."b.md"]
+class = "exec"
+reason = "run by doc examples"
+
+[pages."c.md"]
+class = "workflow"
+workflow = "chart-kind"
+reason = "run by a workflow"
+
+[pages."d.md"]
+class = "external:salesforce"
+reason = "needs a third party"
+
+[pages."e.md"]
+class = "reference"
+reason = "nothing to walk"
+
+[pages."f.md"]
+class = "aws"
+reason = "needs AWS"
+
+[pages."g.md"]
+class = "device"
+reason = "needs a simulator"
+"""
+
+NAV = {"a.md", "b.md", "c.md", "d.md", "e.md", "f.md", "g.md"}
+CONTEXT: Dict[str, Any] = {
+    "enrolled": {"b.md": 3},
+    "workflows": {"chart-kind"},
+    "written": set(),
+}
+
+
+def _flows(skip: Iterable[str] = ()) -> str:
+    blocks = [
+        f'[[flow]]\ntext = "{text}"\njourneys = ["a-journey"]\nnote = "mapped"\n'
+        for text in FLOWS_939
+        if text not in skip
+    ]
+    return "\n" + "\n".join(blocks)
+
+
+def _check(text: str, nav: Set[str] = NAV, **context: Any) -> List[str]:
+    inventory, found = parse_inventory(text)
+    if found:
+        return found
+    return problems(inventory, nav, **{**CONTEXT, **context})
+
+
+def test_the_good_fixture_passes():
+    assert _check(GOOD + _flows()) == []
+
+
+PLANTS = [
+    pytest.param(
+        GOOD + _flows(),
+        NAV | {"new.md"},
+        {},
+        "unclassified nav page: new.md",
+        id="unclassified-nav-page",
+    ),
+    pytest.param(
+        GOOD + '\n[pages."gone.md"]\nclass = "reference"\nreason = "x"\n' + _flows(),
+        NAV,
+        {},
+        "classified page not in the nav: gone.md",
+        id="classified-page-not-in-nav",
+    ),
+    pytest.param(
+        GOOD + '\n[pages."e.md"]\nclass = "reference"\nreason = "again"\n' + _flows(),
+        NAV,
+        {},
+        "does not parse",
+        id="duplicate-key",
+    ),
+    pytest.param(
+        GOOD.replace('class = "aws"', 'class = "manual"') + _flows(),
+        NAV,
+        {},
+        "f.md: unknown class 'manual'",
+        id="unknown-class",
+    ),
+    pytest.param(
+        GOOD.replace('"external:salesforce"', '"external:"') + _flows(),
+        NAV,
+        {},
+        "d.md: class external: names no service",
+        id="external-without-service",
+    ),
+    pytest.param(
+        GOOD.replace('"external:salesforce"', '"external"') + _flows(),
+        NAV,
+        {},
+        "d.md: unknown class 'external'",
+        id="external-without-colon",
+    ),
+    pytest.param(
+        GOOD.replace('"external:salesforce"', '"external:Sales Force"') + _flows(),
+        NAV,
+        {},
+        "is not a lower-case slug",
+        id="external-service-not-a-slug",
+    ),
+    pytest.param(
+        GOOD.replace('journey = "a-journey"\n', "") + _flows(),
+        NAV,
+        {},
+        "a.md: journey without an id",
+        id="journey-without-id",
+    ),
+    pytest.param(
+        GOOD.replace("pending = true\n", "") + _flows(),
+        NAV,
+        {},
+        "has no expectations file",
+        id="journey-neither-written-nor-pending",
+    ),
+    pytest.param(
+        GOOD + _flows(),
+        NAV,
+        {"written": {"a-journey"}},
+        "remove pending = true",
+        id="pending-after-the-file-exists",
+    ),
+    pytest.param(
+        GOOD.replace("pending = true", "pending = false") + _flows(),
+        NAV,
+        {},
+        "pending must be true",
+        id="pending-false",
+    ),
+    pytest.param(
+        GOOD.replace(
+            'class = "reference"\nreason = "nothing to walk"',
+            'class = "journey"\njourney = "a-journey"\n'
+            'pending = true\nreason = "nothing to walk"',
+        )
+        + _flows(),
+        NAV,
+        {},
+        "is also a.md's",
+        id="journey-id-shared",
+    ),
+    pytest.param(
+        GOOD + _flows(),
+        NAV,
+        {"enrolled": {}},
+        "b.md: class exec, but",
+        id="exec-not-enrolled",
+    ),
+    pytest.param(
+        GOOD + _flows(),
+        NAV,
+        {"workflows": set()},
+        "c.md: workflow 'chart-kind' is not a file",
+        id="workflow-missing",
+    ),
+    pytest.param(
+        GOOD.replace('reason = "needs AWS"', 'reason = ""') + _flows(),
+        NAV,
+        {},
+        "f.md: reason must be one non-empty line",
+        id="empty-reason",
+    ),
+    pytest.param(
+        GOOD.replace('reason = "needs AWS"', 'reason = """two\nlines"""') + _flows(),
+        NAV,
+        {},
+        "f.md: reason must be one non-empty line",
+        id="two-line-reason",
+    ),
+    pytest.param(
+        GOOD.replace('class = "aws"', 'class = "aws"\nworkflow = "chart-kind"')
+        + _flows(),
+        NAV,
+        {},
+        "f.md: fields not allowed",
+        id="field-not-allowed",
+    ),
+    pytest.param(
+        GOOD + _flows(skip=[FLOWS_939[6]]),
+        NAV,
+        {},
+        "#939 flow not mapped: 'the SDK quick starts'",
+        id="flow-unmapped",
+    ),
+    pytest.param(
+        GOOD + _flows() + '\n[[flow]]\ntext = "a flow of our own"\n'
+        'journeys = ["a-journey"]\nnote = "x"\n',
+        NAV,
+        {},
+        "flow not in #939's list",
+        id="flow-invented",
+    ),
+    pytest.param(
+        GOOD + _flows().replace('journeys = ["a-journey"]', "journeys = []", 1),
+        NAV,
+        {},
+        "maps to no journey, page or class",
+        id="flow-maps-to-nothing",
+    ),
+    pytest.param(
+        GOOD + _flows().replace('"a-journey"', '"no-such-journey"', 1),
+        NAV,
+        {},
+        "journey 'no-such-journey' is no page's journey",
+        id="flow-names-undeclared-journey",
+    ),
+]
+
+
+@pytest.mark.parametrize("text, nav, context, expected", PLANTS)
+def test_planted_defect_is_refused(text, nav, context, expected):
+    found = _check(text, nav, **context)
+    assert any(expected in line for line in found), found
+
+
+# ---------------------------------------------------------------------------
+# Reading mkdocs.yml
+# ---------------------------------------------------------------------------
+def test_the_loader_accepts_mkdocs_tags():
+    config = load_mkdocs(
+        "site_name: !ENV [SITE_NAME, x]\n"
+        "markdown_extensions:\n"
+        "  - pymdownx.emoji:\n"
+        "      emoji_index: !!python/name:material.extensions.emoji.twemoji\n"
+        "nav:\n"
+        "  - Home: index.md\n"
+    )
+    assert config["site_name"] == ["SITE_NAME", "x"]
+    assert nav_pages(config) == ({"index.md"}, [])
+
+
+def test_the_nav_walk_reads_every_shape_and_refuses_the_unknown():
+    config = load_mkdocs(
+        "nav:\n"
+        "  - index.md\n"
+        "  - Section:\n"
+        "    - Page: a/b.md\n"
+        "    - Deeper:\n"
+        "      - c.md\n"
+        "    - Twice: a/b.md\n"
+        "  - Link: https://example.com/\n"
+        "  - Odd: notes.txt\n"
+    )
+    pages, found = nav_pages(config)
+    assert pages == {"index.md", "a/b.md", "c.md"}
+    assert found == ["nav entry 'Odd' is not a .md page: 'notes.txt'"]
+    assert nav_pages({}) == (set(), ["mkdocs.yml has no nav"])
