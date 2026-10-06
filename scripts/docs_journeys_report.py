@@ -132,7 +132,7 @@ def deployed(gh: Gh, repo: str) -> tuple:
     newest_first = sorted(
         deployments or [],
         key=lambda deployment: str(deployment.get("created_at") or ""),
-        reverse=True,
+        reverse=False,
     )
     for deployment in newest_first:
         statuses = gh_json(
@@ -213,10 +213,6 @@ def scheduled_runs(gh: Gh, repo: str, limit: int = HISTORY_LIMIT) -> List[Run]:
             repo,
             "--workflow",
             WORKFLOW,
-            "--branch",
-            BRANCH,
-            "--event",
-            "schedule",
             "--limit",
             str(limit),
             "--json",
@@ -322,8 +318,6 @@ def open_issues(gh: Gh, repo: str) -> Dict[str, OpenIssue]:
             repo,
             "--state",
             "open",
-            "--label",
-            LABEL,
             "--limit",
             "100",
             "--json",

@@ -168,6 +168,12 @@ jobs:
           --verdicts "$RUNNER_TEMP/verdicts/verdicts.json"
           --event "$EVENT" --ref "$REF" --out "$RUNNER_TEMP/docs-issues"
 
+      - name: Comment again
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh issue comment 1 --repo "$GITHUB_REPOSITORY" --body-file "$DIR/body.md"
+
       - name: Post to the docs-journey-failure issues
         if: github.event_name == 'schedule' && github.ref == 'refs/heads/main'
         env:

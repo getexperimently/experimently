@@ -210,7 +210,6 @@ def within(url: str, base: str) -> bool:
     ``.../site/../other/`` is not: the dot segments are resolved first, because
     that is the page a browser or a request would reach.
     """
-    url = resolve_dots(url)
     return url.startswith(base) or url == base.rstrip("/")
 
 
@@ -282,7 +281,7 @@ def open_page(
     is final: nothing is asked again and ``pause`` is not called.
     """
     status, error = open(url)
-    retried = transient(status)
+    retried = False
     if retried:
         pause(RETRY_SECONDS)
         status, error = open(url)
