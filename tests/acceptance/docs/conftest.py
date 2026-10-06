@@ -9,8 +9,12 @@ installed for Playwright (``python -m playwright install chromium``)::
         python -m pytest -c tests/acceptance/docs/pytest.ini tests/acceptance/docs
 
 This directory is its own pytest root (``pytest.ini``): the repository's root
-``conftest.py`` and ``backend`` are not loaded, and nothing is imported from the
-product.
+``conftest.py`` is not loaded, and nothing is imported from the product. The one
+thing taken from ``backend`` is the repository's test plugin
+``backend/tests/no_real_aws.py`` (pytest and the standard library only), loaded
+here as in every other suite: dummy AWS credentials, no ``~/.aws``, and a
+failing ``aws`` first on ``PATH``, so nothing a journey starts can reach an AWS
+account. ``backend/tests/unit/test_no_real_aws.py`` checks this root loads it.
 
 Environment:
 
@@ -21,7 +25,8 @@ Environment:
   repository, so the runner writes nothing into the tree (Python's own
   ``__pycache__`` aside: ``PYTHONDONTWRITEBYTECODE=1`` keeps that out too;
   marketing-local's build is the other exception, see ``stacks.py``). Unset, a
-  new temporary directory, named at the end of the run.
+  new temporary directory, made when a journey first runs and named at the end
+  of the run; a session that runs no journey then writes nothing.
 * ``DOCS_JOURNEY_RUN_ID``, ``DOCS_JOURNEY_SHA``: written on every log line;
   by default ``GITHUB_RUN_ID`` and ``GITHUB_SHA``, else ``local`` and
   ``unknown`` (no git is run).
@@ -40,11 +45,20 @@ from __future__ import annotations
 
 import datetime
 import os
+import sys
+import tempfile
 from pathlib import Path
 from typing import List, Optional
 
 import pytest
 import yaml
+
+HERE = Path(__file__).resolve().parent
+REPO_ROOT = HERE.parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+pytest_plugins = ["backend.tests.no_real_aws"]
 
 from docs_runner import guide as guides
 from docs_runner import report
@@ -52,8 +66,6 @@ from docs_runner.loader import Refused, context_for, load
 from docs_runner.log import FAIL, Log, run_directory
 from docs_runner.stacks import STACK_CLASSES, StackError
 
-HERE = Path(__file__).resolve().parent
-REPO_ROOT = HERE.parents[2]
 JOURNEYS = HERE / "journeys"
 
 RETRY_PLUGINS = ("rerunfailures", "flaky", "pytest_retry", "retry")
@@ -67,7 +79,7 @@ STACK_FIXTURES = {
 RUNS = pytest.StashKey[List[report.GuideRun]]()
 SKIPPED = pytest.StashKey[List[str]]()
 REPORT_PROBLEMS = pytest.StashKey[List[str]]()
-RUN_DIR = pytest.StashKey[Path]()
+RUN_DIR = pytest.StashKey[Optional[Path]]()
 
 
 def pytest_configure(config: pytest.Config) -> None:
@@ -79,10 +91,12 @@ def pytest_configure(config: pytest.Config) -> None:
     config.stash[RUNS] = []
     config.stash[SKIPPED] = []
     config.stash[REPORT_PROBLEMS] = []
-    try:
-        config.stash[RUN_DIR] = run_directory(os.environ, REPO_ROOT)
-    except ValueError as error:
-        raise pytest.UsageError(str(error)) from None
+    config.stash[RUN_DIR] = None
+    if os.environ.get("DOCS_JOURNEY_RUN_DIR"):
+        try:
+            config.stash[RUN_DIR] = run_directory(os.environ, REPO_ROOT)
+        except ValueError as error:
+            raise pytest.UsageError(str(error)) from None
     config.pluginmanager.register(SkipWatch(config), "docs-journeys-skip-watch")
 
 
@@ -120,10 +134,17 @@ def pytest_generate_tests(metafunc: pytest.Metafunc) -> None:
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+def run_dir_of(config: pytest.Config) -> Path:
+    """The run directory, made now if the environment named none."""
+    if config.stash[RUN_DIR] is None:
+        config.stash[RUN_DIR] = Path(tempfile.mkdtemp(prefix="docs-journeys-run-"))
+    return config.stash[RUN_DIR]
+
+
 class RunSettings:
     def __init__(self, config: pytest.Config):
         environ = os.environ
-        self.run_dir: Path = config.stash[RUN_DIR]
+        self.run_dir: Path = run_dir_of(config)
         self.run_id = environ.get("DOCS_JOURNEY_RUN_ID") or environ.get(
             "GITHUB_RUN_ID", "local"
         )
@@ -288,9 +309,11 @@ def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
     config = session.config
     sha = os.environ.get("DOCS_JOURNEY_SHA") or os.environ.get("GITHUB_SHA", "unknown")
     date = datetime.datetime.now(datetime.timezone.utc).date().isoformat()
-    problem = write_reports(config.stash[RUNS], config.stash[RUN_DIR], sha, date)
-    if problem is not None:
-        config.stash[REPORT_PROBLEMS].append(problem)
+    runs = config.stash[RUNS]
+    if runs or config.stash[RUN_DIR] is not None:
+        problem = write_reports(runs, run_dir_of(config), sha, date)
+        if problem is not None:
+            config.stash[REPORT_PROBLEMS].append(problem)
     if config.stash[SKIPPED] or config.stash[REPORT_PROBLEMS]:
         session.exitstatus = pytest.ExitCode.TESTS_FAILED
 
@@ -298,9 +321,10 @@ def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
 def pytest_terminal_summary(terminalreporter, exitstatus, config) -> None:
     runs = config.stash[RUNS]
     failed = [o.journey for o in runs if report.verdict(o).word == FAIL]
+    where = config.stash[RUN_DIR]
     terminalreporter.write_line(
         f"docs journeys: {len(runs)} run, {len(failed)} failed;"
-        f" results in {config.stash[RUN_DIR]}"
+        + (f" results in {where}" if where is not None else " nothing written")
     )
     for problem in config.stash[REPORT_PROBLEMS]:
         terminalreporter.write_line(f"docs journeys: report refused: {problem}")

@@ -1,6 +1,6 @@
 """What a reader of a run sees: a report per guide, and the run's summary.
 
-Per guide (UX D11.2), in Markdown and in HTML: a verdict line, one sentence
+Per guide, in Markdown and in HTML: a verdict line, one sentence
 saying whether a reader following the guide can finish it, the table of steps
 (what the guide says to do, what was expected before the run, what was seen,
 the result) and, for each FAIL, the expected snapshot and the observed snapshot
@@ -21,7 +21,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
 from docs_runner import registry
-from docs_runner.log import FAIL, NOT_RUN, STRUCTURAL_ONLY, Record
+from docs_runner.log import FAIL, NOT_RUN, PASS, STRUCTURAL_ONLY, Record
 
 #: The longest snapshot shown inline; the file itself is always complete.
 SNAPSHOT_LINES = 200
@@ -78,6 +78,14 @@ def verdict(run: GuideRun) -> Verdict:
             "A reader following this guide cannot finish it."
             f' First failing step: {first.step}, "{first.heading}".',
             first,
+        )
+    if not any(record.result == PASS for record in run.records):
+        reasons = sorted({record.reason for record in run.records})
+        return Verdict(
+            "PARTIAL",
+            f"PARTIAL: {len(run.records)} not run",
+            f"No step of this guide ran here: {len(run.records)} not run"
+            f" ({', '.join(reasons)}).",
         )
     not_run = [
         record

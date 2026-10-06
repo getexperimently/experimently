@@ -30,8 +30,8 @@ without ``pending``)::
           click: {role: link, name: Quick Start}
         expect:
           url: /getting-started/quick-start/
-          visible:
-            - {role: heading, name: Quick Start}
+          aria: |
+            - heading "Quick Start" [level=1]
         fail: the Quick Start link does not lead to the Quick Start page
       - id: deploy-guide
         doc: deployment-operations
@@ -39,21 +39,30 @@ without ``pending``)::
           goto: /deployment/deployment-guide/
         expect:
           status: 200
+        snapshot: false                      # no ARIA snapshot: say why
+        snapshot_reason: only that the page answers matters here
         fail: the deployment guide does not answer
         not_run: needs-aws                   # a reason from registry.py; reported NOT RUN
 
-``do`` is exactly one action. ``expect`` lists what must hold after it, and a
-step in a browser needs at least one of ``url``, ``status``, ``visible``,
-``text``, ``number`` or ``aria``. ``fail`` says what failure looks like; a step
-without it is refused.
+``do`` is exactly one action. ``expect`` lists what must hold after it. A step
+on a screen (``goto``, ``click``, ``fill``, ``select``) expects an ARIA snapshot
+of the page, ``aria``, written before the run, beside any structural
+expectation (``url``, ``status``, ``visible``, ``text``, ``number``); only
+``snapshot: false`` with a one-line ``snapshot_reason`` drops it, and the step
+then needs a structural expectation. ``aria`` is Playwright's ARIA snapshot
+template: it must parse as a YAML list. ``api`` and ``ref`` steps take no
+snapshot. ``fail`` says what failure looks like; a step without it is refused.
+Names, labels, options, ``text`` and ``goto`` are one line each.
 """
 
 from __future__ import annotations
 
 import datetime
-from typing import Any, Dict, List, Literal, Optional, Union
+from typing import Annotated, Any, Dict, List, Literal, Optional, Union
 
+import yaml
 from pydantic import (
+    AfterValidator,
     BaseModel,
     ConfigDict,
     Field,
@@ -174,6 +183,16 @@ def _one_line(value: str, what: str) -> str:
     return value
 
 
+def _single_line(value: str) -> str:
+    if "\n" in value or "\r" in value:
+        raise ValueError("must be one line")
+    return value
+
+
+#: A string a reader sees or types on one line: a name, a label, a path.
+OneLine = Annotated[StrictStr, Field(min_length=1), AfterValidator(_single_line)]
+
+
 class _Strict(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True, frozen=True)
 
@@ -203,21 +222,21 @@ class Named(_Quoted):
     """An element found by its ARIA role and accessible name."""
 
     role: Role
-    name: StrictStr = Field(min_length=1)
+    name: OneLine
 
 
 class Fill(_Quoted):
     """Type ``value`` into the field labelled ``label``."""
 
-    label: StrictStr = Field(min_length=1)
+    label: OneLine
     value: StrictStr
 
 
 class Select(_Quoted):
     """Choose ``option`` in the select labelled ``label``."""
 
-    label: StrictStr = Field(min_length=1)
-    option: StrictStr = Field(min_length=1)
+    label: OneLine
+    option: OneLine
 
 
 class Api(_Strict):
@@ -232,7 +251,7 @@ class Api(_Strict):
 class Do(_Strict):
     """Exactly one action."""
 
-    goto: Optional[StrictStr] = Field(default=None, min_length=1)
+    goto: Optional[OneLine] = None
     click: Optional[Named] = None
     fill: Optional[Fill] = None
     select: Optional[Select] = None
@@ -286,7 +305,7 @@ class Expect(_Strict):
     url: Optional[StrictStr] = Field(default=None, pattern=r"^/\S*$")
     status: Optional[StrictInt] = Field(default=None, ge=100, le=599)
     visible: Optional[List[Named]] = Field(default=None, min_length=1)
-    text: Optional[StrictStr] = Field(default=None, min_length=1)
+    text: Optional[OneLine] = None
     json_: Optional[Dict[str, Any]] = Field(default=None, alias="json", min_length=1)
     number: Optional[NumberExpect] = None
     aria: Optional[StrictStr] = Field(default=None, min_length=1)
@@ -296,6 +315,22 @@ class Expect(_Strict):
         if not self.given():
             raise ValueError("expect names nothing to check")
         return self
+
+    @field_validator("aria")
+    @classmethod
+    def _aria_parses(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return value
+        try:
+            nodes = yaml.safe_load(value)
+        except yaml.YAMLError:
+            nodes = None
+        if not isinstance(nodes, list) or not nodes:
+            raise ValueError(
+                "aria must be an ARIA snapshot template: a non-empty YAML list of"
+                ' nodes, such as - heading "Title" [level=1]'
+            )
+        return value
 
     def given(self) -> List[str]:
         """The entries set, by their names in the file."""
@@ -313,12 +348,23 @@ class Step(_Strict):
     expect: Optional[Expect] = None
     fail: StrictStr
     snapshot: Optional[StrictBool] = None
+    snapshot_reason: Optional[StrictStr] = None
     not_run: Optional[StrictStr] = None
 
     @field_validator("fail")
     @classmethod
     def _fail_one_line(cls, value: str) -> str:
         return _one_line(value, "fail")
+
+    @model_validator(mode="after")
+    def _snapshot_reason_iff_no_snapshot(self) -> "Step":
+        if self.snapshot is False:
+            if self.snapshot_reason is None:
+                raise ValueError("snapshot: false needs a one-line snapshot_reason")
+            _one_line(self.snapshot_reason, "snapshot_reason")
+        elif self.snapshot_reason is not None:
+            raise ValueError("snapshot_reason is only for snapshot: false")
+        return self
 
     @property
     def in_browser(self) -> bool:

@@ -1,8 +1,7 @@
 """The run's results log: JSON Lines, one line per step, the same keys on every line.
 
-``KEYS`` is the line, in order. They are UX D11.1's, with two added: ``step_id``
-(the step's id in its journey file, where ``step`` is its number) and
-``reason`` (why a step is NOT RUN, from ``registry``; empty otherwise).
+``KEYS`` is the line, in order; a change to them is a change of the log's
+contract with whatever reads it:
 
 * ``run``, ``sha``: the run's id and the commit it ran;
 * ``stack``, ``guide``: the journey's stack and its guide (a nav path);

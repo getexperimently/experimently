@@ -1,7 +1,11 @@
 """The four stacks a journey runs against. ``conftest.py`` makes each a fixture.
 
 * ``compose-dev``: the Docker guide's ``docker compose up -d --wait`` at the
-  repository root, under its own compose project, with its own host ports.
+  repository root, under its own compose project, with its own host ports, and
+  with ``--build``, so the images are the checkout's and never ones left by an
+  earlier run. Before ``up``, and after an ``up`` that fails,
+  ``docker compose -p <project> down -v --remove-orphans`` clears the project,
+  so a run starts from an empty database and leaves nothing running.
   Defaults are well away from a developer's own stack (5432, 6379, 8000, 3000);
   each can be set in the environment:
 
@@ -22,6 +26,10 @@
   configuration. After ``up`` the API's ``/api/v1/modules`` must report the
   journey's profile. The stack is brought down (``down -v``) when the session
   ends, or before a journey of the other profile.
+
+A command that cannot be started at all (no ``docker``, no ``npm``) is a
+``StackError`` like one that fails, so the journey is reported FAIL before its
+first step rather than ending the session.
 * ``docs-local``: ``mkdocs build`` into a temporary directory, served by
   ``python -m http.server`` on 127.0.0.1 (``DOCS_JOURNEY_DOCS_PORT``, else a
   free port). Needs the docs toolchain (``scripts/docs_toolchain.sh``).
@@ -130,7 +138,10 @@ def wait_until_answering(url: str, seconds: float) -> None:
 
 
 def _run_logged(argv, *, cwd: Path, env: Mapping[str, str], log: Path, timeout: float):
-    """Run *argv*, its output appended to *log*; the exit status, or None on timeout."""
+    """Run *argv*, its output appended to *log*; the exit status, or None on timeout.
+
+    StackError when it cannot be started at all (the program is missing, say).
+    """
     log.parent.mkdir(parents=True, exist_ok=True)
     with log.open("a", encoding="utf-8") as handle:
         handle.write(f"$ {' '.join(argv)}\n")
@@ -148,6 +159,12 @@ def _run_logged(argv, *, cwd: Path, env: Mapping[str, str], log: Path, timeout: 
         except subprocess.TimeoutExpired:
             handle.write(f"(stopped after {timeout:.0f} s)\n")
             return None
+        except OSError as error:
+            handle.write(f"(could not start: {error})\n")
+            raise StackError(
+                f"{argv[0]} could not be started ({type(error).__name__});"
+                f" see stacks/{log.name}"
+            ) from None
     return done.returncode
 
 
@@ -160,7 +177,20 @@ class _StaticServer:
         self.process: Optional[subprocess.Popen] = None
 
     def start(self) -> str:
-        self.process = subprocess.Popen(
+        if not self.root.is_dir():
+            raise StackError(f"nothing to serve: {self.root} is not a directory")
+        try:
+            self.process = self._spawn()
+        except OSError as error:
+            raise StackError(
+                f"the static server could not be started ({type(error).__name__})"
+            ) from None
+        url = f"http://127.0.0.1:{self.port}/"
+        wait_until_answering(url, 30)
+        return url
+
+    def _spawn(self) -> subprocess.Popen:
+        return subprocess.Popen(
             [
                 sys.executable,
                 "-m",
@@ -174,9 +204,6 @@ class _StaticServer:
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
         )
-        url = f"http://127.0.0.1:{self.port}/"
-        wait_until_answering(url, 30)
-        return url
 
     def stop(self) -> None:
         if self.process is not None and self.process.poll() is None:
@@ -227,12 +254,19 @@ class ComposeDev:
             timeout=timeout,
         )
 
+    def _clear(self, profile: str) -> None:
+        self._compose(profile, "down", "-v", "--remove-orphans", timeout=600)
+
     def up(self, profile: str) -> Running:
         if self.running is not None and self.running.profile == profile:
             return self.running
         self.down()
-        status = self._compose(profile, "up", "-d", "--wait", timeout=self.timeout)
+        self._clear(profile)
+        status = self._compose(
+            profile, "up", "-d", "--wait", "--build", timeout=self.timeout
+        )
         if status != 0:
+            self._clear(profile)
             raise StackError(
                 f"docker compose up ({profile}) "
                 + ("timed out" if status is None else f"exited {status}")
@@ -246,9 +280,16 @@ class ComposeDev:
             profile=profile,
             accounts=DEMO_ACCOUNTS,
         )
-        served = self._served_profile(api_url)
-        if served != profile:
-            raise StackError(f"the stack serves the {served} profile, not {profile}")
+        try:
+            served = self._served_profile(api_url)
+            if served != profile:
+                raise StackError(
+                    f"the stack serves the {served} profile, not {profile}"
+                )
+        except StackError:
+            self.running = None
+            self._clear(profile)
+            raise
         return self.running
 
     @staticmethod
@@ -266,7 +307,7 @@ class ComposeDev:
             return
         profile = self.running.profile
         self.running = None
-        self._compose(profile, "down", "-v", "--remove-orphans", timeout=600)
+        self._clear(profile)
 
 
 class DocsLocal:
@@ -274,6 +315,7 @@ class DocsLocal:
         self.repo_root = repo_root
         self.logs = logs
         self.port = _port(environ, "DOCS_JOURNEY_DOCS_PORT", 0)
+        self.environ = dict(environ)
         self.site: Optional[Path] = None
         self.server: Optional[_StaticServer] = None
         self.running: Optional[Running] = None
@@ -285,7 +327,7 @@ class DocsLocal:
         status = _run_logged(
             [sys.executable, "-m", "mkdocs", "build", "--site-dir", str(self.site)],
             cwd=self.repo_root,
-            env=os.environ,
+            env=self.environ,
             log=self.logs / "docs-local.log",
             timeout=600,
         )
@@ -326,6 +368,7 @@ class MarketingLocal:
         self.frontend = repo_root / "frontend"
         self.logs = logs
         self.port = _port(environ, "DOCS_JOURNEY_MARKETING_PORT", 0)
+        self.environ = dict(environ)
         self.server: Optional[_StaticServer] = None
         self.running: Optional[Running] = None
 
@@ -335,7 +378,7 @@ class MarketingLocal:
         status = _run_logged(
             ["npm", "run", "build:marketing"],
             cwd=self.frontend,
-            env=os.environ,
+            env=self.environ,
             log=self.logs / "marketing-local.log",
             timeout=1200,
         )

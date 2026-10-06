@@ -9,7 +9,9 @@ fails ``test_every_journey_file_loads`` in the "Docs content tests" step,
 through this directory.
 
 Each refusal is shown firing on a small journey with one planted defect, in a
-temporary docs tree. Reads files only; no git, no network.
+temporary docs tree. The compose stack runs against a fake ``docker``, and the
+runner's own pytest session (no skip passes, no retry plugin loads) runs in a
+subprocess on a copy of its conftest. Temporary files only; no git, no network.
 """
 
 from __future__ import annotations
@@ -17,7 +19,13 @@ from __future__ import annotations
 import copy
 import datetime
 import json
+import os
+import shutil
+import stat
+import subprocess
 import sys
+import tempfile
+import textwrap
 import tomllib
 from pathlib import Path
 from typing import Any, Callable, Dict, List
@@ -46,6 +54,7 @@ Some words about the guide.
 
 Open the dashboard and click **Sign in**. Fill **Email** and **Password** with
 the account the seed creates, then choose **Production** in **Environment**.
+Its settings live in `settings.json` and `.env`; the **.NET** tab is for C#.
 
 ```bash
 # Not a heading: a comment in a shell block
@@ -104,6 +113,7 @@ GOOD: Dict[str, Any] = {
             "expect": {
                 "status": 200,
                 "visible": [{"role": "button", "name": "Sign in"}],
+                "aria": '- button "Sign in"',
             },
             "fail": "the sign-in page does not answer",
         },
@@ -119,6 +129,8 @@ GOOD: Dict[str, Any] = {
             "doc": "sign-in",
             "do": {"select": {"label": "Environment", "option": "Production"}},
             "expect": {"text": "Production"},
+            "snapshot": False,
+            "snapshot_reason": "the select is checked by its chosen text",
             "fail": "the environment cannot be chosen",
         },
         {
@@ -160,7 +172,8 @@ GOOD: Dict[str, Any] = {
                         "reason": "the guide calls it the total sample size",
                     },
                     "oracle": {"name": "double", "args": {"x": 2}},
-                }
+                },
+                "aria": '- status "Total"',
             },
             "fail": "the number differs from the oracle",
             "not_run": "waived #123",
@@ -240,9 +253,9 @@ def _drop(step_id: str, key: str):
 
 PLANTS = [
     pytest.param(
-        _on_step("sign-in", lambda s: s["do"]["click"].update(name="#submit")),
+        _on_step("sign-in", lambda s: s["do"]["click"].update(name="css=#submit")),
         {},
-        "'#submit' is a CSS or XPath selector",
+        "'css=#submit' is a CSS or XPath selector",
         id="css-selector-as-a-name",
     ),
     pytest.param(
@@ -274,10 +287,10 @@ PLANTS = [
         id="string-locator",
     ),
     pytest.param(
-        _on_step("email", lambda s: s["do"]["fill"].update(label="input[name=email]")),
+        _on_step("email", lambda s: s["do"]["fill"].update(label="form >> Email")),
         {},
-        "is a CSS or XPath selector",
-        id="attribute-selector-as-a-label",
+        "'form >> Email' is a CSS or XPath selector",
+        id="chained-selector-as-a-label",
     ),
     pytest.param(
         _on_step("sign-in", lambda s: s.update(do={"sleep": 2})),
@@ -374,14 +387,81 @@ PLANTS = [
     pytest.param(
         _on_step("sign-in", lambda s: s.update(expect={"json": {"a": 1}})),
         {},
-        "a step on one screen needs an aria snapshot or a structural expect",
+        "step 4 (sign-in): a step on one screen needs expect.aria",
         id="screen-step-with-only-json",
     ),
     pytest.param(
         _drop("environment", "expect"),
         {},
-        "step 3 (environment): a step on one screen needs an aria snapshot",
+        "step 3 (environment): a step with snapshot: false needs a structural expect",
         id="screen-step-with-no-expect",
+    ),
+    pytest.param(
+        _on_step("open", lambda s: s["expect"].pop("aria")),
+        {},
+        "step 1 (open): a step on one screen needs expect.aria, its ARIA snapshot"
+        " written before the run, beside any structural expect",
+        id="screen-step-without-aria",
+    ),
+    pytest.param(
+        _drop("environment", "snapshot_reason"),
+        {},
+        "step 3 (environment): snapshot: false needs a one-line snapshot_reason",
+        id="no-snapshot-without-a-reason",
+    ),
+    pytest.param(
+        _on_step("sign-in", lambda s: s.update(snapshot_reason="because")),
+        {},
+        "snapshot_reason is only for snapshot: false",
+        id="snapshot-reason-with-a-snapshot",
+    ),
+    pytest.param(
+        _on_step("sign-in", lambda s: s["expect"].update(aria="heading: [unclosed")),
+        {},
+        "step 4 (sign-in).expect.aria: aria must be an ARIA snapshot template",
+        id="aria-that-is-not-yaml",
+    ),
+    pytest.param(
+        _on_step("sign-in", lambda s: s["expect"].update(aria="Experiments")),
+        {},
+        "step 4 (sign-in).expect.aria: aria must be an ARIA snapshot template",
+        id="aria-that-is-not-a-list",
+    ),
+    pytest.param(
+        _on_step("sign-in", lambda s: s["do"]["click"].update(name="Sign\nin")),
+        {},
+        "step 4 (sign-in).do.click.name: must be one line",
+        id="multi-line-name",
+    ),
+    pytest.param(
+        _on_step("email", lambda s: s["do"]["fill"].update(label="Email\naddress")),
+        {},
+        "step 2 (email).do.fill.label: must be one line",
+        id="multi-line-label",
+    ),
+    pytest.param(
+        _on_step("environment", lambda s: s["expect"].update(text="Pro\nduction")),
+        {},
+        "step 3 (environment).expect.text: must be one line",
+        id="multi-line-text",
+    ),
+    pytest.param(
+        _on_step("open", lambda s: s["do"].update(goto="/login\n/other")),
+        {},
+        "step 1 (open).do.goto: must be one line",
+        id="multi-line-goto",
+    ),
+    pytest.param(
+        lambda data: data.update(
+            steps=[
+                _step(data, "health"),
+                {**_step(data, "list"), "not_run": "needs-aws"},
+            ]
+        ),
+        {},
+        "no step is run by this runner: every step is ref: doc-examples or"
+        " declares not_run",
+        id="no-step-run-here",
     ),
     pytest.param(
         _on_step("sign-in", lambda s: s["expect"].update(status=200)),
@@ -531,12 +611,67 @@ def test_a_waiver_names_its_issue(tmp_path):
         assert any("is not a reason a journey may give" in p for p in problems), reason
 
 
-def test_every_problem_is_reported_at_once(tmp_path):
+def test_a_raw_problem_is_not_repeated_by_the_model(tmp_path):
+    """A missing fail, a sleep and an unknown stack, each said once."""
     data = _with(_drop("sign-in", "fail"))
     _step(data, "open")["do"] = {"wait": 1}
     data["stack"] = "nope"
     problems = _refusals(tmp_path, data)
     assert len(problems) == 3, problems
+
+
+def test_every_stage_reports_in_one_file(tmp_path):
+    """A raw problem, a model problem and a semantic one, all three at once."""
+    data = _with(_on_step("open", lambda s: s["expect"].update(pause=1)))
+    _step(data, "email")["retries"] = 2
+    _step(data, "sign-in")["doc"] = "step-9"
+    problems = _refusals(tmp_path, data)
+    assert problems == [
+        "step 1 (open).expect: pause is a sleep; a step waits for what it expects,"
+        " never for a time",
+        "step 2 (email).retries: Extra inputs are not permitted",
+        "step 4 (sign-in): the guide has no anchor #step-9",
+    ], problems
+
+
+def test_names_that_look_like_files_are_names(tmp_path):
+    """settings.json, .env and .NET are what a reader sees, not selectors."""
+    visible = [
+        {"role": "link", "name": "settings.json"},
+        {"role": "link", "name": ".env"},
+        {"role": "tab", "name": ".NET"},
+    ]
+    data = _with(_on_step("open", lambda s: s["expect"].update(visible=visible)))
+    names = [named.name for named in _load(tmp_path, data).steps[0].expect.visible]
+    assert names == ["settings.json", ".env", ".NET"]
+
+
+def test_the_model_docstring_example_loads():
+    """The example in model.py's docstring is a journey the loader accepts."""
+    from docs_runner import model
+
+    doc = model.__doc__
+    block = doc[doc.index("without ``pending``)::") :].split("\n\n", 2)[1]
+    data = yaml.safe_load(textwrap.dedent(block))
+    real = loader.context_for(REPO_ROOT)
+    inventory = copy.deepcopy(real.inventory)
+    inventory["pages"]["README.md"].pop("pending", None)
+    context = loader.Context(
+        docs_root=real.docs_root,
+        inventory=inventory,
+        doc_examples=real.doc_examples,
+        oracles=real.oracles,
+        today=real.today,
+    )
+    with tempfile.TemporaryDirectory() as directory:
+        path = Path(directory) / "docs-site.yaml"
+        path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
+        journey = loader.load(path, context)
+    assert [step.id for step in journey.steps] == [
+        "home",
+        "open-quick-start",
+        "deploy-guide",
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -553,14 +688,18 @@ def test_actions_and_expectations_are_described_for_the_log(tmp_path):
         "GET /api/v1/experiments/ as admin",
         'click the button "New experiment"',
     ]
-    assert checks.describe_expect(steps[0]) == 'status 200; button "Sign in" visible'
+    assert checks.describe_expect(steps[0]) == (
+        'status 200; button "Sign in" visible; the screen matches its ARIA snapshot'
+        " (1 lines)"
+    )
     assert checks.describe_expect(steps[3]) == (
         "at /experiments; the screen matches its ARIA snapshot (1 lines)"
     )
     assert checks.describe_expect(steps[4]) == "Doc Examples runs this section's blocks"
     assert checks.describe_expect(steps[5]) == "status 200; json total = 3"
     assert checks.describe_expect(steps[6]) == (
-        'the number in status "Total" equals double(x=2)'
+        'the number in status "Total" equals double(x=2); the screen matches its'
+        " ARIA snapshot (1 lines)"
     )
 
 
@@ -676,7 +815,7 @@ def _record(**changes: Any) -> log.Record:
 
 
 def test_the_log_keys_are_fixed():
-    """UX D11.1's keys, plus step_id and reason; a change here is a change of contract."""
+    """The keys every line carries, in order; a change here is a change of contract."""
     assert log.KEYS == (
         "run",
         "sha",
@@ -789,7 +928,7 @@ def _failed_run(run_dir: Path) -> report.GuideRun:
 
 
 def test_a_fail_shows_both_snapshots_side_by_side(tmp_path):
-    """V10: for each FAIL, the expected and the observed snapshot, side by side."""
+    """For each FAIL, the expected and the observed snapshot, side by side."""
     run = _failed_run(tmp_path)
     for text in (
         report.guide_markdown(run, tmp_path, date="2026-10-06", sha="abc"),
@@ -889,6 +1028,18 @@ def test_verdicts():
     )
     assert partial.line == "PARTIAL: 1 not run"
     assert "needs-aws" in partial.sentence
+    for reasons in (["doc-examples"], ["doc-examples", "needs-aws"], ["waived #9"]):
+        nothing_ran = report.verdict(
+            run(
+                *(
+                    _record(step=n, result="NOT RUN", reason=reason)
+                    for n, reason in enumerate(reasons, 1)
+                )
+            )
+        )
+        assert nothing_ran.word == "PARTIAL", reasons
+        assert nothing_ran.line == f"PARTIAL: {len(reasons)} not run"
+        assert nothing_ran.sentence.startswith("No step of this guide ran here")
     assert report.verdict(run()).word == "FAIL"
     refused = report.GuideRun("s", "g.md", "G", "docs-local", refused=("x",))
     assert report.verdict(refused).line == "FAIL: the journey file was refused"
@@ -927,6 +1078,169 @@ def test_the_summary_of_an_empty_run_is_red():
     assert text.splitlines()[0].startswith(
         "# Docs journeys, 2026-10-06, commit abc: FAIL"
     )
+
+
+# ---------------------------------------------------------------------------
+# The compose stack, against a fake docker
+# ---------------------------------------------------------------------------
+FAKE_DOCKER = """#!/bin/sh
+here="$(dirname "$0")"
+printf '%s\\n' "$*" >> "$here/calls.log"
+case " $* " in
+  *" up "*) exit "$(cat "$here/up_exit")" ;;
+esac
+exit 0
+"""
+DOWN = "compose -p docs-journeys down -v --remove-orphans"
+UP = "compose -p docs-journeys up -d --wait --build"
+
+
+def _fake_docker(tmp_path: Path, up_exit: int) -> Path:
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    fake = bin_dir / "docker"
+    fake.write_text(FAKE_DOCKER)
+    fake.chmod(fake.stat().st_mode | stat.S_IXUSR)
+    (bin_dir / "up_exit").write_text(str(up_exit))
+    return bin_dir
+
+
+def _compose(tmp_path: Path, bin_dir: Path):
+    from docs_runner import stacks
+
+    environ = {"PATH": f"{bin_dir}{os.pathsep}/usr/bin{os.pathsep}/bin"}
+    return stacks, stacks.ComposeDev(tmp_path, tmp_path / "logs", environ)
+
+
+def _calls(bin_dir: Path) -> List[str]:
+    return (bin_dir / "calls.log").read_text().splitlines()
+
+
+def test_compose_dev_clears_its_project_then_builds(tmp_path, monkeypatch):
+    bin_dir = _fake_docker(tmp_path, 0)
+    stacks, stack = _compose(tmp_path, bin_dir)
+    monkeypatch.setattr(stack, "_served_profile", lambda api_url: "core")
+    running = stack.up("core")
+    assert running.base_url == "http://127.0.0.1:23000/"
+    assert _calls(bin_dir) == [DOWN, UP]
+    stack.down()
+    assert _calls(bin_dir) == [DOWN, UP, DOWN]
+
+
+def test_a_failed_compose_up_clears_its_project(tmp_path):
+    bin_dir = _fake_docker(tmp_path, 3)
+    stacks, stack = _compose(tmp_path, bin_dir)
+    with pytest.raises(stacks.StackError, match=r"docker compose up \(core\) exited 3"):
+        stack.up("core")
+    assert _calls(bin_dir) == [DOWN, UP, DOWN]
+
+
+def test_the_wrong_profile_clears_the_project(tmp_path, monkeypatch):
+    bin_dir = _fake_docker(tmp_path, 0)
+    stacks, stack = _compose(tmp_path, bin_dir)
+    monkeypatch.setattr(stack, "_served_profile", lambda api_url: "core")
+    with pytest.raises(stacks.StackError, match="serves the core profile, not full"):
+        stack.up("full")
+    assert _calls(bin_dir) == [DOWN, UP, DOWN]
+    assert stack.running is None
+
+
+def test_a_program_that_cannot_start_is_a_stack_error(tmp_path):
+    """No docker, no npm: the journey gets a FAIL before step 1, not a crash."""
+    from docs_runner import stacks
+
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    (tmp_path / "frontend").mkdir()
+    environ = {"PATH": str(empty)}
+    compose = stacks.ComposeDev(tmp_path, tmp_path / "logs", environ)
+    with pytest.raises(stacks.StackError, match="docker could not be started"):
+        compose.up("core")
+    marketing = stacks.MarketingLocal(tmp_path, tmp_path / "logs", environ)
+    with pytest.raises(stacks.StackError, match="npm could not be started"):
+        marketing.up()
+
+
+# ---------------------------------------------------------------------------
+# The runner's own session: no skip passes, no retry plugin loads
+# ---------------------------------------------------------------------------
+def _runner_copy(tmp_path: Path, test_body: str) -> Path:
+    """A tree holding the runner's conftest, ini and package, with one test of ours."""
+    root = tmp_path / "repo"
+    here = root / "tests" / "acceptance" / "docs"
+    here.mkdir(parents=True)
+    for name in ("conftest.py", "pytest.ini", "inventory.toml"):
+        shutil.copy(RUNNER_ROOT / name, here / name)
+    shutil.copytree(
+        RUNNER_ROOT / "docs_runner",
+        here / "docs_runner",
+        ignore=shutil.ignore_patterns("__pycache__"),
+    )
+    (here / "test_journeys.py").write_text(test_body)
+    (root / "scripts").mkdir()
+    shutil.copy(REPO_ROOT / "scripts" / "doc_examples.toml", root / "scripts")
+    (root / "backend" / "tests").mkdir(parents=True)
+    (root / "backend" / "__init__.py").write_text("")
+    (root / "backend" / "tests" / "__init__.py").write_text("")
+    shutil.copy(
+        REPO_ROOT / "backend" / "tests" / "no_real_aws.py", root / "backend" / "tests"
+    )
+    return root
+
+
+def _run_runner(
+    root: Path, tmp_path: Path, *args: str, **extra_env: str
+) -> subprocess.CompletedProcess:
+    env = {**os.environ, "DOCS_JOURNEY_RUN_DIR": str(tmp_path / "run"), **extra_env}
+    env.pop("PYTEST_ADDOPTS", None)
+    return subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "pytest",
+            "-c",
+            "tests/acceptance/docs/pytest.ini",
+            "tests/acceptance/docs",
+            *args,
+        ],
+        cwd=root,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+
+
+PASSING = "def test_planted():\n    assert True\n"
+SKIPPING = (
+    "import pytest\n\n\ndef test_planted():\n"
+    '    getattr(pytest, "skip")("planted past the lint")\n'
+)
+
+
+def test_the_runner_session_passes_a_passing_test(tmp_path):
+    """The control: the copy itself runs green, so a red below is the plant."""
+    result = _run_runner(_runner_copy(tmp_path, PASSING), tmp_path)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "1 passed" in result.stdout
+
+
+def test_a_skip_in_the_runner_fails_the_run(tmp_path):
+    result = _run_runner(_runner_copy(tmp_path, SKIPPING), tmp_path)
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "1 skipped" in result.stdout
+    assert "was skipped; nothing here may skip, so the run fails" in result.stdout
+
+
+def test_a_retry_plugin_stops_the_runner(tmp_path):
+    root = _runner_copy(tmp_path, PASSING)
+    (tmp_path / "plugins").mkdir()
+    (tmp_path / "plugins" / "rerunfailures.py").write_text("")
+    result = _run_runner(
+        root, tmp_path, "-p", "rerunfailures", PYTHONPATH=str(tmp_path / "plugins")
+    )
+    assert result.returncode == 4, result.stdout + result.stderr
+    assert "the rerunfailures plugin is loaded" in result.stderr
 
 
 # ---------------------------------------------------------------------------

@@ -7,7 +7,8 @@ knows every reason there can be.
 Declared in a journey file, before the run (a step's ``not_run``):
 
 * ``needs-aws``: the step needs an AWS account;
-* ``needs-founder-account``: the step needs an account only the founder holds;
+* ``needs-founder-account``: the step needs an account the operator holds and
+  the runner does not;
 * ``waived #<issue>``: the step fails today for a known reason, tracked in that
   issue.
 
