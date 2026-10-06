@@ -38,9 +38,9 @@ file in this directory on every pull request (see "The test" below).
   placeholder it has no value for. It never renders one through a shell, a
   heredoc or `envsubst`: those expand whatever variable a template names, and
   the runner's environment holds the credentials.
-- A workflow posts only a rendered template (`gh issue create --body-file`,
-  `gh issue comment --body-file`, or the file appended to the step summary),
-  never a body it builds inline.
+- The QA workflows post only rendered templates; the workflow pin in
+  `backend/tests/unit/infrastructure/test_qa_templates_public_text.py`
+  enforces which workflows may post inline.
 
 ## Placeholders
 
@@ -99,13 +99,14 @@ the same pull request, and its name starts with its kind.
 | `fuzz-issue.tmpl` | API fuzzing | the issue opened on the first red pass; its body is `fuzz-red.tmpl` |
 | `docs-run-green.tmpl`, `docs-run-red.tmpl` | the docs journeys | the top of the run's step summary |
 | `docs-guide-pass.tmpl`, `docs-guide-fail.tmpl`, `docs-guide-partial.tmpl` | the docs journeys | the top of each guide's report |
+| `docs-journey-issue.tmpl` | the docs journeys | one issue per failing guide; its body is `docs-guide-fail.tmpl` |
 | `docs-defect-issue.tmpl` | the docs journeys | one issue per measured docs defect (rules below) |
 
-Each output says what it is in its first two lines: a verdict word (GREEN, RED,
-PASS, FAIL, PARTIAL, or "is red", "failed"), and either "What to do" or a
-count. Every output that is not green says "What to do" in those two lines. For
-an issue, the title carries the verdict and the body's first two lines carry the
-rest.
+Each output says what it is in its first two lines. Its first line carries its
+own verdict word (GREEN, RED, PASS, FAIL, PARTIAL, "is red", "fails"), which the
+test pins per template; the first two lines carry "What to do" or a count, and
+every output that is not green says "What to do" there. For an issue, the title
+carries the verdict and the body's first two lines carry the rest.
 
 ## The synthetic check's issue
 
@@ -141,7 +142,7 @@ time it needs one, the way `nightly-qa.yml` creates `nightly-failure`
 |---|---|---|---|
 | `synthetic-failure` | `B60205` | Synthetic check failed | `synthetic-issue.tmpl` |
 | `fuzz-failure` | `B60205` | API fuzzing failed | `fuzz-issue.tmpl` |
-| `docs-journey-failure` | `B60205` | Docs journey failed | the issue for a failing guide |
+| `docs-journey-failure` | `B60205` | Docs journey failed | `docs-journey-issue.tmpl` |
 | `qa-agent` | `5319E7` | Filed by automated QA after reproduction | `docs-defect-issue.tmpl`, and public bugs filed from QA findings |
 
 `documentation`, `launch-blocking` and `post-launch` already exist. No
@@ -158,14 +159,24 @@ every pull request and of the nightly run.
   printf-style);
 - a template's placeholders differ from the set the test pins for it, title and
   body separately for an issue;
-- a template or this file contains an e-mail address outside the example.com domain, an
-  `@` mention, a UUID, a run of seven or more digits, anything shaped like a key,
-  token or credential header, a fenced code block, a URL other than this
-  repository's or its documentation site's, a hostname, or one of the words the
-  project keeps out of automated public text;
-- a template's first two lines break the rule above;
-- the synthetic issue does not list exactly the eight steps, or the fuzzing
-  issue's body is not `fuzz-red.tmpl`.
+- a template holds a character outside ASCII;
+- a template or this file contains an e-mail address outside the example.com
+  domain, an `@` mention, a UUID, a run of seven or more digits, anything shaped
+  like a key, token or credential header, a fenced code block, a URL other than
+  this repository's or its documentation site's, a hostname, the name of a
+  private repository or of another repository of the organisation, or one of
+  the words the project keeps out of automated public text;
+- a template's first line lacks its pinned verdict word, or its first two lines
+  break the rule above;
+- the synthetic issue does not list exactly the eight steps, or an issue's body
+  differs from its source (`fuzz-red.tmpl`, `docs-guide-fail.tmpl`);
+- a workflow or composite action under `.github/` posts to an issue or pull
+  request (`gh issue` or `gh pr` create, comment, edit, close, reopen or review)
+  or writes its step summary, and is not classified in the test's
+  `WORKFLOW_POSTERS`: either `template` (every such command uses `--body-file`,
+  never `--body`, and the file renders from this directory) or `legacy-inline`,
+  the named workflows that built their text inline before these templates
+  existed. An entry that no longer posts must leave the list.
 
-Each of those refusals is also planted against a good template in the test
-itself, so a rule that stops firing fails too.
+Each of those refusals is also planted in the test itself, so a rule that stops
+firing fails too.

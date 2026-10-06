@@ -12,17 +12,23 @@ therefore checked on the template, before anything is posted:
   the plan allows in public text (UX check V1); no other brace, no dollar sign
   (a shell, ``envsubst`` or a workflow expression would expand it), no angle
   brackets, no printf-style placeholder;
-* no e-mail address outside ``@example.com``, no ``@`` mention, no UUID, no
-  long number, nothing shaped like a key, token or credential header, no fenced
-  block, no URL or hostname other than this repository's and its docs site's,
-  and none of the words the project keeps out of automated public text
-  (UX D9, check V2);
-* the first two lines carry a verdict word and either "What to do" or a count;
-  an output that is not green says "What to do" there (UX check V7). For an
-  issue the title carries the verdict and the body's first two lines the rest;
+* ASCII only; no e-mail address outside ``@example.com``, no ``@`` mention, no
+  UUID, no long number, nothing shaped like a key, token or credential header,
+  no fenced block, no URL or hostname other than this repository's and its docs
+  site's, no name of a private repository or its directories, and none of the
+  words the project keeps out of automated public text (UX D9, check V2);
+* each template's verdict word is pinned and must be on its first line (the
+  title, for an issue); the first two lines carry "What to do" or a count, and
+  an output whose verdict is not green says "What to do" there (UX check V7).
+  For an issue the body's first two lines carry the rest;
 * each template's placeholders are pinned, title and body separately, so a
   docs-defect issue cannot lose its step number (UX check V11), and the
-  synthetic issue names all eight steps.
+  synthetic issue names all eight steps;
+* every workflow that posts to an issue or pull request, or writes its step
+  summary, is classified in ``WORKFLOW_POSTERS``: ``template`` (posts with
+  ``--body-file`` from a rendered template, never ``--body``) or
+  ``legacy-inline`` (a named list of the workflows that built their text inline
+  before these templates existed). A new poster fails until it is classified.
 
 Every refusal is also planted against a real template in ``PLANTS`` below, so
 a rule that stops firing fails here, not only when a template breaks it.
@@ -32,14 +38,17 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
-from typing import Callable, Dict, FrozenSet, List, Optional, Tuple
+from typing import Any, Callable, Dict, FrozenSet, List, NamedTuple, Optional, Tuple
 
 import pytest
+
+from backend.tests.unit.infrastructure.test_docs_only_gate import _load
 
 pytestmark = pytest.mark.unit
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-TEMPLATES_DIR = REPO_ROOT / ".github" / "qa-templates"
+GITHUB_DIR = REPO_ROOT / ".github"
+TEMPLATES_DIR = GITHUB_DIR / "qa-templates"
 README = "README.md"
 
 #: Every placeholder name, by the kind of value it holds. The kinds are exactly
@@ -111,23 +120,67 @@ _DOCS_RUN = frozenset(
     }
 )
 
-#: Every template and its placeholders, as (title, body). Only an
-#: ``-issue.tmpl`` file has a title (its first line); the others have None. A
-#: renderer can rely on this set: it is exactly what it must supply.
-TEMPLATES: Dict[str, Tuple[Optional[FrozenSet[str]], FrozenSet[str]]] = {
-    "synthetic-issue.tmpl": (
+#: The words a template may give as its verdict. Case-sensitive: "pass" in
+#: "superuser pass" is not one, and neither is "PASS" in ``PASS={check}``,
+#: because only the word pinned for the template, on its first line, counts.
+VERDICT_WORDS = (
+    "GREEN",
+    "RED",
+    "PASS",
+    "FAIL",
+    "PARTIAL",
+    "Green",
+    "red",
+    "failed",
+    "fails",
+)
+GREEN_VERDICTS = {"GREEN", "PASS", "Green"}
+
+
+class Template(NamedTuple):
+    """A template's verdict word and its placeholders, title and body apart.
+
+    Only an ``-issue.tmpl`` file has a title (its first line); the others have
+    None. A renderer can rely on the two sets: they are exactly what it must
+    supply."""
+
+    verdict: str
+    title: Optional[FrozenSet[str]]
+    body: FrozenSet[str]
+
+
+_DOCS_GUIDE_FAIL = frozenset(
+    {
+        "heading_guide",
+        "guide_path",
+        "date",
+        "sha",
+        "step_number",
+        "heading_step",
+        "count_steps_pass",
+        "count_steps",
+        "run_link",
+    }
+)
+
+TEMPLATES: Dict[str, Template] = {
+    "synthetic-issue.tmpl": Template(
+        "red",
         frozenset({"check"}),
         frozenset({"check", "count_runs", "date_time", "run_link", "step", "status"}),
     ),
-    "synthetic-step-changed.tmpl": (
+    "synthetic-step-changed.tmpl": Template(
+        "red",
         None,
         frozenset({"check", "step", "status", "run_link", "count_runs"}),
     ),
-    "synthetic-recovered.tmpl": (
+    "synthetic-recovered.tmpl": Template(
+        "Green",
         None,
         frozenset({"date_time", "count_runs", "duration", "run_link"}),
     ),
-    "fuzz-green.tmpl": (
+    "fuzz-green.tmpl": Template(
+        "GREEN",
         None,
         frozenset(
             {
@@ -143,30 +196,18 @@ TEMPLATES: Dict[str, Tuple[Optional[FrozenSet[str]], FrozenSet[str]]] = {
             }
         ),
     ),
-    "fuzz-red.tmpl": (None, _FUZZ_RED),
-    "fuzz-issue.tmpl": (frozenset(), _FUZZ_RED),
-    "docs-run-green.tmpl": (None, _DOCS_RUN),
-    "docs-run-red.tmpl": (None, _DOCS_RUN | {"run_link"}),
-    "docs-guide-pass.tmpl": (
+    "fuzz-red.tmpl": Template("RED", None, _FUZZ_RED),
+    "fuzz-issue.tmpl": Template("red", frozenset(), _FUZZ_RED),
+    "docs-run-green.tmpl": Template("GREEN", None, _DOCS_RUN),
+    "docs-run-red.tmpl": Template("RED", None, _DOCS_RUN | {"run_link"}),
+    "docs-guide-pass.tmpl": Template(
+        "PASS",
         None,
         frozenset({"heading_guide", "guide_path", "date", "sha", "count_steps"}),
     ),
-    "docs-guide-fail.tmpl": (
-        None,
-        frozenset(
-            {
-                "heading_guide",
-                "guide_path",
-                "date",
-                "sha",
-                "step_number",
-                "heading_step",
-                "count_steps_pass",
-                "count_steps",
-            }
-        ),
-    ),
-    "docs-guide-partial.tmpl": (
+    "docs-guide-fail.tmpl": Template("FAIL", None, _DOCS_GUIDE_FAIL),
+    "docs-guide-partial.tmpl": Template(
+        "PARTIAL",
         None,
         frozenset(
             {
@@ -180,7 +221,11 @@ TEMPLATES: Dict[str, Tuple[Optional[FrozenSet[str]], FrozenSet[str]]] = {
             }
         ),
     ),
-    "docs-defect-issue.tmpl": (
+    "docs-journey-issue.tmpl": Template(
+        "red", frozenset({"guide_path"}), _DOCS_GUIDE_FAIL
+    ),
+    "docs-defect-issue.tmpl": Template(
+        "fails",
         frozenset({"heading_guide", "step_number", "heading_step"}),
         frozenset(
             {
@@ -194,6 +239,16 @@ TEMPLATES: Dict[str, Tuple[Optional[FrozenSet[str]], FrozenSet[str]]] = {
         ),
     ),
 }
+
+#: An issue whose body is another template, verbatim: (issue, title, body).
+ISSUE_BODIES = [
+    ("fuzz-issue.tmpl", "API fuzzing is red", "fuzz-red.tmpl"),
+    (
+        "docs-journey-issue.tmpl",
+        "Docs journey ({guide_path}) is red",
+        "docs-guide-fail.tmpl",
+    ),
+]
 
 #: The labels the workflows create on first use; the README documents each.
 LABELS = ("synthetic-failure", "fuzz-failure", "docs-journey-failure", "qa-agent")
@@ -235,6 +290,13 @@ BANNED_STEMS = (
     "bypass",
 )
 
+#: The private repository and its directories, by name; and any repository of
+#: the organisation other than this one.
+PRIVATE_NAMES = ("launch-readiness", "experimently-internal")
+OTHER_REPOSITORY = re.compile(
+    r"getexperimently/(?!experimently(?![A-Za-z0-9_.-]))[A-Za-z0-9_.-]+"
+)
+
 EMAIL = re.compile(r"[A-Za-z0-9._%+-]+@([A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+)")
 MENTION = re.compile(r"(?<![A-Za-z0-9._%+-])@[A-Za-z0-9]")
 UUID = re.compile(
@@ -264,9 +326,6 @@ HOST = re.compile(
 )
 ALLOWED_HOSTS = {"github.com", "getexperimently.github.io", "example.com"}
 
-#: Verdict words, case-sensitive: "pass" in "superuser pass" is not one.
-VERDICT = re.compile(r"\b(GREEN|RED|PASS|FAIL|PARTIAL|Green|red|failed|fails)\b")
-GREEN_VERDICTS = {"GREEN", "PASS", "Green"}
 WHAT_TO_DO = "What to do"
 COUNT = re.compile(r"\{count(?:_[a-z0-9_]+)?\}")
 
@@ -298,6 +357,11 @@ def shape_problems(text: str) -> List[str]:
     found = []
     lowered = text.lower()
     found += [f"the word stem {stem!r}" for stem in BANNED_STEMS if stem in lowered]
+    found += [f"a private name: {name}" for name in PRIVATE_NAMES if name in lowered]
+    found += [
+        f"another repository of the organisation: {match.group(0)}"
+        for match in OTHER_REPOSITORY.finditer(text)
+    ]
     for match in EMAIL.finditer(text):
         if match.group(1).lower() != "example.com":
             found.append(f"an e-mail address outside @example.com: {match.group(0)}")
@@ -334,30 +398,36 @@ def split_issue(name: str, text: str) -> Tuple[Optional[str], str, List[str]]:
     return lines[0], "\n".join(lines[2:]), []
 
 
-def opening_problems(text: str) -> List[str]:
-    """The two-line rule (UX check V7) on the first two non-blank lines."""
+def first_line(text: str) -> str:
+    return next((line for line in text.splitlines() if line.strip()), "")
+
+
+def opening_problems(text: str, green: bool) -> List[str]:
+    """The rest of the two-line rule (UX check V7), on the first two non-blank
+    lines: "What to do" or a count, and "What to do" when not green."""
     head = "\n".join([line for line in text.splitlines() if line.strip()][:2])
-    verdicts = VERDICT.findall(head)
     found = []
-    if not verdicts:
-        found.append(
-            "no verdict word (GREEN, RED, PASS, FAIL, ...) in the first two lines"
-        )
     if WHAT_TO_DO not in head and not COUNT.search(head):
         found.append('neither "What to do" nor a count in the first two lines')
-    if verdicts and verdicts[0] not in GREEN_VERDICTS and WHAT_TO_DO not in head:
+    if not green and WHAT_TO_DO not in head:
         found.append('not green, and "What to do" is not in the first two lines')
     return found
 
 
 def problems(name: str, text: str) -> List[str]:
-    """Everything wrong with one template."""
+    """Everything wrong with one template, judged against its pinned verdict."""
+    verdict = TEMPLATES[name].verdict
     found = syntax_problems(text) + shape_problems(text)
+    if not text.isascii():
+        found.append("a character outside ASCII: it can hide or impersonate text")
     title, body, layout = split_issue(name, text)
     found += layout
-    if title is not None and not VERDICT.search(title):
-        found.append("the issue title has no verdict word")
-    found += opening_problems(body)
+    first = first_line(body) if title is None else title
+    if not re.search(rf"\b{re.escape(verdict)}\b", first):
+        found.append(
+            f"the first line (the title, for an issue) does not carry its verdict {verdict!r}"
+        )
+    found += opening_problems(body, green=verdict in GREEN_VERDICTS)
     return found
 
 
@@ -391,7 +461,12 @@ def test_the_template_is_safe_to_publish(name):
 @pytest.mark.parametrize("name", sorted(TEMPLATES))
 def test_the_template_uses_exactly_its_placeholders(name):
     title, body, _ = split_issue(name, read(name))
-    assert (placeholders(title), placeholders(body)) == TEMPLATES[name]
+    spec = TEMPLATES[name]
+    assert (placeholders(title), placeholders(body)) == (spec.title, spec.body)
+
+
+def test_every_pinned_verdict_is_a_verdict_word():
+    assert {spec.verdict for spec in TEMPLATES.values()} <= set(VERDICT_WORDS)
 
 
 def test_every_placeholder_kind_is_one_the_plan_allows():
@@ -426,13 +501,17 @@ def test_the_readme_is_safe_to_publish_and_documents_every_name_and_label():
 def test_the_synthetic_issue_lists_the_eight_steps_in_order():
     _, body, _ = split_issue("synthetic-issue.tmpl", read("synthetic-issue.tmpl"))
     listed = re.findall(r"^([0-9]+)\. ([A-Z][a-z]+(?: [a-z]+)*):", body, re.M)
-    assert listed == [(str(n), step) for n, step in enumerate(SYNTHETIC_STEPS, 1)]
+    numbers = range(1, len(SYNTHETIC_STEPS) + 1)
+    assert listed == [(str(n), step) for n, step in zip(numbers, SYNTHETIC_STEPS)]
 
 
-def test_the_fuzz_issue_body_is_the_red_summary():
-    title, body, _ = split_issue("fuzz-issue.tmpl", read("fuzz-issue.tmpl"))
-    assert title == "API fuzzing is red"
-    assert body == read("fuzz-red.tmpl")
+@pytest.mark.parametrize("issue, title, source", ISSUE_BODIES)
+def test_the_issue_body_is_its_source_template(issue, title, source):
+    """The fuzzing issue is the red summary, and the issue for a failing guide
+    is that guide's report header, word for word."""
+    found_title, body, _ = split_issue(issue, read(issue))
+    assert found_title == title
+    assert body == read(source)
 
 
 # ---------------------------------------------------------------------------
@@ -447,7 +526,9 @@ def _add(line: str) -> Callable[[str], str]:
 def _move_what_to_do_down(text: str) -> str:
     """The "What to do" paragraph swapped with the one after it."""
     paragraphs = text.split("\n\n")
-    index = next(i for i, p in enumerate(paragraphs) if p.startswith(WHAT_TO_DO))
+    index = next(
+        i for i in range(len(paragraphs)) if paragraphs[i].startswith(WHAT_TO_DO)
+    )
     paragraphs[index], paragraphs[index + 1] = paragraphs[index + 1], paragraphs[index]
     return "\n\n".join(paragraphs)
 
@@ -527,9 +608,56 @@ PLANTS = [
         _move_what_to_do_down,
         WHAT_TO_DO,
     ),
+    # The verdict deleted from the first line, where an incidental word in the
+    # first two lines ("PASS=" in the reproduce command, "failed") once
+    # satisfied the rule.
+    (
+        "verdict-removed-fuzz-red",
+        "fuzz-red.tmpl",
+        _replace("commit {sha}: RED", "commit {sha}"),
+        "verdict 'RED'",
+    ),
+    (
+        "verdict-removed-docs-run-red",
+        "docs-run-red.tmpl",
+        _replace("commit {sha}: RED", "commit {sha}"),
+        "verdict 'RED'",
+    ),
+    (
+        "verdict-removed-docs-guide-partial",
+        "docs-guide-partial.tmpl",
+        _replace(": PARTIAL, {count_not_run}", ": {count_not_run}"),
+        "verdict 'PARTIAL'",
+    ),
+    (
+        "verdict-removed-synthetic-step-changed",
+        "synthetic-step-changed.tmpl",
+        _replace("is still red, and", "is still down, and"),
+        "verdict 'red'",
+    ),
+    (
+        "verdict-removed-docs-journey-issue",
+        "docs-journey-issue.tmpl",
+        _replace(") is red\n", ")\n"),
+        "verdict 'red'",
+    ),
+    ("smart-quotes", "fuzz-green.tmpl", _add("\u201cquoted\u201d"), "ASCII"),
+    ("zero-width-space", "fuzz-green.tmpl", _add("a\u200bb"), "ASCII"),
+    (
+        "private-directory",
+        "docs-run-red.tmpl",
+        _add("Notes: launch-readiness/qa"),
+        "private name",
+    ),
+    (
+        "private-repository",
+        "docs-run-red.tmpl",
+        _add("See getexperimently/qa-notes"),
+        "another repository",
+    ),
 ] + [
     (f"stem-{n}", "docs-guide-partial.tmpl", _add(f"x{stem}x"), "word stem")
-    for n, stem in enumerate(BANNED_STEMS)
+    for n, stem in zip(range(len(BANNED_STEMS)), BANNED_STEMS)
 ]
 
 
@@ -558,3 +686,244 @@ def test_what_public_text_may_say_passes(line):
     """The rules do not refuse the things a template legitimately says."""
     text = read("synthetic-recovered.tmpl") + "\n" + line + "\n"
     assert problems("synthetic-recovered.tmpl", text) == []
+
+
+# ---------------------------------------------------------------------------
+# Which workflows may post, and how
+# ---------------------------------------------------------------------------
+
+#: Every workflow and composite action under .github/ that posts to an issue or
+#: a pull request, or writes its step summary, by path under .github/.
+#: ``template``: posts only with ``--body-file``, from a template rendered out
+#: of .github/qa-templates/. ``legacy-inline``: built its text inline before the
+#: templates existed; this list may shrink, and a new poster is a template one.
+WORKFLOW_POSTERS: Dict[str, Tuple[str, str]] = {
+    "workflows/chart-kind.yml": (
+        "legacy-inline",
+        "the chart-kind-failure issue: date, commit and run link",
+    ),
+    "workflows/db-migrate.yml": (
+        "legacy-inline",
+        "the migration result table in the step summary",
+    ),
+    "workflows/dependabot-lock.yml": (
+        "legacy-inline",
+        "the lock-refresh comment on a Dependabot pull request, and its outcome table",
+    ),
+    "workflows/deploy.yml": ("legacy-inline", "the deploy result in the step summary"),
+    "workflows/doc-examples.yml": (
+        "legacy-inline",
+        "the doc-examples-failure issue: date, commit and run link",
+    ),
+    "workflows/nightly-qa.yml": (
+        "legacy-inline",
+        "the nightly-failure issue (date, commit, run link) and one summary line",
+    ),
+    "workflows/rollback.yml": (
+        "legacy-inline",
+        "the rollback result in the step summary",
+    ),
+    "workflows/sdk-unit-tests.yml": (
+        "legacy-inline",
+        "which SDK tiers ran, in the step summary",
+    ),
+}
+POSTER_KINDS = ("template", "legacy-inline")
+
+POSTS = re.compile(
+    r"\bgh\s+(?:issue|pr)\s+(?:create|comment|edit|close|reopen|review)\b"
+)
+SUMMARY = "GITHUB_STEP_SUMMARY"
+INLINE_BODY = re.compile(r"(?<!\S)(?:--body|-b)(?=[\s=])")
+BODY_FILE = re.compile(r"(?<!\S)--body-file(?=[\s=])")
+TEMPLATES_REFERENCE = ".github/qa-templates/"
+
+
+def scripts(document: Any) -> List[str]:
+    """Every ``run:`` script of a workflow's jobs or a composite action."""
+    steps: List[Any] = []
+    if isinstance(document, dict):
+        for job in (document.get("jobs") or {}).values():
+            if isinstance(job, dict):
+                steps += job.get("steps") or []
+        runs = document.get("runs")
+        if isinstance(runs, dict):
+            steps += runs.get("steps") or []
+    return [
+        step["run"]
+        for step in steps
+        if isinstance(step, dict) and isinstance(step.get("run"), str)
+    ]
+
+
+def posting_commands(document: Any) -> List[str]:
+    """Each command that posts (continuation lines joined), and SUMMARY once
+    for every script that writes the step summary."""
+    found = []
+    for script in scripts(document):
+        for line in script.replace("\\\n", " ").splitlines():
+            if POSTS.search(line):
+                found.append(line.strip())
+        if SUMMARY in script:
+            found.append(SUMMARY)
+    return found
+
+
+def poster_files() -> List[Path]:
+    paths = [
+        *GITHUB_DIR.glob("workflows/*.yml"),
+        *GITHUB_DIR.glob("workflows/*.yaml"),
+        *GITHUB_DIR.glob("actions/*/action.yml"),
+        *GITHUB_DIR.glob("actions/*/action.yaml"),
+    ]
+    return sorted(paths)
+
+
+def scan() -> Tuple[Dict[str, List[str]], Dict[str, str]]:
+    """(the posting commands of each file that posts, every file's text)."""
+    posters, texts = {}, {}
+    for path in poster_files():
+        rel = path.relative_to(GITHUB_DIR).as_posix()
+        texts[rel] = path.read_text(encoding="utf-8")
+        commands = posting_commands(_load(path))
+        if commands:
+            posters[rel] = commands
+    return posters, texts
+
+
+def poster_problems(
+    posters: Dict[str, List[str]],
+    texts: Dict[str, str],
+    classified: Dict[str, Tuple[str, str]] = WORKFLOW_POSTERS,
+) -> List[str]:
+    found = [
+        f"{path} posts or writes a step summary and is not in WORKFLOW_POSTERS"
+        for path in sorted(set(posters) - set(classified))
+    ]
+    found += [
+        f"{path} is in WORKFLOW_POSTERS but no longer posts: remove it"
+        for path in sorted(set(classified) - set(posters))
+    ]
+    for path, (kind, reason) in sorted(classified.items()):
+        if kind not in POSTER_KINDS or not reason.strip():
+            found.append(
+                f"{path}: the kind must be one of {POSTER_KINDS}, with a reason"
+            )
+        if kind != "template" or path not in posters:
+            continue
+        if TEMPLATES_REFERENCE not in texts.get(path, ""):
+            found.append(
+                f"{path}: a template poster that renders nothing from {TEMPLATES_REFERENCE}"
+            )
+        for command in posters[path]:
+            if command != SUMMARY and (
+                INLINE_BODY.search(command) or not BODY_FILE.search(command)
+            ):
+                found.append(f"{path}: posts without --body-file: {command}")
+    return found
+
+
+def test_every_workflow_that_posts_is_classified():
+    paths = poster_files()
+    assert len(paths) > 20, "the scan found almost nothing: it is broken, not clean"
+    posters, texts = scan()
+    found = poster_problems(posters, texts)
+    assert not found, "\n".join(found)
+
+
+def _workflow(run: str) -> Dict[str, Any]:
+    return {"on": {"workflow_dispatch": None}, "jobs": {"j": {"steps": [{"run": run}]}}}
+
+
+_RENDERED = (
+    'body="$RUNNER_TEMP/body.md"  # rendered from .github/qa-templates/fuzz-red.tmpl\n'
+)
+
+#: (id, the planted file's script, its classification or None, the file's
+#: text, a fragment the problems must contain; None = no problem)
+POSTER_PLANTS = [
+    (
+        "unclassified",
+        'gh issue comment 1 --body "$X"',
+        None,
+        "",
+        "not in WORKFLOW_POSTERS",
+    ),
+    (
+        "unclassified-summary",
+        'cat out.md >> "$GITHUB_STEP_SUMMARY"',
+        None,
+        "",
+        "not in WORKFLOW_POSTERS",
+    ),
+    (
+        "template-inline-body",
+        'gh issue comment 1 --body "$X"',
+        "template",
+        _RENDERED,
+        "without --body-file",
+    ),
+    (
+        "template-short-flag",
+        'gh issue comment 1 -b "$X"',
+        "template",
+        _RENDERED,
+        "without --body-file",
+    ),
+    (
+        "template-continued-line",
+        'gh issue create --title "$T" \\\n  --body "$X"',
+        "template",
+        _RENDERED,
+        "without --body-file",
+    ),
+    (
+        "template-renders-nothing",
+        'gh issue comment 1 --body-file "$RUNNER_TEMP/body.md"',
+        "template",
+        "",
+        "renders nothing",
+    ),
+    (
+        "template-summary-renders-nothing",
+        'cat out.md >> "$GITHUB_STEP_SUMMARY"',
+        "template",
+        "",
+        "renders nothing",
+    ),
+    (
+        "template-done-right",
+        'gh issue comment 1 --body-file "$RUNNER_TEMP/body.md"',
+        "template",
+        _RENDERED,
+        None,
+    ),
+]
+
+
+@pytest.mark.parametrize(
+    "run, kind, text, fragment",
+    [plant[1:] for plant in POSTER_PLANTS],
+    ids=[plant[0] for plant in POSTER_PLANTS],
+)
+def test_the_poster_rule_fires_on_a_planted_workflow(run, kind, text, fragment):
+    posters, texts = scan()
+    assert poster_problems(posters, texts) == []
+    planted = "workflows/planted.yml"
+    posters[planted] = posting_commands(_workflow(run))
+    texts[planted] = text
+    classified = dict(WORKFLOW_POSTERS)
+    if kind is not None:
+        classified[planted] = (kind, "planted")
+    found = poster_problems(posters, texts, classified)
+    if fragment is None:
+        assert found == []
+    else:
+        assert any(fragment in problem for problem in found), found
+
+
+def test_a_poster_that_stops_posting_must_leave_the_list():
+    posters, texts = scan()
+    posters.pop("workflows/nightly-qa.yml")
+    found = poster_problems(posters, texts)
+    assert any("no longer posts" in problem for problem in found), found
