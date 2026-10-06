@@ -513,7 +513,7 @@ reason = "the CDK VPC stack"
 
 [pages."infrastructure/network-security-readme.md"]
 class = "aws"
-reason = "describes AWS networking (subnets, NAT gateways, groups and ACLs) as a Terraform configuration this repository does not contain"
+reason = "describes the AWS network the CDK stacks create (subnets, NAT gateways, endpoints, security groups and ACLs)"
 
 [pages."infrastructure/aws-iam-setup.md"]
 class = "aws"

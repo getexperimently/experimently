@@ -464,7 +464,6 @@ reason = "run on a kind cluster by the chart-kind workflow (scripts/chart_kind.s
 "docs/infrastructure/aws-iam-setup.md" = { comments = 0, unlabelled = 0, syntax = 0 }
 "docs/infrastructure/cloudwatch-setup.md" = { comments = 0, unlabelled = 4, syntax = 0 }
 "docs/infrastructure/dynamodb-readme.md" = { comments = 0, unlabelled = 0, syntax = 0 }
-"docs/infrastructure/network-security-readme.md" = { comments = 0, unlabelled = 0, syntax = 0 }
 "docs/infrastructure/redis-summary.md" = { comments = 0, unlabelled = 0, syntax = 0 }
 "docs/infrastructure/vpc-stack-implementation.md" = { comments = 0, unlabelled = 0, syntax = 0 }
 "docs/integrations/aws.md" = { comments = 0, unlabelled = 0, syntax = 0 }

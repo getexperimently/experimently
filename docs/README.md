@@ -141,7 +141,7 @@
 - [Redis / ElastiCache](infrastructure/redis-summary.md) — caching strategy
 - [CloudWatch Setup](infrastructure/cloudwatch-setup.md) — log groups, agent config
 - [IAM Setup](infrastructure/aws-iam-setup.md) — roles and permissions
-- [Network Security](infrastructure/network-security-readme.md) — VPC, WAF, ALB
+- [Network Security](infrastructure/network-security-readme.md) — subnets, NAT, endpoints, security groups, ACLs
 - [VPC Stack](infrastructure/vpc-stack-implementation.md) — CDK networking stack
 
 ---
