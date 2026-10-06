@@ -277,12 +277,17 @@ class JourneyRunner:
         return f"kept {where} as {keep.secret} ({len(value)} characters)"
 
     @staticmethod
-    def _holds(check, failure: str) -> None:
-        """Run a Playwright expectation; a failure says *failure*, not the call log."""
+    def _holds(check, failure) -> None:
+        """Run a Playwright expectation; a failure says *failure*, not the call log.
+
+        *failure* is the line, or a function that writes it when the
+        expectation has failed: a line naming where the page is must be
+        written then, not before the expectation's wait began.
+        """
         try:
             check()
         except AssertionError:
-            raise StepFailed(failure) from None
+            raise StepFailed(failure() if callable(failure) else failure) from None
 
     def _search_step(self, step: Step, page: Page, running: Running) -> str:
         self._act(step, page, running)
@@ -457,9 +462,9 @@ class JourneyRunner:
         wanted = step.expect
 
         def here() -> str:
-            # The document's own location. Measured 2026-10-06: after the
-            # sign-in page sent the browser on to /experiments, page.url still
-            # read /login while the screen showed the experiments.
+            # The document's own location. Measured 2026-10-06 on the
+            # dashboard's development server: seconds after Log out, page.url
+            # still read /admin/users while location was /login?next=...
             try:
                 return str(page.evaluate("location.pathname")) or "/"
             except PlaywrightError:
@@ -477,26 +482,31 @@ class JourneyRunner:
             url = urljoin(base, wanted.url.lstrip("/"))
             self._holds(
                 lambda: expect(page).to_have_url(url),
-                f"at {here()}, not {wanted.url}",
+                lambda: f"at {here()}, not {wanted.url}",
             )
         for named in wanted.visible or []:
             self._holds(
                 lambda named=named: expect(self._role(page, named)).to_be_visible(),
-                f'no {named.role} "{named.name}" visible at {here()}',
+                lambda named=named: (
+                    f'no {named.role} "{named.name}" visible at {here()}'
+                ),
             )
         if wanted.text is not None:
             self._holds(
                 lambda: expect(
                     page.get_by_text(wanted.text, exact=True).first
                 ).to_be_visible(),
-                f'no text "{wanted.text}" visible at {here()}',
+                lambda: f'no text "{wanted.text}" visible at {here()}',
             )
         if wanted.number is not None:
             number = wanted.number
             element = self._role(page, number.locator)
             self._holds(
                 lambda: expect(element).to_be_visible(),
-                f'no {number.locator.role} "{number.locator.name}" visible at {here()}',
+                lambda: (
+                    f'no {number.locator.role} "{number.locator.name}"'
+                    f" visible at {here()}"
+                ),
             )
             shown = parse_number(element.inner_text())
             oracle = ORACLES[number.oracle.name](**number.oracle.args)
@@ -507,7 +517,9 @@ class JourneyRunner:
                 lambda: expect(page.locator("body")).to_match_aria_snapshot(
                     wanted.aria
                 ),
-                f"the screen at {here()} does not match its expected ARIA snapshot",
+                lambda: (
+                    f"the screen at {here()} does not match its expected ARIA snapshot"
+                ),
             )
         observed = f"at {here()}"
         if response is not None:
@@ -605,7 +617,7 @@ class JourneyRunner:
             expected_snapshot = self._expected_nav(
                 running, self._name(journey_id, number, step, ".expected.json")
             )
-        elif step.do.crawl == "links":
+        elif step.do.crawl == "links" or step.do.kind == "keep":
             expected_snapshot = STRUCTURAL_ONLY
         base = {
             "run": self.settings.run_id,
