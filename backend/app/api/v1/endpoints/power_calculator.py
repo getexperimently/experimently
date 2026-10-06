@@ -6,7 +6,7 @@ Routes (no authentication required — useful as a pre-login planning tool):
     POST /api/v1/power/mde          — compute MDE for a fixed sample
     POST /api/v1/power/runtime      — estimate experiment runtime
     GET  /api/v1/power/curve        — power curve (effect size vs. sample)
-    POST /api/v1/power/plan         — AI-enhanced planning advice
+    POST /api/v1/power/plan         — built-in planning advice
 """
 
 import logging
@@ -283,15 +283,15 @@ def get_power_curve(
     "/plan",
     response_model=PlanResponse,
     status_code=status.HTTP_200_OK,
-    summary="Get AI Planning Advice",
+    summary="Get Planning Advice",
     description=(
         "Generate plain-English planning advice for a power analysis result. "
-        "Uses Claude AI when ANTHROPIC_API_KEY is configured; "
-        "falls back to template-based advice otherwise."
+        "The advice is the built-in planning advice, and generated_by is "
+        "always 'template'."
     ),
 )
 async def get_planning_advice(body: PlanRequest) -> PlanResponse:
-    """Generate AI-enhanced planning advice."""
+    """Generate the built-in planning advice."""
     try:
         result = await _planner.get_planning_advice(
             experiment_name=body.experiment_name,

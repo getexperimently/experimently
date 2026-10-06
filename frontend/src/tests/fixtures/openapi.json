@@ -890,7 +890,7 @@
     "/api/v1/power/plan": {
       "post": {
         "operationId": "get_planning_advice_api_v1_power_plan_post",
-        "summary": "Get AI Planning Advice"
+        "summary": "Get Planning Advice"
       }
     },
     "/api/v1/power/runtime": {

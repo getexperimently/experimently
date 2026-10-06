@@ -6,7 +6,7 @@ Tests the full HTTP request/response cycle for:
   POST /api/v1/power/mde          — compute MDE for a fixed sample
   POST /api/v1/power/runtime      — estimate experiment runtime
   GET  /api/v1/power/curve        — power curve
-  POST /api/v1/power/plan         — AI planning advice (Claude mocked)
+  POST /api/v1/power/plan         — built-in planning advice
 
 Validation tests (422):
   - baseline_rate=0 → 422
@@ -418,11 +418,12 @@ class TestPowerCurveEndpoint:
 
 
 class TestPlanEndpoint:
-    """POST /api/v1/power/plan (AI planning advice, Claude mocked)."""
+    """POST /api/v1/power/plan (the built-in planning advice)."""
 
     @pytest.fixture(autouse=True)
-    def mock_anthropic_unavailable(self, monkeypatch):
-        """Ensure no real Anthropic API calls are made in integration tests."""
+    def no_anthropic_key(self, monkeypatch):
+        """Run with ANTHROPIC_API_KEY unset; the unit test
+        ``test_power_plan_builtin_advice.py`` covers it set."""
         monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
 
     def test_returns_200(self, client: TestClient):
@@ -439,7 +440,7 @@ class TestPlanEndpoint:
         resp = client.post("/api/v1/power/plan", json=_plan_payload())
         data = resp.json()
         assert "generated_by" in data
-        assert data["generated_by"] in ("ai", "template")
+        assert data["generated_by"] == "template"
 
     def test_generated_by_template_when_no_api_key(self, client: TestClient):
         resp = client.post("/api/v1/power/plan", json=_plan_payload())

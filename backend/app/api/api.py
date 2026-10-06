@@ -203,7 +203,7 @@ CORE_TAGS_METADATA = [
         "name": "Power Calculator",
         "description": (
             "Pre-experiment statistical power analysis: sample size computation, "
-            "MDE estimation, runtime estimation, power curves, and AI-enhanced "
+            "MDE estimation, runtime estimation, power curves, and "
             "planning advice. No authentication required."
         ),
     },
