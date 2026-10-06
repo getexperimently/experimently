@@ -23,10 +23,14 @@ file in this directory on every pull request (see "The test" below).
 
 ## Format
 
-- One file per output. GitHub renders the text as Markdown (issue bodies,
-  comments, step summaries), so lines meant to stand apart are separated by a
-  blank line.
-- A file whose name ends in `-issue.md` is an issue: line 1 is the title,
+- One `.tmpl` file per output. Its text is Markdown, which GitHub renders when
+  it is posted (issue bodies, comments, step summaries), so lines meant to
+  stand apart are separated by a blank line. It is not named `.md` because it
+  is not a documentation page: every Markdown file in the repository belongs to
+  the documentation examples contract (`[meta] universe` in
+  `scripts/doc_examples.toml`), and this README is the one page here that is
+  listed there.
+- A file whose name ends in `-issue.tmpl` is an issue: line 1 is the title,
   line 2 is blank, and the rest is the body.
 - A placeholder is a name in braces, such as `{date}`, and braces appear
   nowhere else. A workflow renders a template by replacing each placeholder
@@ -87,15 +91,15 @@ the same pull request, and its name starts with its kind.
 
 | File | Posted by | Where |
 |---|---|---|
-| `synthetic-issue.md` | the synthetic check | the issue opened after repeated failures (rules below) |
-| `synthetic-step-changed.md` | the synthetic check | a comment on that issue when the failing step changes |
-| `synthetic-recovered.md` | the synthetic check | the comment that closes it |
-| `fuzz-green.md` | each fuzzing pass | the step summary of a green pass |
-| `fuzz-red.md` | each fuzzing pass | the step summary of a red pass, and each comment on the open fuzzing issue |
-| `fuzz-issue.md` | API fuzzing | the issue opened on the first red pass; its body is `fuzz-red.md` |
-| `docs-run-green.md`, `docs-run-red.md` | the docs journeys | the top of the run's step summary |
-| `docs-guide-pass.md`, `docs-guide-fail.md`, `docs-guide-partial.md` | the docs journeys | the top of each guide's report |
-| `docs-defect-issue.md` | the docs journeys | one issue per measured docs defect (rules below) |
+| `synthetic-issue.tmpl` | the synthetic check | the issue opened after repeated failures (rules below) |
+| `synthetic-step-changed.tmpl` | the synthetic check | a comment on that issue when the failing step changes |
+| `synthetic-recovered.tmpl` | the synthetic check | the comment that closes it |
+| `fuzz-green.tmpl` | each fuzzing pass | the step summary of a green pass |
+| `fuzz-red.tmpl` | each fuzzing pass | the step summary of a red pass, and each comment on the open fuzzing issue |
+| `fuzz-issue.tmpl` | API fuzzing | the issue opened on the first red pass; its body is `fuzz-red.tmpl` |
+| `docs-run-green.tmpl`, `docs-run-red.tmpl` | the docs journeys | the top of the run's step summary |
+| `docs-guide-pass.tmpl`, `docs-guide-fail.tmpl`, `docs-guide-partial.tmpl` | the docs journeys | the top of each guide's report |
+| `docs-defect-issue.tmpl` | the docs journeys | one issue per measured docs defect (rules below) |
 
 Each output says what it is in its first two lines: a verdict word (GREEN, RED,
 PASS, FAIL, PARTIAL, or "is red", "failed"), and either "What to do" or a
@@ -109,12 +113,12 @@ The synthetic workflow follows these rules; the issue body states them for the
 reader.
 
 1. One issue per target, labelled `synthetic-failure`, opened from
-   `synthetic-issue.md` after 3 failed runs in a row on staging, or 2 on
+   `synthetic-issue.tmpl` after 3 failed runs in a row on staging, or 2 on
    production. Never one per run.
-2. While it is open, a comment (`synthetic-step-changed.md`) is added only when
+2. While it is open, a comment (`synthetic-step-changed.tmpl`) is added only when
    the failing step differs from the step the issue or its latest comment
    names. A failure at the same step adds nothing.
-3. The first run that passes comments `synthetic-recovered.md` and closes the
+3. The first run that passes comments `synthetic-recovered.tmpl` and closes the
    issue.
 4. A run that is skipped (`SYNTH_ENABLED` not `true`) counts as neither a
    failure nor a pass.
@@ -135,10 +139,10 @@ time it needs one, the way `nightly-qa.yml` creates `nightly-failure`
 
 | Label | Colour | Description | Applied to |
 |---|---|---|---|
-| `synthetic-failure` | `B60205` | Synthetic check failed | `synthetic-issue.md` |
-| `fuzz-failure` | `B60205` | API fuzzing failed | `fuzz-issue.md` |
+| `synthetic-failure` | `B60205` | Synthetic check failed | `synthetic-issue.tmpl` |
+| `fuzz-failure` | `B60205` | API fuzzing failed | `fuzz-issue.tmpl` |
 | `docs-journey-failure` | `B60205` | Docs journey failed | the issue for a failing guide |
-| `qa-agent` | `5319E7` | Filed by automated QA after reproduction | `docs-defect-issue.md`, and public bugs filed from QA findings |
+| `qa-agent` | `5319E7` | Filed by automated QA after reproduction | `docs-defect-issue.tmpl`, and public bugs filed from QA findings |
 
 `documentation`, `launch-blocking` and `post-launch` already exist. No
 `stats-failure` label is needed: the statistics batteries run in the unit job of
@@ -161,7 +165,7 @@ every pull request and of the nightly run.
   project keeps out of automated public text;
 - a template's first two lines break the rule above;
 - the synthetic issue does not list exactly the eight steps, or the fuzzing
-  issue's body is not `fuzz-red.md`.
+  issue's body is not `fuzz-red.tmpl`.
 
 Each of those refusals is also planted against a good template in the test
 itself, so a rule that stops firing fails too.

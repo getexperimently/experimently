@@ -16,6 +16,7 @@ documents = 37
 exec = 197
 universe = [
     ".github/pull_request_template.md",
+    ".github/qa-templates/README.md",
     "CHANGELOG.md",
     "CODE_OF_CONDUCT.md",
     "CONTRIBUTING.md",
