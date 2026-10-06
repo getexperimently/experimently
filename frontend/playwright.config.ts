@@ -7,7 +7,7 @@ import { API_URL, BASE_URL, IS_EXTERNAL_BASE_URL, PORT } from "./tests/e2e/env";
  * Playwright configuration for the Experimently dashboard.
  *
  * Three projects:
- *   - `journeys` — the seven fail-hard PR journeys (`*.journey.spec.ts`), the
+ *   - `journeys` — the fail-hard PR journeys (`*.journey.spec.ts`), the
  *     required `browser-e2e` gate. Run them with `--project=journeys`.
  *   - `sso` — sign in with SSO from the dashboard (`*.sso.spec.ts`, C2b). It
  *     needs its own API process and the fake OIDC provider, which the

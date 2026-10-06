@@ -292,7 +292,7 @@ export function AppShell({ children }: AppShellProps) {
           <div className="flex items-center gap-6 min-w-0">
             <Wordmark href={status === 'authenticated' ? '/experiments' : '/'} />
 
-            <nav aria-label="Primary" className="hidden md:flex items-center gap-1">
+            <nav aria-label="Primary" className="hidden xl:flex items-center gap-1">
               {visibleNav.map((item) => {
                 const active = item.href === activeHref;
                 return (
@@ -395,7 +395,7 @@ export function AppShell({ children }: AppShellProps) {
 
             <button
               type="button"
-              className="md:hidden inline-flex items-center justify-center h-8 w-8 rounded-md text-slate-600 hover:bg-slate-100"
+              className="xl:hidden inline-flex items-center justify-center h-8 w-8 rounded-md text-slate-600 hover:bg-slate-100"
               aria-label={menuOpen ? 'Close navigation' : 'Open navigation'}
               aria-expanded={menuOpen}
               aria-controls="mobile-nav"
@@ -418,7 +418,7 @@ export function AppShell({ children }: AppShellProps) {
             id="mobile-nav"
             aria-label="Primary mobile"
             data-testid="mobile-nav"
-            className="md:hidden border-t border-slate-200 bg-white px-4 py-2 flex flex-col gap-1"
+            className="xl:hidden border-t border-slate-200 bg-white px-4 py-2 flex flex-col gap-1"
           >
             {visibleNav.map((item) => (
               <Link
