@@ -44,11 +44,11 @@ pytest backend/tests/unit/  # Unit tests only
 pytest backend/tests/integration/  # Integration tests only
 
 # Code quality (ruff replaces black, isort and flake8). The scope is
-# `backend/ modules/ scripts/` -- exactly what `make format` / `make lint` and
-# the lint CI job pass; linting backend/ alone leaves the modules and the
-# repository tooling unchecked.
-ruff format backend/ modules/ scripts/        # Format code
-ruff check backend/ modules/ scripts/ --fix   # Lint and auto-fix (includes import sorting)
+# `backend/ modules/ scripts/ tests/acceptance/` -- exactly what `make format` /
+# `make lint` and the lint CI job pass; linting backend/ alone leaves the
+# modules, the repository tooling and the acceptance runner unchecked.
+ruff format backend/ modules/ scripts/ tests/acceptance/        # Format code
+ruff check backend/ modules/ scripts/ tests/acceptance/ --fix   # Lint and auto-fix (includes import sorting)
 mypy backend/app/                             # Type checking: NOT gated, NOT clean (#788)
 make format                 # The two ruff commands above
 make lint                   # Everything the `lint` CI job runs (see below)
@@ -308,7 +308,9 @@ alembic stamp heads
 - **Lint and format with ruff** (`make lint` / `make format`). Ruff replaced
   black, isort and flake8 in the P1 lint gate: one tool, one config block
   (`[tool.ruff]` in `pyproject.toml`), the same version in CI, pre-commit and
-  the venv. `.flake8` is gone; do not reintroduce black or isort.
+  the venv. `.flake8` is gone; do not reintroduce black or isort. The one
+  addition is `tests/acceptance/docs/ruff.toml`, which extends that block to
+  ban pytest's skip and xfail in the docs-journey runner (#939).
 - Follow PEP 8 for Python code
 - Use type annotations for all functions and methods
 - Document public functions with comprehensive docstrings
@@ -1248,18 +1250,19 @@ python -m alembic -c backend/app/db/alembic.ini current
 
 ### Code Quality Checks
 ```bash
-# Format and auto-fix backend/, modules/ and scripts/ in place
-# (ruff: format + lint + import order)
+# Format and auto-fix backend/, modules/, scripts/ and tests/acceptance/ in
+# place (ruff: format + lint + import order)
 make format
 
 # The full lint gate, in this order:
-#   ruff check / ruff format --check   backend/ modules/ scripts/
+#   ruff check / ruff format --check   backend/ modules/ scripts/ tests/acceptance/
 #   lint-imports                       the core/modules import boundary
 #                                      ([tool.importlinter] in pyproject.toml,
 #                                      backend/lambda/.importlinter)
 #   reuse lint                         every file carries a licence, and
 #                                      LICENSES/Apache-2.0.txt matches LICENSE
-#   check_requirements_lock.py         both requirements locks match their inputs
+#   check_requirements_lock.py         both requirements locks match their inputs,
+#                                      and the requirements files share their pins
 #   eslint + tsc                       frontend/
 #   hadolint                           the four Dockerfiles
 #   actionlint                         .github/workflows

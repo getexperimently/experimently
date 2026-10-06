@@ -34,6 +34,10 @@ between two input files must therefore name the same version, and every
 runtime.txt pin must be present in backend/requirements.txt -- which is what
 makes a bump in one file fail the lint job until the other follows.
 
+The acceptance suites' pins (``tests/acceptance/requirements.txt``) are held
+the same way: every package they share with ``backend/requirements.txt`` or
+with ``backend/requirements/runtime.lock`` must name the same version there.
+
 The modules pair is skipped when ``modules/`` is absent (a core checkout).
 
 Usage (from the repository root)::
@@ -101,6 +105,22 @@ SUPERSETS = [
         ROOT / "modules" / "requirements-test.txt",
         ROOT / "modules" / "requirements.lock",
         False,
+        False,
+    ),
+    # The acceptance suites (tests/acceptance/requirements.txt) install in an
+    # environment of their own, but a package they share with the venv or the
+    # image -- the numerics above all, which their oracles compute with -- must
+    # name the version the API computes with. playwright is theirs alone.
+    (
+        ROOT / "tests" / "acceptance" / "requirements.txt",
+        ROOT / "backend" / "requirements.txt",
+        True,
+        False,
+    ),
+    (
+        ROOT / "tests" / "acceptance" / "requirements.txt",
+        ROOT / "backend" / "requirements" / "runtime.lock",
+        True,
         False,
     ),
 ]
