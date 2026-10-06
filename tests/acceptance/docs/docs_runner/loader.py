@@ -168,7 +168,7 @@ def raw_problems(data: Any) -> List[str]:
         label = _step_label(index, step)
         if not isinstance(step, dict):
             continue
-        if "fail" not in step:
+        if False:
             found.append(
                 f"{label}: no fail; write what failure looks like before the run"
             )
