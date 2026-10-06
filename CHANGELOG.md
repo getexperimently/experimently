@@ -10,6 +10,28 @@ longer applies and release-please can generate this file directly. Until it
 does, entries below 0.2.2 are hand-written and the links in them are the
 reason why.
 
+## [0.23.2](https://github.com/getexperimently/experimently/compare/v0.23.1...v0.23.2) (2026-10-06)
+
+
+### Bug Fixes
+
+* **dashboard:** a flag whose rules use NOT groups is shown as stored, with an accurate note ([#940](https://github.com/getexperimently/experimently/issues/940)) ([fe7cb52](https://github.com/getexperimently/experimently/commit/fe7cb522cf025793e3f85ddde1382fdbebe2b3cb))
+* **dashboard:** flag screens offer create, toggle and save only to roles that may change flags ([#934](https://github.com/getexperimently/experimently/issues/934)) ([850923f](https://github.com/getexperimently/experimently/commit/850923f2894a182f604693231b3a283fb3443fac))
+* **dashboard:** skip the sequential call when it is off, point non-superusers at the API-key route, article fix ([#930](https://github.com/getexperimently/experimently/issues/930)) ([4e0c51c](https://github.com/getexperimently/experimently/commit/4e0c51c6d7b97826e322c01ae6795a57ab15853d))
+* **dashboard:** the header collapses to the menu button below 1280 px ([#938](https://github.com/getexperimently/experimently/issues/938)) ([1a2d787](https://github.com/getexperimently/experimently/commit/1a2d787b416476903af553ecc1b34e5c5ffc5cd1))
+* **experiments:** an experiment whose creator's account was removed still reads and lists ([#935](https://github.com/getexperimently/experimently/issues/935)) ([cd1012b](https://github.com/getexperimently/experimently/commit/cd1012b664a7ab0435a6b7e86e799f4e450185d4))
+* **results:** sequential analysis compares the control against the same treatment arm on every call ([#933](https://github.com/getexperimently/experimently/issues/933)) ([44ac4f4](https://github.com/getexperimently/experimently/commit/44ac4f4b7c7a9c51f20f58b00c48a54f230c31b3))
+
+
+### Dependencies
+
+* werkzeug 3.1.9 and source-map-js 1.2.2 in the shipped closures; a dated exception for python-jose in the test closure ([#932](https://github.com/getexperimently/experimently/issues/932)) ([ce3b7c8](https://github.com/getexperimently/experimently/commit/ce3b7c8939f490e0f656afb978e7a6614d3f8e3e))
+
+
+### Documentation
+
+* **bayesian:** the credible interval is equal-tailed ([#931](https://github.com/getexperimently/experimently/issues/931)) ([97e159a](https://github.com/getexperimently/experimently/commit/97e159ac486029d631629d56429a7aa471e3342e))
+
 ## [0.23.1](https://github.com/getexperimently/experimently/compare/v0.23.0...v0.23.1) (2026-10-05)
 
 
