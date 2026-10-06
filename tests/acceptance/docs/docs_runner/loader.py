@@ -26,8 +26,11 @@ YAML, or not a mapping, stops at that. Refused, besides what ``model`` refuses:
 * a step on a screen (``goto``, ``click``, ``fill``, ``select``) without
   ``aria``, unless it says ``snapshot: false`` with a ``snapshot_reason`` and
   has a structural expectation (``url``, ``status``, ``visible``, ``text``,
-  ``number``); an ``api`` step with neither ``status`` nor ``json``; and an
-  expectation the step's kind cannot have;
+  ``number``) and no ``aria``; an ``api`` step with neither ``status`` nor
+  ``json``; a ``search`` step without ``found``; a ``crawl`` step with an
+  ``expect``; and an expectation the step's kind cannot have;
+* a ``search`` or ``crawl`` step on a stack that serves no documentation site
+  (only docs-published and docs-local do), or with a ``snapshot`` setting;
 * a journey none of whose steps this runner runs (every step is
   ``ref: doc-examples`` or declares ``not_run``);
 * ``ref: doc-examples`` on a section with no shell block Doc Examples runs, or
@@ -66,7 +69,10 @@ from docs_runner import registry
 from docs_runner.model import (
     API_EXPECTS,
     BROWSER_EXPECTS,
+    SEARCH_EXPECTS,
+    SITE_STACKS,
     STACKS,
+    STRUCTURAL_EXPECTS,
     Journey,
     Step,
 )
@@ -299,7 +305,35 @@ def _expect_problems(label: str, step: Step, stack: Optional[str]) -> List[str]:
         if step.snapshot:
             found.append(f"{label}: an api step has no screen to snapshot")
         return found
-    wrong = [name for name in given if name not in BROWSER_EXPECTS]
+    if kind in ("crawl", "search"):
+        if stack is not None and stack not in SITE_STACKS:
+            found.append(
+                f"{label}: {kind} is for the documentation site's stacks"
+                f" ({', '.join(SITE_STACKS)}); {stack} serves no site"
+            )
+        if step.snapshot is not None:
+            found.append(
+                f"{label}: a {kind} step takes no ARIA snapshot; leave snapshot out"
+            )
+    if kind == "crawl":
+        if given:
+            found.append(
+                f"{label}: crawl: {step.do.crawl} checks what the action says; it has"
+                " no expect"
+            )
+        return found
+    if kind == "search":
+        wrong = [name for name in given if name not in SEARCH_EXPECTS]
+        if wrong:
+            found.append(f"{label}: a search step expects only found, not {wrong}")
+        if "found" not in given:
+            found.append(
+                f"{label}: a search step needs expect.found, the page it must find"
+            )
+        return found
+    if "found" in given:
+        found.append(f"{label}: found is the page a search finds; {kind} has none")
+    wrong = [name for name in given if name not in BROWSER_EXPECTS + ("found",)]
     if wrong:
         found.append(f"{label}: a step in a browser cannot expect {wrong}")
     if step.snapshot is not False:
@@ -309,11 +343,17 @@ def _expect_problems(label: str, step: Step, stack: Optional[str]) -> List[str]:
                 " written before the run, beside any structural expect; or"
                 " snapshot: false with a snapshot_reason"
             )
-    elif not [name for name in given if name in BROWSER_EXPECTS]:
-        found.append(
-            f"{label}: a step with snapshot: false needs a structural expect"
-            " (url, status, visible, text, number)"
-        )
+    else:
+        if "aria" in given:
+            found.append(
+                f"{label}: snapshot: false drops the ARIA snapshot, but expect.aria"
+                " gives one; remove one of the two"
+            )
+        if not [name for name in given if name in STRUCTURAL_EXPECTS]:
+            found.append(
+                f"{label}: a step with snapshot: false needs a structural expect"
+                f" ({', '.join(STRUCTURAL_EXPECTS)})"
+            )
     if "status" in given and kind != "goto":
         found.append(f"{label}: status is the answer to a goto; {kind} has none")
     return found

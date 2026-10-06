@@ -198,6 +198,12 @@ NOT_DOCS_TESTS = {
     ),
     # Hands the classifier path STRINGS such as "docs/a.py"; opens no file.
     "backend/tests/unit/scripts/test_classify_changes.py": "fixture strings only",
+    # Pins docs-journeys.yml's script lines, one of which names mkdocs.yml and
+    # docs (the git archive of the published site's source); opens no file
+    # under docs/.
+    "backend/tests/unit/scripts/test_docs_journeys_workflow.py": (
+        "fixture strings only"
+    ),
     # Hands stub `git` and `python3` path STRINGS such as "docs/a.md" to the
     # classifier step's script; opens no file under docs/.
     "backend/tests/unit/infrastructure/test_ci_classification.py": (

@@ -45,14 +45,31 @@ without ``pending``)::
         not_run: needs-aws                   # a reason from registry.py; reported NOT RUN
 
 ``do`` is exactly one action. ``expect`` lists what must hold after it. A step
-on a screen (``goto``, ``click``, ``fill``, ``select``) expects an ARIA snapshot
-of the page, ``aria``, written before the run, beside any structural
+on a screen (``goto``, ``click``, ``fill``, ``select``) expects an ARIA
+snapshot of the page, ``aria``, written before the run, beside any structural
 expectation (``url``, ``status``, ``visible``, ``text``, ``number``); only
 ``snapshot: false`` with a one-line ``snapshot_reason`` drops it, and the step
-then needs a structural expectation. ``aria`` is Playwright's ARIA snapshot
-template: it must parse as a YAML list. ``api`` and ``ref`` steps take no
-snapshot. ``fail`` says what failure looks like; a step without it is refused.
-Names, labels, options, ``text`` and ``goto`` are one line each.
+then needs a structural expectation and no ``aria``. ``aria`` is Playwright's
+ARIA snapshot template: it must parse as a YAML list. ``api``, ``ref`` and
+``crawl`` steps take no snapshot. ``fail`` says what failure looks like; a step
+without it is refused. Names, labels, options, ``text``, ``goto`` and
+``search`` are one line each.
+
+Two actions are for the documentation site itself (stacks docs-published and
+docs-local), whose source (``mkdocs.yml`` and ``docs/``) the stack names:
+
+* ``search: <query>`` opens the site's home page and types the query into its
+  search box; ``expect.found`` is the path of the page that must be among the
+  first ``SEARCH_TOP`` results. A search step expects ``found`` and nothing
+  else, and takes no ARIA snapshot (the results' excerpts change with every
+  edit of the pages); its screen is kept as a screenshot.
+* ``crawl: nav`` visits every page of the source's nav on the site: each must
+  answer 2xx without leaving the site, and its rendered first-level heading
+  must equal the source page's first ``# `` heading. ``crawl: links`` checks
+  every link to the site found on those pages, and every absolute link to the
+  site (its ``site_url``) written in the source pages: each must answer 2xx,
+  following redirects only within the site. A crawl's check is the action
+  itself, so a crawl step has no ``expect``.
 """
 
 from __future__ import annotations
@@ -170,11 +187,22 @@ Role = Literal[
 
 SLUG_PATTERN = r"^[a-z0-9]+(?:-[a-z0-9]+)*$"
 
-#: The browser actions; ``api`` and ``ref`` are not on a screen.
-BROWSER_ACTIONS = ("goto", "click", "fill", "select")
-#: What a browser step may expect, and what an ``api`` step may.
+#: The actions on one screen, which expect an ARIA snapshot.
+SCREEN_ACTIONS = ("goto", "click", "fill", "select")
+#: The actions in the browser, whose screen is kept as a screenshot.
+BROWSER_ACTIONS = (*SCREEN_ACTIONS, "search")
+#: What a step on a screen may expect, and what an ``api`` step may.
 BROWSER_EXPECTS = ("url", "status", "visible", "text", "number", "aria")
+#: A screen step's structural expectations: all but the ARIA snapshot.
+STRUCTURAL_EXPECTS = tuple(name for name in BROWSER_EXPECTS if name != "aria")
 API_EXPECTS = ("status", "json")
+SEARCH_EXPECTS = ("found",)
+#: The stacks that serve the documentation site and name its source.
+SITE_STACKS = ("docs-local", "docs-published")
+#: What a crawl checks: every nav page's heading, or every link to the site.
+CRAWLS = ("nav", "links")
+#: How far down the search results a ``found`` page may be.
+SEARCH_TOP = 3
 
 
 def _one_line(value: str, what: str) -> str:
@@ -257,14 +285,16 @@ class Do(_Strict):
     select: Optional[Select] = None
     api: Optional[Api] = None
     ref: Optional[Literal["doc-examples"]] = None
+    search: Optional[OneLine] = None
+    crawl: Optional[Literal["nav", "links"]] = None
 
     @model_validator(mode="after")
     def _exactly_one(self) -> "Do":
         given = [name for name in type(self).model_fields if getattr(self, name)]
         if len(given) != 1:
             raise ValueError(
-                "do must be exactly one of goto, click, fill, select, api, ref;"
-                f" got {given or 'none'}"
+                "do must be exactly one of goto, click, fill, select, api, ref,"
+                f" search, crawl; got {given or 'none'}"
             )
         return self
 
@@ -308,6 +338,7 @@ class Expect(_Strict):
     text: Optional[OneLine] = None
     json_: Optional[Dict[str, Any]] = Field(default=None, alias="json", min_length=1)
     number: Optional[NumberExpect] = None
+    found: Optional[StrictStr] = Field(default=None, pattern=r"^/\S*$")
     aria: Optional[StrictStr] = Field(default=None, min_length=1)
 
     @model_validator(mode="after")

@@ -98,7 +98,8 @@ BAD = {
         "../secrets.md",
         "guides/../x.md",
         "getting-started/quick-start.html",
-        "Getting-Started/x.md",
+        "Getting Started/x.md",
+        "_hidden/x.md",
         "a b.md",
         "x" * 200 + ".md",
     ],
@@ -162,6 +163,15 @@ def test_every_kind_has_a_check_good_values_and_planted_bad_ones():
 @pytest.mark.parametrize("kind", sorted(GOOD))
 def test_a_good_value_of_each_kind_is_accepted(kind):
     qa_render.check_value(NAME_OF_KIND[kind], GOOD[kind])
+
+
+@pytest.mark.parametrize(
+    "path", ["README.md", "rbac/README.md", "Enhanced_Rules_Engine_Reference.md"]
+)
+def test_a_nav_page_named_with_capitals_is_a_guide_path(path):
+    """Three pages of the docs nav have capitals in their names; README.md is
+    the docs-site journey's own guide, so its report header names it."""
+    qa_render.check_value("guide_path", path)
 
 
 @pytest.mark.parametrize(

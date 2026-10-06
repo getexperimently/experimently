@@ -1,0 +1,517 @@
+# SPDX-FileCopyrightText: 2026 Experimently contributors
+# SPDX-License-Identifier: Apache-2.0
+"""What the docs journeys' runs add up to: one rolling issue per failing guide.
+
+Two commands, both reading with ``gh`` only:
+
+``deployed``
+    Run by ``docs-journeys.yml`` before the journeys: which commit the
+    published documentation site was built from. The site is deployed from
+    release tags (``docs.yml``), so it lags ``main``; the docs-site journey
+    compares it with that commit's ``mkdocs.yml`` and ``docs/``, not with
+    ``main``'s. It is the newest deployment to the ``github-pages`` environment
+    whose latest status is ``success`` (a newer deployment marks the one before
+    it ``inactive``; a failed one leaves it live). Writes ``sha`` and ``ref``
+    under ``--out``; fails when there is none.
+
+``report``
+    Run after the journeys. It reads this run's
+``verdicts.json`` (written by the runner, ``tests/acceptance/docs``), the
+verdicts of the scheduled runs before it on ``main`` (each run uploads its own
+as the artifact ``docs-journeys-verdicts``) and the open ``docs-journey-failure``
+issues, decides what to post for each guide, renders the text with
+``qa_render`` and writes it under ``--out``: one directory per post under
+``posts/`` holding ``action`` (``open``, ``comment`` or ``close``), ``issue``
+(the number to comment on or close), ``title.txt`` (for ``open``) and
+``body.md``. ``gh`` is only read here; posting is the workflow's, with
+``--body-file``. The rules (``.github/qa-templates/README.md``):
+
+* a guide that fails opens its issue on the ``OPEN_AFTER``-th scheduled run in
+  a row in which it failed, when none is open; one red night can be the site
+  or the network for a moment, two in a row are not, and at one run a night a
+  third would add a day before anyone hears;
+* while its issue is open, a failing guide comments only when its failing step
+  differs from the step the issue or its latest comment names;
+* the first run in which the guide passes (or is PARTIAL: nothing failed)
+  comments its report header and closes the issue;
+* a run with no verdicts (the journeys did not start), or one in which the
+  guide did not run, counts as neither a failure nor a pass.
+
+Only a scheduled run on ``main`` posts. Any other run (a dispatch, a run on
+another branch) decides the same way, as if it were the next scheduled run, and
+prints what it would post: a dry run.
+
+Text is rendered only from ``docs-journey-issue.tmpl`` (the issue, and the
+comment when the failing step changes; its body is the guide's
+``docs-guide-fail.tmpl`` header) and ``docs-guide-pass.tmpl`` or
+``docs-guide-partial.tmpl`` (the closing comment: the guide's header in the
+run that recovered). Printed text is guide paths, step numbers, counts and
+fixed sentences only.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import re
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
+from typing import Any, Callable, Dict, List, Mapping, NamedTuple, Optional, Sequence
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+import qa_render  # a sibling script, not a package
+
+WORKFLOW = "docs-journeys.yml"
+BRANCH = "main"
+LABEL = "docs-journey-failure"
+ARTIFACT = "docs-journeys-verdicts"
+ISSUE = "docs-journey-issue.tmpl"
+#: Scheduled runs in a row in which a guide failed that open its issue.
+OPEN_AFTER = 2
+#: How many scheduled runs back the report looks for the start of a streak.
+HISTORY_LIMIT = 10
+BOT_LOGINS = frozenset({"github-actions", "github-actions[bot]", "app/github-actions"})
+FAIL, PASS, PARTIAL = "FAIL", "PASS", "PARTIAL"
+WORDS = (FAIL, PASS, PARTIAL)
+#: The closing comment's template, by the verdict of the run that recovered.
+RECOVERED = {PASS: "docs-guide-pass.tmpl", PARTIAL: "docs-guide-partial.tmpl"}
+
+Gh = Callable[[List[str]], str]
+
+
+class GhError(RuntimeError):
+    """A ``gh`` call failed; the message names the command, never its output."""
+
+
+class VerdictsError(ValueError):
+    """A ``verdicts.json`` that is not what the runner writes."""
+
+
+def run_gh(args: List[str]) -> str:
+    """``gh <args>``, its stdout."""
+    try:
+        done = subprocess.run(
+            ["gh", *args], capture_output=True, text=True, timeout=120, check=False
+        )
+    except (OSError, subprocess.TimeoutExpired) as error:
+        raise GhError(f"gh {' '.join(args[:2])}: {type(error).__name__}") from None
+    if done.returncode != 0:
+        raise GhError(f"gh {' '.join(args[:2])} failed (exit {done.returncode})")
+    return done.stdout
+
+
+def gh_json(gh: Gh, args: List[str]) -> Any:
+    return json.loads(gh(args) or "null")
+
+
+# ---------------------------------------------------------------------------
+# The published site's source
+# ---------------------------------------------------------------------------
+ENVIRONMENT = "github-pages"
+_SHA = re.compile(r"[0-9a-f]{40}")
+_REF = re.compile(r"[A-Za-z0-9][A-Za-z0-9._/-]{0,99}")
+
+
+class DeployedError(RuntimeError):
+    """No deployment of the site can be named."""
+
+
+def deployed(gh: Gh, repo: str) -> tuple:
+    """(sha, ref) of the live deployment of the documentation site."""
+    deployments = gh_json(
+        gh, ["api", f"repos/{repo}/deployments?environment={ENVIRONMENT}&per_page=30"]
+    )
+    for deployment in deployments or []:
+        statuses = gh_json(
+            gh,
+            ["api", f"repos/{repo}/deployments/{deployment['id']}/statuses?per_page=1"],
+        )
+        if statuses and statuses[0].get("state") == "success":
+            sha, ref = str(deployment.get("sha")), str(deployment.get("ref"))
+            if not _SHA.fullmatch(sha) or not _REF.fullmatch(ref):
+                raise DeployedError("the live deployment names no commit")
+            return sha, ref
+    raise DeployedError(f"no deployment to {ENVIRONMENT} is live")
+
+
+def deployed_command(
+    args: argparse.Namespace, env: Mapping[str, str], gh: Gh = run_gh
+) -> int:
+    sha, ref = deployed(gh, env["GITHUB_REPOSITORY"])
+    args.out.mkdir(parents=True, exist_ok=True)
+    (args.out / "sha").write_text(sha + "\n", encoding="ascii")
+    (args.out / "ref").write_text(ref + "\n", encoding="ascii")
+    print(f"the published site was built from {ref} ({sha})")
+    return 0
+
+
+# ---------------------------------------------------------------------------
+# Verdicts
+# ---------------------------------------------------------------------------
+class Verdict(NamedTuple):
+    guide: str
+    word: str
+    step: int
+    template: str
+    values: Mapping[str, str]
+
+
+def read_verdicts(path: Path) -> Dict[str, Verdict]:
+    """Each journey's verdict in a run's ``verdicts.json``; VerdictsError if malformed."""
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as error:
+        raise VerdictsError(f"{path.name}: {type(error).__name__}") from None
+    journeys = data.get("journeys") if isinstance(data, dict) else None
+    if not isinstance(journeys, dict):
+        raise VerdictsError(f"{path.name}: no journeys")
+    found: Dict[str, Verdict] = {}
+    for journey, entry in journeys.items():
+        if not isinstance(entry, dict) or entry.get("word") not in WORDS:
+            raise VerdictsError(f"{path.name}: journey {journey!r} has no verdict")
+        values = entry.get("values") or {}
+        if not isinstance(values, dict):
+            raise VerdictsError(f"{path.name}: journey {journey!r}: values")
+        step = entry.get("step")
+        found[str(journey)] = Verdict(
+            str(entry.get("guide", "")),
+            entry["word"],
+            step if isinstance(step, int) else 0,
+            str(entry.get("template", "")),
+            {str(k): str(v) for k, v in values.items()},
+        )
+    return found
+
+
+class Run(NamedTuple):
+    run_id: int
+    status: str
+    conclusion: str
+
+
+def scheduled_runs(gh: Gh, repo: str, limit: int = HISTORY_LIMIT) -> List[Run]:
+    """The workflow's scheduled runs on main, newest first."""
+    items = gh_json(
+        gh,
+        [
+            "run",
+            "list",
+            "--repo",
+            repo,
+            "--workflow",
+            WORKFLOW,
+            "--branch",
+            BRANCH,
+            "--event",
+            "schedule",
+            "--limit",
+            str(limit),
+            "--json",
+            "databaseId,status,conclusion,createdAt",
+        ],
+    )
+    items = sorted(
+        items or [], key=lambda item: item.get("createdAt", ""), reverse=True
+    )
+    return [
+        Run(
+            int(item["databaseId"]),
+            item.get("status") or "",
+            item.get("conclusion") or "",
+        )
+        for item in items
+    ]
+
+
+def run_verdicts(
+    gh: Gh, repo: str, run: Run, scratch: Path
+) -> Optional[Dict[str, Verdict]]:
+    """A finished run's verdicts, or None when it left none (or is unfinished)."""
+    if run.status != "completed":
+        return None
+    listing = gh_json(
+        gh, ["api", f"repos/{repo}/actions/runs/{run.run_id}/artifacts?per_page=100"]
+    )
+    names = {
+        artifact.get("name")
+        for artifact in (listing or {}).get("artifacts", [])
+        if not artifact.get("expired")
+    }
+    if ARTIFACT not in names:
+        return None
+    target = scratch / str(run.run_id)
+    gh(
+        [
+            "run",
+            "download",
+            str(run.run_id),
+            "--repo",
+            repo,
+            "--name",
+            ARTIFACT,
+            "--dir",
+            str(target),
+        ]
+    )
+    try:
+        return read_verdicts(target / "verdicts.json")
+    except VerdictsError:
+        return None
+
+
+def failed_in_a_row(
+    journey: str, history: Sequence[Optional[Mapping[str, Verdict]]]
+) -> int:
+    """Runs before this one, newest first, in which *journey* failed, back to
+    the last one in which it did not; a run without it is passed over."""
+    count = 0
+    for verdicts in history:
+        if verdicts is None or journey not in verdicts:
+            continue
+        if verdicts[journey].word != FAIL:
+            break
+        count += 1
+    return count
+
+
+# ---------------------------------------------------------------------------
+# Issues
+# ---------------------------------------------------------------------------
+class OpenIssue(NamedTuple):
+    number: int
+    guide: str
+    step: Optional[int]  # the failing step the issue or its latest comment names
+
+
+_TITLE = re.compile(r"^Docs journey \((?P<guide>[^()\s]+)\) is red$")
+_STEP = re.compile(r": FAIL at step ([0-9]+)$", re.M)
+
+
+def _login(item: Mapping[str, Any]) -> str:
+    author = item.get("author") or {}
+    return str(author.get("login") or "")
+
+
+def _named_step(text: str) -> Optional[int]:
+    first = text.lstrip().split("\n", 1)[0]
+    match = _STEP.search(first)
+    return int(match.group(1)) if match else None
+
+
+def open_issues(gh: Gh, repo: str) -> Dict[str, OpenIssue]:
+    """The open issues this workflow filed, by guide path (the newest per guide)."""
+    issues = gh_json(
+        gh,
+        [
+            "issue",
+            "list",
+            "--repo",
+            repo,
+            "--state",
+            "open",
+            "--label",
+            LABEL,
+            "--limit",
+            "100",
+            "--json",
+            "number,title,author",
+        ],
+    )
+    found: Dict[str, OpenIssue] = {}
+    for issue in sorted(issues or [], key=lambda item: int(item["number"])):
+        match = _TITLE.match(str(issue.get("title") or ""))
+        if not match or _login(issue) not in BOT_LOGINS:
+            continue
+        number = int(issue["number"])
+        view = (
+            gh_json(
+                gh,
+                [
+                    "issue",
+                    "view",
+                    str(number),
+                    "--repo",
+                    repo,
+                    "--json",
+                    "body,comments",
+                ],
+            )
+            or {}
+        )
+        step = _named_step(str(view.get("body") or ""))
+        for comment in view.get("comments") or []:
+            if _login(comment) in BOT_LOGINS:
+                named = _named_step(str(comment.get("body") or ""))
+                if named is not None:
+                    step = named
+        found[match.group("guide")] = OpenIssue(number, match.group("guide"), step)
+    return found
+
+
+# ---------------------------------------------------------------------------
+# The decision
+# ---------------------------------------------------------------------------
+class Post(NamedTuple):
+    action: str  # open | comment | close
+    guide: str
+    issue: Optional[int]
+    title: Optional[str]
+    body: str
+
+
+class Line(NamedTuple):
+    """One guide's decision, as printed."""
+
+    guide: str
+    text: str
+
+
+def decide(
+    current: Mapping[str, Verdict],
+    history: Sequence[Optional[Mapping[str, Verdict]]],
+    issues: Mapping[str, OpenIssue],
+) -> List[Post | Line]:
+    """What to post for this run, guide by guide; ``Line`` for nothing."""
+    out: List[Post | Line] = []
+    for journey in sorted(current):
+        verdict = current[journey]
+        issue = issues.get(verdict.guide)
+        if verdict.word == FAIL:
+            if verdict.template != "docs-guide-fail.tmpl":
+                raise VerdictsError(f"{journey}: a FAIL without its header's values")
+            rendered = qa_render.render(ISSUE, verdict.values)
+            if issue is None:
+                streak = failed_in_a_row(journey, history) + 1
+                if streak >= OPEN_AFTER:
+                    out.append(
+                        Post("open", verdict.guide, None, rendered.title, rendered.body)
+                    )
+                else:
+                    out.append(
+                        Line(
+                            verdict.guide,
+                            f"FAIL at step {verdict.step}; failed {streak} scheduled"
+                            f" run(s) in a row; the issue opens at {OPEN_AFTER}",
+                        )
+                    )
+            elif issue.step != verdict.step:
+                out.append(
+                    Post("comment", verdict.guide, issue.number, None, rendered.body)
+                )
+            else:
+                out.append(
+                    Line(
+                        verdict.guide,
+                        f"FAIL at step {verdict.step}, as issue #{issue.number} says",
+                    )
+                )
+        elif issue is not None:
+            template = RECOVERED[verdict.word]
+            if verdict.template != template:
+                raise VerdictsError(
+                    f"{journey}: a {verdict.word} without its header's values"
+                )
+            body = qa_render.render(template, verdict.values).body
+            out.append(Post("close", verdict.guide, issue.number, None, body))
+        else:
+            out.append(Line(verdict.guide, f"{verdict.word}; no open issue"))
+    return out
+
+
+def describe(item: Post | Line) -> str:
+    if isinstance(item, Line):
+        return f"{item.guide}: {item.text}"
+    if item.action == "open":
+        return f"{item.guide}: open its issue"
+    if item.action == "comment":
+        return f"{item.guide}: comment on issue #{item.issue}: the failing step changed"
+    return (
+        f"{item.guide}: comment its passing header on issue #{item.issue} and close it"
+    )
+
+
+def write_posts(items: Sequence[Post | Line], out: Path) -> int:
+    posts = out / "posts"
+    posts.mkdir(parents=True, exist_ok=True)
+    count = 0
+    for item in items:
+        if not isinstance(item, Post):
+            continue
+        count += 1
+        target = posts / f"{count:02d}"
+        target.mkdir()
+        (target / "action").write_text(item.action + "\n", encoding="ascii")
+        if item.issue is not None:
+            (target / "issue").write_text(f"{item.issue}\n", encoding="ascii")
+        if item.title is not None:
+            (target / "title.txt").write_text(item.title + "\n", encoding="ascii")
+        (target / "body.md").write_text(item.body, encoding="ascii")
+    return count
+
+
+def report(args: argparse.Namespace, env: Mapping[str, str], gh: Gh = run_gh) -> int:
+    repo = env["GITHUB_REPOSITORY"]
+    this_run = env.get("GITHUB_RUN_ID", "")
+    counted = args.event == "schedule" and args.ref == f"refs/heads/{BRANCH}"
+    out: Path = args.out
+    out.mkdir(parents=True, exist_ok=True)
+    (out / "posts").mkdir(exist_ok=True)
+    current = read_verdicts(args.verdicts)
+    history: List[Optional[Dict[str, Verdict]]] = []
+    if any(verdict.word == FAIL for verdict in current.values()):
+        with tempfile.TemporaryDirectory() as scratch:
+            for run in scheduled_runs(gh, repo):
+                if str(run.run_id) == this_run:
+                    continue
+                history.append(run_verdicts(gh, repo, run, Path(scratch)))
+    issues = open_issues(gh, repo)
+    items = decide(current, history, issues)
+    posts = write_posts(items, out) if counted else 0
+    if counted:
+        print(f"a scheduled run on {BRANCH}: {posts} post(s)")
+    else:
+        print(
+            f"dry run: a {args.event} run on {args.ref} posts nothing; a scheduled run"
+            f" on {BRANCH} with these results would do this"
+        )
+    print(
+        f"guides in this run: {len(current)}; scheduled runs read before it:"
+        f" {len(history)}; open issues: {len(issues)}"
+    )
+    for item in items:
+        print(("would: " if not counted else "") + describe(item))
+    return 0
+
+
+def main(
+    argv: Optional[List[str]] = None,
+    env: Optional[Mapping[str, str]] = None,
+    gh: Optional[Gh] = None,
+) -> int:
+    env = os.environ if env is None else env
+    gh = run_gh if gh is None else gh
+    parser = argparse.ArgumentParser(description=__doc__.split("\n", 1)[0])
+    commands = parser.add_subparsers(dest="command", required=True)
+    rep = commands.add_parser("report")
+    rep.add_argument("--verdicts", required=True, type=Path)
+    rep.add_argument("--event", required=True)
+    rep.add_argument("--ref", required=True)
+    rep.add_argument("--out", required=True, type=Path)
+    dep = commands.add_parser("deployed")
+    dep.add_argument("--out", required=True, type=Path)
+    args = parser.parse_args(argv)
+    try:
+        if args.command == "deployed":
+            return deployed_command(args, env, gh)
+        return report(args, env, gh)
+    except (GhError, DeployedError, VerdictsError, qa_render.RenderError) as error:
+        print(f"::error title=Docs journeys::{error}")
+        return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())
