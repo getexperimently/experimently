@@ -786,7 +786,7 @@ Resolved with `license-checker-rseidelsohn --production`.
 | `shallow-clone` | 3.0.1 |
 | `shebang-command` | 2.0.0 |
 | `shebang-regex` | 3.0.0 |
-| `shell-quote` | 1.10.0 |
+| `shell-quote` | 1.12.0 |
 | `sisteransi` | 1.0.5 |
 | `slash` | 3.0.0 |
 | `slice-ansi` | 2.1.0 |
