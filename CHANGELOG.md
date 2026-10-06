@@ -10,6 +10,23 @@ longer applies and release-please can generate this file directly. Until it
 does, entries below 0.2.2 are hand-written and the links in them are the
 reason why.
 
+## [0.25.2](https://github.com/getexperimently/experimently/compare/v0.25.1...v0.25.2) (2026-10-06)
+
+
+### Bug Fixes
+
+* **ci:** the load-test runner fails when it measured nothing ([#981](https://github.com/getexperimently/experimently/issues/981)) ([be3e83c](https://github.com/getexperimently/experimently/commit/be3e83ca016738b879c181b2a64c0a37cdbf390d))
+
+
+### Dependencies
+
+* sharp 0.35.5 in the dashboard and both demo apps ([#988](https://github.com/getexperimently/experimently/issues/988)) ([5e8f7a6](https://github.com/getexperimently/experimently/commit/5e8f7a6e5f99cc838076d4184283f5d3c7c0f1d1))
+
+
+### Documentation
+
+* **integrations:** the secret-rotation recipe and the roles table say what the API does ([#987](https://github.com/getexperimently/experimently/issues/987)) ([c645216](https://github.com/getexperimently/experimently/commit/c6452162632beb822e712661810fdad0e95dc86a))
+
 ## [0.25.1](https://github.com/getexperimently/experimently/compare/v0.25.0...v0.25.1) (2026-10-06)
 
 
