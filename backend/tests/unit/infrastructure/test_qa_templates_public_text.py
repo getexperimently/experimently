@@ -1,8 +1,9 @@
 """The QA alerts and summaries say what to do, and stay safe to publish.
 
 ``.github/qa-templates/`` holds the fixed wording of every issue, comment and
-step summary the automated QA workflows post: the synthetic staging check, API
-fuzzing and the docs journeys (QA plan, UX D1-D3, D9, D11.2, D11.5). This
+step summary the automated QA workflows post, one ``.tmpl`` file each: the
+synthetic staging check, API fuzzing and the docs journeys (QA plan, UX D1-D3,
+D9, D11.2, D11.5). This
 repository is public, so each of those is public the moment it is posted, and
 an edit afterwards does not recall the notification e-mail. The rules are
 therefore checked on the template, before anything is posted:
@@ -111,22 +112,22 @@ _DOCS_RUN = frozenset(
 )
 
 #: Every template and its placeholders, as (title, body). Only an
-#: ``-issue.md`` file has a title (its first line); the others have None. A
+#: ``-issue.tmpl`` file has a title (its first line); the others have None. A
 #: renderer can rely on this set: it is exactly what it must supply.
 TEMPLATES: Dict[str, Tuple[Optional[FrozenSet[str]], FrozenSet[str]]] = {
-    "synthetic-issue.md": (
+    "synthetic-issue.tmpl": (
         frozenset({"check"}),
         frozenset({"check", "count_runs", "date_time", "run_link", "step", "status"}),
     ),
-    "synthetic-step-changed.md": (
+    "synthetic-step-changed.tmpl": (
         None,
         frozenset({"check", "step", "status", "run_link", "count_runs"}),
     ),
-    "synthetic-recovered.md": (
+    "synthetic-recovered.tmpl": (
         None,
         frozenset({"date_time", "count_runs", "duration", "run_link"}),
     ),
-    "fuzz-green.md": (
+    "fuzz-green.tmpl": (
         None,
         frozenset(
             {
@@ -142,15 +143,15 @@ TEMPLATES: Dict[str, Tuple[Optional[FrozenSet[str]], FrozenSet[str]]] = {
             }
         ),
     ),
-    "fuzz-red.md": (None, _FUZZ_RED),
-    "fuzz-issue.md": (frozenset(), _FUZZ_RED),
-    "docs-run-green.md": (None, _DOCS_RUN),
-    "docs-run-red.md": (None, _DOCS_RUN | {"run_link"}),
-    "docs-guide-pass.md": (
+    "fuzz-red.tmpl": (None, _FUZZ_RED),
+    "fuzz-issue.tmpl": (frozenset(), _FUZZ_RED),
+    "docs-run-green.tmpl": (None, _DOCS_RUN),
+    "docs-run-red.tmpl": (None, _DOCS_RUN | {"run_link"}),
+    "docs-guide-pass.tmpl": (
         None,
         frozenset({"heading_guide", "guide_path", "date", "sha", "count_steps"}),
     ),
-    "docs-guide-fail.md": (
+    "docs-guide-fail.tmpl": (
         None,
         frozenset(
             {
@@ -165,7 +166,7 @@ TEMPLATES: Dict[str, Tuple[Optional[FrozenSet[str]], FrozenSet[str]]] = {
             }
         ),
     ),
-    "docs-guide-partial.md": (
+    "docs-guide-partial.tmpl": (
         None,
         frozenset(
             {
@@ -179,7 +180,7 @@ TEMPLATES: Dict[str, Tuple[Optional[FrozenSet[str]], FrozenSet[str]]] = {
             }
         ),
     ),
-    "docs-defect-issue.md": (
+    "docs-defect-issue.tmpl": (
         frozenset({"heading_guide", "step_number", "heading_step"}),
         frozenset(
             {
@@ -321,7 +322,7 @@ def shape_problems(text: str) -> List[str]:
 
 def split_issue(name: str, text: str) -> Tuple[Optional[str], str, List[str]]:
     """(title, body, layout problems); a non-issue template has no title."""
-    if not name.endswith("-issue.md"):
+    if not name.endswith("-issue.tmpl"):
         return None, text, []
     lines = text.split("\n")
     if len(lines) < 3 or not lines[0].strip() or lines[1] != "":
@@ -423,15 +424,15 @@ def test_the_readme_is_safe_to_publish_and_documents_every_name_and_label():
 
 
 def test_the_synthetic_issue_lists_the_eight_steps_in_order():
-    _, body, _ = split_issue("synthetic-issue.md", read("synthetic-issue.md"))
+    _, body, _ = split_issue("synthetic-issue.tmpl", read("synthetic-issue.tmpl"))
     listed = re.findall(r"^([0-9]+)\. ([A-Z][a-z]+(?: [a-z]+)*):", body, re.M)
     assert listed == [(str(n), step) for n, step in enumerate(SYNTHETIC_STEPS, 1)]
 
 
 def test_the_fuzz_issue_body_is_the_red_summary():
-    title, body, _ = split_issue("fuzz-issue.md", read("fuzz-issue.md"))
+    title, body, _ = split_issue("fuzz-issue.tmpl", read("fuzz-issue.tmpl"))
     assert title == "API fuzzing is red"
-    assert body == read("fuzz-red.md")
+    assert body == read("fuzz-red.tmpl")
 
 
 # ---------------------------------------------------------------------------
@@ -463,71 +464,71 @@ def _replace(old: str, new: str) -> Callable[[str], str]:
 PLANTS = [
     (
         "workflow-expression",
-        "synthetic-issue.md",
+        "synthetic-issue.tmpl",
         _add("Base URL: ${{ vars.PUBLIC_BASE_URL }}"),
         "dollar sign",
     ),
-    ("real-e-mail", "synthetic-issue.md", _add("Ask user@realdomain.io."), "e-mail"),
-    ("what-to-do-moved", "synthetic-issue.md", _move_what_to_do_down, WHAT_TO_DO),
-    ("unknown-placeholder", "fuzz-red.md", _add("Body: {response_body}"), "not one"),
-    ("stray-brace", "fuzz-red.md", _add('Body: {"assigned": true}'), "brace"),
-    ("angle-placeholder", "docs-run-red.md", _add("Experiment: <id>"), "angle"),
-    ("printf", "docs-run-red.md", _add("User: %(user)s"), "printf"),
-    ("mention", "synthetic-recovered.md", _add("cc @someone"), "mention"),
+    ("real-e-mail", "synthetic-issue.tmpl", _add("Ask user@realdomain.io."), "e-mail"),
+    ("what-to-do-moved", "synthetic-issue.tmpl", _move_what_to_do_down, WHAT_TO_DO),
+    ("unknown-placeholder", "fuzz-red.tmpl", _add("Body: {response_body}"), "not one"),
+    ("stray-brace", "fuzz-red.tmpl", _add('Body: {"assigned": true}'), "brace"),
+    ("angle-placeholder", "docs-run-red.tmpl", _add("Experiment: <id>"), "angle"),
+    ("printf", "docs-run-red.tmpl", _add("User: %(user)s"), "printf"),
+    ("mention", "synthetic-recovered.tmpl", _add("cc @someone"), "mention"),
     (
         "uuid",
-        "synthetic-recovered.md",
+        "synthetic-recovered.tmpl",
         _add("Experiment 123e4567-e89b-12d3-a456-426614174000"),
         "UUID",
     ),
-    ("long-number", "synthetic-recovered.md", _add("User 12345678"), "digits"),
+    ("long-number", "synthetic-recovered.tmpl", _add("User 12345678"), "digits"),
     (
         "api-key",
-        "fuzz-green.md",
+        "fuzz-green.tmpl",
         _add("Key: " + "ep" + "tk_" + "0" * 32),
         "API key prefix",
     ),
-    ("key-prefix", "fuzz-green.md", _add("sk" + "_live_" + "x"), "key prefix"),
-    ("aws-key", "fuzz-green.md", _add("AK" + "IA" + "X" * 16), "AWS"),
-    ("github-token", "fuzz-green.md", _add("gh" + "p_" + "x" * 8), "GitHub"),
-    ("jwt", "fuzz-green.md", _add("ey" + "J" + "x" * 20), "JSON web token"),
-    ("bearer", "docs-guide-fail.md", _add("Bearer " + "x" * 20), "bearer"),
-    ("header", "docs-guide-fail.md", _add("X-API-Key: x"), "header"),
-    ("fence", "docs-guide-pass.md", _add("```\nok\n```"), "fenced"),
-    ("other-url", "docs-defect-issue.md", _add("See https://example.net/x"), "URL"),
-    ("hostname", "docs-defect-issue.md", _add("On staging.example.net"), "hostname"),
+    ("key-prefix", "fuzz-green.tmpl", _add("sk" + "_live_" + "x"), "key prefix"),
+    ("aws-key", "fuzz-green.tmpl", _add("AK" + "IA" + "X" * 16), "AWS"),
+    ("github-token", "fuzz-green.tmpl", _add("gh" + "p_" + "x" * 8), "GitHub"),
+    ("jwt", "fuzz-green.tmpl", _add("ey" + "J" + "x" * 20), "JSON web token"),
+    ("bearer", "docs-guide-fail.tmpl", _add("Bearer " + "x" * 20), "bearer"),
+    ("header", "docs-guide-fail.tmpl", _add("X-API-Key: x"), "header"),
+    ("fence", "docs-guide-pass.tmpl", _add("```\nok\n```"), "fenced"),
+    ("other-url", "docs-defect-issue.tmpl", _add("See https://example.net/x"), "URL"),
+    ("hostname", "docs-defect-issue.tmpl", _add("On staging.example.net"), "hostname"),
     (
         "title-without-verdict",
-        "synthetic-issue.md",
+        "synthetic-issue.tmpl",
         _replace("Synthetic check ({check}) is red\n", "Synthetic check ({check})\n"),
         "title",
     ),
     (
         "issue-without-blank-line",
-        "docs-defect-issue.md",
+        "docs-defect-issue.tmpl",
         _replace(" fails as written\n\n", " fails as written\n"),
         "blank line",
     ),
     (
         "no-verdict",
-        "fuzz-green.md",
+        "fuzz-green.tmpl",
         _replace("commit {sha}: GREEN", "commit {sha}"),
         "verdict",
     ),
     (
         "no-count-and-no-what-to-do",
-        "docs-guide-pass.md",
+        "docs-guide-pass.tmpl",
         _replace("all {count_steps} steps pass", "every step passes"),
         "neither",
     ),
     (
         "red-without-what-to-do",
-        "docs-guide-fail.md",
+        "docs-guide-fail.tmpl",
         _move_what_to_do_down,
         WHAT_TO_DO,
     ),
 ] + [
-    (f"stem-{n}", "docs-guide-partial.md", _add(f"x{stem}x"), "word stem")
+    (f"stem-{n}", "docs-guide-partial.tmpl", _add(f"x{stem}x"), "word stem")
     for n, stem in enumerate(BANNED_STEMS)
 ]
 
@@ -555,5 +556,5 @@ def test_the_rule_fires_on_a_planted_defect(template, plant, fragment):
 )
 def test_what_public_text_may_say_passes(line):
     """The rules do not refuse the things a template legitimately says."""
-    text = read("synthetic-recovered.md") + "\n" + line + "\n"
-    assert problems("synthetic-recovered.md", text) == []
+    text = read("synthetic-recovered.tmpl") + "\n" + line + "\n"
+    assert problems("synthetic-recovered.tmpl", text) == []
