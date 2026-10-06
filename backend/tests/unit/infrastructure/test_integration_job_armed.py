@@ -32,6 +32,11 @@ tree through ``scripts/core_build.sh`` and is armed the same way (#899): the
 ``redis`` service, the password-protected Redis started by hand, and both
 ``EXPERIMENTLY_REQUIRE_*`` variables on the step that runs the script.
 
+``integration-tests`` in ``nightly-qa.yml`` runs the suite once a night, in
+one session, and is armed the same way (#902): its ``redis`` service and its
+password-protected Redis step are compared with the shard job's, so the two
+workflows cannot drift apart, and its suite step sets both variables.
+
 The summary's two ``run:`` scripts are executed here, over reports written by
 real pytest running the shard plugin, the way test_dashboard_deploy_wiring.py
 runs a deploy step's script.
@@ -358,6 +363,85 @@ def test_core_build_runs_the_whole_integration_suite(function):
 )
 def test_script_narrowing_is_recognised(tokens, narrowed):
     assert bool(_script_narrowing(tokens)) is narrowed
+
+
+# ---------------------------------------------------------------------------
+# nightly-qa: the same suite once a night (#902)
+# ---------------------------------------------------------------------------
+
+NIGHTLY = wg.WORKFLOWS / "nightly-qa.yml"
+NIGHTLY_JOB = "integration-tests"
+
+
+def _nightly_job() -> Dict[str, Any]:
+    jobs = wg.load(NIGHTLY).get("jobs") or {}
+    assert NIGHTLY_JOB in jobs, (
+        f"{NIGHTLY.name} has no `{NIGHTLY_JOB}` job: {sorted(jobs)}"
+    )
+    return jobs[NIGHTLY_JOB]
+
+
+def _nightly_suite_step() -> Dict[str, Any]:
+    steps = _suite_steps(_nightly_job())
+    assert len(steps) == 1, (
+        f"expected exactly one step in {NIGHTLY.name} that runs pytest on {SUITE}, "
+        f"found {[s.get('name') for s in steps]}"
+    )
+    return steps[0]
+
+
+def _named_step(job: Dict[str, Any], name: str) -> Dict[str, Any]:
+    steps = [s for s in _steps(job) if s.get("name") == name]
+    assert len(steps) == 1, [s.get("name") for s in _steps(job)]
+    return steps[0]
+
+
+def test_the_nightly_job_has_the_shard_job_s_redis_service():
+    """Without it the Redis-backed tests skipped every night (#902). Compared
+    whole with the shard job's, so a change to one is a change to both."""
+    services = _nightly_job().get("services") or {}
+    assert "redis" in services, (
+        f"`{NIGHTLY_JOB}` in {NIGHTLY.name} lost its `redis` service: services "
+        f"are {sorted(services)}"
+    )
+    assert services["redis"] == (_job().get("services") or {}).get("redis"), (
+        services["redis"],
+        (_job().get("services") or {}).get("redis"),
+    )
+
+
+def test_the_nightly_job_starts_the_shard_job_s_password_protected_redis_first():
+    """test_redis_password_auth.py reads REDIS_AUTH_TEST_PORT/_PASSWORD, which
+    this step writes to GITHUB_ENV: the same script as the shard job's, before
+    the suite step and under the same condition."""
+    job = _nightly_job()
+    suite = _nightly_suite_step()
+    names = [s.get("name") for s in _steps(job)]
+    auth = _named_step(job, AUTH_STEP)
+    assert names.index(AUTH_STEP) < names.index(suite.get("name")), names
+    assert auth.get("if") == suite.get("if"), (auth.get("if"), suite.get("if"))
+    assert auth.get("run") == _named_step(_job(), AUTH_STEP).get("run"), (
+        f"the {AUTH_STEP!r} step differs between {NIGHTLY.name} and {WORKFLOW.name}"
+    )
+
+
+def test_the_nightly_suite_step_requires_both_redis_servers():
+    env = _nightly_suite_step().get("env") or {}
+    assert {k: env.get(k) for k in REQUIRE} == dict.fromkeys(REQUIRE, "1"), (
+        f"the step that runs {SUITE} in {NIGHTLY.name} must set both "
+        f'{REQUIRE} to "1", otherwise a missing Redis makes its tests skip '
+        f"green; env is {env}"
+    )
+
+
+def test_the_nightly_suite_step_runs_the_whole_suite():
+    step = _nightly_suite_step()
+    tokens = _pytest_args(_tokens(step["run"]))
+    assert SUITE in tokens, f"the step must run `{SUITE}` itself: {tokens}"
+    assert not _script_narrowing(tokens), (
+        f"the step narrows the run with {_script_narrowing(tokens)}: {tokens}"
+    )
+    assert "PYTEST_ADDOPTS" not in (step.get("env") or {}), step.get("env")
 
 
 # ---------------------------------------------------------------------------
