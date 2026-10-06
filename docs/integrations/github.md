@@ -35,16 +35,19 @@ Before creating the integration, you need:
 
 ## Creating the Integration
 
+Creating, changing and deleting an integration needs an **ADMIN** bearer token; an ADMIN or a DEVELOPER can read it. `is_active` defaults to `false`, and only an active integration answers webhook deliveries, so send `true`.
+
 ```bash
 curl -X POST http://localhost:8000/api/v1/integrations \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
-    "name": "GitHub Experiments Repo",
-    "integration_type": "GITHUB",
-    "description": "Webhook integration for the experiments monorepo",
-    "config": {
+    "integration_type": "github",
+    "is_active": true,
+    "encrypted_config": {
       "token": "ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+      "repo_owner": "your-org",
+      "repo_name": "your-repo",
       "webhook_secret": "a-strong-random-secret-at-least-32-chars"
     }
   }'
@@ -54,15 +57,22 @@ curl -X POST http://localhost:8000/api/v1/integrations \
 
 ```json
 {
-  "id": "int-uuid-here",
-  "name": "GitHub Experiments Repo",
-  "integration_type": "GITHUB",
+  "id": "3f1a9c62-6f5e-4a3b-9a0c-6d2b8e7f1a45",
+  "integration_type": "github",
   "is_active": true,
-  "created_at": "2026-03-02T10:00:00Z"
+  "encrypted_config": {
+    "repo_owner": "your-org",
+    "repo_name": "your-repo"
+  },
+  "stored_secrets": ["token", "webhook_secret"],
+  "last_sync_at": null,
+  "last_error": null,
+  "created_at": "2026-03-02T10:00:00Z",
+  "updated_at": "2026-03-02T10:00:00Z"
 }
 ```
 
-Save the `id` — you need it for the webhook endpoint URL.
+There is one GitHub configuration, and it is addressed by its type, `github`, not by the `id`: `GET`, `PUT` and `DELETE` use `/api/v1/integrations/github`, and the webhook URL below has no id in it either. The request and response are described in [Create Integration](../api/integrations.md#create-integration).
 
 ---
 
@@ -71,6 +81,8 @@ Save the `id` — you need it for the webhook endpoint URL.
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | `token` | string | Yes | GitHub PAT or GitHub App installation token. Passed as `Authorization: Bearer <token>` on outbound API calls to GitHub. |
+| `repo_owner` | string | Yes | Owner (user or organisation) of the repository |
+| `repo_name` | string | Yes | Repository name |
 | `webhook_secret` | string | Yes | A secret string used to verify incoming webhook payloads. Must match what you set in GitHub's webhook configuration. |
 
 Neither the `token` nor the `webhook_secret` is returned in any response: a response shows `repo_owner` and `repo_name` and lists the names of the other keys in `stored_secrets` (see [What a response shows](../api/integrations.md#what-a-response-shows)). Both are stored in the database as given; they are not encrypted.
@@ -228,25 +240,13 @@ The platform parses this field from incoming `pull_request` webhook events and c
 
 1. Confirm the webhook payload URL is reachable from the public internet
 2. Check GitHub's webhook delivery logs: **Repository → Settings → Webhooks → [Your Webhook] → Recent Deliveries**
-3. Verify the integration is active: `GET /api/v1/integrations/{id}`
+3. Verify the integration is active: `GET /api/v1/integrations/github` (an ADMIN or a DEVELOPER can call it) and check that `is_active` is `true`
 4. Check the platform's application logs for any processing errors
 
 ### Rotating the Webhook Secret
 
 If you need to rotate the webhook secret:
 
-Step 1: Update the integration in the platform:
-
-```bash
-curl -X PUT http://localhost:8000/api/v1/integrations/int-uuid-here \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "config": {
-      "token": "ghp_xxxx",
-      "webhook_secret": "new-strong-secret-here"
-    }
-  }'
-```
+Step 1: Change the secret in the platform. Use the recipe in [Upgrading an integration created before webhook authentication](../api/integrations.md#upgrading-an-integration-created-before-webhook-authentication) with `TYPE=github` and an ADMIN token. It sends one `PUT /api/v1/integrations/github` that carries only the new `webhook_secret`; the stored `token` and repository settings are kept, and it prints the new secret.
 
 Step 2: Update the secret in GitHub webhook settings immediately (There will be a brief window during rotation where deliveries may fail)

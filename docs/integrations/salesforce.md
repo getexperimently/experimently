@@ -37,18 +37,20 @@ Before creating the integration, you need:
 
 ## Creating the Integration
 
+Creating, changing and deleting an integration needs an **ADMIN** bearer token; an ADMIN or a DEVELOPER can read it. `is_active` defaults to `false`, and only an active integration answers webhook deliveries, so send `true`.
+
 ```bash
 curl -X POST http://localhost:8000/api/v1/integrations \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
-    "name": "Salesforce CRM Sync",
-    "integration_type": "SALESFORCE",
-    "description": "Syncs experiment completion to Salesforce campaigns",
-    "config": {
+    "integration_type": "salesforce",
+    "is_active": true,
+    "encrypted_config": {
       "instance_url": "https://your-org.my.salesforce.com",
       "client_id": "3MVG9...",
-      "client_secret": "1234567890ABCDEF..."
+      "client_secret": "1234567890ABCDEF...",
+      "webhook_secret": "a-strong-random-secret-at-least-32-chars"
     }
   }'
 ```
@@ -57,15 +59,22 @@ curl -X POST http://localhost:8000/api/v1/integrations \
 
 ```json
 {
-  "id": "int-uuid-here",
-  "name": "Salesforce CRM Sync",
-  "integration_type": "SALESFORCE",
+  "id": "3f1a9c62-6f5e-4a3b-9a0c-6d2b8e7f1a45",
+  "integration_type": "salesforce",
   "is_active": true,
-  "created_at": "2026-03-02T10:00:00Z"
+  "encrypted_config": {
+    "instance_url": "https://your-org.my.salesforce.com",
+    "client_id": "3MVG9..."
+  },
+  "stored_secrets": ["client_secret", "webhook_secret"],
+  "last_sync_at": null,
+  "last_error": null,
+  "created_at": "2026-03-02T10:00:00Z",
+  "updated_at": "2026-03-02T10:00:00Z"
 }
 ```
 
-Save the `id` — you will need it for the webhook endpoint URL.
+There is one Salesforce configuration, and it is addressed by its type, `salesforce`, not by the `id`: `GET`, `PUT` and `DELETE` use `/api/v1/integrations/salesforce`, and the webhook URL below has no id in it either. The request and response are described in [Create Integration](../api/integrations.md#create-integration).
 
 ---
 
@@ -76,6 +85,7 @@ Save the `id` — you will need it for the webhook endpoint URL.
 | `instance_url` | string | Yes | Your Salesforce instance URL, e.g., `https://your-org.my.salesforce.com` |
 | `client_id` | string | Yes | OAuth 2.0 Consumer Key from the Connected App |
 | `client_secret` | string | Yes | OAuth 2.0 Consumer Secret from the Connected App |
+| `webhook_secret` | string | Yes | A secret you choose (for example `openssl rand -hex 32`). An inbound delivery to the webhook endpoint below must present it; see [Webhook Endpoints](../api/integrations.md#webhook-endpoints) |
 | `access_token` | string | No | Pre-seeded OAuth 2.0 access token. The platform manages token refresh automatically; you do not need to supply this. |
 
 The platform uses the **OAuth 2.0 Client Credentials** flow. The credentials are stored in the database as given; they are not encrypted. The `client_secret`, an `access_token` and the `webhook_secret` are not returned in any response, not even masked: a response shows `instance_url` and `client_id` and lists the names of the other keys in `stored_secrets` (see [What a response shows](../api/integrations.md#what-a-response-shows)).
@@ -172,17 +182,18 @@ If this returns a token, the credentials are correct.
 
 ### Updating Integration Credentials
 
-If you rotate your Salesforce Connected App credentials:
+If you rotate your Salesforce Connected App credentials, send the new values with `PUT /api/v1/integrations/salesforce` and an ADMIN token. The integration is addressed by its type, not by an id. `PUT` merges `encrypted_config` key by key, so send only the keys that changed: the keys you leave out, such as `instance_url` and `webhook_secret`, are kept.
 
 ```bash
-curl -X PUT http://localhost:8000/api/v1/integrations/int-uuid-here \
+curl -X PUT http://localhost:8000/api/v1/integrations/salesforce \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
-    "config": {
-      "instance_url": "https://your-org.my.salesforce.com",
+    "encrypted_config": {
       "client_id": "3MVG9-new-key...",
       "client_secret": "new-secret..."
     }
   }'
 ```
+
+The whole request is described in [Update Integration](../api/integrations.md#update-integration). To change the `webhook_secret` instead, use the recipe in [Upgrading an integration created before webhook authentication](../api/integrations.md#upgrading-an-integration-created-before-webhook-authentication) with `TYPE=salesforce`.
