@@ -308,6 +308,42 @@ describe('AppShell', () => {
     expect(screen.queryByTestId('mobile-nav')).not.toBeInTheDocument();
   });
 
+  it('collapses to the menu button below 1280 px, one breakpoint for all three (#926)', async () => {
+    // Between 768 and 1279 px the inline nav reached the user menu (a
+    // superuser's at 1024 px, every role's at 768 px), so the header collapses
+    // at Tailwind's xl (1280 px) instead of md (768 px). The nav, the toggle
+    // and the mobile nav must name the same breakpoint: a toggle left at
+    // md:hidden beside an xl:flex nav leaves a 768-1279 px band with no
+    // navigation at all. jsdom applies no media queries, so this reads the
+    // classes; the layout is measured in tests/e2e/header-breakpoint.journey.spec.ts.
+    signInAs(makeUser());
+    renderShell(full());
+    await waitFor(() => expect(screen.getByTestId('user-menu')).toBeInTheDocument());
+    const classesOf = (el: Element) => el.className.split(/\s+/);
+
+    const desktop = screen.getByRole('navigation', { name: 'Primary' });
+    expect(classesOf(desktop)).toContain('hidden');
+    expect(classesOf(desktop)).toContain('xl:flex');
+    expect(classesOf(desktop)).not.toContain('md:flex');
+
+    const toggle = screen.getByTestId('mobile-nav-toggle');
+    expect(classesOf(toggle)).toContain('xl:hidden');
+
+    fireEvent.click(toggle);
+    const mobile = screen.getByTestId('mobile-nav');
+    expect(classesOf(mobile)).toContain('xl:hidden');
+
+    // The prefix each element carries, read from the DOM rather than typed
+    // again: one of the three drifting fails here whatever the others say.
+    const prefixOf = (el: Element, utility: string) => {
+      const variants = classesOf(el).filter((c) => c.endsWith(`:${utility}`));
+      expect(variants).toHaveLength(1);
+      return variants[0].split(':')[0];
+    };
+    expect(prefixOf(toggle, 'hidden')).toBe(prefixOf(desktop, 'flex'));
+    expect(prefixOf(mobile, 'hidden')).toBe(prefixOf(desktop, 'flex'));
+  });
+
   describe('module chrome', () => {
     it('keeps the primary nav free of module routes', () => {
       expect(NAV_ITEMS.map((i) => i.href)).toEqual([
