@@ -1163,7 +1163,7 @@
         "type": "object"
       },
       "BayesianConfig": {
-        "description": "Configuration for the Bayesian analysis engine.\n\nAttributes:\n    prior_family: Conjugate prior family (beta, normal, or gamma).\n    alpha: Alpha hyperparameter for the prior (must be > 0).\n    beta: Beta hyperparameter for the prior (must be > 0).\n    loss_threshold: Expected loss the leading variant must be below for\n        STOP_WINNER (must be > 0).  STOP_WINNER also needs that variant's\n        probability to be best to be at least 0.975, a fixed threshold\n        that is not configurable (#242).\n    rope: Region of Practical Equivalence as [lower, upper]; if the\n        posterior difference falls inside ROPE, the experiment is deemed\n        equivalent and stopped.\n    credible_level: HDI credible interval level in (0, 1), default 0.95.",
+        "description": "Configuration for the Bayesian analysis engine.\n\nAttributes:\n    prior_family: Conjugate prior family (beta, normal, or gamma).\n    alpha: Alpha hyperparameter for the prior (must be > 0).\n    beta: Beta hyperparameter for the prior (must be > 0).\n    loss_threshold: Expected loss the leading variant must be below for\n        STOP_WINNER (must be > 0).  STOP_WINNER also needs that variant's\n        probability to be best to be at least 0.975, a fixed threshold\n        that is not configurable (#242).\n    rope: Region of Practical Equivalence as [lower, upper]; if the\n        posterior difference falls inside ROPE, the experiment is deemed\n        equivalent and stopped.\n    credible_level: Credible interval level in (0, 1), default 0.95;\n        the interval is equal-tailed.",
         "properties": {
           "alpha": {
             "default": 1,
@@ -1229,7 +1229,7 @@
         "type": "string"
       },
       "BayesianPosteriorResult": {
-        "description": "Posterior distribution result for a Beta-Binomial model.\n\nAttributes:\n    alpha: Posterior alpha (alpha_prior + conversions).\n    beta: Posterior beta (beta_prior + non_conversions).\n    mean: Posterior mean = alpha / (alpha + beta).\n    credible_interval_lower: Lower bound of the HDI.\n    credible_interval_upper: Upper bound of the HDI.",
+        "description": "Posterior distribution result for a Beta-Binomial model.\n\nAttributes:\n    alpha: Posterior alpha (alpha_prior + conversions).\n    beta: Posterior beta (beta_prior + non_conversions).\n    mean: Posterior mean = alpha / (alpha + beta).\n    credible_interval_lower: Lower bound of the equal-tailed credible\n        interval (the (1 - level) / 2 quantile of the posterior).\n    credible_interval_upper: Upper bound (the 1 - (1 - level) / 2\n        quantile).",
         "properties": {
           "alpha": {
             "title": "Alpha",

@@ -462,18 +462,19 @@ describe('the Bayesian panel', () => {
 });
 
 describe('the page asks for nothing new', () => {
-  it('makes exactly the requests it made before: both blocks come in GET /results/{id}', async () => {
+  it('makes exactly these requests: both blocks come in GET /results/{id}, and nothing asks /sequential', async () => {
     install(results({ srm: SRM_MISMATCH, bayesian_results: BAYESIAN }), { bayesian_enabled: true });
     await renderLoaded();
     await waitFor(() => expect(screen.getByTestId('bayesian-panel')).toBeInTheDocument());
     const calls = mockedApiFetch.mock.calls.map(([p, o]) => `${(o?.method ?? 'GET').toUpperCase()} ${p}`);
+    // No GET /results/{id}/sequential: the experiment does not say sequential
+    // testing is on, so that route (which would answer 404) is not asked (#919).
     expect(Array.from(new Set(calls)).sort()).toEqual(
       [
         'GET /api/v1/experiments/exp-1',
         'GET /api/v1/results/exp-1',
         'GET /api/v1/results/exp-1/daily',
         'GET /api/v1/results/exp-1/sample-size',
-        'GET /api/v1/results/exp-1/sequential',
       ].sort()
     );
   });

@@ -2,6 +2,7 @@ import React from 'react';
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import ExperimentsPage from '@/pages/experiments/index';
 import { apiFetch } from '@/services/api';
+import { docsUrl } from '@/services/docs';
 import { Experiment } from '@/types/experiments';
 import { apiError, makeRouter, routedApi } from './helpers/apiMock';
 
@@ -118,7 +119,10 @@ describe('ExperimentsPage', () => {
 
     const card = await screen.findByTestId('first-run-checklist');
     expect(within(card).getByTestId('checklist-create-experiment')).toHaveAttribute('href', '/experiments/new');
-    expect(within(card).getByTestId('checklist-api-keys')).toHaveAttribute('href', '/admin/api-keys');
+    // No account is known here (useOptionalAuth gives null), so step 2 names
+    // the route rather than the superuser-only Admin page (#920).
+    expect(within(card).queryByTestId('checklist-api-keys')).toBeNull();
+    expect(within(card).getByTestId('checklist-api-key-route')).toHaveTextContent('POST /api/v1/api-keys');
 
     const curl = within(card).getByTestId('checklist-curl').textContent ?? '';
     expect(curl).toContain('http://api.test/api/v1/tracking/assign');
@@ -227,4 +231,53 @@ describe('ExperimentsPage — create button by role', () => {
     render(<ExperimentsPage />);
     expect(await screen.findByTestId('new-experiment-btn')).toBeInTheDocument();
   });
+});
+
+describe("ExperimentsPage — the checklist's API-key step by account (#920)", () => {
+  // /admin/api-keys opens only for a superuser (withAdminGuard). The step
+  // links there for a superuser alone; everyone else gets the route any
+  // signed-in user may call, with the docs page beside it.
+  const signIn = (role: string, is_superuser: boolean) =>
+    mockAuth.mockReturnValue({
+      user: { id: 'u1', email: 'u@example.com', username: 'u', role, is_superuser, is_active: true },
+      status: 'authenticated' as const,
+      login: jest.fn(),
+      logout: jest.fn(),
+      hasRole: (...roles: string[]) => roles.includes(role),
+    });
+
+  afterEach(() => mockAuth.mockReturnValue(null));
+
+  async function checklist() {
+    mockedApiFetch.mockImplementation(
+      routedApi([{ path: '/api/v1/experiments', handler: () => listResponse([]) }]) as unknown as typeof apiFetch,
+    );
+    render(<ExperimentsPage />);
+    return screen.findByTestId('first-run-checklist');
+  }
+
+  it('opens Admin → API Keys for a superuser', async () => {
+    signIn('VIEWER', true);
+    const card = await checklist();
+    expect(within(card).getByTestId('checklist-api-keys')).toHaveAttribute('href', '/admin/api-keys');
+    expect(within(card).queryByTestId('checklist-api-key-route')).toBeNull();
+  });
+
+  it.each(['ADMIN', 'DEVELOPER', 'ANALYST', 'VIEWER'])(
+    'gives %s, who cannot open that page, the route and the docs page instead',
+    async (role) => {
+      signIn(role, false);
+      const card = await checklist();
+      expect(within(card).queryByTestId('checklist-api-keys')).toBeNull();
+      expect(card.querySelector('a[href="/admin/api-keys"]')).toBeNull();
+      const route = within(card).getByTestId('checklist-api-key-route');
+      expect(route).toHaveTextContent(
+        'Create one for yourself with POST /api/v1/api-keys (see API Key Management) or ask an administrator.',
+      );
+      expect(within(route).getByRole('link', { name: 'API Key Management' })).toHaveAttribute(
+        'href',
+        docsUrl('security/api-keys'),
+      );
+    },
+  );
 });

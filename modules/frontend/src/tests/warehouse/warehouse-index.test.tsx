@@ -221,6 +221,19 @@ describe('sources tabs', () => {
     renderPage();
     expect(await screen.findByTestId('warehouse-source-needs-connection')).toBeInTheDocument();
     expect(screen.getByTestId('warehouse-assignment-empty')).toHaveTextContent('No assignment sources yet.');
+    // "An", not "A": the article follows the noun (#921).
+    expect(screen.getByTestId('warehouse-source-needs-connection')).toHaveTextContent(
+      'An assignment source reads a table through a warehouse connection.',
+    );
+  });
+
+  it('says the same of a metric source, with its own article (#921)', async () => {
+    mockQuery = { tab: 'metric' };
+    setData({ conns: [], srcs: [] });
+    renderPage();
+    expect(await screen.findByTestId('warehouse-source-needs-connection')).toHaveTextContent(
+      'A metric source reads a table through a warehouse connection.',
+    );
   });
 
   it('moves between tabs with the arrow keys and keeps the URL in step', async () => {

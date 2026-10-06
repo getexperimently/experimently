@@ -99,6 +99,13 @@ const SEQUENTIAL = {
 function install() {
   mockedApiFetch.mockImplementation(
     routedApi([
+      // The Sequential tab comes from the dedicated route below only because
+      // the experiment says sequential testing is on and the results carry no
+      // block; with it off, that route is never asked (#919).
+      {
+        path: '/api/v1/experiments/exp-1',
+        handler: () => ({ id: 'exp-1', sequential_testing_enabled: true }),
+      },
       { path: '/api/v1/results/exp-1', handler: () => RESULTS },
       {
         path: '/api/v1/results/exp-1/daily',

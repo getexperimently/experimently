@@ -42,6 +42,8 @@ interface ExperimentReading {
   settings: StoredAnalysisSettings | null;
   /** Undefined when the experiment could not be read. */
   bayesianEnabled: boolean | undefined;
+  /** Undefined when the experiment could not be read. */
+  sequentialEnabled: boolean | undefined;
 }
 
 /**
@@ -55,6 +57,10 @@ async function readExperiment(experimentId: string): Promise<ExperimentReading> 
     const experiment = await ExperimentsService.get(experimentId);
     const bayesianEnabled =
       typeof experiment?.bayesian_enabled === 'boolean' ? experiment.bayesian_enabled : undefined;
+    const sequentialEnabled =
+      typeof experiment?.sequential_testing_enabled === 'boolean'
+        ? experiment.sequential_testing_enabled
+        : undefined;
     if (experiment?.correction_method && typeof experiment.confidence_level === 'number') {
       return {
         settings: {
@@ -62,13 +68,14 @@ async function readExperiment(experimentId: string): Promise<ExperimentReading> 
           confidence_level: experiment.confidence_level,
         },
         bayesianEnabled,
+        sequentialEnabled,
       };
     }
-    return { settings: null, bayesianEnabled };
+    return { settings: null, bayesianEnabled, sequentialEnabled };
   } catch {
     // Fall through: the results request goes without settings.
   }
-  return { settings: null, bayesianEnabled: undefined };
+  return { settings: null, bayesianEnabled: undefined, sequentialEnabled: undefined };
 }
 
 export const RESULTS_LOAD_FAILED = 'The results could not be loaded.';
@@ -175,7 +182,8 @@ export function ResultsDashboard({ experimentId }: ResultsDashboardProps) {
       // The dashboard sends the experiment's stored correction and confidence
       // level. If the experiment cannot be read, the results are still asked
       // for, with no settings, and the server uses the stored ones.
-      const resultsRequest = readExperiment(experimentId).then(({ settings, bayesianEnabled: b }) => {
+      const experimentRequest = readExperiment(experimentId);
+      const resultsRequest = experimentRequest.then(({ settings, bayesianEnabled: b }) => {
         setStored(settings);
         setBayesianEnabled(b);
         return settings
@@ -189,17 +197,23 @@ export function ResultsDashboard({ experimentId }: ResultsDashboardProps) {
       setResults(r);
       setDaily(d);
 
-      // Fetch sequential data if available (inline or via dedicated endpoint)
+      // The results carry the sequential block whenever sequential testing is
+      // on. The dedicated route is asked only when the experiment says it is
+      // on and the block is still missing (an API that does not embed it, or
+      // an analysis that failed). When it is off, that route answers 404, and
+      // asking it anyway logged a failed request on every results page (#919).
+      // `readExperiment` never rejects, so this await is immediate.
+      const { sequentialEnabled } = await experimentRequest;
       if (r.sequential_testing) {
         setSequential(r.sequential_testing);
-      } else {
-        // Try dedicated endpoint — swallow errors for non-sequential experiments
+      } else if (sequentialEnabled === true) {
         try {
-          const seq = await ResultsService.getSequentialResults(experimentId);
-          setSequential(seq);
+          setSequential(await ResultsService.getSequentialResults(experimentId));
         } catch {
           setSequential(null);
         }
+      } else {
+        setSequential(null);
       }
     } catch (e) {
       setError(resultsErrorMessage(e));

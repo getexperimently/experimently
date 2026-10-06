@@ -5,6 +5,7 @@ import { PageTitle } from '@/components/PageTitle';
 import { BanditWeightsSection } from '@/components/experiments/BanditWeightsSection';
 import { ExperimentManageSection } from '@/components/experiments/ExperimentManageSection';
 import { TargetingSection } from '@/components/experiments/TargetingSection';
+import { ApiKeyRouteHint } from '@/components/experiments/ApiKeyRouteHint';
 import WarehouseAnalysisSection from '@modules/components/warehouse/runs/WarehouseAnalysisSection';
 import { useAuth } from '@/contexts/AuthContext';
 import { isApiError } from '@/services/api';
@@ -564,11 +565,26 @@ export default function ExperimentDetailPage() {
           <section className="mt-6 bg-white rounded-lg border border-slate-200 p-5" data-testid="sdk-hint">
             <h2 className="text-sm font-semibold text-slate-800 mb-1">Assign a user from your app</h2>
             <p className="text-xs text-slate-500 mb-3">
-              Use the experiment key with an API key from{' '}
-              <Link href="/admin/api-keys" className="text-blue-600 hover:underline">
-                Admin → API Keys
-              </Link>
-              . Track conversions by sending the metric event name
+              {/* Admin → API Keys opens only for a superuser; everyone else gets the route (#920). */}
+              {user?.is_superuser ? (
+                <>
+                  Use the experiment key with an API key from{' '}
+                  <Link
+                    href="/admin/api-keys"
+                    className="text-blue-600 hover:underline"
+                    data-testid="sdk-hint-admin-api-keys"
+                  >
+                    Admin → API Keys
+                  </Link>
+                  .
+                </>
+              ) : (
+                <>
+                  Use the experiment key with an API key.{' '}
+                  <ApiKeyRouteHint testId="sdk-hint-api-key-route" />
+                </>
+              )}{' '}
+              Track conversions by sending the metric event name
               {primaryMetric ? (
                 <>
                   {' '}
