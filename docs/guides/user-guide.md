@@ -194,7 +194,7 @@ on a `DRAFT` experiment, with an ADMIN or DEVELOPER token. The experiment activa
 leave out of the request is left as it is, and `null` clears it. A date written without a
 UTC offset is read in `time_zone`, an IANA name such as `America/Los_Angeles` (default
 `UTC`); a date with an offset, like the ones below, keeps it. Dates are stored in UTC.
-Clicking **Start** before the scheduled start starts the experiment then: its start date
+Clicking **Start** before the scheduled start starts the experiment right away: its start date
 becomes the time you clicked, and a scheduled end date is kept.
 
 ```{.bash skip reason="server: needs a running API, a signed-in token in TOKEN and a draft experiment's id in EXPERIMENT_ID"}

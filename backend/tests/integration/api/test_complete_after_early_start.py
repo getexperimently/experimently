@@ -16,9 +16,14 @@ Now:
   moved to one microsecond before the completion time, the latest start the
   row accepts, so the row keeps ``end_date > start_date``.
 
+The start a completion moves is the one that is NOT before the completion time:
+a start exactly equal to it moves too (``>=``, not ``>``), or the row would hold
+``end_date == start_date`` and the check would refuse it.
+
 Unchanged, and checked here: a start and a complete with no schedule, a resume
-from PAUSED, a draft whose scheduled start has already passed (started by hand
-or by the scheduler) keeps that start.
+from PAUSED, a PAUSED row whose start is still ahead (written by an earlier
+version) keeps that start when it is resumed, a draft whose scheduled start has
+already passed (started by hand or by the scheduler) keeps that start.
 
 The requests are real: a real ``User`` row, a real local JWT, and no
 dependency override except ``deps.get_db``. A state no route can reach any
@@ -304,6 +309,41 @@ def test_an_experiment_whose_start_is_still_ahead_completes(
     assert completes == 1
 
 
+@pytest.mark.regression
+def test_a_start_exactly_at_the_completion_time_is_moved_one_microsecond_back(
+    client, db_session, developer, monkeypatch
+):
+    """``start_date == now`` is moved too: ``end_date`` must be after it.
+
+    The completion time is frozen at the stored start, so the two are equal to
+    the microsecond. A comparison of ``>`` instead of ``>=`` leaves the start
+    where it is, writes ``end_date == start_date`` and the row is refused (a 500).
+    """
+    from backend.app.api.v1.endpoints import experiments as experiments_endpoint
+
+    experiment_id = _create_draft(client, developer)
+    started = _post(client, developer, experiment_id, "start")
+    assert started.status_code == 200, started.text
+    moment = _now()
+    _write(db_session, experiment_id, start_date=moment)
+
+    real_record_end_date = experiments_endpoint.record_end_date
+    monkeypatch.setattr(
+        experiments_endpoint,
+        "record_end_date",
+        lambda experiment, now: real_record_end_date(experiment, moment),
+    )
+    completed = _post(client, developer, experiment_id, "complete")
+
+    assert completed.status_code == 200, completed.text
+    assert completed.json()["status"] == "completed"
+    status, start_date, end_date, completes = _row(db_session, experiment_id)
+    assert status == ExperimentStatus.COMPLETED
+    assert end_date == moment
+    assert end_date == start_date + timedelta(microseconds=1)
+    assert completes == 1
+
+
 # --- unchanged ------------------------------------------------------------------
 
 
@@ -334,6 +374,37 @@ def test_a_start_pause_resume_and_complete_with_no_schedule_are_unchanged(
     assert start_date == first_start
     assert before <= end_date <= after
     assert completes == 1
+
+
+def test_a_paused_row_whose_start_is_ahead_keeps_it_when_resumed(
+    client, db_session, developer
+):
+    """Only a DRAFT's start that is still ahead is replaced by the real start.
+
+    A PAUSED row has already started once, so the date it holds is when it first
+    started; a row an earlier version left with a future one keeps it on resume
+    (completing it later moves the start, see above).
+    """
+    experiment_id = _create_draft(client, developer)
+    started = _post(client, developer, experiment_id, "start")
+    assert started.status_code == 200, started.text
+    first_start = _now() + timedelta(days=30)
+    _write(
+        db_session,
+        experiment_id,
+        status=ExperimentStatus.PAUSED,
+        start_date=first_start,
+    )
+
+    resumed = _post(client, developer, experiment_id, "start")
+
+    assert resumed.status_code == 200, resumed.text
+    body = resumed.json()
+    assert body["status"] == "active"
+    assert _utc(body["start_date"]) == first_start
+    status, start_date, _, _ = _row(db_session, experiment_id)
+    assert status == ExperimentStatus.ACTIVE
+    assert start_date == first_start
 
 
 def test_a_draft_whose_scheduled_start_has_passed_keeps_it_when_started_by_hand(
