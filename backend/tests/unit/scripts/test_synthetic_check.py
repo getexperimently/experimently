@@ -373,9 +373,8 @@ def test_every_other_route_is_refused_before_anything_is_sent(serve, method, rou
     assert stub.seen == []
 
 
-def test_the_client_error_routes_are_refused():
-    """The check sends nothing but its eight requests. The two routes SDKs use
-    to report client errors are named here so that no edit adds them."""
+def test_the_tracking_errors_routes_are_refused():
+    """The check sends nothing but its eight requests."""
     client = sc.Client("http://127.0.0.1:9")
     for route in ("/api/v1/tracking/errors", "/api/v1/tracking/errors/batch"):
         assert ("POST", route) not in sc.REQUESTS
