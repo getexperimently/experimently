@@ -92,6 +92,18 @@ jobs:
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
+
+      # For the Redis-backed integration tests (the experiment cache, the flag
+      # reads after every writer), as in integration-tests.yml (#902).
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
     steps:
       - uses: actions/checkout@v7
 
@@ -107,6 +119,30 @@ jobs:
           pip install -r backend/requirements.txt
           pip install -e . --no-deps
 
+      # A second Redis that requires a password, for
+      # backend/tests/integration/test_redis_password_auth.py, started the
+      # same way as in integration-tests.yml: a service container takes no
+      # command. The password is generated per run and handed to the tests
+      # through GITHUB_ENV.
+      - name: Start a password-protected Redis
+        run: |
+          password="$(openssl rand -hex 16)"
+          echo "::add-mask::${password}"
+          docker run -d --name redis-auth -p 6380:6379 redis:7-alpine \
+            redis-server --requirepass "${password}"
+          for _ in $(seq 1 30); do
+            if docker exec redis-auth redis-cli --no-auth-warning -a "${password}" ping | grep -q PONG; then
+              {
+                echo "REDIS_AUTH_TEST_PORT=6380"
+                echo "REDIS_AUTH_TEST_PASSWORD=${password}"
+              } >> "$GITHUB_ENV"
+              exit 0
+            fi
+            sleep 1
+          done
+          docker logs redis-auth
+          exit 1
+
       - name: Run integration tests
         env:
           APP_ENV: test
@@ -118,6 +154,10 @@ jobs:
           POSTGRES_SCHEMA: experimentation
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
+          # Both Redis servers must be there: without these a missing one
+          # makes its tests skip green, with them it fails the job.
+          EXPERIMENTLY_REQUIRE_REDIS: "1"
+          EXPERIMENTLY_REQUIRE_REDIS_AUTH: "1"
         run: python -m pytest backend/tests/integration/ -p no:cov -q --tb=short
 
   # Absolute wall-clock targets ("P99 under 40 ms", "over 1000 evaluations a
