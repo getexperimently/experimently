@@ -3,6 +3,7 @@ import { render, screen, fireEvent, waitFor, within } from '@testing-library/rea
 import ExperimentDetailPage, { ACTIONS_BY_STATUS } from '@/pages/experiments/[id]';
 import { ModulesProvider } from '@/contexts/ModulesContext';
 import { apiFetch } from '@/services/api';
+import { docsUrl } from '@/services/docs';
 import { Experiment } from '@/types/experiments';
 import { apiError, makeRouter, routedApi } from './helpers/apiMock';
 
@@ -465,4 +466,58 @@ describe('ExperimentDetailPage — warehouse analysis section (the `warehouse` m
     expect(screen.queryByTestId('warehouse-analysis')).toBeNull();
     expect(warehouseCalls()).toEqual([]);
   });
+});
+
+describe('ExperimentDetailPage — where the SDK hint sends the reader for an API key (#920)', () => {
+  // /admin/api-keys opens only for a superuser (withAdminGuard), so the hint
+  // names that page to a superuser alone. Everyone else is given the route
+  // any signed-in user may call, with the docs page beside it.
+  const signInAs = (role: string, is_superuser: boolean) =>
+    mockUseAuth.mockReturnValue({
+      user: {
+        id: 'user-1',
+        email: `${role.toLowerCase()}@demo.com`,
+        username: role.toLowerCase(),
+        role,
+        is_superuser,
+      },
+      status: 'authenticated',
+    });
+
+  async function sdkHint() {
+    install(experiment());
+    render(<ExperimentDetailPage />);
+    await screen.findByTestId('experiment-detail');
+    return screen.getByTestId('sdk-hint');
+  }
+
+  it('sends a superuser to Admin → API Keys', async () => {
+    signInAs('VIEWER', true);
+    const box = await sdkHint();
+    expect(within(box).getByRole('link', { name: 'Admin → API Keys' })).toHaveAttribute(
+      'href',
+      '/admin/api-keys',
+    );
+    expect(within(box).queryByTestId('sdk-hint-api-key-route')).toBeNull();
+  });
+
+  it.each(['ADMIN', 'DEVELOPER', 'ANALYST', 'VIEWER'])(
+    'gives %s, who cannot open that page, the route and the docs page instead',
+    async (role) => {
+      signInAs(role, false);
+      const box = await sdkHint();
+      expect(within(box).queryByRole('link', { name: 'Admin → API Keys' })).toBeNull();
+      expect(box.querySelector('a[href="/admin/api-keys"]')).toBeNull();
+      const route = within(box).getByTestId('sdk-hint-api-key-route');
+      expect(route).toHaveTextContent(
+        'Create one for yourself with POST /api/v1/api-keys (see API Key Management) or ask an administrator.',
+      );
+      expect(within(route).getByRole('link', { name: 'API Key Management' })).toHaveAttribute(
+        'href',
+        docsUrl('security/api-keys'),
+      );
+      // The curl sample is still there for everyone.
+      expect(box).toHaveTextContent('"experiment_key": "checkout-button-colour"');
+    },
+  );
 });

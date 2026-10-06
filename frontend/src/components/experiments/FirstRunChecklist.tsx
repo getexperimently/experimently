@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
 import Link from 'next/link';
+import { useOptionalAuth } from '@/contexts/AuthContext';
 import { apiBase } from '@/services/api';
+import { ApiKeyRouteHint } from '@/components/experiments/ApiKeyRouteHint';
 
 /** Origin shown in the curl sample: configured API URL, else the page origin. */
 export function sampleApiOrigin(): string {
@@ -31,6 +33,10 @@ interface FirstRunChecklistProps {
 export function FirstRunChecklist({ experimentKey }: FirstRunChecklistProps) {
   const [copied, setCopied] = useState(false);
   const curl = assignCurlSample(sampleApiOrigin(), experimentKey);
+  // /admin/api-keys opens only for a superuser (withAdminGuard). Anyone else,
+  // and a reader whose account is not known yet, is pointed at the route
+  // instead of a page that answers 403 (#920).
+  const superuser = useOptionalAuth()?.user?.is_superuser === true;
 
   const copy = async () => {
     try {
@@ -82,13 +88,19 @@ export function FirstRunChecklist({ experimentKey }: FirstRunChecklistProps) {
               SDKs and the tracking API authenticate with <code className="font-mono">X-API-Key</code>.
               Keys are shown once — copy it when it appears.
             </p>
-            <Link
-              href="/admin/api-keys"
-              className="inline-flex items-center mt-2 text-sm font-medium text-blue-600 hover:underline"
-              data-testid="checklist-api-keys"
-            >
-              Open Admin → API Keys &rarr;
-            </Link>
+            {superuser ? (
+              <Link
+                href="/admin/api-keys"
+                className="inline-flex items-center mt-2 text-sm font-medium text-blue-600 hover:underline"
+                data-testid="checklist-api-keys"
+              >
+                Open Admin → API Keys &rarr;
+              </Link>
+            ) : (
+              <p className="text-sm text-slate-500 mt-2">
+                <ApiKeyRouteHint testId="checklist-api-key-route" />
+              </p>
+            )}
           </div>
         </li>
 
