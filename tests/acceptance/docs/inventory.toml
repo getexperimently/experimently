@@ -38,6 +38,10 @@
 # [[flow]] maps each flow in the "Flows, at least" list of #939 to journeys, to
 # pages (whose class and reason are above) or to every page of a class. The test
 # holds that list itself, so a flow cannot drop out of the mapping.
+#
+# The intent for the journeys' run summary: it prints the #939 mapping, and every
+# nav page that is not a journey with its class and reason, so what is not
+# walked is listed, never silent.
 
 [pages."README.md"]
 class = "journey"
@@ -140,24 +144,30 @@ class = "external:llm-provider"
 reason = "steps 3-5 call a model and need an LLM provider key (OpenAI, Anthropic); the blocks that need none run in Doc Examples"
 
 [pages."sdk/javascript.md"]
-class = "reference"
-reason = "not walked yet: no journey installs the published package (0.1.0 on npm) and calls a stack from an app"
+class = "journey"
+journey = "sdk-javascript"
+pending = true
+reason = "install the published package (0.1.0 on npm) as the page says and run its snippet against a stack"
 
 [pages."sdk/python.md"]
-class = "reference"
-reason = "not walked yet: no journey installs the published package (0.1.0 on PyPI) and calls a stack from an app"
+class = "journey"
+journey = "sdk-python"
+pending = true
+reason = "install the published package (0.1.0 on PyPI) as the page says and run its snippet against a stack"
 
 [pages."sdk/java.md"]
 class = "reference"
-reason = "not walked: the page says the package is not yet on Maven Central"
+reason = "not walked: the page says the package is not yet on Maven Central; the SDK live contract (tests/sdk-contract/live/run_live_contract.py) runs the SDK against a live API in the PR QA Gate"
 
 [pages."sdk/react.md"]
 class = "reference"
-reason = "not walked: the page says the package is not yet on npm"
+reason = "not walked: the page says the package is not yet on npm; the SDK live contract (tests/sdk-contract/live/run_live_contract.py) runs the SDK against a live API in the PR QA Gate"
 
 [pages."sdk/go.md"]
-class = "reference"
-reason = "not walked yet: no journey runs go get and calls a stack from an app"
+class = "journey"
+journey = "sdk-go"
+pending = true
+reason = "go get the module as the page says and run its snippet against a stack"
 
 [pages."sdk/ios.md"]
 class = "device"
@@ -165,7 +175,7 @@ reason = "needs Xcode and an iOS simulator or device"
 
 [pages."sdk/android.md"]
 class = "device"
-reason = "needs the Android SDK and an emulator or device"
+reason = "needs the Android SDK and an emulator or device; the SDK live contract (tests/sdk-contract/live/run_live_contract.py) runs the SDK against a live API in the PR QA Gate on the JVM"
 
 [pages."sdk/flutter.md"]
 class = "device"
@@ -173,7 +183,7 @@ reason = "needs the Flutter SDK and a simulator, emulator or device"
 
 [pages."sdk/react-native.md"]
 class = "device"
-reason = "needs a React Native toolchain and a simulator, emulator or device"
+reason = "needs a React Native toolchain and a simulator, emulator or device; the SDK live contract (tests/sdk-contract/live/run_live_contract.py) runs the SDK against a live API in the PR QA Gate"
 
 [pages."mcp-server.md"]
 class = "external:mcp-client"
@@ -181,23 +191,23 @@ reason = "its flow is an AI assistant (Claude, Cursor, Copilot) calling the serv
 
 [pages."sdk/openfeature.md"]
 class = "reference"
-reason = "not walked: the page says the provider is not yet on npm"
+reason = "not walked: the page says the provider is not yet on npm; the SDK live contract (tests/sdk-contract/live/run_live_contract.py) runs the provider against a live API in the PR QA Gate"
 
 [pages."sdk/edge.md"]
 class = "reference"
-reason = "not walked: the page says the package is not yet on npm"
+reason = "not walked: the page says the package is not yet on npm; the SDK live contract (tests/sdk-contract/live/run_live_contract.py) runs the SDK against a live API in the PR QA Gate"
 
 [pages."sdk/ruby.md"]
 class = "reference"
-reason = "not walked: the page says the gem is not yet on RubyGems"
+reason = "not walked: the page says the gem is not yet on RubyGems; the SDK live contract (tests/sdk-contract/live/run_live_contract.py) runs the SDK against a live API in the PR QA Gate"
 
 [pages."sdk/php.md"]
 class = "reference"
-reason = "not walked: the page says the package is not yet on Packagist"
+reason = "not walked: the page says the package is not yet on Packagist; the SDK live contract (tests/sdk-contract/live/run_live_contract.py) runs the SDK against a live API in the PR QA Gate"
 
 [pages."sdk/dotnet.md"]
 class = "reference"
-reason = "not walked: the page says the package is not yet on NuGet"
+reason = "not walked: the page says the package is not yet on NuGet; the SDK live contract (tests/sdk-contract/live/run_live_contract.py) runs the SDK against a live API in the PR QA Gate"
 
 [pages."sdk/elixir.md"]
 class = "reference"
@@ -486,7 +496,7 @@ reason = "the CDK VPC stack"
 
 [pages."infrastructure/network-security-readme.md"]
 class = "aws"
-reason = "the CDK network rules"
+reason = "describes AWS networking (subnets, NAT gateways, groups and ACLs) as a Terraform configuration this repository does not contain"
 
 [pages."infrastructure/aws-iam-setup.md"]
 class = "aws"
@@ -587,12 +597,10 @@ note = "the table is held to the dashboard's source by a unit test; every exec p
 
 [[flow]]
 text = "the SDK quick starts"
+journeys = ["sdk-javascript", "sdk-python", "sdk-go"]
 pages = [
-    "sdk/javascript.md",
-    "sdk/python.md",
     "sdk/java.md",
     "sdk/react.md",
-    "sdk/go.md",
     "sdk/ios.md",
     "sdk/android.md",
     "sdk/flutter.md",
@@ -605,7 +613,7 @@ pages = [
     "sdk/elixir.md",
     "sdk/local-evaluation.md",
 ]
-note = "no SDK quick start is walked in a browser journey yet; each page's class and reason say what verifies it"
+note = "the JavaScript, Python and Go quick starts are journeys, installed as each page says; every other SDK page's class and reason say what verifies it"
 
 [[flow]]
 text = "self-hosting guides where they can be rehearsed without AWS"
