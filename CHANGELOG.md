@@ -10,6 +10,15 @@ longer applies and release-please can generate this file directly. Until it
 does, entries below 0.2.2 are hand-written and the links in them are the
 reason why.
 
+## [0.25.1](https://github.com/getexperimently/experimently/compare/v0.25.0...v0.25.1) (2026-10-06)
+
+
+### Bug Fixes
+
+* **experiments:** an experiment started before its scheduled start can be completed ([#980](https://github.com/getexperimently/experimently/issues/980)) ([5471d82](https://github.com/getexperimently/experimently/commit/5471d82331d4915cc31d3ff68cb9c8712c93520f))
+* **experiments:** starting a draft whose end date has passed answers a clear 4xx instead of 500 ([#972](https://github.com/getexperimently/experimently/issues/972)) ([1576f69](https://github.com/getexperimently/experimently/commit/1576f6910c7333b46a5cea9012636714e6cc6281))
+* **safety:** a flag's safety config refuses a null enabled or metrics, and a stored null no longer breaks its reads ([#969](https://github.com/getexperimently/experimently/issues/969)) ([c6e0f08](https://github.com/getexperimently/experimently/commit/c6e0f081d82f1a858e111c86db62aa5d8b8a71d4))
+
 ## [0.25.0](https://github.com/getexperimently/experimently/compare/v0.24.0...v0.25.0) (2026-10-06)
 
 
