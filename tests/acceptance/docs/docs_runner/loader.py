@@ -47,6 +47,14 @@ YAML, or not a mapping, stops at that. Refused, besides what ``model`` refuses:
   the action, and it keeps no screen);
 * a journey that makes up or keeps a secret and is recorded (``video: true``):
   a recording would show what the run keeps out of its files.
+* ``save`` on a step that is not an ``api`` step, or a name saved twice;
+* a ``{{name}}`` that no earlier step saves, or that names a secret (a secret
+  is sent only as a ``key``); a ``key`` that names no secret saved or kept earlier; a
+  traffic step's ``experiment`` that names no value saved earlier;
+* a ``traffic`` step on any stack but compose-dev, or with an ``expect`` or a
+  ``snapshot`` setting (its check is the action);
+* ``computed`` on a step that is not an ``api`` step, and ``cells`` on one that
+  is not on a screen, or either naming an oracle not in ``ORACLES``.
 """
 
 from __future__ import annotations
@@ -73,7 +81,7 @@ import yaml
 from pydantic import ValidationError
 
 from docs_runner import guide as guides
-from docs_runner import registry
+from docs_runner import registry, values
 from docs_runner.model import (
     API_EXPECTS,
     BROWSER_EXPECTS,
@@ -278,7 +286,10 @@ def _quoted_names(step: Step) -> List[tuple]:
         names.append(("select.label", do.select.label, do.select.quote))
     if do.keep is not None:
         within = do.keep.within
-        names.append(("keep.within.name", within.name, within.quote))
+        if within is not None:
+            names.append(("keep.within.name", within.name, within.quote))
+        else:
+            names.append(("keep.prefix", do.keep.prefix, True))
     expect = step.expect
     if expect is not None:
         for index, named in enumerate(expect.visible or []):
@@ -286,6 +297,9 @@ def _quoted_names(step: Step) -> List[tuple]:
         if expect.number is not None:
             locator = expect.number.locator
             names.append(("expect.number.locator.name", locator.name, locator.quote))
+        for index, cell in enumerate(expect.cells or []):
+            names.append((f"expect.cells[{index}].row", cell.row, cell.quote))
+            names.append((f"expect.cells[{index}].column", cell.column, cell.quote))
     return names
 
 
@@ -301,6 +315,20 @@ def _expect_problems(label: str, step: Step, stack: Optional[str]) -> List[str]:
             )
         if step.snapshot:
             found.append(f"{label}: ref: doc-examples has no screen to snapshot")
+        return found
+    if kind == "traffic":
+        if stack is not None and stack != "compose-dev":
+            found.append(
+                f"{label}: a traffic step needs the compose stack's API; {stack}"
+                " has none"
+            )
+        if given:
+            found.append(
+                f"{label}: traffic checks what the action says (each user assigned"
+                " as chosen, each event accepted); it has no expect"
+            )
+        if step.snapshot is not None:
+            found.append(f"{label}: a traffic step has no screen to snapshot")
         return found
     if kind == "api":
         if stack is not None and stack != "compose-dev":
@@ -462,10 +490,73 @@ def _step_problems(
                 f"{label}: ref: doc-examples, but the section #{step.doc} has no"
                 " {.bash exec} block"
             )
-    if step.expect is not None and step.expect.number is not None:
-        oracle = step.expect.number.oracle.name
-        if oracle not in context.oracles:
-            found.append(f"{label}: no oracle named {oracle!r}")
+    if step.expect is not None:
+        named = []
+        if step.expect.number is not None:
+            named.append(step.expect.number.oracle.name)
+        named.extend(c.oracle.name for c in (step.expect.computed or {}).values())
+        named.extend(c.oracle.name for c in step.expect.cells or [])
+        for oracle in named:
+            if oracle not in context.oracles:
+                found.append(f"{label}: no oracle named {oracle!r}")
+    if step.save is not None and step.do.kind != "api":
+        found.append(f"{label}: save keeps values from an api step's answer only")
+    return found
+
+
+def _uses(step: Step) -> List[Tuple[str, str]]:
+    """(what, name) for every saved value or secret the step uses."""
+    used: List[Tuple[str, str]] = []
+    do = step.do
+    if do.api is not None:
+        for name in values.placeholders(do.api.path):
+            used.append(("value", name))
+        for name in values.placeholders_in(do.api.body):
+            used.append(("value", name))
+        if do.api.key is not None:
+            used.append(("key", do.api.key))
+    if do.goto is not None:
+        for name in values.placeholders(do.goto):
+            used.append(("value", name))
+    if do.traffic is not None:
+        used.append(("experiment", do.traffic.experiment))
+        used.append(("key", do.traffic.key))
+    return used
+
+
+def _value_problems(
+    steps: Sequence[Tuple[int, Step]], passwords: Sequence[str] = ()
+) -> List[str]:
+    """A value or key used before a step saves it, a secret in a path, a name saved twice.
+
+    A secret is a value saved with ``secret: true``, kept by a ``keep`` step or
+    made up as one of the journey's ``passwords``.
+    """
+    found: List[str] = []
+    saved: Dict[str, bool] = dict.fromkeys(passwords, True)
+    for index, step in steps:
+        label = f"step {index + 1} ({step.id})"
+        for what, name in _uses(step):
+            if name not in saved:
+                found.append(f"{label}: {name!r} is used before any step saves it")
+            elif what == "key" and not saved[name]:
+                found.append(
+                    f"{label}: the key {name!r} is not a secret; save the API key"
+                    " with secret: true"
+                )
+            elif what != "key" and saved[name]:
+                found.append(
+                    f"{label}: {name!r} is a secret; a secret is sent only as a key,"
+                    " never put into a path, a body or an address"
+                )
+        for name, save in (step.save or {}).items():
+            if name in saved:
+                found.append(
+                    f"{label}: {name!r} is saved twice; give each its own name"
+                )
+            saved[name] = save.secret
+        if step.do.keep is not None:
+            saved[step.do.keep.secret] = True
     return found
 
 
@@ -528,6 +619,8 @@ def semantic_problems(
         label = f"step {index + 1} ({step.id})"
         found.extend(_step_problems(label, step, guide_path, guide, stack, context))
     found.extend(_secret_problems(steps, passwords, video))
+    if complete:
+        found.extend(_value_problems(steps, passwords))
     if complete and steps:
         if all(step.do.kind == "ref" or step.not_run is not None for _, step in steps):
             found.append(

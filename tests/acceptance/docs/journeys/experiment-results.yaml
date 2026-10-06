@@ -1,0 +1,379 @@
+# An experiment from guided setup to its results (#939; QA plan D3b, EM ruling
+# 2.1): the User Guide's "Creating an Experiment", "Then: start the experiment"
+# and "Reading Results", with a known population in between.
+#
+# The population: Control 400 users of whom 40 convert, Treatment 400 of whom
+# 64 convert, sent through the tracking API with an API key exactly as an
+# application would (traffic.py chooses the users with the documented
+# assignment hash, so each variant gets exactly its count). The results API and
+# the results page must then show exactly those counts, and the p-value must be
+# the one scipy computes for the test the API reports for a conversion metric:
+# Fisher's exact test, two-sided, on converting users (oracles.py,
+# fisher_exact_p). Fisher's p for these counts is 0.0152993; the tests a
+# defect would substitute give 0.0116 (z-test or chi-square without Yates),
+# 0.0156 (chi-square with Yates) and 0.0076 (one-sided Fisher), so the API's
+# value is held to 1e-9 relative (the API and the oracle run the same scipy,
+# 1.17.1, so only the last bits of a float may differ) and the page's to the
+# four places it shows.
+#
+# The rates (10.00%, 16.00%), the lift (+60.0%) and the sample-ratio p (1, an
+# exact 400/400 split) follow from the chosen counts by arithmetic and are
+# written in the expectations.
+guide: guides/user-guide.md
+stack: compose-dev
+profile: core
+video: true
+written: 2026-10-06
+steps:
+  - id: sign-in-page
+    doc: accessing-the-platform
+    do:
+      goto: /login
+    expect:
+      status: 200
+      aria: |
+        - main:
+          - heading "Sign in" [level=1]
+          - textbox "Email"
+          - textbox "Password"
+          - button "Sign in"
+    fail: the dashboard does not answer, or its sign-in page is not there
+  - id: email
+    doc: accessing-the-platform
+    do:
+      fill:
+        label: Email
+        value: admin@demo.com
+        quote: false
+        reason: the sign-in form's field; the guide says only to sign in with an ADMIN account
+    expect:
+      aria: |
+        - textbox "Email": admin@demo.com
+    fail: there is no Email field to fill
+  - id: password
+    doc: accessing-the-platform
+    do:
+      fill:
+        label: Password
+        value: Demo1234!
+        quote: false
+        reason: the sign-in form's field; the demo account's documented password
+    expect:
+      aria: |
+        - textbox "Password"
+    fail: there is no Password field to fill
+  - id: sign-in
+    doc: accessing-the-platform
+    do:
+      click:
+        role: button
+        name: Sign in
+        quote: false
+        reason: the sign-in form's button
+    expect:
+      url: /experiments
+      aria: |
+        - main:
+          - heading "Experiments" [level=1]
+          - link "+ New Experiment"
+    fail: the ADMIN account cannot sign in, or does not land on the experiments list
+  - id: new-experiment
+    doc: creating-an-experiment
+    do:
+      click:
+        role: link
+        name: + New Experiment
+    expect:
+      url: /experiments/new
+      aria: |
+        - main:
+          - heading "New Experiment" [level=1]
+          - paragraph:
+            - link "Use the single-page form (advanced)"
+          - navigation "Guided setup steps":
+            - paragraph: Step 1 of 5
+          - region "What kind of experiment?":
+            - group "Choose the experiment type.":
+              - radio /^A\/B Test/ [checked]
+              - radio /^Multivariate/
+          - button "Next"
+    fail: Experiments → + New Experiment does not open guided setup at its first step, A/B Test chosen
+  - id: type-next
+    doc: creating-an-experiment
+    do:
+      click:
+        role: button
+        name: Next
+    expect:
+      url: /experiments/new?step=details
+      aria: |
+        - main:
+          - navigation "Guided setup steps":
+            - paragraph: Step 2 of 5
+          - region "Name it and choose what to measure":
+            - textbox "Name *"
+            - textbox "Key"
+            - textbox "Description"
+            - textbox "Hypothesis"
+            - textbox "Metric 1 name"
+            - textbox "Metric 1 event name"
+            - radio "Primary metric" [checked]
+    fail: Next does not move to the Details step, with the name, key, description, hypothesis and a primary metric
+  - id: name
+    doc: creating-an-experiment
+    do:
+      fill:
+        label: Name *
+        value: Docs journey results
+        quote: false
+        reason: the field is labelled "Name *" (required); the guide calls it Name
+    expect:
+      aria: |
+        - textbox "Name *":
+          - text: Docs journey results
+        - textbox "Key":
+          - text: docs_journey_results
+    fail: the name cannot be typed, or the key is not generated from it
+  - id: metric-name
+    doc: creating-an-experiment
+    do:
+      fill:
+        label: Metric 1 name
+        value: Checkout completed
+        quote: false
+        reason: the first metric's name field; the guide says to choose what to measure
+    expect:
+      aria: |
+        - textbox "Metric 1 name":
+          - text: Checkout completed
+    fail: the metric's name cannot be typed
+  - id: metric-event
+    doc: creating-an-experiment
+    do:
+      fill:
+        label: Metric 1 event name
+        value: checkout_completed
+        quote: false
+        reason: the first metric's event name field; the guide names it the event name
+    expect:
+      aria: |
+        - textbox "Metric 1 event name":
+          - text: checkout_completed
+        - combobox "Metric 1 type":
+          - option "Conversion" [selected]
+    fail: the metric's event name cannot be typed, or the metric is not a conversion
+  - id: details-next
+    doc: creating-an-experiment
+    do:
+      click:
+        role: button
+        name: Next
+    expect:
+      url: /experiments/new?step=variants
+      aria: |
+        - main:
+          - navigation "Guided setup steps":
+            - paragraph: Step 3 of 5
+          - region "Set up the versions users will see":
+            - paragraph: Allocations must add up to 100%. Currently 100%
+            - textbox "Variant 1 name":
+              - text: Control
+            - spinbutton "Variant 1 allocation": "50"
+            - radio "Control" [checked]
+            - textbox "Variant 2 name":
+              - text: Treatment
+            - spinbutton "Variant 2 allocation": "50"
+    fail: the Variants step does not offer a control and a treatment at 50% each
+  - id: variants-next
+    doc: creating-an-experiment
+    do:
+      click:
+        role: button
+        name: Next
+    expect:
+      url: /experiments/new?step=estimate
+      aria: |
+        - main:
+          - navigation "Guided setup steps":
+            - paragraph: Step 4 of 5
+          - region "How results will be judged, and how many users you need":
+            - group "How results will be judged":
+              - combobox "Confidence level":
+                - option "95% (recommended)" [selected]
+              - combobox "Correction for several variants":
+                - option "Benjamini-Hochberg (recommended)" [selected]
+    fail: the Estimate step does not start with how results will be judged, 95% and Benjamini-Hochberg chosen
+  - id: estimate-next
+    doc: creating-an-experiment
+    do:
+      click:
+        role: button
+        name: Next
+    expect:
+      url: /experiments/new?step=review
+      aria: |
+        - main:
+          - navigation "Guided setup steps":
+            - paragraph: Step 5 of 5
+          - region "Check and create":
+            - definition:
+              - paragraph: "Name: Docs journey results"
+            - definition:
+              - list:
+                - listitem: "Control: 50% (control)"
+                - listitem: "Treatment: 50%"
+            - term: Analysis
+            - definition:
+              - paragraph: 95% confidence · Benjamini-Hochberg correction
+          - button "Create Experiment"
+    fail: the Review step does not show the experiment as it will be sent, with its Analysis row
+  - id: create
+    doc: creating-an-experiment
+    do:
+      click:
+        role: button
+        name: Create Experiment
+    expect:
+      aria: |
+        - main:
+          - heading "Docs journey results" [level=1]
+          - text: Draft
+          - button "Start"
+    fail: Create Experiment does not create a draft and land on its page
+  - id: start
+    doc: creating-an-experiment
+    do:
+      click:
+        role: button
+        name: Start
+    expect:
+      aria: |
+        - main:
+          - heading "Docs journey results" [level=1]
+          - text: Active
+          - link "View results"
+    fail: Start does not make the experiment active
+  - id: find-experiment
+    doc: reading-results
+    do:
+      api:
+        method: GET
+        path: /api/v1/experiments/?search=journey%20results
+        as: admin
+    expect:
+      status: 200
+      json:
+        total: 1
+        items.0.key: docs_journey_results
+        items.0.status: active
+    save:
+      experiment-id:
+        path: items.0.id
+    fail: the experiment just created is not the one active experiment the API finds by its name
+  - id: api-key
+    doc: creating-an-experiment
+    do:
+      api:
+        method: POST
+        path: /api/v1/api-keys
+        as: admin
+        body:
+          name: Docs journey results
+    expect:
+      status: 201
+      json:
+        name: Docs journey results
+    save:
+      sdk-key:
+        path: key
+        secret: true
+    fail: no API key can be created for the application that assigns users and tracks conversions
+  - id: traffic
+    doc: creating-an-experiment
+    do:
+      traffic:
+        experiment: experiment-id
+        key: sdk-key
+        as: admin
+        event: checkout_completed
+        users: results-user
+        variants:
+          Control: {assigned: 400, converted: 40}
+          Treatment: {assigned: 400, converted: 64}
+    fail: a user is refused, assigned a variant other than the documented hash gives, or a conversion is refused
+  - id: results-page
+    doc: reading-results
+    do:
+      click:
+        role: link
+        name: View results
+        quote: false
+        reason: the experiment page's link to its results; the guide writes the path as Experiments → [Your Experiment] → Results
+    expect:
+      cells:
+        - row: Treatment
+          column: p-value
+          oracle:
+            name: fisher_exact_p
+            args: {control_users: 400, control_converted: 40, treatment_users: 400, treatment_converted: 64}
+      aria: |
+        - main:
+          - heading "Docs journey results" [level=2]
+          - text: /Ship Variant/
+          - paragraph: Total Users
+          - paragraph: "800"
+          - paragraph: Minimum sample
+          - paragraph: Reached
+          - paragraph: "Analysis: 95% confidence · one comparison with the control on each metric, so no correction is needed"
+          - paragraph: "Sample ratio check passed: the traffic split matches the allocation (p = 1)."
+          - tabpanel:
+            - region "Metric comparison":
+              - table:
+                - rowgroup:
+                  - row "Metric Variant Sample Size Value Improvement p-value Significance"
+                - rowgroup:
+                  - row /Control\(control\) 400 10\.00%/
+                  - row /Treatment 400 16\.00% \+60\.0%/
+    fail: the results page shows other counts or rates than were sent, a failed sample-ratio check, no recommendation to ship, or a p-value that is not Fisher's
+  - id: results-api
+    doc: exporting-results
+    do:
+      api:
+        method: GET
+        path: /api/v1/results/{{experiment-id}}
+        as: admin
+    expect:
+      status: 200
+      json:
+        experiment_name: Docs journey results
+        confidence_level: 0.95
+        correction_method: benjamini_hochberg
+        metrics.0.metric_name: Checkout completed
+        metrics.0.is_primary: true
+        metrics.0.variants.0.variant_name: Control
+        metrics.0.variants.0.is_control: true
+        metrics.0.variants.0.sample_size: 400
+        metrics.0.variants.0.conversions: 40
+        metrics.0.variants.1.variant_name: Treatment
+        metrics.0.variants.1.is_control: false
+        metrics.0.variants.1.sample_size: 400
+        metrics.0.variants.1.conversions: 64
+        metrics.0.variants.1.statistical_test_used: fisher_exact
+        metrics.0.variants.1.is_significant: true
+        summary.total_users: 800
+        summary.total_conversions: 104
+        summary.recommendation: SHIP_VARIANT
+        srm.warning: false
+        srm.p_value: 1.0
+      computed:
+        metrics.0.variants.1.p_value:
+          oracle:
+            name: fisher_exact_p
+            args: {control_users: 400, control_converted: 40, treatment_users: 400, treatment_converted: 64}
+          rel: 1.0e-9
+        metrics.0.variants.1.adjusted_p_value:
+          oracle:
+            name: fisher_exact_p
+            args: {control_users: 400, control_converted: 40, treatment_users: 400, treatment_converted: 64}
+          rel: 1.0e-9
+    fail: the results API shows other counts than were sent, or a p-value that is not Fisher's exact test's for them

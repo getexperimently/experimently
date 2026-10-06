@@ -105,8 +105,6 @@ reason = "reported errors roll a flag back, seen on the dashboard's safety page;
 [pages."guides/user-guide.md"]
 class = "journey"
 journey = "experiment-results"
-pending = true
-planned = "D3b"
 reason = "running an experiment and reading its results page after seeded traffic: counts, p-value and the sample-ratio check"
 
 [pages."guides/dashboard-and-api.md"]
@@ -277,8 +275,6 @@ reason = "an API reference for the rbac module; its shell blocks are not yet enr
 [pages."security/api-keys.md"]
 class = "journey"
 journey = "api-key-first-assignment"
-pending = true
-planned = "D3b"
 reason = "create an API key in the dashboard and use it for a first assignment; its API steps run in Doc Examples"
 
 [pages."auth/sso.md"]
@@ -330,8 +326,6 @@ reason = "its API steps run on a stack in Doc Examples"
 [pages."guides/experiment-wizard.md"]
 class = "journey"
 journey = "experiment-wizard"
-pending = true
-planned = "D3b"
 reason = "the wizard's five steps to a draft, then started; its API steps run in Doc Examples"
 
 [pages."api/interaction-detection.md"]

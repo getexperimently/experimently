@@ -585,7 +585,7 @@ PLANTS = [
         ),
         {},
         "step 3 (environment): a step with snapshot: false needs a structural"
-        " expect (url, status, visible, text, number)",
+        " expect (url, status, visible, text, number, cells)",
         id="snapshot-false-with-only-aria",
     ),
     pytest.param(

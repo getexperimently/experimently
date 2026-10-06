@@ -1,0 +1,281 @@
+# A first API key, made in the dashboard and used as an application uses it
+# (#939; QA plan D3b): "API Key Management" walked from Admin → API Keys →
+# Create API Key to an assignment, an event and a flag evaluation with the
+# key, its Last used time on the keys page, and its deletion, after which the
+# key is refused.
+#
+# The key is shown once, so the screen that shows it keeps no screenshot and
+# no ARIA snapshot, the journey is not recorded, and the key is kept (keep)
+# without being written anywhere: the runner's redactor takes it out of every
+# file, and the end-of-run scan fails the run if it is found in one.
+guide: security/api-keys.md
+stack: compose-dev
+profile: core
+video: false
+written: 2026-10-06
+steps:
+  - id: sign-in-page
+    doc: creating-an-api-key
+    do:
+      goto: /login
+    expect:
+      status: 200
+      aria: |
+        - main:
+          - heading "Sign in" [level=1]
+          - textbox "Email"
+          - textbox "Password"
+          - button "Sign in"
+    fail: the dashboard does not answer, or its sign-in page is not there
+  - id: email
+    doc: creating-an-api-key
+    do:
+      fill:
+        label: Email
+        value: admin@demo.com
+        quote: false
+        reason: the sign-in form's field; the guide's examples use the demo administrator
+    expect:
+      aria: |
+        - textbox "Email":
+          - text: admin@demo.com
+    fail: there is no Email field to fill
+  - id: password
+    doc: creating-an-api-key
+    do:
+      fill:
+        label: Password
+        value: Demo1234!
+        quote: false
+        reason: the sign-in form's field; the demo administrator's documented password
+    expect:
+      aria: |
+        - textbox "Password"
+    fail: there is no Password field to fill
+  - id: sign-in
+    doc: creating-an-api-key
+    do:
+      click:
+        role: button
+        name: Sign in
+        quote: false
+        reason: the sign-in form's button
+    expect:
+      url: /experiments
+      aria: |
+        - banner:
+          - navigation "Primary":
+            - link "Admin"
+    fail: the demo administrator cannot sign in, or is not offered Admin
+  - id: admin
+    doc: scopes
+    do:
+      click:
+        role: link
+        name: Admin
+    expect:
+      url: /admin
+      aria: |
+        - main:
+          - complementary:
+            - navigation:
+              - link "API Keys"
+    fail: Admin does not open the admin pages with API Keys among them
+  - id: api-keys
+    doc: scopes
+    do:
+      click:
+        role: link
+        name: API Keys
+    expect:
+      url: /admin/api-keys
+      aria: |
+        - main:
+          - main:
+            - heading "API Keys" [level=1]
+            - paragraph:
+              - text: SDKs authenticate with
+              - code: X-API-Key
+              - text: . The key is shown once when created.
+            - button "Create API Key"
+    fail: the API Keys page does not answer, or offers no Create API Key
+  - id: create-form
+    doc: scopes
+    do:
+      click:
+        role: button
+        name: Create API Key
+    expect:
+      aria: |
+        - dialog:
+          - heading "Create API Key" [level=2]
+          - textbox "Name *"
+          - checkbox "Server-side local evaluation (sdk:ruleset)" [checked=false]
+          - button "Create Key" [disabled]
+    fail: Create API Key does not ask for a name, with the sdk:ruleset scope offered unticked
+  - id: name
+    doc: creating-an-api-key
+    do:
+      fill:
+        label: Name *
+        value: Docs journey first key
+        quote: false
+        reason: the field is labelled "Name *" (required); the guide says the name is required
+    expect:
+      aria: |
+        - dialog:
+          - textbox "Name *":
+            - text: Docs journey first key
+    fail: the key's name cannot be typed
+  - id: create-key
+    doc: creating-an-api-key
+    do:
+      click:
+        role: button
+        name: Create Key
+        quote: false
+        reason: the dialog's button; the guide says Admin → API Keys → Create API Key
+    expect:
+      text: Copy this key — it won't be shown again
+    snapshot: false
+    snapshot_reason: the screen shows the new key, which no file of the run may hold
+    fail: the key is not created, or the page does not say it is shown only once
+  - id: keep-key
+    doc: creating-an-api-key
+    do:
+      keep:
+        secret: sdk-key
+        role: code
+        prefix: eptk_
+    fail: the page does not show exactly one key starting eptk_
+  - id: dismiss
+    doc: listing-keys
+    do:
+      click:
+        role: button
+        name: Dismiss
+        quote: false
+        reason: the banner's button; the guide says the key is shown only once
+    expect:
+      aria: |
+        - main:
+          - main:
+            - table:
+              - rowgroup:
+                - row "Name Scopes Created Last used Expires Status Actions"
+              - rowgroup:
+                - row /^Docs journey first key — .* — — active Delete$/
+    fail: the key is not listed, with no scopes, never used, active
+  - id: evaluate
+    doc: using-an-api-key
+    do:
+      api:
+        method: GET
+        path: /api/v1/feature-flags/evaluate/beta_features?user_id=user-123&context=%7B%22plan%22%3A%22pro%22%7D
+        as: anonymous
+        key: sdk-key
+    expect:
+      status: 200
+      json:
+        key: beta_features
+        enabled: true
+    fail: the key is refused for a flag evaluation, or beta_features is not on for user-123
+  - id: assign
+    doc: what-api-keys-are-used-for
+    do:
+      api:
+        method: POST
+        path: /api/v1/tracking/assign
+        as: anonymous
+        key: sdk-key
+        body:
+          experiment_key: checkout_button_color
+          user_id: docs-journey-first-user
+    expect:
+      status: 200
+      json:
+        experiment_key: checkout_button_color
+        user_id: docs-journey-first-user
+        assigned: true
+    fail: the key cannot assign a first user to the demo data's checkout_button_color experiment
+  - id: track
+    doc: using-an-api-key
+    do:
+      api:
+        method: POST
+        path: /api/v1/tracking/track
+        as: anonymous
+        key: sdk-key
+        body:
+          user_id: docs-journey-first-user
+          experiment_key: checkout_button_color
+          event_type: purchase
+          value: 49.99
+    expect:
+      status: 200
+      json:
+        event_type: purchase
+        value: 49.99
+    fail: the key cannot track the user's purchase
+  - id: last-used
+    doc: listing-keys
+    do:
+      goto: /admin/api-keys
+    expect:
+      status: 200
+      aria: |
+        - main:
+          - main:
+            - table:
+              - rowgroup:
+                - row /^Docs journey first key /:
+                  - cell "Docs journey first key"
+                  - cell "—"
+                  - cell /\d{4}/
+                  - cell /\d{4}/
+                  - cell "—"
+                  - cell "active"
+    fail: the keys page does not show when the key was last used
+  - id: delete
+    doc: deleting-a-key
+    do:
+      click:
+        role: button
+        name: Delete
+    expect:
+      aria: |
+        - alertdialog "Delete API key Docs journey first key":
+          - button "Cancel"
+          - button "Delete key"
+    fail: Delete does not ask to confirm, naming the key
+  - id: confirm-delete
+    doc: deleting-a-key
+    do:
+      click:
+        role: button
+        name: Delete key
+        quote: false
+        reason: the confirmation's button; the guide says the key is deleted permanently
+    expect:
+      aria: |
+        - main:
+          - main:
+            - paragraph: No API keys found. Create one to get started.
+    fail: the key is not deleted, or is still listed
+  - id: refused
+    doc: deleting-a-key
+    do:
+      api:
+        method: POST
+        path: /api/v1/tracking/track
+        as: anonymous
+        key: sdk-key
+        body:
+          user_id: user-123
+          experiment_key: checkout_button_color
+          event_type: purchase
+    expect:
+      status: 401
+      json:
+        detail: Invalid API Key
+    fail: the deleted key is still accepted

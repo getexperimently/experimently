@@ -1,0 +1,216 @@
+"""A known population of users, assigned and converted through the tracking API.
+
+A ``traffic`` step sends an experiment the users a journey chooses, as an
+application using an SDK would: each user is assigned with
+``POST /api/v1/tracking/assign`` and, for the users that convert, the metric's
+event is sent with ``POST /api/v1/tracking/track``, both with an API key
+(``X-API-Key``). The journey says how many users each variant gets and how many
+of them convert, so the numbers the results must show are known before the run.
+
+Which variant a user lands in is not left to chance. Assignment is a
+deterministic hash of the user and the experiment into a bucket in [0, 100),
+the variants taking the buckets in their order, each as many as its traffic
+allocation (``docs/architecture/technical-guide.md``, "Assignment Algorithm").
+The hash is the cross-SDK one (``docs/sdk/javascript.md``, "Hash utilities";
+pinned by ``tests/sdk-contract/golden-vectors.json``): the first four bytes of
+``MD5("{user_id}:{experiment_key}")`` read as a little-endian unsigned integer
+and divided by 2^32, times 100, its integer part the bucket. ``choose`` walks the user ids
+``<prefix>-00001``, ``<prefix>-00002``, ... and keeps, per variant, the first
+ones the hash puts there until each variant has its count. Every assignment the
+API answers is then checked against that: a user answered with another variant,
+or not assigned, fails the step. So the counts sent are exactly the counts
+chosen, and a disagreement between the API's assignment and the documented hash
+is a failure of its own, not a skewed count.
+
+This module computes the hash itself (``hashlib``); it imports nothing from the
+product, so an assignment that drifts from the contract is caught rather than
+copied. Nothing here imports Playwright: the requests go through a ``fetch``
+the runner passes in, and the unit job tests the rest with a fake one.
+
+What a step writes (``NN-<step>.traffic.json``) holds counts and the first few
+problems only; never the API key.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import struct
+from dataclasses import dataclass, field
+from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
+
+#: 2^32, the divisor the SDK contract gives.
+HASH_DIVISOR = 4294967296
+#: How many candidate user ids ``choose`` tries per user it needs before giving up.
+CANDIDATES_PER_USER = 50
+#: How many problems a step lists; it stops sending once it has this many.
+PROBLEMS_KEPT = 10
+
+ASSIGN_PATH = "/api/v1/tracking/assign"
+TRACK_PATH = "/api/v1/tracking/track"
+
+#: ``fetch(method, path, body)``: the answer's status and its JSON (None if none).
+Fetch = Callable[[str, str, Optional[Dict[str, Any]]], Tuple[int, Any]]
+
+
+class TrafficError(Exception):
+    """The population could not be sent as chosen; the message says why."""
+
+
+def bucket(user_id: str, experiment_key: str) -> int:
+    """The user's bucket in [0, 100) under the experiment's key (the SDK contract)."""
+    digest = hashlib.md5(
+        f"{user_id}:{experiment_key}".encode("utf-8"), usedforsecurity=False
+    ).digest()
+    (number,) = struct.unpack_from("<I", digest[:4])
+    return int(number / HASH_DIVISOR * 100)
+
+
+def variant_for(
+    user_id: str, experiment_key: str, allocations: Sequence[Tuple[str, int]]
+) -> str:
+    """The variant the documented hash gives *user_id*.
+
+    *allocations* is ``(variant name, traffic allocation in percent)`` in the
+    experiment's order; a tail left when they add up to less than 100 goes to
+    the last variant, as the server does.
+    """
+    if not allocations:
+        raise TrafficError("the experiment has no variants")
+    position = bucket(user_id, experiment_key)
+    cumulative = 0
+    for name, allocation in allocations:
+        cumulative += allocation
+        if position < cumulative:
+            return name
+    return allocations[-1][0]
+
+
+def user_id(prefix: str, number: int) -> str:
+    return f"{prefix}-{number:05d}"
+
+
+def choose(
+    experiment_key: str,
+    allocations: Sequence[Tuple[str, int]],
+    counts: Mapping[str, int],
+    prefix: str,
+) -> Dict[str, List[str]]:
+    """Per variant, the first ``counts[variant]`` user ids the hash puts there.
+
+    TrafficError when a variant of *counts* is not one of the experiment's, or
+    when ``CANDIDATES_PER_USER`` candidates per user needed are not enough (a
+    variant with a tiny allocation).
+    """
+    names = [name for name, _ in allocations]
+    unknown = sorted(set(counts) - set(names))
+    if unknown:
+        raise TrafficError(
+            f"the experiment has no variant {unknown[0]!r} (it has {', '.join(names)})"
+        )
+    chosen: Dict[str, List[str]] = {name: [] for name in counts}
+    needed = sum(counts.values())
+    limit = max(needed, 1) * CANDIDATES_PER_USER
+    number = 0
+    while any(len(chosen[name]) < counts[name] for name in counts):
+        number += 1
+        if number > limit:
+            short = [n for n in counts if len(chosen[n]) < counts[n]]
+            raise TrafficError(
+                f"{limit} candidate users gave {short[0]!r} only"
+                f" {len(chosen[short[0]])} of {counts[short[0]]}"
+            )
+        candidate = user_id(prefix, number)
+        name = variant_for(candidate, experiment_key, allocations)
+        if name in chosen and len(chosen[name]) < counts[name]:
+            chosen[name].append(candidate)
+    return chosen
+
+
+@dataclass
+class Outcome:
+    """What was sent and what came back, in counts, for the step's file."""
+
+    experiment_key: str
+    prefix: str
+    variants: Dict[str, Dict[str, int]] = field(default_factory=dict)
+    requests: int = 0
+    problems: List[str] = field(default_factory=list)
+
+    def record(self) -> Dict[str, Any]:
+        return {
+            "experiment_key": self.experiment_key,
+            "users": f"{self.prefix}-NNNNN",
+            "variants": self.variants,
+            "requests": self.requests,
+            "problems": self.problems,
+        }
+
+
+def send(
+    fetch: Fetch,
+    *,
+    experiment_key: str,
+    event: str,
+    chosen: Mapping[str, Sequence[str]],
+    converted: Mapping[str, int],
+    prefix: str,
+) -> Outcome:
+    """Assign every chosen user, then track *event* for each variant's first converters.
+
+    Each assignment must answer 200 with ``assigned: true`` and the variant the
+    user was chosen for; each track must answer 200. Sending stops once
+    ``PROBLEMS_KEPT`` problems are found, and no event is tracked unless every
+    assignment was as chosen.
+    """
+    outcome = Outcome(experiment_key=experiment_key, prefix=prefix)
+
+    def problem(text: str) -> bool:
+        outcome.problems.append(text)
+        return len(outcome.problems) >= PROBLEMS_KEPT
+
+    stop = False
+    for name, users in chosen.items():
+        counted = {"assigned": 0, "as_chosen": 0, "converted": 0}
+        outcome.variants[name] = counted
+        for user in users:
+            if stop:
+                break
+            status, answer = fetch(
+                "POST", ASSIGN_PATH, {"experiment_key": experiment_key, "user_id": user}
+            )
+            outcome.requests += 1
+            if status != 200 or not isinstance(answer, dict):
+                stop = problem(f"assigning {user} answered {status}")
+                continue
+            counted["assigned"] += 1
+            if answer.get("assigned") is not True:
+                stop = problem(
+                    f"{user} was not assigned (reason {answer.get('reason')!r})"
+                )
+            elif answer.get("variant_name") != name:
+                stop = problem(
+                    f"{user} was assigned {answer.get('variant_name')!r}; the"
+                    f" documented hash puts it in {name!r}"
+                )
+            else:
+                counted["as_chosen"] += 1
+    if outcome.problems:
+        return outcome
+    for name, users in chosen.items():
+        for user in users[: converted.get(name, 0)]:
+            status, _ = fetch(
+                "POST",
+                TRACK_PATH,
+                {
+                    "event_type": event,
+                    "user_id": user,
+                    "experiment_key": experiment_key,
+                },
+            )
+            outcome.requests += 1
+            if status != 200:
+                if problem(f"tracking {event} for {user} answered {status}"):
+                    return outcome
+                continue
+            outcome.variants[name]["converted"] += 1
+    return outcome
