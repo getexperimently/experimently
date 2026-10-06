@@ -20,6 +20,17 @@ jest.mock('@/services/api', () => ({
 const mockRouter = makeRouter({ pathname: '/feature-flags/new' });
 jest.mock('next/router', () => ({ useRouter: () => mockRouter }));
 
+// Unset by default (no session, as before #917): the page shows the form.
+const mockAuth = jest.fn();
+jest.mock('@/contexts/AuthContext', () => ({ useOptionalAuth: () => mockAuth() }));
+
+function signIn(role: string, is_superuser = false) {
+  mockAuth.mockReturnValue({
+    status: 'authenticated',
+    user: { id: 'u1', email: 'u@example.com', username: 'u', role, is_superuser },
+  });
+}
+
 jest.mock('next/head', () => {
   const Head = ({ children }: { children: React.ReactNode }) => <>{children}</>;
   Head.displayName = 'MockHead';
@@ -81,6 +92,7 @@ function submit() {
 
 beforeEach(() => {
   mockedApiFetch.mockReset();
+  mockAuth.mockReset();
   mockRouter.push.mockClear();
 });
 
@@ -171,6 +183,41 @@ describe('NewFeatureFlagPage', () => {
   });
 });
 
+describe('who may create flags (#917)', () => {
+  it.each(['ANALYST', 'VIEWER'])('%s gets a notice instead of the form, and nothing is sent', (role) => {
+    signIn(role);
+    const posts = install();
+    render(<NewFeatureFlagPage />);
+
+    expect(screen.getByTestId('flag-new-role-note')).toHaveTextContent(
+      'Your role can view feature flags but not create them. Feature flags are created and changed by the ADMIN and DEVELOPER roles.',
+    );
+    expect(screen.getByRole('link', { name: 'Back to feature flags' })).toHaveAttribute('href', '/feature-flags');
+    expect(screen.queryByTestId('submit-flag')).toBeNull();
+    expect(screen.queryByTestId('flag-name-input')).toBeNull();
+    expect(screen.queryByTestId('flag-key-input')).toBeNull();
+    expect(screen.queryByTestId('flag-targeting-section')).toBeNull();
+    expect(screen.queryByTestId('rollout-percentage')).toBeNull();
+    expect(document.querySelector('form')).toBeNull();
+    expect(posts).toEqual([]);
+    expect(mockedApiFetch).not.toHaveBeenCalled();
+    expect(mockRouter.push).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['ADMIN', false],
+    ['DEVELOPER', false],
+    ['VIEWER', true],
+  ])('%s (superuser: %s) gets the form', (role, is_superuser) => {
+    signIn(role, is_superuser);
+    install();
+    render(<NewFeatureFlagPage />);
+    expect(screen.getByTestId('submit-flag')).toBeInTheDocument();
+    expect(screen.getByTestId('flag-name-input')).toBeInTheDocument();
+    expect(screen.queryByTestId('flag-new-role-note')).toBeNull();
+  });
+});
+
 describe('NewFeatureFlagPage accessibility (axe-core in jsdom; colour contrast is not computable here)', () => {
   const axeOptions: axe.RunOptions = { rules: { 'color-contrast': { enabled: false } } };
 
@@ -209,6 +256,14 @@ describe('NewFeatureFlagPage accessibility (axe-core in jsdom; colour contrast i
     fillName();
     submit();
     await screen.findByText('Failed to create feature flag');
+    expect(await violations(container)).toEqual([]);
+  });
+
+  it('has no violations with the role notice shown', async () => {
+    signIn('VIEWER');
+    install();
+    const { container } = render(<NewFeatureFlagPage />);
+    screen.getByTestId('flag-new-role-note');
     expect(await violations(container)).toEqual([]);
   });
 });

@@ -14,6 +14,8 @@ import {
 import { targetingToSend } from '@/utils/flagTargeting';
 import { CreateFeatureFlagRequest, FeatureFlagsService } from '@/services/featureFlags';
 import { PageTitle } from '@/components/PageTitle';
+import { useOptionalAuth } from '@/contexts/AuthContext';
+import { FLAG_ROLE_NOTE, canChangeFeatureFlags } from '@/utils/experimentPermissions';
 
 function generateKey(name: string): string {
   return name
@@ -25,6 +27,7 @@ function generateKey(name: string): string {
 
 export default function NewFeatureFlagPage() {
   const router = useRouter();
+  const auth = useOptionalAuth();
   const [name, setName] = useState('');
   const [key, setKey] = useState('');
   const [keyEdited, setKeyEdited] = useState(false);
@@ -87,6 +90,26 @@ export default function NewFeatureFlagPage() {
       setIsSubmitting(false);
     }
   };
+
+  // The page asks the API's own create question (#917): an ANALYST or VIEWER
+  // sees a notice instead of a form that could only earn a 403, and no
+  // request can be sent from it.
+  if (!canChangeFeatureFlags(auth?.user)) {
+    return (
+      <div className="flex-1 bg-slate-50">
+        <PageTitle title="New Feature Flag" />
+        <div className="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+          <h1 className="text-2xl font-bold text-slate-900">New Feature Flag</h1>
+          <p className="mt-4 text-sm text-slate-700" data-testid="flag-new-role-note">
+            Your role can view feature flags but not create them. {FLAG_ROLE_NOTE}
+          </p>
+          <Link href="/feature-flags" className="mt-4 inline-block text-sm text-blue-700 underline">
+            Back to feature flags
+          </Link>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex-1 bg-slate-50">

@@ -1,5 +1,6 @@
 import { test, expect, TEST_USERS, type UserRole } from "./fixtures/auth.fixture";
 import { ExperimentsPage } from "./pages/experiments.page";
+import { FeatureFlagsPage } from "./pages/feature-flags.page";
 
 /**
  * Journey 4 — role-based access control.
@@ -223,6 +224,71 @@ test.describe("Journey: RBAC", () => {
         await expect(page.getByTestId("results-dashboard")).toBeVisible({ timeout: 20_000 });
         await page.waitForLoadState("networkidle");
         expect(refused, "no experiments/results request is refused").toEqual([]);
+      } finally {
+        await page.close();
+      }
+    });
+  }
+
+  // Feature flags follow the role the same way (#917). ANALYST and VIEWER hold
+  // FEATURE_FLAG READ and LIST only, so the list offers them no row switch and
+  // no "+ New Flag", /feature-flags/new shows a notice instead of a form that
+  // could only earn a 403, and the flag page offers no switch, no slider and
+  // no Save. Each "absent" check sits beside a "present" one on the same page,
+  // so a page that failed to render cannot pass it.
+  for (const role of ["analyst", "viewer"] as const) {
+    test(`${role} reads feature flags and is offered no change`, async ({ sessions }) => {
+      const page = await (await sessions(role)).newPage();
+      const flags = new FeatureFlagsPage(page);
+      // Seeded by seed_demo_data.py; the flag journey toggles beta_features,
+      // never this one, and no journey deletes a seeded flag.
+      const seededKey = "new_dashboard_ui";
+      let posts = 0;
+      page.on("request", (request) => {
+        const { pathname } = new URL(request.url());
+        if (request.method() === "POST" && /\/api\/v1\/feature-flags\/?$/.test(pathname)) posts += 1;
+      });
+      try {
+        await flags.goto();
+        const listNote = page.getByTestId("flags-role-note");
+        await expect(listNote).toBeVisible({ timeout: 15_000 });
+        await expect(listNote).toHaveText(
+          "Feature flags are created and changed by the ADMIN and DEVELOPER roles.",
+        );
+        await expect(flags.listError).toHaveCount(0);
+        await expect(flags.flagList).toBeVisible({ timeout: 15_000 });
+        expect(await flags.flagRows.count()).toBeGreaterThan(0);
+        const seededRow = flags.getFlagRow(seededKey);
+        await expect(seededRow).toBeVisible();
+        await expect(seededRow.getByTestId("flag-status-pill")).toHaveText(/^(On|Off)$/);
+        await expect(flags.rowToggle(seededKey)).toHaveCount(0);
+        await expect(flags.toggleSwitch).toHaveCount(0);
+        await expect(flags.createButton).toHaveCount(0);
+
+        await flags.gotoNew();
+        const newNote = page.getByTestId("flag-new-role-note");
+        await expect(newNote).toBeVisible({ timeout: 15_000 });
+        await expect(newNote).toHaveText(
+          "Your role can view feature flags but not create them. Feature flags are created and changed by the ADMIN and DEVELOPER roles.",
+        );
+        await expect(page.getByRole("link", { name: "Back to feature flags" })).toBeVisible();
+        await expect(flags.submitButton).toHaveCount(0);
+        await expect(flags.nameInput).toHaveCount(0);
+        expect(posts, "no create request was sent").toBe(0);
+
+        await flags.goto();
+        await flags.getFlagRow(seededKey).getByTestId("flag-link").click();
+        await expect(flags.detail).toBeVisible({ timeout: 15_000 });
+        await expect(flags.detailKey).toHaveText(seededKey);
+        await expect(page.getByTestId("flag-role-note")).toHaveText(
+          "Feature flags are created and changed by the ADMIN and DEVELOPER roles.",
+        );
+        await expect(flags.detailToggle).toHaveCount(0);
+        await expect(flags.rolloutPercentageInput).toBeDisabled();
+        await expect(flags.saveButton).toHaveCount(0);
+        await expect(page.getByTestId("targeting-replace")).toHaveCount(0);
+        // Reading stays: the safety check still resolves for this role.
+        await expect(flags.safetyStatus).toBeVisible({ timeout: 20_000 });
       } finally {
         await page.close();
       }

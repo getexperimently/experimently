@@ -14,6 +14,17 @@ jest.mock('@/services/api', () => ({
 const mockRouter = makeRouter({ pathname: '/feature-flags/[id]', query: { id: 'flag-1' } });
 jest.mock('next/router', () => ({ useRouter: () => mockRouter }));
 
+// Unset by default (no session, as before #917): the page keeps every control.
+const mockAuth = jest.fn();
+jest.mock('@/contexts/AuthContext', () => ({ useOptionalAuth: () => mockAuth() }));
+
+function signIn(role: string, is_superuser = false) {
+  mockAuth.mockReturnValue({
+    status: 'authenticated',
+    user: { id: 'u1', email: 'u@example.com', username: 'u', role, is_superuser },
+  });
+}
+
 jest.mock('next/head', () => {
   const Head = ({ children }: { children: React.ReactNode }) => <>{children}</>;
   Head.displayName = 'MockHead';
@@ -105,6 +116,7 @@ const happyRoutes = (overrides: { flag?: FeatureFlag; schedules?: RolloutSchedul
 
 beforeEach(() => {
   mockedApiFetch.mockReset();
+  mockAuth.mockReset();
 });
 
 describe('pickSchedule', () => {
@@ -375,5 +387,85 @@ describe('FeatureFlagDetailPage', () => {
     ]);
     render(<FeatureFlagDetailPage />);
     expect(await screen.findByTestId('flag-error')).toHaveTextContent("Can't reach the API");
+  });
+});
+
+describe('who may change a flag (#917)', () => {
+  /** A shape the builder cannot show, so the page offers "Replace rules" to roles that may change it. */
+  const NATIVE_RULES = {
+    rules: [{ id: 'r-1', conditions: [{ attribute: 'country', operator: 'equals', value: 'DE' }] }],
+  } as unknown as FeatureFlag['rules'];
+
+  const writes = () => mockedApiFetch.mock.calls.filter(([, o]) => o?.method && o.method !== 'GET');
+
+  it.each(['ANALYST', 'VIEWER'])(
+    '%s reads the flag with no switch, a read-only builder, a disabled slider and no Save',
+    async (role) => {
+      signIn(role);
+      install(happyRoutes());
+      render(<FeatureFlagDetailPage />);
+      await screen.findByTestId('flag-detail');
+
+      // The state is still shown, in the pill and in words; only the switch is gone.
+      expect(screen.getByTestId('flag-status')).toHaveTextContent('Off');
+      expect(screen.getByText('Not serving')).toBeInTheDocument();
+      expect(screen.queryByTestId('flag-toggle')).toBeNull();
+      expect(screen.queryByRole('switch')).toBeNull();
+      expect(screen.getByTestId('flag-role-note')).toHaveTextContent(
+        'Feature flags are created and changed by the ADMIN and DEVELOPER roles.',
+      );
+
+      // The builder shows the stored rules and takes no change.
+      expect(screen.getByDisplayValue('US')).toBeDisabled();
+      expect(screen.queryByRole('button', { name: '+ Add Group' })).toBeNull();
+      expect(screen.queryByLabelText('Remove condition')).toBeNull();
+
+      expect(screen.getByTestId('rollout-value')).toHaveTextContent('25%');
+      expect(screen.getByTestId('rollout-percentage')).toBeDisabled();
+      expect(screen.queryByTestId('save-flag')).toBeNull();
+
+      // Reading stays: the schedule and the safety check load, and Re-check is offered.
+      expect(await screen.findByTestId('rollout-schedule-name')).toHaveTextContent('Gradual checkout rollout');
+      expect(await screen.findByTestId('safety-status')).toHaveTextContent('Healthy');
+      expect(screen.getByTestId('safety-recheck')).toBeEnabled();
+      expect(writes()).toEqual([]);
+    },
+  );
+
+  it.each(['ANALYST', 'VIEWER'])('%s sees stored rules the builder cannot show, without "Replace rules"', async (role) => {
+    signIn(role);
+    install(happyRoutes({ flag: flag({ rules: NATIVE_RULES }) }));
+    render(<FeatureFlagDetailPage />);
+    await screen.findByTestId('flag-detail');
+    const section = screen.getByTestId('flag-targeting-section');
+    expect(within(section).getByTestId('targeting-raw')).toBeInTheDocument();
+    expect(within(section).getByTestId('targeting-raw-json')).toHaveTextContent('"DE"');
+    expect(within(section).queryByTestId('targeting-replace')).toBeNull();
+    expect(screen.queryByTestId('save-flag')).toBeNull();
+  });
+
+  it.each([
+    ['ADMIN', false],
+    ['DEVELOPER', false],
+    ['VIEWER', true],
+  ])('%s (superuser: %s) keeps every control', async (role, is_superuser) => {
+    signIn(role, is_superuser);
+    install(happyRoutes());
+    render(<FeatureFlagDetailPage />);
+    await screen.findByTestId('flag-detail');
+    expect(screen.getByTestId('flag-toggle')).toHaveAttribute('aria-checked', 'false');
+    expect(screen.getByDisplayValue('US')).toBeEnabled();
+    expect(screen.getByRole('button', { name: '+ Add Group' })).toBeInTheDocument();
+    expect(screen.getByTestId('rollout-percentage')).toBeEnabled();
+    expect(screen.getByTestId('save-flag')).toBeInTheDocument();
+    expect(screen.queryByTestId('flag-role-note')).toBeNull();
+  });
+
+  it('an ADMIN still gets "Replace rules" over rules the builder cannot show', async () => {
+    signIn('ADMIN');
+    install(happyRoutes({ flag: flag({ rules: NATIVE_RULES }) }));
+    render(<FeatureFlagDetailPage />);
+    await screen.findByTestId('flag-detail');
+    expect(screen.getByTestId('targeting-replace')).toBeInTheDocument();
   });
 });

@@ -49,3 +49,38 @@ export function canChangeExperiment(
   if (user.is_superuser) return true;
   return ROLES_THAT_CAN_CHANGE.includes(user.role as 'ADMIN' | 'DEVELOPER');
 }
+
+/**
+ * Whether the API would accept a change to a feature flag from this user
+ * (#917): create, turn on or off, and update, including its targeting rules
+ * and rollout percentage.
+ *
+ * Mirrors `can_act_on_feature_flag`: a superuser is accepted before the role
+ * table is read; otherwise the role must hold FEATURE_FLAG CREATE, UPDATE or
+ * DELETE, which exactly the same roles hold -- ADMIN and DEVELOPER -- so one
+ * function answers all three questions. Who created the flag is not part of
+ * the question (access to a flag is by role, not ownership). ANALYST and
+ * VIEWER read any flag and change none.
+ *
+ * Shared by the flag list ("+ New Flag" and the row switches),
+ * `/feature-flags/new` (a notice instead of the form) and the flag page (the
+ * switch, the rule builder, the rollout slider and "Save Changes"), so the
+ * three cannot disagree. `backend/tests/unit/core/test_dashboard_experiment_roles.py`
+ * keeps the role list here equal to `permissions.py`.
+ */
+const FLAG_ROLES_THAT_CAN_CHANGE = ['ADMIN', 'DEVELOPER'] as const;
+
+/** Shown by the three flag pages in place of the controls the role lacks. */
+export const FLAG_ROLE_NOTE = 'Feature flags are created and changed by the ADMIN and DEVELOPER roles.';
+
+export function canChangeFeatureFlags(
+  user: { role?: string | null; is_superuser?: boolean } | null | undefined,
+): boolean {
+  // No session yet: keep the controls rather than flickering them in; the
+  // API still decides. In the dashboard `RequireAuth` renders a flag page only
+  // once the user is resolved, so this branch is reached only by a page
+  // mounted outside an AuthProvider.
+  if (!user) return true;
+  if (user.is_superuser) return true;
+  return FLAG_ROLES_THAT_CAN_CHANGE.includes(user.role as 'ADMIN' | 'DEVELOPER');
+}
