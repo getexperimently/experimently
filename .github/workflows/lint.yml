@@ -1,11 +1,13 @@
 name: Lint
 
 # One fast job: everything that reads the tree without running it.
-#   ruff check / ruff format --check   backend/ modules/ scripts/  (replaces black + isort + flake8)
+#   ruff check / ruff format --check   backend/ modules/ scripts/ tests/acceptance/
+#                                      (replaces black + isort + flake8)
 #   lint-imports                       the core/modules import boundary ([tool.importlinter]
 #                                      in pyproject.toml, backend/lambda/.importlinter)
 #   reuse lint                         every file carries a licence (REUSE.toml, LICENSES/)
-#   check_requirements_lock.py         backend/requirements/runtime.lock matches runtime.txt
+#   check_requirements_lock.py         backend/requirements/runtime.lock matches runtime.txt,
+#                                      and the requirements files share their pins
 #   eslint + tsc                       frontend/
 #   hadolint                           the four Dockerfiles
 #   actionlint                         .github/workflows
@@ -50,12 +52,13 @@ jobs:
       - name: Install ruff, import-linter, reuse
         run: pip install "ruff==${RUFF_VERSION}" "import-linter==${IMPORT_LINTER_VERSION}" "reuse==${REUSE_VERSION}"
 
-      # Configuration lives in [tool.ruff] in pyproject.toml.
+      # Configuration lives in [tool.ruff] in pyproject.toml; the docs-journey
+      # runner adds one rule of its own in tests/acceptance/docs/ruff.toml.
       - name: ruff check
-        run: ruff check backend/ modules/ scripts/ --output-format=github
+        run: ruff check backend/ modules/ scripts/ tests/acceptance/ --output-format=github
 
       - name: ruff format --check
-        run: ruff format --check backend/ modules/ scripts/
+        run: ruff format --check backend/ modules/ scripts/ tests/acceptance/
 
       # The core/modules boundary, statically: backend.app / backend.lambda
       # never import modules; backend.app never imports backend.tests, sdk,

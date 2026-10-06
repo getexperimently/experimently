@@ -34,10 +34,10 @@ authority — read it rather than this page if the two ever disagree.
 
 ### Python lint and format (`astral-sh/ruff-pre-commit`)
 
-`ruff --fix` and `ruff-format`, both scoped to `^(backend|modules|scripts)/` —
-the same three trees as `make lint` and the `lint` CI job. Scoped to
-`^backend/` the hook used to let a `modules/` or `scripts/` change through and
-the gate then failed on it.
+`ruff --fix` and `ruff-format`, both scoped to
+`^(backend|modules|scripts|tests/acceptance)/` — the same four trees as
+`make lint` and the `lint` CI job. Scoped to `^backend/` the hook used to let a
+`modules/` or `scripts/` change through and the gate then failed on it.
 
 Ruff replaced black, isort and flake8. One tool, one config block
 (`[tool.ruff]` in `pyproject.toml`). `.flake8` does not exist.

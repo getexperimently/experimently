@@ -151,7 +151,7 @@ PRs should be small and focused on a single issue or feature. Large changes shou
     version in CI, pre-commit and the venv. `.flake8` no longer exists; do not
     reintroduce black or isort.
 -   `make format` runs the two fixing commands; `make lint` runs exactly what
-    the `lint` CI job runs. Both scope ruff to `backend/ scripts/ modules/`
+    the `lint` CI job runs. Both scope ruff to `backend/ scripts/ modules/ tests/acceptance/`
 -   Use type hints for all function parameters and return values
 -   Document functions and classes with docstrings (Google style)
 -   Use meaningful variable and function names

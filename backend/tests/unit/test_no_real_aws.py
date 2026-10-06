@@ -119,6 +119,9 @@ _ROOTS = [
     ("tests/sdk-contract", ["-o", "addopts="]),
     ("sdk/python/tests", ["-o", "addopts="]),
     ("sdk/openfeature-python/tests", ["-o", "addopts="]),
+    # The docs-journey runner: its own pytest root (tests/acceptance/docs/
+    # pytest.ini), loading backend/tests/no_real_aws.py from its conftest.
+    ("tests/acceptance/docs", []),
 ]
 
 
