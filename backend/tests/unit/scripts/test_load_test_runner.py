@@ -99,6 +99,11 @@ class _Ok(BaseHTTPRequestHandler):
     """Answers every GET and POST with 200 and `{}`, and counts them."""
 
     protocol_version = "HTTP/1.1"  # keep-alive, so throughput is not connect-bound
+    # TCP_NODELAY. The headers and the body go out as two writes; with Nagle on,
+    # Linux holds the body until the client's delayed ACK, about 40 ms, so in CI
+    # every request took 42 ms and two users made 32 requests per second
+    # against the target's 100. macOS does not show it.
+    disable_nagle_algorithm = True
 
     def _answer(self) -> None:
         length = int(self.headers.get("Content-Length") or 0)
@@ -196,9 +201,10 @@ def test_no_matched_endpoint_fails(stub: _StubServer, tmp_path: Path) -> None:
 
 def test_a_measured_run_passes(stub: _StubServer, tmp_path: Path) -> None:
     # The runner's exit here also depends on the target's latency and rate,
-    # i.e. on wall-clock time, so the best of three runs counts. On a laptop
-    # one run recorded about 8,000 requests in the 3 s (the target needs 300)
-    # at 1-2 ms p99 (the target allows 1,000 ms), so a retry should be rare.
+    # i.e. on wall-clock time, so the best of three runs counts. With the stub's
+    # TCP_NODELAY, runs on macOS and in a Linux container each recorded 8,000 to
+    # 8,800 requests in the 3 s (the target needs 300) at a p99 of 1-2 ms (it
+    # allows 1,000 ms), so a retry should be rare.
     for attempt in range(1, 4):
         code, output = _run(stub, tmp_path / f"attempt-{attempt}", MEASURED)
         if code == 0:
