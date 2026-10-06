@@ -1063,6 +1063,10 @@ def _get_sequential_data(
     """
     Extract control/treatment conversion data for sequential analysis.
 
+    The treatment is the one created first: ``Experiment.variants`` is ordered
+    by ``created_at`` then ``id`` (#929), so an experiment with three or more
+    arms compares the control against the same arm on every call.
+
     Returns (control_successes, control_total, treatment_successes, treatment_total).
     """
     from sqlalchemy import func
