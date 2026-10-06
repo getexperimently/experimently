@@ -82,6 +82,7 @@ nav:
   - Core Concepts: getting-started/concepts.md
   - Architecture Overview: getting-started/architecture.md
   - FAQ: getting-started/faq.md
+  - Getting Started Index: getting-started/README.md
   - Modules & Profiles: getting-started/modules.md
 - Feature Flags:
   - Creating Feature Flags: feature-flags/create.md
