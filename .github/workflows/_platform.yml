@@ -5,9 +5,10 @@ name: Platform
 #
 # Every job that needs a *running* Experimently used to repeat the same twenty
 # lines: pg + redis services, Python, bootstrap, seeds, uvicorn from the
-# repository root, poll /health. This is that sequence, once. Its one caller
-# today is pr-qa-gate.yml's sdk-live-contract; the nightly suites do NOT call it
-# (the `integration` and `smoke` suites below are there for when one does).
+# repository root, poll /health. This is that sequence, once. Its callers
+# are pr-qa-gate.yml's sdk-live-contract and fuzz.yml's three API fuzzing
+# passes; the nightly suites do NOT call it (the `integration` and `smoke`
+# suites below are there for when one does).
 #
 #   jobs:
 #     live-contract:
@@ -48,7 +49,7 @@ on:
         type: string
         default: demo
       suite:
-        description: 'Named suite to run: sdk-live-contract | integration | smoke.'
+        description: 'Named suite to run: sdk-live-contract | integration | smoke | fuzz.'
         type: string
         required: true
       sdks:
@@ -63,6 +64,18 @@ on:
         description: 'Report the check without doing the work (every step but the first is skipped). pr-qa-gate.yml sets it on a docs-only change.'
         type: boolean
         default: false
+      api_env:
+        description: 'Extra environment for the API process alone: one NAME=value per line, exported before uvicorn starts. Empty for none.'
+        type: string
+        default: ''
+      fuzz_pass:
+        description: 'For fuzz: superuser | viewer | sdk, the credentials and operations of the pass (scripts/fuzz_check.py).'
+        type: string
+        default: ''
+      fuzz_seed:
+        description: 'For fuzz: the Schemathesis seed, an integer. (`seed` above is the data seed; this is not.)'
+        type: number
+        default: 0
 
 jobs:
   platform:
@@ -219,6 +232,16 @@ jobs:
             esac
           done
 
+      # Schemathesis in a venv of its own under the runner's temp directory:
+      # installing it next to the backend would move packages the API under
+      # test imports (tests/fuzz/requirements.txt pins it).
+      - name: Install the fuzzer
+        if: ${{ !inputs.skip && inputs.suite == 'fuzz' }}
+        run: |
+          set -euo pipefail
+          python -m venv "$RUNNER_TEMP/fuzz-venv"
+          "$RUNNER_TEMP/fuzz-venv/bin/pip" install --quiet --disable-pip-version-check -r tests/fuzz/requirements.txt
+
       # ── boot ────────────────────────────────────────────────────────────────
       # Everything runs from the repository root: the code imports backend.app.*
       # and `cd backend` breaks those imports.
@@ -249,10 +272,25 @@ jobs:
             echo "::endgroup::"
           done
 
+      # `api_env` is read through `env:` and exported line by line, never
+      # written into the script, and reaches the API process alone (the seeds
+      # above have run). The pid is written before the health loop, which ends
+      # the step with `exit 0`; the fuzz arm reads it.
       - name: Start the API
         if: ${{ !inputs.skip }}
+        env:
+          API_ENV: ${{ inputs.api_env }}
         run: |
+          while IFS= read -r entry; do
+            [ -z "$entry" ] && continue
+            if ! [[ "$entry" =~ ^[A-Z_][A-Z0-9_]*= ]]; then
+              echo "::error::api_env: each line is NAME=value"
+              exit 1
+            fi
+            export "${entry?}"
+          done <<< "$API_ENV"
           nohup python -m uvicorn backend.app.main:app --host 127.0.0.1 --port 8000 > backend.log 2>&1 &
+          echo "$!" > "$RUNNER_TEMP/api.pid"
           for _ in $(seq 1 60); do
             curl -sf http://127.0.0.1:8000/health > /dev/null && exit 0
             sleep 1
@@ -311,6 +349,9 @@ jobs:
         env:
           SUITE: ${{ inputs.suite }}
           SDKS: ${{ inputs.sdks }}
+          FUZZ_PASS: ${{ inputs.fuzz_pass }}
+          FUZZ_SEED: ${{ inputs.fuzz_seed }}
+          PG_CONTAINER: ${{ job.services.postgres.id }}
         run: |
           set -euo pipefail
           case "$SUITE" in
@@ -326,13 +367,95 @@ jobs:
             smoke)
               python -m pytest backend/tests/smoke -p no:cov -q --tb=short
               ;;
+            fuzz)
+              # API fuzzing, one pass (fuzz.yml). This job's log is public, so
+              # it carries counts only: Schemathesis's output and its report
+              # stay in files under $RUNNER_TEMP that nothing prints or
+              # uploads, and the step summary is rendered from
+              # .github/qa-templates/fuzz-green.tmpl or fuzz-red.tmpl by
+              # scripts/fuzz_check.py through scripts/qa_render.py.
+              case "$FUZZ_PASS" in
+                superuser) email=admin@demo.com ;;
+                viewer) email=viewer@demo.com ;;
+                sdk) email= ;;
+                *) echo "::error::fuzz_pass must be superuser, viewer or sdk"; exit 1 ;;
+              esac
+              # Nothing may reach AWS: the API process must carry the dead
+              # endpoint fuzz.yml passes in api_env. -z reads the process's
+              # NUL-separated entries as they are and -x compares whole
+              # entries (`:90` does not match); reading the file directly, no
+              # pipe can end early and fail a check that matched.
+              pid=$(cat "$RUNNER_TEMP/api.pid")
+              if ! grep -qxzF 'AWS_ENDPOINT_URL=http://127.0.0.1:9' "/proc/$pid/environ"; then
+                echo "::error::the API process does not have AWS_ENDPOINT_URL=http://127.0.0.1:9; refusing to fuzz"
+                exit 1
+              fi
+              # The runner prints the database container's log when the job
+              # ends, and a PostgreSQL error quotes its statement, values
+              # included. From here on nothing short of a crash is logged.
+              for setting in log_min_messages log_min_error_statement; do
+                docker exec "$PG_CONTAINER" psql -U postgres -qAtc "ALTER SYSTEM SET $setting = 'panic'"
+              done
+              docker exec "$PG_CONTAINER" psql -U postgres -qAtc "SELECT pg_reload_conf()" > /dev/null
+              for setting in log_min_messages log_min_error_statement; do
+                if [ "$(docker exec "$PG_CONTAINER" psql -U postgres -qAtc "SHOW $setting")" != panic ]; then
+                  echo "::error::the database still logs errors ($setting); refusing to fuzz"
+                  exit 1
+                fi
+              done
+              work="$RUNNER_TEMP/fuzz"
+              mkdir -p "$work/report"
+              if [ "$FUZZ_PASS" = sdk ]; then
+                key=$(cat tests/sdk-contract/live/.api_key)
+                echo "::add-mask::$key"
+                auth=(-H "X-API-Key: $key")
+              else
+                token=$(curl -sf -X POST http://127.0.0.1:8000/api/v1/auth/login \
+                  -H 'Content-Type: application/json' \
+                  -d "{\"email\": \"$email\", \"password\": \"Demo1234!\"}" | jq -er .access_token) || {
+                  echo "::error::could not sign in as the $FUZZ_PASS pass's seeded user"
+                  exit 1
+                }
+                echo "::add-mask::$token"
+                auth=(-H "Authorization: Bearer $token")
+              fi
+              curl -sf http://127.0.0.1:8000/api/v1/openapi.json -o "$work/openapi.json"
+              python scripts/fuzz_check.py args --pass "$FUZZ_PASS" --schema "$work/openapi.json" > "$work/filters.txt"
+              filters=()
+              while IFS= read -r arg; do filters+=("$arg"); done < "$work/filters.txt"
+              # Its exit status is not the verdict (1 on any 5xx, 0 on a run
+              # that reached nothing); fuzz_check.py decides below.
+              set +e
+              (
+                cd "$work" &&
+                  "$RUNNER_TEMP/fuzz-venv/bin/schemathesis" run http://127.0.0.1:8000/api/v1/openapi.json \
+                    --checks not_a_server_error --phases examples,coverage,fuzzing \
+                    --max-examples 5 --workers 1 --rate-limit 4/s \
+                    --seed "$FUZZ_SEED" --generation-deterministic \
+                    --report ndjson --report-dir "$work/report" \
+                    "${filters[@]}" "${auth[@]}"
+              ) > "$work/schemathesis.out" 2>&1
+              set -e
+              verdict=0
+              python scripts/fuzz_check.py evaluate --pass "$FUZZ_PASS" \
+                --schema "$work/openapi.json" --report-dir "$work/report" \
+                --seed "$FUZZ_SEED" --sha "$GITHUB_SHA" \
+                --run-link "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
+                --summary "$work/summary.md" || verdict=$?
+              if [ -f "$work/summary.md" ]; then
+                cat "$work/summary.md" >> "$GITHUB_STEP_SUMMARY"
+              fi
+              exit "$verdict"
+              ;;
             *)
-              echo "::error::unknown suite '$SUITE'. Known: sdk-live-contract, integration, smoke."
+              echo "::error::unknown suite '$SUITE'. Known: sdk-live-contract, integration, smoke, fuzz."
               echo "Add a new suite to the case statement in .github/workflows/_platform.yml."
               exit 1
               ;;
           esac
 
+      # Not for fuzz: the API log of a fuzz run quotes the requests and the
+      # failures, and this job's log is public.
       - name: Backend log (on failure)
-        if: ${{ !inputs.skip && failure() }}
+        if: ${{ !inputs.skip && failure() && inputs.suite != 'fuzz' }}
         run: tail -n 200 backend.log

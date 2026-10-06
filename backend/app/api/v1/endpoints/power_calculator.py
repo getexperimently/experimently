@@ -38,6 +38,18 @@ router = APIRouter()
 _calculator = PowerCalculatorService()
 _planner = AIExperimentPlannerService()
 
+# What the calculation routes (sample size, MDE, runtime, curve) answer, with
+# a 422, when a number in the calculation leaves floating-point range and
+# Python raises OverflowError (#1003). The request schemas' upper bounds keep
+# the integers in range; what is left is the sample size of a ``mean`` or
+# ``ratio`` metric with a very large ``baseline_std``, or with a baseline so
+# small that the difference squared underflows to zero. Those used to answer
+# 500. The curve skips a point it cannot compute, so it has no known case.
+OUT_OF_RANGE_MESSAGE = (
+    "These values are too large or too small to calculate with. "
+    "Use values nearer those of a real experiment."
+)
+
 
 # ---------------------------------------------------------------------------
 # POST /sample-size
@@ -74,6 +86,11 @@ def compute_sample_size(body: SampleSizeRequest) -> SampleSizeResponse:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=str(exc),
+        ) from exc
+    except OverflowError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=OUT_OF_RANGE_MESSAGE,
         ) from exc
 
     return SampleSizeResponse(
@@ -123,6 +140,11 @@ def compute_mde(body: MDERequest) -> MDEResponse:
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=str(exc),
         ) from exc
+    except OverflowError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=OUT_OF_RANGE_MESSAGE,
+        ) from exc
 
     return MDEResponse(
         mde_absolute=result.mde_absolute,
@@ -164,6 +186,11 @@ def compute_runtime(body: RuntimeRequest) -> RuntimeResponse:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=str(exc),
+        ) from exc
+    except OverflowError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=OUT_OF_RANGE_MESSAGE,
         ) from exc
 
     return RuntimeResponse(
@@ -225,6 +252,11 @@ def get_power_curve(
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=str(exc),
+        ) from exc
+    except OverflowError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=OUT_OF_RANGE_MESSAGE,
         ) from exc
 
     return PowerCurveResponse(
