@@ -247,7 +247,7 @@ export default function LoginPage() {
             </details>
           </div>
 
-          <p className="mt-6 text-center text-xs text-slate-400">
+          <p className="mt-6 text-center text-xs text-slate-500">
             No public sign-up. Accounts are created by an administrator.
           </p>
         </div>

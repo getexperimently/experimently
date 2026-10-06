@@ -21,7 +21,7 @@ export function AdminLayout({ children, title, currentPath }: AdminLayoutProps) 
       {/* Main Content Area */}
       <main className="flex-1 min-w-0 overflow-auto p-6">
         <header className="flex items-center gap-3 mb-6">
-          <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">Admin</span>
+          <span className="text-xs font-semibold uppercase tracking-wider text-slate-500">Admin</span>
           <span className="text-slate-300">/</span>
           <h1 className="text-lg font-semibold text-slate-900">{title}</h1>
         </header>

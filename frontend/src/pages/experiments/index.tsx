@@ -154,7 +154,7 @@ export default function ExperimentsPage() {
                       >
                         {exp.name}
                       </Link>
-                      <p className="text-xs text-slate-400 mt-0.5 font-mono">{exp.key ?? ''}</p>
+                      <p className="text-xs text-slate-500 mt-0.5 font-mono">{exp.key ?? ''}</p>
                     </td>
                     <td className="px-4 py-3">
                       <span

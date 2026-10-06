@@ -6,14 +6,19 @@ import { API_URL, BASE_URL, IS_EXTERNAL_BASE_URL, PORT } from "./tests/e2e/env";
 /**
  * Playwright configuration for the Experimently dashboard.
  *
- * Three projects:
+ * Four projects:
  *   - `journeys` — the fail-hard PR journeys (`*.journey.spec.ts`), the
  *     required `browser-e2e` gate. Run them with `--project=journeys`.
  *   - `sso` — sign in with SSO from the dashboard (`*.sso.spec.ts`, C2b). It
  *     needs its own API process and the fake OIDC provider, which the
  *     `browser-e2e` job starts as steps; see tests/e2e/sso-sign-in.sso.spec.ts.
- *   - `extended` — everything else under tests/e2e (accessibility, visual
- *     regression); nightly territory, not a PR gate.
+ *   - `extended` — everything else under tests/e2e (accessibility and the
+ *     older specs); nightly territory, not a PR gate, but a failure there
+ *     fails the night.
+ *   - `visual` — `visual-regression.spec.ts` only. No baseline image has been
+ *     committed (#943), so every test in it fails on the first comparison and
+ *     no workflow runs this project. `npm run test:visual` (and
+ *     `test:visual:update`, which writes the baselines) select it by file name.
  *
  * The web server is chosen automatically so nobody has to remember a flag:
  *   - a dashboard already answering on the base URL is reused (local dev);
@@ -104,7 +109,15 @@ export default defineConfig({
     {
       name: "extended",
       testMatch: /\.spec\.ts$/,
-      testIgnore: [/\.journey\.spec\.ts$/, /\.sso\.spec\.ts$/],
+      // The visual spec has its own project below, until its baselines exist.
+      testIgnore: [/\.journey\.spec\.ts$/, /\.sso\.spec\.ts$/, /visual-regression\.spec\.ts$/],
+      use: { ...devices["Desktop Chrome"] },
+    },
+    {
+      // Not run by any workflow. Move it back into `extended` (delete the
+      // ignore above and this project) in the change that commits the images.
+      name: "visual",
+      testMatch: /visual-regression\.spec\.ts$/,
       use: { ...devices["Desktop Chrome"] },
     },
   ],
