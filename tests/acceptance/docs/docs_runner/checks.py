@@ -11,7 +11,7 @@ import json
 import re
 from typing import Any, List
 
-from docs_runner.model import Step
+from docs_runner.model import SEARCH_TOP, Step
 
 OBSERVED_CHARS = 300
 NUMBER = re.compile(r"-?\d[\d,]*(?:\.\d+)?|-?\.\d+")
@@ -46,10 +46,31 @@ def describe_action(step: Step) -> str:
         return f'choose "{do.select.option}" in "{do.select.label}"'
     if do.api is not None:
         return f"{do.api.method} {do.api.path} as {do.api.as_}"
+    if do.search is not None:
+        return f'search the site for "{do.search}"'
+    if do.crawl == "nav":
+        return "open every page of the nav on the site"
+    if do.crawl == "links":
+        return "follow every link to the site from the nav pages and their source"
     return "its shell blocks, run by Doc Examples"
 
 
+#: What each crawl expects; the action itself is the check.
+CRAWL_EXPECTS = {
+    "nav": (
+        "every nav page of the source answers 2xx on the site, and its first-level"
+        " heading is the source page's first # heading"
+    ),
+    "links": (
+        "every link to the site on the nav pages, and every absolute link to the site"
+        " in their source, answers 2xx, redirected only within the site"
+    ),
+}
+
+
 def describe_expect(step: Step) -> str:
+    if step.do.crawl is not None:
+        return CRAWL_EXPECTS[step.do.crawl]
     expect_ = step.expect
     if expect_ is None:
         return "Doc Examples runs this section's blocks"
@@ -71,6 +92,8 @@ def describe_expect(step: Step) -> str:
             f'the number in {number.locator.role} "{number.locator.name}" equals'
             f" {number.oracle.name}({args})"
         )
+    if expect_.found is not None:
+        parts.append(f"{expect_.found} among the first {SEARCH_TOP} results")
     if expect_.aria is not None:
         parts.append(
             f"the screen matches its ARIA snapshot ({len(expect_.aria.splitlines())} lines)"

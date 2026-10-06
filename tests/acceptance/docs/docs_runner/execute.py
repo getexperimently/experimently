@@ -14,13 +14,22 @@ Files, under ``<run dir>/<journey>/``: ``NN-<step>.expected.aria.yml`` (the
 expected ARIA snapshot, written before the step runs), ``NN-<step>.png`` and
 ``NN-<step>.aria.yml`` (the screen and its ARIA snapshot, after the step, or
 when it fails), ``NN-<step>.api.json`` (an api step's status and the values at
-its expected JSON paths). A ``video: true`` journey is recorded to
-``videos/<journey>.webm`` (1280x720) unless ``DOCS_JOURNEY_RECORD_VIDEO=0``.
+its expected JSON paths), ``NN-<step>.expected.json`` (a ``crawl: nav`` step's
+pages, URLs and headings, read from the site's source before the step runs)
+and ``NN-<step>.crawl.json`` (what a crawl saw, and what differed). A
+``video: true`` journey is recorded to ``videos/<journey>.webm`` (1280x720)
+unless ``DOCS_JOURNEY_RECORD_VIDEO=0``.
+
+The two crawls visit the nav pages once per journey and share what they saw.
+A search starts from the site's home page, so the results it reads are its
+own: the site's search box is MkDocs Material's (a textbox named "Search"),
+and its results are read once the count above them is shown.
 """
 
 from __future__ import annotations
 
 import json
+import re
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -30,7 +39,7 @@ from urllib.parse import urljoin, urlparse
 from playwright.sync_api import Browser, Page, Playwright, expect
 from playwright.sync_api import Error as PlaywrightError
 
-from docs_runner import registry
+from docs_runner import registry, site
 from docs_runner.checks import (
     StepFailed,
     describe_action,
@@ -42,11 +51,13 @@ from docs_runner.checks import (
 )
 from docs_runner.guide import Guide
 from docs_runner.log import FAIL, NOT_RUN, PASS, STRUCTURAL_ONLY, Log, Record
-from docs_runner.model import Journey, Named, Step
+from docs_runner.model import SEARCH_TOP, Journey, Named, Step
 from docs_runner.oracles import ORACLES
 from docs_runner.stacks import Running
 
 VIEWPORT = {"width": 1280, "height": 720}
+#: The count MkDocs Material shows above the search results once they are in.
+SEARCH_COUNT = re.compile(r"^(?:No|[0-9]+) matching documents?$")
 
 
 @dataclass
@@ -69,6 +80,10 @@ class JourneyRunner:
         self.log = log
         self.settings = settings
         self.tokens: Dict[Tuple[str, str], str] = {}
+        #: What the crawls saw, per site and source: (nav pages, visit per page).
+        self.visits: Dict[
+            Tuple[str, str], Tuple[List[site.NavPage], Dict[str, Any]]
+        ] = {}
         expect.set_options(timeout=settings.timeout_ms)
 
     # -- files -------------------------------------------------------------
@@ -166,6 +181,9 @@ class JourneyRunner:
                 page.get_by_label(do.select.label, exact=True).select_option(
                     label=do.select.option
                 )
+            elif do.search is not None:
+                page.goto(running.base_url)
+                page.get_by_role("textbox", name="Search", exact=True).fill(do.search)
         except PlaywrightError as error:
             raise StepFailed(
                 f"could not {describe_action(step)}: {one_line(error, 160)}"
@@ -179,6 +197,157 @@ class JourneyRunner:
             check()
         except AssertionError:
             raise StepFailed(failure) from None
+
+    def _search_step(self, step: Step, page: Page, running: Running) -> str:
+        self._act(step, page, running)
+        query, wanted = step.do.search, step.expect.found
+        self._holds(
+            lambda: expect(page.locator(".md-search-result__meta")).to_have_text(
+                SEARCH_COUNT
+            ),
+            f'searching for "{query}" showed no results count',
+        )
+        results = page.locator(
+            "li.md-search-result__item > a.md-search-result__link"
+        ).evaluate_all("links => links.map(link => link.href)")
+        place = site.rank(results, running.base_url, wanted)
+        if place is None or place > SEARCH_TOP:
+            shown = ", ".join(
+                "/" + site.on_site(running.base_url, site.strip(url))
+                for url in results[:SEARCH_TOP]
+            )
+            raise StepFailed(
+                f'searching for "{query}": {wanted} is not among the first'
+                f" {SEARCH_TOP} results ({shown or 'none'})"
+            )
+        return f'searching for "{query}": {wanted} is result {place} of {len(results)}'
+
+    # -- the documentation site --------------------------------------------
+    def _visit(self, page: Page, url: str, base: str) -> Dict[str, Any]:
+        """Open one page of the site: its status, where it ended, its heading, its links."""
+        try:
+            response = page.goto(url, wait_until="domcontentloaded")
+        except PlaywrightError as error:
+            return {"url": url, "status": None, "error": one_line(error, 160)}
+        final = page.url
+        headings = page.get_by_role("main").get_by_role("heading", level=1)
+        heading = headings.first.inner_text() if headings.count() else None
+        hrefs = page.locator("a[href]").evaluate_all(
+            "links => links.map(link => link.href)"
+        )
+        return {
+            "url": "/" + site.on_site(base, url),
+            "status": response.status if response is not None else None,
+            "final": "/" + site.on_site(base, site.strip(final)),
+            "on_site": site.within(final, base),
+            "heading": site.normalise(heading) if heading is not None else None,
+            "links": site.site_links(hrefs, base),
+        }
+
+    def _site_visits(self, page: Page, running: Running):
+        """The nav pages of the site's source, and what was seen at each; once per site."""
+        if running.source is None:
+            raise StepFailed(f"the {running.name} stack names no site source")
+        key = (running.base_url, str(running.source))
+        if key not in self.visits:
+            pages = site.nav_pages(site.Source(running.source))
+            seen = {
+                nav.path: self._visit(
+                    page, urljoin(running.base_url, nav.url), running.base_url
+                )
+                for nav in pages
+            }
+            self.visits[key] = (pages, seen)
+        return self.visits[key]
+
+    def _expected_nav(self, running: Running, name: str) -> str:
+        """Write what ``crawl: nav`` expects, from the source, before it runs."""
+        if running.source is None:
+            return STRUCTURAL_ONLY
+        try:
+            pages = site.nav_pages(site.Source(running.source))
+        except site.SiteError:
+            return STRUCTURAL_ONLY
+        rows = [
+            {"page": p.path, "url": "/" + p.url, "heading": p.heading} for p in pages
+        ]
+        return self._write(name, json.dumps(rows, indent=2, ensure_ascii=False) + "\n")
+
+    def _crawl_step(
+        self,
+        step: Step,
+        page: Page,
+        running: Running,
+        request,
+        journey_id: str,
+        number: int,
+    ) -> Tuple[str, str]:
+        name = self._name(journey_id, number, step, ".crawl.json")
+        try:
+            pages, seen = self._site_visits(page, running)
+        except site.SiteError as error:
+            raise _Failed(
+                one_line(error),
+                self._write(name, json.dumps({"error": str(error)}) + "\n"),
+            ) from None
+        if step.do.crawl == "nav":
+            problems = site.compare_headings(pages, seen)
+            checked, what = len(pages), "nav pages"
+            record: Dict[str, Any] = {
+                "problems": problems,
+                "seen": {
+                    path: {k: v for k, v in visit.items() if k != "links"}
+                    for path, visit in seen.items()
+                },
+            }
+        else:
+            source = site.Source(running.source)
+            written = site.site_url(source) or running.base_url
+            links: Dict[str, str] = {}
+            for nav in pages:
+                for link in seen[nav.path].get("links", []):
+                    links.setdefault(link, "/" + nav.url)
+            for path, link in site.absolute_links(source, [nav.path for nav in pages]):
+                links.setdefault(
+                    site.to_stack(link, written, running.base_url), f"{path} (source)"
+                )
+
+            def fetch(url: str) -> Tuple[int, str]:
+                answer = request.get(url, max_redirects=0)
+                return answer.status, answer.headers.get("location", "")
+
+            resolved = [site.resolve(link, running.base_url, fetch) for link in links]
+            problems = [
+                f"/{site.on_site(running.base_url, r.link)} (on {links[r.link]}): {r.problem}"
+                for r in resolved
+                if r.problem
+            ]
+            checked, what = len(links), "links to the site"
+            record = {
+                "problems": problems,
+                "links": {
+                    "/" + site.on_site(running.base_url, r.link): {
+                        "on": links[r.link],
+                        "status": r.status,
+                    }
+                    for r in resolved
+                },
+            }
+        snapshot = self._write(
+            name,
+            json.dumps({"checked": checked, **record}, indent=2, ensure_ascii=False)
+            + "\n",
+        )
+        if problems:
+            raise _Failed(
+                one_line(
+                    f"{len(problems)} of {checked} {what}: " + "; ".join(problems)
+                ),
+                snapshot,
+            )
+        if not checked:
+            raise _Failed(f"no {what} to check", snapshot)
+        return f"{checked} {what}, every one as expected", snapshot
 
     def _browser_step(self, step: Step, page: Page, running: Running) -> str:
         response = self._act(step, page, running)
@@ -247,6 +416,9 @@ class JourneyRunner:
         api = None
         if running.api_url:
             api = self.playwright.request.new_context(base_url=running.api_url)
+        request = None
+        if running.source is not None:
+            request = self.playwright.request.new_context()
         anchors = guide.anchors
         records: List[Record] = []
         failed = False
@@ -260,6 +432,7 @@ class JourneyRunner:
                     running,
                     page,
                     api,
+                    request,
                     anchors,
                     failed,
                 )
@@ -271,6 +444,8 @@ class JourneyRunner:
             context.close()
             if api is not None:
                 api.dispose()
+            if request is not None:
+                request.dispose()
             if video is not None:
                 self._keep_video(video, journey_id)
         return records
@@ -283,6 +458,10 @@ class JourneyRunner:
         target = self.settings.run_dir / "videos" / f"{journey_id}.webm"
         if source.is_file():
             source.replace(target)
+            try:
+                source.parent.rmdir()
+            except OSError:
+                pass
 
     def _step(
         self,
@@ -293,6 +472,7 @@ class JourneyRunner:
         running: Running,
         page: Page,
         api,
+        request,
         anchors: Dict[str, str],
         failed: bool,
     ) -> Record:
@@ -304,6 +484,12 @@ class JourneyRunner:
                     self._name(journey_id, number, step, ".expected.aria.yml"),
                     step.expect.aria.rstrip("\n") + "\n",
                 )
+        elif step.do.crawl == "nav":
+            expected_snapshot = self._expected_nav(
+                running, self._name(journey_id, number, step, ".expected.json")
+            )
+        elif step.do.crawl == "links":
+            expected_snapshot = STRUCTURAL_ONLY
         base = {
             "run": self.settings.run_id,
             "sha": self.settings.sha,
@@ -335,8 +521,15 @@ class JourneyRunner:
                 observed, snapshot = self._api_step(
                     step, running, api, journey_id, number
                 )
+            elif step.do.kind == "crawl":
+                observed, snapshot = self._crawl_step(
+                    step, page, running, request, journey_id, number
+                )
             else:
-                observed = self._browser_step(step, page, running)
+                if step.do.kind == "search":
+                    observed = self._search_step(step, page, running)
+                else:
+                    observed = self._browser_step(step, page, running)
                 if step.takes_screenshot:
                     snapshot = self._screen(page, journey_id, number, step)
             result = PASS
@@ -347,8 +540,9 @@ class JourneyRunner:
             if step.in_browser:
                 snapshot = self._screen(page, journey_id, number, step)
             else:
+                suffix = ".crawl.json" if step.do.kind == "crawl" else ".api.json"
                 snapshot = self._write(
-                    self._name(journey_id, number, step, ".api.json"),
+                    self._name(journey_id, number, step, suffix),
                     json.dumps({"error": observed}, indent=2) + "\n",
                 )
         ms = int((time.monotonic() - started) * 1000)
