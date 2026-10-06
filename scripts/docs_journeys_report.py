@@ -9,10 +9,13 @@ Two commands, both reading with ``gh`` only:
     published documentation site was built from. The site is deployed from
     release tags (``docs.yml``), so it lags ``main``; the docs-site journey
     compares it with that commit's ``mkdocs.yml`` and ``docs/``, not with
-    ``main``'s. It is the newest deployment to the ``github-pages`` environment
-    whose latest status is ``success`` (a newer deployment marks the one before
-    it ``inactive``; a failed one leaves it live). Writes ``sha`` and ``ref``
-    under ``--out``; fails when there is none.
+    ``main``'s. It is the newest deployment to the ``github-pages`` environment,
+    by ``created_at``, whose latest status is ``success``. A newer deployment
+    does not mark the one before it ``inactive`` here (measured on 2026-10-06:
+    the latest status of each of the last eight deployments was ``success``,
+    none ``inactive``), so what picks the live one is its date; a newer one
+    that failed or is still deploying is passed over. Writes ``sha`` and
+    ``ref`` under ``--out``; fails when there is none.
 
 ``report``
     Run after the journeys. It reads this run's
@@ -125,7 +128,13 @@ def deployed(gh: Gh, repo: str) -> tuple:
     deployments = gh_json(
         gh, ["api", f"repos/{repo}/deployments?environment={ENVIRONMENT}&per_page=30"]
     )
-    for deployment in deployments or []:
+    # Newest first by date, not by the order the API lists them in.
+    newest_first = sorted(
+        deployments or [],
+        key=lambda deployment: str(deployment.get("created_at") or ""),
+        reverse=True,
+    )
+    for deployment in newest_first:
         statuses = gh_json(
             gh,
             ["api", f"repos/{repo}/deployments/{deployment['id']}/statuses?per_page=1"],

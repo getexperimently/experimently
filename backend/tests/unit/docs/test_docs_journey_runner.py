@@ -1540,6 +1540,8 @@ BASE = "https://example.github.io/sample/"
         ({BASE + "a": (301, "")}, "301 with no Location"),
         ({BASE + "a": (301, BASE + "a")}, "more than 5 redirects"),
         ({BASE + "a": OSError("down")}, "no answer (OSError)"),
+        ({BASE + "a": (301, BASE + "../other/")}, "outside the site"),
+        ({BASE + "a": (301, BASE + "b/../c/"), BASE + "b/../c/": (200, "")}, ""),
     ],
     ids=[
         "ok",
@@ -1550,6 +1552,8 @@ BASE = "https://example.github.io/sample/"
         "no-location",
         "loop",
         "down",
+        "dot-segments-climb-out",
+        "dot-segments-stay-in",
     ],
 )
 def test_a_link_resolves_only_within_the_site(answers, problem):
@@ -1594,6 +1598,153 @@ def test_a_5xx_or_no_answer_is_asked_once_more(answers, problem, retried, pauses
     assert resolved.problem.startswith(problem) if problem else resolved.problem == ""
     assert resolved.retried is retried
     assert waited == [site.RETRY_SECONDS] * pauses
+
+
+def _opener(*answers):
+    """An ``open`` that gives *answers* in turn, (status or None, error); it
+    records the URLs it was asked for."""
+    queue = list(answers)
+    asked: List[str] = []
+
+    def open(url: str):
+        asked.append(url)
+        return queue.pop(0)
+
+    open.asked = asked
+    return open
+
+
+@pytest.mark.parametrize(
+    "answers, status, error, retried",
+    [
+        ([(503, ""), (200, "")], 200, "", True),
+        ([(None, "net::ERR_RESET"), (200, "")], 200, "", True),
+        ([(503, ""), (503, "")], 503, "", True),
+        ([(None, "first"), (None, "second")], None, "second", True),
+        ([(500, ""), (404, "")], 404, "", True),
+        ([(404, "")], 404, "", False),
+        ([(200, "")], 200, "", False),
+    ],
+    ids=[
+        "503-then-ok",
+        "none-then-ok",
+        "503-twice",
+        "none-twice",
+        "500-then-404",
+        "404-once",
+        "ok",
+    ],
+)
+def test_a_page_that_answers_5xx_or_nothing_is_opened_once_more(
+    answers, status, error, retried
+):
+    """The same rule as a link's: the second answer is the one judged, and a
+    4xx or a 2xx on the first is final, with no pause."""
+    waited: List[float] = []
+    opener = _opener(*answers)
+    opened = site.open_page(BASE + "a/", opener, pause=waited.append)
+    assert (opened.status, opened.error, opened.retried) == (status, error, retried)
+    asks = 2 if retried else 1
+    assert opener.asked == [BASE + "a/"] * asks
+    assert waited == [site.RETRY_SECONDS] * (asks - 1)
+
+
+def test_the_second_answer_is_the_one_a_nav_page_is_judged_by():
+    """503 then 200 is green; 503 then 503 is red; a 404 is red and not asked again."""
+    page = site.NavPage("a.md", "a/", "A")
+
+    def problems(*answers):
+        opener = _opener(*answers)
+        opened = site.open_page(BASE + "a/", opener, pause=lambda seconds: None)
+        seen = {"a.md": {"status": opened.status, "heading": "A", "on_site": True}}
+        return site.compare_headings([page], seen), len(opener.asked)
+
+    assert problems((503, ""), (200, "")) == ([], 2)
+    assert problems((503, ""), (503, "")) == (["a.md (/a/): answered 503"], 2)
+    assert problems((None, "x"), (None, "x")) == (["a.md (/a/): answered nothing"], 2)
+    assert problems((404, "")) == (["a.md (/a/): answered 404"], 1)
+
+
+@pytest.mark.parametrize(
+    "url, inside",
+    [
+        (BASE, True),
+        (BASE + "a/", True),
+        ("https://example.github.io/sample", True),
+        (BASE + "./a/", True),
+        (BASE + "a/../b/", True),
+        ("https://example.github.io/../sample/a/", True),
+        (BASE + "../other/", False),
+        (BASE + "a/../../other/", False),
+        (BASE + "..", False),
+        (BASE + "a/%2e%2e/%2E%2E/other/", False),
+        ("https://example.github.io/sample-other/", False),
+        ("http://example.github.io/sample/a/", False),
+        ("https://other.example/sample/a/", False),
+    ],
+)
+def test_a_url_with_dot_segments_is_judged_by_the_page_it_reaches(url, inside):
+    """``.../sample/../other/`` starts with the site's address and is not a page
+    of the site: a browser or a request resolves the dots first."""
+    assert site.within(url, BASE) is inside
+
+
+def test_a_link_with_dot_segments_that_leaves_the_site_is_not_the_sites():
+    hrefs = [BASE + "a/", BASE + "../other/", BASE + "b/../c/"]
+    assert site.site_links(hrefs, BASE) == [BASE + "a/", BASE + "b/../c/"]
+
+
+@pytest.mark.parametrize(
+    "checked, what, problems, twice, against, text",
+    [
+        (7, "nav pages", [], 0, "", "7 nav pages, every one as expected"),
+        (
+            7,
+            "nav pages",
+            [],
+            0,
+            "v0.25.1",
+            "7 nav pages, every one as expected against v0.25.1",
+        ),
+        (
+            7,
+            "nav pages",
+            [],
+            2,
+            "v0.25.1",
+            "7 nav pages, every one as expected against v0.25.1 (2 asked twice)",
+        ),
+        (
+            5,
+            "links to the site",
+            [],
+            1,
+            "",
+            "5 links to the site, every one as expected (1 asked twice)",
+        ),
+        (
+            7,
+            "nav pages",
+            ["a.md (/a/): answered 503", "b.md (/b/): answered 404"],
+            1,
+            "v0.25.1",
+            "2 of 7 nav pages against v0.25.1 (1 asked twice):"
+            " a.md (/a/): answered 503; b.md (/b/): answered 404",
+        ),
+        (
+            7,
+            "nav pages",
+            ["a.md (/a/): answered 404"],
+            0,
+            "",
+            "1 of 7 nav pages: a.md (/a/): answered 404",
+        ),
+    ],
+)
+def test_the_crawl_says_what_it_compared_with_and_how_many_were_asked_twice(
+    checked, what, problems, twice, against, text
+):
+    assert site.crawl_text(checked, what, problems, twice, against) == text
 
 
 def test_each_way_a_nav_page_can_differ_from_its_source(tmp_path):
@@ -1655,7 +1806,23 @@ def test_the_published_stack_takes_its_source_from_the_environment(tmp_path):
         tmp_path / "repo", tmp_path, {"DOCS_JOURNEY_PUBLISHED_SOURCE": str(tag)}
     ).up()
     assert running.source == tag
+    assert running.source_ref == ""
     assert running.base_url == stacks.PUBLISHED_URL
+    named = stacks.DocsPublished(
+        tmp_path / "repo",
+        tmp_path,
+        {
+            "DOCS_JOURNEY_PUBLISHED_SOURCE": str(tag),
+            "DOCS_JOURNEY_PUBLISHED_REF": "v0.25.1",
+        },
+    ).up()
+    assert named.source_ref == "v0.25.1"
+    for odd in ("v1 && x", "-v1", "v1\nv2", "x" * 101, "$(id)"):
+        with pytest.raises(stacks.StackError, match="not a git ref") as refused:
+            stacks.DocsPublished(
+                tmp_path / "repo", tmp_path, {"DOCS_JOURNEY_PUBLISHED_REF": odd}
+            )
+        assert odd not in str(refused.value)
     unset = stacks.DocsPublished(REPO_ROOT, tmp_path, {}).up()
     assert unset.source == REPO_ROOT
     with pytest.raises(stacks.StackError, match="holds no mkdocs.yml"):
@@ -1701,7 +1868,7 @@ def test_a_ci_run_renders_its_guide_header_from_the_fail_template(tmp_path):
                 "date": "2026-10-06",
                 "sha": SHA,
                 "step_number": "2",
-                "heading_step": "Sign in",
+                "heading_step": "Sign in (sign-in)",
                 "run_link": LINK,
                 "count_steps_pass": "1",
                 "count_steps": "3",
@@ -1752,6 +1919,59 @@ def test_a_ci_run_renders_pass_and_partial_headers():
 def test_a_heading_is_folded_to_what_a_template_takes(text, folded):
     assert report.heading_value(text) == folded
     _renderer().check_value("heading_step", report.heading_value(text))
+
+
+def test_a_failing_step_is_named_by_its_own_id_when_steps_share_a_heading():
+    """The docs-site journey's steps all point at the home page's heading, so
+    the heading alone says nothing about which of them failed."""
+    heading = "Experimently Documentation"
+
+    def run(failing_id: str, failing_step: int):
+        steps = ["home", "nav-pages", "links", "search-quick-start"]
+        return report.GuideRun(
+            "docs-site",
+            "README.md",
+            heading,
+            "docs-published",
+            records=tuple(
+                _record(
+                    guide="README.md",
+                    step=number,
+                    step_id=step_id,
+                    heading=heading,
+                    result="FAIL" if step_id == failing_id else "PASS",
+                )
+                for number, step_id in enumerate(steps, 1)
+            ),
+        )
+
+    info = report.RunInfo("2026-10-06", SHA, LINK)
+    issues = []
+    for failing_id, number in (("nav-pages", 2), ("links", 3)):
+        name, values = report.header_template(run(failing_id, number), info)
+        assert name == "docs-guide-fail.tmpl"
+        assert values["heading_step"] == f"{heading} ({failing_id})"
+        issue = _renderer().render("docs-journey-issue.tmpl", values).body
+        assert f'step {values["step_number"]}, "{heading} ({failing_id})"' in issue
+        issues.append(issue)
+    assert issues[0] != issues[1]
+
+
+@pytest.mark.parametrize(
+    "heading, step_id, named",
+    [
+        ("Sign in", "sign-in", "Sign in (sign-in)"),
+        ("Rollback \u2014 Experimently", "size", "Rollback - Experimently (size)"),
+        ("\u2603", "size", "untitled (size)"),
+        ("x" * 130, "nav-pages", "x" * 108 + " (nav-pages)"),
+        ("Home", "a" * 118, "(" + "a" * 118),
+        ("Home", "a" * 119, "(" + "a" * 118),
+    ],
+    ids=["plain", "folded", "untitled", "heading-cut-id-whole", "id-118", "id-119"],
+)
+def test_a_step_is_named_within_what_a_template_takes(heading, step_id, named):
+    assert report.step_heading(heading, step_id) == named
+    _renderer().check_value("heading_step", report.step_heading(heading, step_id))
 
 
 def test_a_header_the_renderer_refuses_fails_the_report(tmp_path):

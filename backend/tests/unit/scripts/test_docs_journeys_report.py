@@ -8,6 +8,13 @@ gets a comment (the failing step changed), when it closes (the guide passed,
 or ran with nothing failing); that every text is the rendered template; and
 that only a scheduled run on ``main`` writes anything to post. Each rule is
 also seen to fire on a planted defect.
+
+The fake refuses a ``gh`` call that lacks the filters the script's rules rest
+on: the scheduled runs of ``docs-journeys.yml`` on ``main`` (a dispatch or a
+branch run counted as a night would open an issue early), the open issues
+labelled ``docs-journey-failure`` (any other open issue taken for one of ours
+would be commented on and closed), and the ``github-pages`` deployments. A
+fake that answers whatever it is asked would pass with the filters gone.
 """
 
 from __future__ import annotations
@@ -102,8 +109,38 @@ def verdicts_file(tmp_path: Path, name: str, **journeys: Dict[str, Any]) -> Path
     return path
 
 
+#: The filters each listing must carry, written out here and not read from the
+#: script, so that a filter changed or dropped there fails here.
+RUN_LIST_FLAGS = {
+    "--repo": REPO,
+    "--workflow": "docs-journeys.yml",
+    "--branch": "main",
+    "--event": "schedule",
+}
+ISSUE_LIST_FLAGS = {
+    "--repo": REPO,
+    "--state": "open",
+    "--label": "docs-journey-failure",
+}
+DEPLOYMENTS_QUERY = "environment=github-pages"
+
+
+def require_flags(args: List[str], flags: Dict[str, str]) -> None:
+    """Refuse a ``gh`` call that does not carry each flag with its exact value."""
+    for flag, value in flags.items():
+        at = args.index(flag) if flag in args else -1
+        if at < 0 or args[at + 1 : at + 2] != [value]:
+            raise AssertionError(f"gh {' '.join(args[:2])} without {flag} {value}")
+
+
 class FakeGh:
-    """``gh`` as the script calls it, answering from tables; records each call."""
+    """``gh`` as the script calls it, answering from tables; records each call.
+
+    It answers a listing only when the call carries the filters the script's
+    rules rest on (``RUN_LIST_FLAGS``, ``ISSUE_LIST_FLAGS``, the deployments'
+    environment): a call without them raises, as an unfiltered listing would
+    quietly answer with other workflows', branches' or issues' rows.
+    """
 
     def __init__(
         self,
@@ -125,6 +162,7 @@ class FakeGh:
     def __call__(self, args: List[str]) -> str:
         self.calls.append(args)
         if args[:2] == ["run", "list"]:
+            require_flags(args, RUN_LIST_FLAGS)
             return json.dumps(self.runs)
         if args[:2] == ["run", "download"]:
             run_id = int(args[2])
@@ -144,8 +182,11 @@ class FakeGh:
             deployment = int(args[1].split("/deployments/")[1].split("/")[0])
             return json.dumps(self.statuses.get(deployment, []))
         if args[0] == "api" and "/deployments?" in args[1]:
+            if DEPLOYMENTS_QUERY not in args[1].split("?", 1)[1].split("&"):
+                raise AssertionError(f"gh api deployments without {DEPLOYMENTS_QUERY}")
             return json.dumps(self.deployments)
         if args[:2] == ["issue", "list"]:
+            require_flags(args, ISSUE_LIST_FLAGS)
             return json.dumps(self.issues)
         if args[:2] == ["issue", "view"]:
             return json.dumps(self.views[int(args[2])])
@@ -196,14 +237,20 @@ def posts(tmp_path: Path) -> List[Dict[str, str]]:
 # ---------------------------------------------------------------------------
 GOOD_SHA = "e8e3553e79bd4ac173d2505fdcacf94a9a81985e"
 OLD_SHA = "906a69b9f7ce2fc5c9536b781c673346e70aeb91"
+MID_SHA = "964fca4c3a1d5b0e8f7c2a9d6b4e1f03a5c7d928"
+DAY_1, DAY_2, DAY_3 = (
+    "2026-10-06T06:19:46Z",
+    "2026-10-06T10:56:00Z",
+    "2026-10-06T13:42:03Z",
+)
 
 
 def test_the_live_deployment_is_the_newest_successful_one(tmp_path):
     gh = FakeGh(
         deployments=[
-            {"id": 3, "sha": "a" * 40, "ref": "v0.26.0"},
-            {"id": 2, "sha": GOOD_SHA, "ref": "v0.25.1"},
-            {"id": 1, "sha": OLD_SHA, "ref": "v0.25.0"},
+            {"id": 3, "sha": "a" * 40, "ref": "v0.26.0", "created_at": DAY_3},
+            {"id": 2, "sha": GOOD_SHA, "ref": "v0.25.1", "created_at": DAY_2},
+            {"id": 1, "sha": OLD_SHA, "ref": "v0.25.0", "created_at": DAY_1},
         ],
         statuses={
             3: [{"state": "failure"}],
@@ -216,6 +263,45 @@ def test_the_live_deployment_is_the_newest_successful_one(tmp_path):
     assert djr.deployed_command(args, ENV, gh) == 0
     assert (tmp_path / "dep" / "sha").read_text() == GOOD_SHA + "\n"
     assert (tmp_path / "dep" / "ref").read_text() == "v0.25.1\n"
+
+
+def _all_success():
+    """The three newest deployments as measured on 2026-10-06: the latest
+    status of each is ``success`` (none ``inactive``)."""
+    deployments = [
+        {"id": 6885576327, "sha": GOOD_SHA, "ref": "v0.25.1", "created_at": DAY_3},
+        {"id": 6882089525, "sha": OLD_SHA, "ref": "v0.25.0", "created_at": DAY_2},
+        {"id": 6879545110, "sha": MID_SHA, "ref": "v0.24.0", "created_at": DAY_1},
+    ]
+    return deployments, {d["id"]: [{"state": "success"}] for d in deployments}
+
+
+@pytest.mark.parametrize(
+    "order",
+    [(0, 1, 2), (2, 1, 0), (1, 2, 0)],
+    ids=["newest-first-as-the-api-lists", "oldest-first", "shuffled"],
+)
+def test_when_every_deployment_succeeded_the_newest_is_live(order):
+    """No deployment is ``inactive``, so what picks the live one is its date,
+    not the order the listing happens to come in."""
+    deployments, statuses = _all_success()
+    gh = FakeGh(deployments=[deployments[i] for i in order], statuses=statuses)
+    assert djr.deployed(gh, REPO) == (GOOD_SHA, "v0.25.1")
+
+
+def test_a_newer_deployment_still_in_progress_is_passed_over():
+    deployments, statuses = _all_success()
+    newest = {
+        "id": 7,
+        "sha": "b" * 40,
+        "ref": "v0.26.0",
+        "created_at": "2026-10-07T01:00:00Z",
+    }
+    gh = FakeGh(
+        deployments=[newest, *deployments],
+        statuses={**statuses, 7: [{"state": "in_progress"}]},
+    )
+    assert djr.deployed(gh, REPO) == (GOOD_SHA, "v0.25.1")
 
 
 @pytest.mark.parametrize(
@@ -440,6 +526,70 @@ def test_main_turns_a_refusal_into_exit_1_without_a_value(tmp_path, capsys):
     out = capsys.readouterr().out
     assert "::error title=Docs journeys::" in out
     assert "SENTINEL" not in out
+
+
+# ---------------------------------------------------------------------------
+# The listings carry their filters
+# ---------------------------------------------------------------------------
+def _call(command: str, flags: Dict[str, str]) -> List[str]:
+    args = command.split()
+    for flag, value in flags.items():
+        args += [flag, value]
+    return args
+
+
+@pytest.mark.parametrize(
+    "command, flags",
+    [("run list", RUN_LIST_FLAGS), ("issue list", ISSUE_LIST_FLAGS)],
+    ids=["run-list", "issue-list"],
+)
+def test_the_fake_refuses_a_listing_without_a_filter(command, flags):
+    """The fake is the gate of the filters below: it must refuse each call that
+    drops one, or a script that dropped it would pass."""
+    FakeGh()(_call(command, flags))  # whole: answered
+    for dropped in flags:
+        kept = {flag: value for flag, value in flags.items() if flag != dropped}
+        with pytest.raises(AssertionError, match=f"without {dropped} "):
+            FakeGh()(_call(command, kept))
+        wrong = {**flags, dropped: "other"}
+        with pytest.raises(AssertionError, match=f"without {dropped} "):
+            FakeGh()(_call(command, wrong))
+
+
+def test_the_fake_refuses_deployments_of_another_environment():
+    FakeGh()(["api", f"repos/{REPO}/deployments?environment=github-pages&per_page=30"])
+    for query in ("per_page=30", "environment=production&per_page=30"):
+        with pytest.raises(AssertionError, match="without environment=github-pages"):
+            FakeGh()(["api", f"repos/{REPO}/deployments?{query}"])
+
+
+def test_the_history_is_the_scheduled_runs_of_the_workflow_on_main():
+    """Each filter is what keeps a dispatch, a branch run or another workflow's
+    run out of the count of red nights."""
+    gh = FakeGh(runs=[run(2), run(1)])
+    assert [r.run_id for r in djr.scheduled_runs(gh, REPO)] == [2, 1]
+    (call,) = gh.calls
+    assert call[:2] == ["run", "list"]
+    for flag, value in RUN_LIST_FLAGS.items():
+        assert call[call.index(flag) + 1] == value
+
+
+def test_only_open_issues_with_the_label_are_ours():
+    gh = FakeGh()
+    assert djr.open_issues(gh, REPO) == {}
+    (call,) = gh.calls
+    assert call[:2] == ["issue", "list"]
+    for flag, value in ISSUE_LIST_FLAGS.items():
+        assert call[call.index(flag) + 1] == value
+
+
+def test_the_deployments_asked_for_are_the_pages_environment():
+    deployments, statuses = _all_success()
+    gh = FakeGh(deployments=deployments, statuses=statuses)
+    djr.deployed(gh, REPO)
+    assert gh.calls[0][1] == (
+        f"repos/{REPO}/deployments?environment=github-pages&per_page=30"
+    )
 
 
 # ---------------------------------------------------------------------------
