@@ -548,9 +548,9 @@ requests==2.34.2 \
     # via
     #   -c backend/requirements.txt
     #   -r modules/requirements.txt
-sqlglot==30.20.0 \
-    --hash=sha256:8210b49131ac80cb3d4135edd3f64a50c95f2046305f4e6978fca59b39c82407 \
-    --hash=sha256:886fd92eba9bf944dee97164b16760f21576a7f55ef4a9211337903442e8aded
+sqlglot==30.21.0 \
+    --hash=sha256:6787ac202a3adc0e25434f1512370a655e51cb3de8c792544de5f6ff9c618d25 \
+    --hash=sha256:816d1a4815b7562b3976efcc0b561c928a743f976efd0fb8ad6db7a5b96c069e
     # via -r modules/requirements.txt
 urllib3==2.8.0 \
     --hash=sha256:0cf3cae568d36aa9576b28dfb35f11328f1cb974ca7647d9475ebb86c75ac6e3 \
