@@ -122,15 +122,14 @@ class User(Base, BaseModel):
     feature_flags = relationship("FeatureFlag", back_populates="owner")
     reports = relationship("Report", back_populates="owner")
     audit_logs = relationship("AuditLog", back_populates="user")
+    # Removing an account removes its API keys with it, and keeps the segments
+    # and rollout schedules it created, with owner_id null (both columns are
+    # ON DELETE SET NULL).
     api_keys = relationship(
         "APIKey", back_populates="user", cascade="all, delete-orphan"
     )
-    segments = relationship(
-        "Segment", back_populates="owner", cascade="all, delete-orphan"
-    )
-    rollout_schedules = relationship(
-        "RolloutSchedule", back_populates="owner", cascade="all, delete-orphan"
-    )
+    segments = relationship("Segment", back_populates="owner")
+    rollout_schedules = relationship("RolloutSchedule", back_populates="owner")
 
     def __init__(self, **kwargs):
         """Initialize a user with proper handling of full_name and preferences."""

@@ -30,7 +30,7 @@
 
 **Account Deletion:**
 - Accounts may be deleted 90 days after deactivation (to allow investigation if needed)
-- Deletion triggers cascade delete of API keys, rollout schedules, and segments per the SQLAlchemy model relationships in `backend/app/models/user.py`
+- Deletion removes the account's API keys; the segments and rollout schedules it created are kept, with no owner (`owner_id` null)
 - Audit log entries are preserved with `user_id` set to NULL (foreign key `SET NULL` on delete)
 
 ### 1.2 RBAC Matrix
