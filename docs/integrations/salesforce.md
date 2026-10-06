@@ -107,6 +107,20 @@ POST /api/v1/integrations/webhooks/salesforce
    `https://your-platform.example.com/api/v1/integrations/webhooks/salesforce`
 3. Set the **User to Send As** to a user with API access
 4. Select the fields you want to include in the payload
+5. Send the integration's `webhook_secret` with every delivery, as described next
+
+### Authenticating a delivery
+
+The platform reads a delivery only after the sender has presented the integration's `webhook_secret`, in one of two forms. Without it the answer is `401` and the body is not read.
+
+| How | Header | Value |
+|-----|--------|-------|
+| Shared secret | `X-Experimently-Webhook-Secret` | The `webhook_secret` itself |
+| Signature, from a callout that can compute one | `X-Hub-Signature-256` | `sha256=` followed by the hex HMAC-SHA256 of the raw request body, keyed with the `webhook_secret` |
+
+A Salesforce outbound message cannot compute an HMAC over the body it sends, so it uses the shared-secret header. The secret then travels with every delivery, so the endpoint must be HTTPS. A callout that can sign should send the signature instead. A delivery that carries a signature is judged on the signature alone: a wrong signature is refused even when the shared-secret header is right.
+
+Every refused delivery gets the same answer, `401` with the body `{"detail": "Webhook authentication failed"}`: a wrong or missing secret, an integration that is not active, an integration with no `webhook_secret`, and no Salesforce integration at all are not told apart. If every delivery is refused, check with `GET /api/v1/integrations/salesforce` that `is_active` is `true` and that `stored_secrets` lists `webhook_secret`. See [Webhook Endpoints](../api/integrations.md#webhook-endpoints) for the whole contract.
 
 ### Incoming Webhook Payload Format
 
@@ -133,8 +147,10 @@ The platform accepts JSON payloads from Salesforce outbound messages or custom R
 **Response: 200 OK**
 
 ```json
-{"processed": true}
+{"status": "received"}
 ```
+
+A delivery from an authenticated sender is answered `200` even when the platform could not process the event: the failure is logged, so the provider does not retry something it cannot fix. A body that is not a JSON object is `400 Bad Request`, and that is checked only after the sender is authenticated.
 
 ---
 

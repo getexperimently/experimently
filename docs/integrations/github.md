@@ -136,6 +136,8 @@ if not constant_time_compare(expected_signature, provided_signature):
 
 Requests with a missing or invalid `X-Hub-Signature-256` header receive `401 Unauthorized` and are not processed. This prevents spoofed webhook deliveries.
 
+Every refused delivery gets the same answer, whatever the reason: `401` with the body `{"detail": "Webhook authentication failed"}`. A wrong or missing signature, an integration that is not active, an integration with no `webhook_secret`, and no GitHub integration at all are not told apart.
+
 ---
 
 ## Supported Event Types
@@ -202,8 +204,10 @@ Received when an issue is opened, edited, closed, or labeled.
 **Response: 200 OK**
 
 ```json
-{"processed": true}
+{"status": "received"}
 ```
+
+A delivery from an authenticated sender is answered `200` even when the platform could not process the event: the failure is logged, so the provider does not retry something it cannot fix. A body that is not a JSON object is `400 Bad Request`, and that is checked only after the sender is authenticated.
 
 ---
 
@@ -221,20 +225,22 @@ The platform parses this field from incoming `pull_request` webhook events and c
 
 ## Troubleshooting
 
-### 400 Bad Request — Bad HMAC Signature
+### 401 Unauthorized
 
-**Symptom**: GitHub webhook deliveries show status `400` with error `invalid signature`.
+**Symptom**: GitHub's delivery log shows status `401` and the body `{"detail": "Webhook authentication failed"}`.
 
-**Causes and fixes**:
-1. **Secret mismatch**: The `webhook_secret` in the platform does not match the secret in GitHub's webhook settings. Delete and recreate the integration with a consistent secret.
-2. **Encoding issue**: Ensure the secret does not contain leading or trailing whitespace. Copy-paste carefully.
-3. **Content type**: Confirm GitHub is sending `application/json` (not `application/x-www-form-urlencoded`).
+Every refused delivery is answered the same way, so the status does not say which of these it is:
 
-### 401 Unauthorized — Missing Signature
+1. **Secret mismatch**: The `webhook_secret` in the platform does not match the secret in GitHub's webhook settings. Set it again with the recipe in [Rotating the Webhook Secret](#rotating-the-webhook-secret) and use the same value in GitHub. As a last resort you can `DELETE /api/v1/integrations/github` and create the integration again, but that removes the stored `token` and repository settings too, so you send them again.
+2. **No secret in GitHub**: GitHub sends no `X-Hub-Signature-256` header when the webhook's **Secret** field is empty. Open the webhook's settings in GitHub and fill it in.
+3. **Not active, or no `webhook_secret` stored**: `GET /api/v1/integrations/github` must show `"is_active": true` and list `webhook_secret` in `stored_secrets`. The platform log also names an active integration that has no secret, once per process.
+4. **Encoding issue**: Ensure the secret does not contain leading or trailing whitespace. Copy-paste carefully.
 
-**Symptom**: Webhook deliveries fail with `401`.
+### 400 Bad Request
 
-**Cause**: GitHub is not sending the `X-Hub-Signature-256` header. This typically means the webhook secret was not configured in GitHub. Go to your GitHub webhook settings and ensure the secret field is populated.
+**Symptom**: GitHub's delivery log shows status `400` with the body `{"detail": "Invalid JSON payload"}`.
+
+The signature was accepted, but the body is not a JSON object. Confirm the webhook's **Content type** is `application/json`, not `application/x-www-form-urlencoded`.
 
 ### Webhook Deliveries Not Reaching the Platform
 
