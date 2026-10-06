@@ -68,8 +68,9 @@ UNMATCHED = """
                 pass
 """
 
-# Recorded, and matched: `/api/v1/experiments` is a target, and the loosest one
-# a recorded name can reach (p50 150 ms, p95 400 ms, p99 1000 ms, 100 rps).
+# Recorded, and matched: the runner pairs `/api/v1/experiments` with the first
+# target it matches, create_experiment (p50 150 ms, p95 400 ms, p99 1000 ms,
+# at least 100 requests per second).
 MEASURED = """
     from locust import HttpUser, constant, task
 
