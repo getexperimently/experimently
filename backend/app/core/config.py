@@ -286,8 +286,8 @@ class Settings(BaseSettings):
     )
     API_V1_STR: str = "/api/v1"
 
-    # The Claude model the platform's own features call (AI experiment design,
-    # the planner). Not the models a *user* selects for an LLM experiment --
+    # The Claude model the platform's own features call (AI experiment
+    # design). Not the models a *user* selects for an LLM experiment --
     # those come from the experiment record and go through llm_proxy_service.
     #
     # A setting rather than a literal because the three call sites that used to

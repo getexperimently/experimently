@@ -328,7 +328,8 @@ Return the power curve — sample size required per variant for a range of effec
 
 ### POST /api/v1/power/plan
 
-Generate plain-English planning advice using Claude AI (falls back to built-in templates).
+Generate plain-English planning advice for a power analysis result. The advice is the
+built-in planning advice, and `generated_by` is always `"template"`.
 
 **Request body**:
 ```json
