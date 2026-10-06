@@ -208,7 +208,7 @@ The first line starts only the database and cache. The bootstrap creates the sch
 the first administrator, and is safe to run again. `ENVIRONMENT` must be set: the API
 will not start without it, and the bootstrap will not create an administrator with the
 default password unless it says `development` or `test`. In a second terminal, start the
-dashboard on http://localhost:3000; it proxies `/api` to port 8000:
+dashboard on http://localhost:3100; it proxies `/api` to port 8000:
 
 ```{.bash skip reason="server: starts a long-running development server"}
 cd frontend && npm ci && npm run dev

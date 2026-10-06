@@ -59,7 +59,7 @@ DEFAULT_CORS_ORIGINS = (
 _DEFAULT_PORTS = {"http": 80, "https": 443}
 
 #: The dashboard origins a *development* API accepts as an SSO `return_to`
-#: without configuration: `npm run dev` (3000) and the static export (3100).
+#: without configuration: `npm run dev` (3100) and the dashboard container (3000).
 #: Never added in any other environment.
 DEVELOPMENT_DASHBOARD_ORIGINS = ("http://localhost:3000", "http://localhost:3100")
 
