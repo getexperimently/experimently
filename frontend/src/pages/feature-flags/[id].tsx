@@ -24,6 +24,8 @@ import {
 import type { SafetyCheckResponse } from '@/types/safety';
 import { PageTitle } from '@/components/PageTitle';
 import { FlagToggle } from '@/components/feature-flags/FlagToggle';
+import { useOptionalAuth } from '@/contexts/AuthContext';
+import { FLAG_ROLE_NOTE, canChangeFeatureFlags } from '@/utils/experimentPermissions';
 
 const SCHEDULE_STATUS_COLORS: Record<string, string> = {
   draft: 'bg-slate-100 text-slate-700',
@@ -101,6 +103,10 @@ export default function FeatureFlagDetailPage() {
   const router = useRouter();
   const rawId = router.query.id;
   const id = typeof rawId === 'string' ? rawId : undefined;
+  const auth = useOptionalAuth();
+  // ANALYST and VIEWER read a flag and change none of it (#917): no switch,
+  // the rule builder read-only, the slider disabled, no Save, and a note why.
+  const canChange = canChangeFeatureFlags(auth?.user);
 
   const [flag, setFlag] = useState<FeatureFlag | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -346,15 +352,22 @@ export default function FeatureFlagDetailPage() {
 
             <div className="flex items-center gap-3 shrink-0">
               <span className="text-sm text-slate-600">{on ? 'Serving' : 'Not serving'}</span>
-              <FlagToggle
-                on={on}
-                disabled={toggling}
-                label={`Turn ${flag.key} ${on ? 'off' : 'on'}`}
-                onChange={(next) => void handleToggle(next)}
-                data-testid="flag-toggle"
-              />
+              {canChange && (
+                <FlagToggle
+                  on={on}
+                  disabled={toggling}
+                  label={`Turn ${flag.key} ${on ? 'off' : 'on'}`}
+                  onChange={(next) => void handleToggle(next)}
+                  data-testid="flag-toggle"
+                />
+              )}
             </div>
           </div>
+          {!canChange && (
+            <p className="mt-4 text-sm text-slate-600" data-testid="flag-role-note">
+              {FLAG_ROLE_NOTE}
+            </p>
+          )}
           {toggleError && (
             <div
               role="alert"
@@ -542,6 +555,7 @@ export default function FeatureFlagDetailPage() {
                   value={rules}
                   onChange={setRules}
                   operatorOptions={FLAG_OPERATOR_OPTIONS}
+                  readOnly={!canChange}
                   data-testid="targeting-rule-builder"
                 />
                 {replaced && (
@@ -565,7 +579,7 @@ export default function FeatureFlagDetailPage() {
               <div data-testid="targeting-raw">
                 <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
                   <h3 className="text-sm font-semibold text-slate-700">Targeting Rules</h3>
-                  {!confirmingReplace && (
+                  {!confirmingReplace && canChange && (
                     <button
                       type="button"
                       onClick={() => setConfirmingReplace(true)}
@@ -656,6 +670,7 @@ export default function FeatureFlagDetailPage() {
                 max={100}
                 value={rolloutPercentage}
                 onChange={(e) => setRolloutPercentage(Number(e.target.value))}
+                disabled={!canChange}
                 className="w-full accent-blue-600"
                 data-testid="rollout-percentage"
               />
@@ -687,17 +702,19 @@ export default function FeatureFlagDetailPage() {
             </div>
           )}
 
-          <div className="flex justify-end">
-            <button
-              type="button"
-              onClick={() => void handleSave()}
-              disabled={isSaving}
-              className="px-6 py-2 rounded-lg bg-blue-600 text-white text-sm font-medium hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-              data-testid="save-flag"
-            >
-              {isSaving ? 'Saving...' : 'Save Changes'}
-            </button>
-          </div>
+          {canChange && (
+            <div className="flex justify-end">
+              <button
+                type="button"
+                onClick={() => void handleSave()}
+                disabled={isSaving}
+                className="px-6 py-2 rounded-lg bg-blue-600 text-white text-sm font-medium hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                data-testid="save-flag"
+              >
+                {isSaving ? 'Saving...' : 'Save Changes'}
+              </button>
+            </div>
+          )}
         </div>
       </div>
     </div>

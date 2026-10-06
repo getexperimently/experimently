@@ -3,6 +3,7 @@ import { act, render, screen, fireEvent, waitFor, within } from '@testing-librar
 import FeatureFlagsPage from '@/pages/feature-flags/index';
 import { apiFetch } from '@/services/api';
 import { FeatureFlag } from '@/services/featureFlags';
+import { FLAG_ROLE_NOTE } from '@/utils/experimentPermissions';
 import { apiError, makeRouter, routedApi } from './helpers/apiMock';
 
 jest.mock('@/services/api', () => ({
@@ -12,6 +13,17 @@ jest.mock('@/services/api', () => ({
 
 const mockRouter = makeRouter({ pathname: '/feature-flags', asPath: '/feature-flags' });
 jest.mock('next/router', () => ({ useRouter: () => mockRouter }));
+
+// Unset by default (no session, as before #917): the page keeps every control.
+const mockAuth = jest.fn();
+jest.mock('@/contexts/AuthContext', () => ({ useOptionalAuth: () => mockAuth() }));
+
+function signIn(role: string, is_superuser = false) {
+  mockAuth.mockReturnValue({
+    status: 'authenticated',
+    user: { id: 'u1', email: 'u@example.com', username: 'u', role, is_superuser },
+  });
+}
 
 jest.mock('next/head', () => {
   const Head = ({ children }: { children: React.ReactNode }) => <>{children}</>;
@@ -45,6 +57,7 @@ const toggleCalls = () =>
 
 beforeEach(() => {
   mockedApiFetch.mockReset();
+  mockAuth.mockReset();
 });
 
 describe('FeatureFlagsPage', () => {
@@ -348,5 +361,74 @@ describe('FeatureFlagsPage', () => {
     expect(await screen.findByTestId('flags-error')).toHaveTextContent('boom');
     fireEvent.click(screen.getByTestId('flags-retry'));
     expect(await screen.findByTestId('flags-table')).toBeInTheDocument();
+  });
+});
+
+describe('who may change flags (#917)', () => {
+  const serve = (items: FeatureFlag[]) =>
+    mockedApiFetch.mockImplementation(
+      routedApi([{ path: '/api/v1/feature-flags', handler: () => list(items) }]) as unknown as typeof apiFetch,
+    );
+
+  it.each(['ANALYST', 'VIEWER'])(
+    '%s reads the list with no switch, no "+ New Flag" and a note saying why',
+    async (role) => {
+      signIn(role);
+      serve([flag({ is_active: true }), flag({ id: 'flag-2', key: 'dark_mode', name: 'Dark mode', is_active: false })]);
+      render(<FeatureFlagsPage />);
+
+      const table = await screen.findByTestId('flags-table');
+      const rows = within(table).getAllByTestId('flag-row');
+      expect(rows).toHaveLength(2);
+      // The rows still say whether each flag is on; the pill is the only state shown.
+      expect(within(rows[0]).getByTestId('flag-status-pill')).toHaveTextContent('On');
+      expect(within(rows[1]).getByTestId('flag-status-pill')).toHaveTextContent('Off');
+      expect(within(rows[0]).getByTestId('flag-link')).toHaveAttribute('href', '/feature-flags/flag-1');
+
+      expect(screen.queryByTestId('flag-toggle-checkout_v2')).toBeNull();
+      expect(screen.queryByTestId('flag-toggle-dark_mode')).toBeNull();
+      expect(screen.queryByRole('switch')).toBeNull();
+      expect(within(table).queryByText('On / Off')).toBeNull();
+      expect(within(table).getAllByRole('columnheader')).toHaveLength(5);
+
+      expect(screen.queryByTestId('new-flag-btn')).toBeNull();
+      const note = screen.getByTestId('flags-role-note');
+      expect(note).toHaveTextContent(FLAG_ROLE_NOTE);
+      expect(note).toHaveTextContent('Feature flags are created and changed by the ADMIN and DEVELOPER roles.');
+    },
+  );
+
+  it.each(['ANALYST', 'VIEWER'])('%s gets the empty state with no create link', async (role) => {
+    signIn(role);
+    serve([]);
+    render(<FeatureFlagsPage />);
+    const empty = await screen.findByTestId('flags-empty');
+    expect(empty).toHaveTextContent('No feature flags yet');
+    expect(within(empty).queryByRole('link')).toBeNull();
+    expect(screen.queryByTestId('new-flag-btn')).toBeNull();
+    expect(screen.getByTestId('flags-role-note')).toBeInTheDocument();
+  });
+
+  it.each([
+    ['ADMIN', false],
+    ['DEVELOPER', false],
+    ['VIEWER', true],
+  ])('%s (superuser: %s) keeps "+ New Flag" and the switches', async (role, is_superuser) => {
+    signIn(role, is_superuser);
+    serve([flag({ is_active: true })]);
+    render(<FeatureFlagsPage />);
+    const table = await screen.findByTestId('flags-table');
+    expect(screen.getByTestId('new-flag-btn')).toHaveAttribute('href', '/feature-flags/new');
+    expect(screen.getByTestId('flag-toggle-checkout_v2')).toHaveAttribute('aria-checked', 'true');
+    expect(within(table).getByText('On / Off')).toBeInTheDocument();
+    expect(screen.queryByTestId('flags-role-note')).toBeNull();
+  });
+
+  it('an ADMIN still gets the create link in the empty state', async () => {
+    signIn('ADMIN');
+    serve([]);
+    render(<FeatureFlagsPage />);
+    const empty = await screen.findByTestId('flags-empty');
+    expect(within(empty).getByRole('link', { name: /create your first flag/i })).toHaveAttribute('href', '/feature-flags/new');
   });
 });

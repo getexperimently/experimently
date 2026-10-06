@@ -2,6 +2,8 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { PageTitle } from '@/components/PageTitle';
 import { FlagToggle } from '@/components/feature-flags/FlagToggle';
+import { useOptionalAuth } from '@/contexts/AuthContext';
+import { FLAG_ROLE_NOTE, canChangeFeatureFlags } from '@/utils/experimentPermissions';
 import {
   FeatureFlag,
   FeatureFlagStatus,
@@ -21,6 +23,10 @@ function formatDate(value: string): string {
 }
 
 export default function FeatureFlagsPage() {
+  const auth = useOptionalAuth();
+  // ANALYST and VIEWER read flags and change none (#917): they get no
+  // "+ New Flag", no create link and no On/Off column, and a note saying why.
+  const canChange = canChangeFeatureFlags(auth?.user);
   const [statusFilter, setStatusFilter] = useState<FeatureFlagStatus | 'all'>('all');
   const [flags, setFlags] = useState<FeatureFlag[]>([]);
   const [loading, setLoading] = useState(true);
@@ -127,13 +133,19 @@ export default function FeatureFlagsPage() {
               Turn features on and off, roll them out gradually and watch their safety signals
             </p>
           </div>
-          <Link
-            href="/feature-flags/new"
-            className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 transition-colors"
-            data-testid="new-flag-btn"
-          >
-            + New Flag
-          </Link>
+          {canChange ? (
+            <Link
+              href="/feature-flags/new"
+              className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 transition-colors"
+              data-testid="new-flag-btn"
+            >
+              + New Flag
+            </Link>
+          ) : (
+            <p className="text-sm text-slate-600" data-testid="flags-role-note">
+              {FLAG_ROLE_NOTE}
+            </p>
+          )}
         </div>
 
         {/* Filters */}
@@ -196,12 +208,14 @@ export default function FeatureFlagsPage() {
               {statusFilter === 'all' ? 'No feature flags yet' : 'No flags match this filter'}
             </p>
             {statusFilter === 'all' ? (
-              <Link
-                href="/feature-flags/new"
-                className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 transition-colors"
-              >
-                Create your first flag
-              </Link>
+              canChange && (
+                <Link
+                  href="/feature-flags/new"
+                  className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 transition-colors"
+                >
+                  Create your first flag
+                </Link>
+              )
             ) : (
               <button
                 type="button"
@@ -241,7 +255,9 @@ export default function FeatureFlagsPage() {
                   <th className="text-left px-4 py-3 text-slate-600 font-medium">Status</th>
                   <th className="text-right px-4 py-3 text-slate-600 font-medium">Rollout</th>
                   <th className="text-left px-4 py-3 text-slate-600 font-medium">Updated</th>
-                  <th className="text-right px-4 py-3 text-slate-600 font-medium">On / Off</th>
+                  {canChange && (
+                    <th className="text-right px-4 py-3 text-slate-600 font-medium">On / Off</th>
+                  )}
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
@@ -284,15 +300,17 @@ export default function FeatureFlagsPage() {
                         {flag.rollout_percentage}%
                       </td>
                       <td className="px-4 py-3 text-slate-500">{formatDate(flag.updated_at)}</td>
-                      <td className="px-4 py-3 text-right">
-                        <FlagToggle
-                          on={on}
-                          disabled={Boolean(toggling[flag.id])}
-                          label={`Turn ${flag.key} ${on ? 'off' : 'on'}`}
-                          onChange={() => void handleToggle(flag)}
-                          data-testid={`flag-toggle-${flag.key}`}
-                        />
-                      </td>
+                      {canChange && (
+                        <td className="px-4 py-3 text-right">
+                          <FlagToggle
+                            on={on}
+                            disabled={Boolean(toggling[flag.id])}
+                            label={`Turn ${flag.key} ${on ? 'off' : 'on'}`}
+                            onChange={() => void handleToggle(flag)}
+                            data-testid={`flag-toggle-${flag.key}`}
+                          />
+                        </td>
+                      )}
                     </tr>
                   );
                 })}
