@@ -27,6 +27,15 @@
   journey's profile. The stack is brought down (``down -v``) when the session
   ends, or before a journey of the other profile.
 
+  A guide gives the addresses a reader gets with the default host ports
+  (``http://localhost:3000`` for the dashboard, ``http://localhost:8000`` for
+  the API). The stack's ``published`` maps each default that
+  ``docker-compose.yml`` itself gives the dashboard and the API
+  (``${FRONTEND_HOST_PORT:-3000}``, ``${API_HOST_PORT:-8000}``) to where that
+  service runs here, so an ``open`` of a guide's address reaches the same
+  service on this stack's port, and one of a port the compose file does not
+  default to reaches nothing.
+
 A command that cannot be started at all (no ``docker``, no ``npm``) is a
 ``StackError`` like one that fails, so the journey is reported FAIL before its
 first step rather than ending the session.
@@ -55,6 +64,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import socket
 import subprocess
@@ -67,7 +77,14 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, Mapping, Optional, Tuple
 
+import yaml
+
 PUBLISHED_URL = "https://getexperimently.github.io/experimently/"
+
+#: The compose variables of the two services a browser opens: the API and the dashboard.
+HTTP_PORT_VARIABLES = ("API_HOST_PORT", "FRONTEND_HOST_PORT")
+#: A ``ports`` entry whose host port is a variable with a default.
+DEFAULTED_PORT = re.compile(r"^\$\{(?P<variable>[A-Z_]+):-(?P<default>[0-9]{1,5})\}:")
 
 #: (our variable, the compose variable, the default host port)
 COMPOSE_PORTS: Tuple[Tuple[str, str, int], ...] = (
@@ -113,6 +130,9 @@ class Running:
     accounts: Mapping[str, Tuple[str, str]] = field(default_factory=dict)
     #: For a documentation site: the directory it was built from.
     source: Optional[Path] = None
+    #: For the compose stack: each default host port a guide's address names,
+    #: and the base URL that stands for it here.
+    published: Mapping[int, str] = field(default_factory=dict)
 
 
 def free_port() -> int:
@@ -144,6 +164,22 @@ def wait_until_answering(url: str, seconds: float) -> None:
             last = str(error)
         time.sleep(0.5)
     raise StackError(f"{url} did not answer within {seconds:.0f} s ({last})")
+
+
+def compose_default_ports(compose_file: Path) -> Dict[str, int]:
+    """Each ``${VAR:-port}`` host port in *compose_file*'s ``ports``, by variable."""
+    try:
+        data = yaml.safe_load(compose_file.read_text(encoding="utf-8"))
+    except (OSError, yaml.YAMLError) as error:
+        raise StackError(f"{compose_file.name} cannot be read: {error}") from None
+    found: Dict[str, int] = {}
+    services = data.get("services", {}) if isinstance(data, dict) else {}
+    for service in services.values() if isinstance(services, dict) else []:
+        for entry in (service or {}).get("ports", []) or []:
+            match = DEFAULTED_PORT.match(str(entry))
+            if match:
+                found[match["variable"]] = int(match["default"])
+    return found
 
 
 def _run_logged(argv, *, cwd: Path, env: Mapping[str, str], log: Path, timeout: float):
@@ -269,6 +305,7 @@ class ComposeDev:
     def up(self, profile: str) -> Running:
         if self.running is not None and self.running.profile == profile:
             return self.running
+        published = self.published()
         self.down()
         self._clear(profile)
         status = self._compose(
@@ -288,6 +325,7 @@ class ComposeDev:
             api_url=api_url,
             profile=profile,
             accounts=DEMO_ACCOUNTS,
+            published=published,
         )
         try:
             served = self._served_profile(api_url)
@@ -300,6 +338,19 @@ class ComposeDev:
             self._clear(profile)
             raise
         return self.running
+
+    def published(self) -> Dict[int, str]:
+        """The dashboard's and the API's default host ports, each mapped to its URL here."""
+        defaults = compose_default_ports(self.repo_root / "docker-compose.yml")
+        missing = [name for name in HTTP_PORT_VARIABLES if name not in defaults]
+        if missing:
+            raise StackError(
+                f"docker-compose.yml gives no default host port for {missing[0]}"
+            )
+        return {
+            defaults[name]: f"http://127.0.0.1:{self.ports[name]}"
+            for name in HTTP_PORT_VARIABLES
+        }
 
     @staticmethod
     def _served_profile(api_url: str) -> str:

@@ -12,6 +12,7 @@ import re
 from typing import Any, List
 
 from docs_runner.model import SEARCH_TOP, Step
+from docs_runner.redaction import MIN_LENGTH
 
 OBSERVED_CHARS = 300
 NUMBER = re.compile(r"-?\d[\d,]*(?:\.\d+)?|-?\.\d+")
@@ -38,10 +39,20 @@ def describe_action(step: Step) -> str:
     do = step.do
     if do.goto is not None:
         return f"open {do.goto}"
+    if do.open is not None:
+        return f"open {do.open}, the guide's address"
     if do.click is not None:
         return f'click the {do.click.role} "{do.click.name}"'
     if do.fill is not None:
+        if do.fill.secret is not None:
+            return f'fill "{do.fill.label}" with the password {do.fill.secret}'
         return f'fill "{do.fill.label}"'
+    if do.keep is not None:
+        within = do.keep.within
+        return (
+            f"keep the text of the {do.keep.role} in the {within.role}"
+            f' "{within.name}" as {do.keep.secret}'
+        )
     if do.select is not None:
         return f'choose "{do.select.option}" in "{do.select.label}"'
     if do.api is not None:
@@ -71,6 +82,11 @@ CRAWL_EXPECTS = {
 def describe_expect(step: Step) -> str:
     if step.do.crawl is not None:
         return CRAWL_EXPECTS[step.do.crawl]
+    if step.do.keep is not None:
+        return (
+            f"exactly one {step.do.keep.role} there, holding at least"
+            f" {MIN_LENGTH} characters (kept, never written)"
+        )
     expect_ = step.expect
     if expect_ is None:
         return "Doc Examples runs this section's blocks"

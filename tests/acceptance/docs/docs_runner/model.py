@@ -45,15 +45,17 @@ without ``pending``)::
         not_run: needs-aws                   # a reason from registry.py; reported NOT RUN
 
 ``do`` is exactly one action. ``expect`` lists what must hold after it. A step
-on a screen (``goto``, ``click``, ``fill``, ``select``) expects an ARIA
-snapshot of the page, ``aria``, written before the run, beside any structural
-expectation (``url``, ``status``, ``visible``, ``text``, ``number``); only
-``snapshot: false`` with a one-line ``snapshot_reason`` drops it, and the step
-then needs a structural expectation and no ``aria``. ``aria`` is Playwright's
-ARIA snapshot template: it must parse as a YAML list. ``api``, ``ref`` and
-``crawl`` steps take no snapshot. ``fail`` says what failure looks like; a step
-without it is refused. Names, labels, options, ``text``, ``goto`` and
-``search`` are one line each.
+on a screen (``goto``, ``open``, ``click``, ``fill``, ``select``) expects an
+ARIA snapshot of the page, ``aria``, written before the run, beside any
+structural expectation (``url``, ``status``, ``visible``, ``text``,
+``number``); only ``snapshot: false`` with a one-line ``snapshot_reason`` drops
+it, and the step then needs a structural expectation and no ``aria``. A step
+with ``snapshot: false`` keeps no screenshot and no ARIA snapshot, whether it
+passes or fails. ``aria`` is Playwright's ARIA snapshot template: it must parse
+as a YAML list. ``api``, ``ref``, ``crawl`` and ``keep`` steps take no
+snapshot. ``fail`` says what failure looks like; a step without it is refused.
+Names, labels, options, ``text``, ``goto``, ``open`` and ``search`` are one
+line each.
 
 Two actions are for the documentation site itself (stacks docs-published and
 docs-local), whose source (``mkdocs.yml`` and ``docs/``) the stack names:
@@ -70,11 +72,37 @@ docs-local), whose source (``mkdocs.yml`` and ``docs/``) the stack names:
   site (its ``site_url``) written in the source pages: each must answer 2xx,
   following redirects only within the site. A crawl's check is the action
   itself, so a crawl step has no ``expect``.
+
+Three are for following a guide on the compose stack (``compose-dev``) as its
+reader does:
+
+* ``open: <URL>`` opens an address the guide gives, such as
+  ``http://localhost:3000``: the guide's text must contain the URL's origin
+  (``http://localhost:<port>``), and the step fails unless the stack, started
+  with ``docker-compose.yml``'s default host ports, serves something on that
+  port. The stack runs on ports of its own, so the runner opens the same path
+  on the port that stands for it (``stacks.ComposeDev``). A screen step.
+* ``passwords: [<name>, ...]`` (a journey field, not a step) makes up one
+  fresh password per name when the journey starts, each meeting the account
+  rules; ``fill: {label: ..., secret: <name>}`` types one instead of a
+  ``value``.
+* ``keep: {secret: <name>, role: <role>, within: {role: ..., name: ...}}``
+  reads the text of the one element of that role inside the named element
+  (the one-time password the dashboard shows once) and keeps it under that
+  name, for a later ``fill``. Its check is the action itself: exactly one
+  such element, its text at least ``redaction.MIN_LENGTH`` characters. It
+  takes no screenshot and no ARIA snapshot.
+
+What a run makes up or keeps is never written to the run directory
+(``redaction.py``): a fill that types one takes ``snapshot: false``, a journey
+that has one is not recorded (``video: false``), and every text the runner
+writes has them taken out.
 """
 
 from __future__ import annotations
 
 import datetime
+import re
 from typing import Annotated, Any, Dict, List, Literal, Optional, Union
 
 import yaml
@@ -188,9 +216,9 @@ Role = Literal[
 SLUG_PATTERN = r"^[a-z0-9]+(?:-[a-z0-9]+)*$"
 
 #: The actions on one screen, which expect an ARIA snapshot.
-SCREEN_ACTIONS = ("goto", "click", "fill", "select")
-#: The actions in the browser, whose screen is kept as a screenshot.
-BROWSER_ACTIONS = (*SCREEN_ACTIONS, "search")
+SCREEN_ACTIONS = ("goto", "open", "click", "fill", "select")
+#: The actions in the browser; each but ``keep`` keeps its screen as a screenshot.
+BROWSER_ACTIONS = (*SCREEN_ACTIONS, "search", "keep")
 #: What a step on a screen may expect, and what an ``api`` step may.
 BROWSER_EXPECTS = ("url", "status", "visible", "text", "number", "aria")
 #: A screen step's structural expectations: all but the ARIA snapshot.
@@ -203,6 +231,10 @@ SITE_STACKS = ("docs-local", "docs-published")
 CRAWLS = ("nav", "links")
 #: How far down the search results a ``found`` page may be.
 SEARCH_TOP = 3
+#: An address a guide gives for the compose stack: ``open``'s argument.
+LOCAL_URL = re.compile(
+    r"^(?P<origin>http://localhost:(?P<port>[0-9]{1,5}))(?P<path>/\S*)?$"
+)
 
 
 def _one_line(value: str, what: str) -> str:
@@ -254,10 +286,17 @@ class Named(_Quoted):
 
 
 class Fill(_Quoted):
-    """Type ``value`` into the field labelled ``label``."""
+    """Type ``value``, or the password kept as ``secret``, into the field ``label``."""
 
     label: OneLine
-    value: StrictStr
+    value: Optional[StrictStr] = None
+    secret: Optional[StrictStr] = Field(default=None, pattern=SLUG_PATTERN)
+
+    @model_validator(mode="after")
+    def _value_or_secret(self) -> "Fill":
+        if (self.value is None) == (self.secret is None):
+            raise ValueError("a fill types exactly one of value or secret")
+        return self
 
 
 class Select(_Quoted):
@@ -265,6 +304,14 @@ class Select(_Quoted):
 
     label: OneLine
     option: OneLine
+
+
+class Keep(_Strict):
+    """Keep the text of the one ``role`` element inside ``within`` as ``secret``."""
+
+    secret: StrictStr = Field(pattern=SLUG_PATTERN)
+    role: Role
+    within: Named
 
 
 class Api(_Strict):
@@ -280,9 +327,11 @@ class Do(_Strict):
     """Exactly one action."""
 
     goto: Optional[OneLine] = None
+    open: Optional[OneLine] = None
     click: Optional[Named] = None
     fill: Optional[Fill] = None
     select: Optional[Select] = None
+    keep: Optional[Keep] = None
     api: Optional[Api] = None
     ref: Optional[Literal["doc-examples"]] = None
     search: Optional[OneLine] = None
@@ -293,8 +342,8 @@ class Do(_Strict):
         given = [name for name in type(self).model_fields if getattr(self, name)]
         if len(given) != 1:
             raise ValueError(
-                "do must be exactly one of goto, click, fill, select, api, ref,"
-                f" search, crawl; got {given or 'none'}"
+                "do must be exactly one of goto, open, click, fill, select, keep,"
+                f" api, ref, search, crawl; got {given or 'none'}"
             )
         return self
 
@@ -303,7 +352,18 @@ class Do(_Strict):
     def _goto_is_a_path(cls, value: Optional[str]) -> Optional[str]:
         if value is not None and "://" in value:
             raise ValueError(
-                "goto is a path on the stack (its base URL is the stack's), not a URL"
+                "goto is a path on the stack (its base URL is the stack's), not a"
+                " URL; open is for an address the guide gives"
+            )
+        return value
+
+    @field_validator("open")
+    @classmethod
+    def _open_is_a_local_url(cls, value: Optional[str]) -> Optional[str]:
+        if value is not None and not LOCAL_URL.match(value):
+            raise ValueError(
+                "open is an address the guide gives on this machine,"
+                " http://localhost:<port> and an optional path"
             )
         return value
 
@@ -403,7 +463,16 @@ class Step(_Strict):
 
     @property
     def takes_screenshot(self) -> bool:
-        return self.in_browser and self.snapshot is not False
+        return self.in_browser and self.snapshot is not False and self.do.kind != "keep"
+
+    @property
+    def secret(self) -> Optional[str]:
+        """The secret this step types (a fill's) or keeps, if any."""
+        if self.do.fill is not None:
+            return self.do.fill.secret
+        if self.do.keep is not None:
+            return self.do.keep.secret
+        return None
 
 
 class Journey(_Strict):
@@ -412,6 +481,10 @@ class Journey(_Strict):
     profile: Profile
     video: StrictBool
     written: datetime.date
+    #: Passwords the runner makes up when the journey starts, by name.
+    passwords: List[Annotated[StrictStr, Field(pattern=SLUG_PATTERN)]] = Field(
+        default_factory=list
+    )
     steps: List[Step] = Field(min_length=1)
 
     @model_validator(mode="after")
@@ -422,3 +495,18 @@ class Journey(_Strict):
                 raise ValueError(f"step id {step.id!r} is used twice")
             seen.add(step.id)
         return self
+
+    @model_validator(mode="after")
+    def _unique_secrets(self) -> "Journey":
+        names = list(self.passwords)
+        names += [step.do.keep.secret for step in self.steps if step.do.keep]
+        twice = sorted({name for name in names if names.count(name) > 1})
+        if twice:
+            raise ValueError(
+                f"secret {twice[0]!r} is made up or kept twice; give each its own name"
+            )
+        return self
+
+    @property
+    def has_secrets(self) -> bool:
+        return bool(self.passwords) or any(step.do.keep for step in self.steps)

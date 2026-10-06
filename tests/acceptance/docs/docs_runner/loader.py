@@ -38,7 +38,15 @@ YAML, or not a mapping, stops at that. Refused, besides what ``model`` refuses:
 * an ``api`` step on a stack with no API (every stack but compose-dev);
 * an oracle not in ``docs_runner.oracles.ORACLES``;
 * a ``not_run`` reason the registry does not let a journey declare;
-* a ``written`` date after today.
+* a ``written`` date after today;
+* ``open`` on any stack but compose-dev, or of a URL whose origin
+  (``http://localhost:<port>``) the guide's text does not contain;
+* a ``fill`` that types a ``secret`` no ``passwords`` entry makes up and no
+  earlier ``keep`` step keeps, or that does not say ``snapshot: false``;
+* a ``keep`` step with an ``expect`` or a ``snapshot`` setting (its check is
+  the action, and it keeps no screen);
+* a journey that makes up or keeps a secret and is recorded (``video: true``):
+  a recording would show what the run keeps out of its files.
 """
 
 from __future__ import annotations
@@ -69,6 +77,7 @@ from docs_runner import registry
 from docs_runner.model import (
     API_EXPECTS,
     BROWSER_EXPECTS,
+    LOCAL_URL,
     SEARCH_EXPECTS,
     SITE_STACKS,
     STACKS,
@@ -267,6 +276,9 @@ def _quoted_names(step: Step) -> List[tuple]:
         names.append(("fill.label", do.fill.label, do.fill.quote))
     if do.select is not None:
         names.append(("select.label", do.select.label, do.select.quote))
+    if do.keep is not None:
+        within = do.keep.within
+        names.append(("keep.within.name", within.name, within.quote))
     expect = step.expect
     if expect is not None:
         for index, named in enumerate(expect.visible or []):
@@ -322,6 +334,15 @@ def _expect_problems(label: str, step: Step, stack: Optional[str]) -> List[str]:
                 " no expect"
             )
         return found
+    if kind == "keep":
+        if given:
+            found.append(
+                f"{label}: keep checks what the action says (one element, its text"
+                " kept); it has no expect"
+            )
+        if step.snapshot is not None:
+            found.append(f"{label}: a keep step keeps no screen; leave snapshot out")
+        return found
     if kind == "search":
         wrong = [name for name in given if name not in SEARCH_EXPECTS]
         if wrong:
@@ -354,8 +375,15 @@ def _expect_problems(label: str, step: Step, stack: Optional[str]) -> List[str]:
                 f"{label}: a step with snapshot: false needs a structural expect"
                 f" ({', '.join(STRUCTURAL_EXPECTS)})"
             )
-    if "status" in given and kind != "goto":
-        found.append(f"{label}: status is the answer to a goto; {kind} has none")
+    if "status" in given and kind not in ("goto", "open"):
+        found.append(
+            f"{label}: status is the answer to a goto or an open; {kind} has none"
+        )
+    if step.do.fill is not None and step.do.fill.secret and step.snapshot is not False:
+        found.append(
+            f"{label}: a fill that types the secret {step.do.fill.secret!r} keeps no"
+            " screen: give snapshot: false and a snapshot_reason"
+        )
     return found
 
 
@@ -402,6 +430,18 @@ def _step_problems(
                     " the guide says, or give quote: false and a reason"
                 )
     found.extend(_expect_problems(label, step, stack))
+    if step.do.open is not None:
+        if stack is not None and stack != "compose-dev":
+            found.append(
+                f"{label}: open is for an address the guide gives for the compose"
+                f" stack; {stack} is not it"
+            )
+        match = LOCAL_URL.match(step.do.open)
+        if guide is not None and match and not guide.contains(match["origin"]):
+            found.append(
+                f"{label}: open {match['origin']!r} is not in the guide's text; open"
+                " an address the guide gives"
+            )
     if step.not_run is not None and not registry.is_declarable(step.not_run):
         found.append(
             f"{label}: not_run {step.not_run!r} is not a reason a journey may"
@@ -429,6 +469,33 @@ def _step_problems(
     return found
 
 
+def _secret_problems(
+    steps: Sequence[Tuple[int, Step]],
+    passwords: Sequence[str],
+    video: Optional[bool],
+) -> List[str]:
+    """A secret typed before anything makes it up or keeps it; a recorded journey."""
+    found: List[str] = []
+    known = set(passwords)
+    for index, step in steps:
+        label = f"step {index + 1} ({step.id})"
+        typed = step.do.fill.secret if step.do.fill is not None else None
+        if typed is not None and typed not in known:
+            found.append(
+                f"{label}: fill types the secret {typed!r}, which no passwords entry"
+                " makes up and no earlier keep step keeps"
+            )
+        if step.do.keep is not None:
+            known.add(step.do.keep.secret)
+    has_secrets = bool(passwords) or any(step.do.keep for _, step in steps)
+    if has_secrets and video:
+        found.append(
+            "video: true, but the journey makes up or keeps a secret; a recording"
+            " would show it, so give video: false"
+        )
+    return found
+
+
 def semantic_problems(
     *,
     guide_path: Optional[str],
@@ -438,6 +505,8 @@ def semantic_problems(
     complete: bool,
     stem: str,
     context: Context,
+    passwords: Sequence[str] = (),
+    video: Optional[bool] = None,
 ) -> List[str]:
     """Refusals against the guide, the inventory and the registry.
 
@@ -458,6 +527,7 @@ def semantic_problems(
     for index, step in steps:
         label = f"step {index + 1} ({step.id})"
         found.extend(_step_problems(label, step, guide_path, guide, stack, context))
+    found.extend(_secret_problems(steps, passwords, video))
     if complete and steps:
         if all(step.do.kind == "ref" or step.not_run is not None for _, step in steps):
             found.append(
@@ -473,6 +543,8 @@ def _parts(data: Dict[str, Any]) -> Dict[str, Any]:
     guide_ok = isinstance(guide, str) and re.fullmatch(r"[^/\s][^\s]*\.md", guide)
     stack = data.get("stack")
     written = data.get("written")
+    passwords = data.get("passwords")
+    video = data.get("video")
     raw_steps = data.get("steps") if isinstance(data.get("steps"), list) else []
     steps: List[Tuple[int, Step]] = []
     for index, raw in enumerate(raw_steps):
@@ -491,6 +563,12 @@ def _parts(data: Dict[str, Any]) -> Dict[str, Any]:
         ),
         "steps": steps,
         "complete": bool(raw_steps) and len(steps) == len(raw_steps),
+        "passwords": (
+            [name for name in passwords if isinstance(name, str)]
+            if isinstance(passwords, list)
+            else []
+        ),
+        "video": video if isinstance(video, bool) else None,
     }
 
 
@@ -519,6 +597,8 @@ def load(path: Path, context: Context) -> Journey:
             "written": journey.written,
             "steps": list(enumerate(journey.steps)),
             "complete": True,
+            "passwords": list(journey.passwords),
+            "video": journey.video,
         }
     else:
         parts = _parts(data)

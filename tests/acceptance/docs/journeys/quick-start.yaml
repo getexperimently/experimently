@@ -1,0 +1,284 @@
+# The Quick Start (docs/getting-started/quick-start.md), its browser half
+# (#939): the addresses Step 1 gives, the sign-in Step 2 sends the reader to,
+# and the dashboard screens Steps 3 and 6 name ("Experiments -> + New
+# Experiment", "create it, then Start", "Experiments -> your experiment -> View
+# results").
+#
+# The guide's shell blocks run in Doc Examples on a stack of their own, so each
+# section that has one is a ref: doc-examples step here. Step 3's experiment is
+# created through the API with the guide's own request body (the guided setup
+# beyond its first screen is the experiment-wizard journey's), then started and
+# opened in the dashboard as the guide says.
+#
+# Its sign-in steps name the form's labels with quote: false: the guide says
+# "sign in" and gives the account (admin@demo.com / Demo1234!), not the form.
+#
+# "Running outside Docker" says the dashboard's development server "proxies
+# /api to port 8000". Measured on 2026-10-06 (next dev, nothing set): the dev
+# server answers 404 for /api/v1/modules and /health/ready, and the dashboard
+# calls http://localhost:8000 itself. That section starts development servers,
+# which no stack here runs, so the pull request that added this journey
+# corrected the sentence instead.
+#
+# Expectations written on 2026-10-06 from the guide and the dashboard's source,
+# before the first run.
+guide: getting-started/quick-start.md
+stack: compose-dev
+profile: core
+video: true
+written: 2026-10-06
+steps:
+  - id: start-the-stack
+    doc: step-1-start-the-stack
+    do:
+      ref: doc-examples
+    fail: Doc Examples reports that the stack does not start, or that /health/ready is not healthy
+  - id: api-docs-address
+    doc: step-1-start-the-stack
+    do:
+      open: http://localhost:8000/api/v1/docs
+    expect:
+      status: 200
+    snapshot: false
+    snapshot_reason: the page draws itself with scripts it loads from a CDN; that the address answers is what the guide says
+    fail: the API's interactive docs do not answer at the address the guide gives
+  - id: health-address
+    doc: step-1-start-the-stack
+    do:
+      open: http://localhost:8000/health/ready
+    expect:
+      status: 200
+    snapshot: false
+    snapshot_reason: the API answers JSON there, not a screen; the address and its status are the check
+    fail: the health check does not answer at the address the guide gives, or the stack is not ready
+  - id: log-in-from-the-shell
+    doc: step-2-log-in
+    do:
+      ref: doc-examples
+    fail: Doc Examples reports that admin@demo.com does not sign in as ADMIN
+  - id: dashboard-address
+    doc: step-2-log-in
+    do:
+      open: http://localhost:3000
+    expect:
+      status: 200
+      aria: |
+        - banner:
+          - navigation:
+            - link "Sign in"
+        - main:
+          - heading "A/B testing and feature flags you run yourself." [level=1]
+    fail: the dashboard does not answer at the address the guide gives
+  - id: sign-in-page
+    doc: step-2-log-in
+    do:
+      click:
+        role: link
+        name: Sign in
+        quote: false
+        reason: the guide says to sign in; this is the dashboard's link for it
+    expect:
+      url: /login
+      aria: |
+        - main:
+          - heading "Sign in" [level=1]
+          - textbox "Email"
+          - textbox "Password"
+          - button "Sign in"
+    fail: the dashboard offers no way to sign in
+  - id: email
+    doc: step-1-start-the-stack
+    do:
+      fill:
+        label: Email
+        value: admin@demo.com
+        quote: false
+        reason: the sign-in form's field; the guide gives the account
+    expect:
+      aria: |
+        - main:
+          - textbox "Email": admin@demo.com
+    fail: the sign-in form has no Email field
+  - id: password
+    doc: step-1-start-the-stack
+    do:
+      fill:
+        label: Password
+        value: Demo1234!
+        quote: false
+        reason: the sign-in form's field; the guide gives the default credentials
+    expect:
+      aria: |
+        - main:
+          - textbox "Password"
+          - button "Sign in"
+    fail: the sign-in form has no Password field
+  - id: signed-in
+    doc: step-2-log-in
+    do:
+      click:
+        role: button
+        name: Sign in
+        quote: false
+        reason: the sign-in form's button; the guide says to sign in
+    expect:
+      url: /experiments
+      aria: |
+        - banner:
+          - navigation "Primary":
+            - link "Experiments"
+          - link "Change password"
+          - button "Log out"
+        - main:
+          - heading "Experiments" [level=1]
+    fail: the default credentials do not sign in, or signing in does not open the dashboard
+  - id: experiments
+    doc: step-3-create-an-experiment
+    do:
+      click:
+        role: link
+        name: Experiments
+    expect:
+      url: /experiments
+      aria: |
+        - main:
+          - heading "Experiments" [level=1]
+          - link "+ New Experiment"
+    fail: there is no Experiments page, or it offers no + New Experiment
+  - id: guided-setup
+    doc: step-3-create-an-experiment
+    do:
+      click:
+        role: link
+        name: + New Experiment
+    expect:
+      url: /experiments/new
+      aria: |
+        - main:
+          - heading "New Experiment" [level=1]
+          - navigation "Guided setup steps":
+            - paragraph: Step 1 of 5
+            - list:
+              - listitem: Type (current step)
+              - listitem:
+                - button "Details (not started)"
+              - listitem: Variants (not started)
+              - listitem: Estimate (not started)
+              - listitem: Review (not started)
+          - region "What kind of experiment?":
+            - heading "What kind of experiment?" [level=2]
+    fail: "+ New Experiment does not open the guided setup with its five steps: type, details, variants, estimate, review"
+  - id: create-from-the-shell
+    doc: step-3-create-an-experiment
+    do:
+      ref: doc-examples
+    fail: Doc Examples reports that the guide's experiment is not created and started
+  - id: create
+    doc: step-3-create-an-experiment
+    do:
+      api:
+        method: POST
+        path: /api/v1/experiments/
+        as: admin
+        body:
+          name: Homepage button colour
+          key: homepage_button_colour
+          hypothesis: A green call-to-action raises click-through
+          experiment_type: a_b
+          variants:
+            - name: control
+              is_control: true
+              traffic_allocation: 50
+            - name: green_cta
+              is_control: false
+              traffic_allocation: 50
+          metrics:
+            - name: CTA click
+              event_name: cta_click
+              metric_type: conversion
+              is_primary: true
+    expect:
+      status: 201
+      json:
+        name: Homepage button colour
+        key: homepage_button_colour
+        status: draft
+    fail: the guide's request body does not create a draft experiment
+  - id: back-to-experiments
+    doc: step-6-read-the-results
+    do:
+      click:
+        role: link
+        name: Experiments
+    expect:
+      url: /experiments
+      aria: |
+        - main:
+          - heading "Experiments" [level=1]
+          - table:
+            - rowgroup:
+              - row:
+                - cell:
+                  - link "Homepage button colour"
+    fail: the experiment just created is not on the Experiments page
+  - id: your-experiment
+    doc: step-6-read-the-results
+    do:
+      click:
+        role: link
+        name: Homepage button colour
+    expect:
+      aria: |
+        - main:
+          - heading "Homepage button colour" [level=1]
+          - text: Draft
+          - button "Start"
+          - text: View results
+    fail: the experiment's page does not open, or a draft offers no Start
+  - id: start
+    doc: step-3-create-an-experiment
+    do:
+      click:
+        role: button
+        name: Start
+    expect:
+      aria: |
+        - main:
+          - heading "Homepage button colour" [level=1]
+          - text: Active
+          - button "Pause"
+          - link "View results"
+    fail: Start does not make the experiment active
+  - id: view-results
+    doc: step-6-read-the-results
+    do:
+      click:
+        role: link
+        name: View results
+    expect:
+      aria: |
+        - main:
+          - heading "Homepage button colour" [level=2]
+          - tablist "Results sections":
+            - tab "Overview" [selected]
+    fail: View results does not open the experiment's results
+  - id: api-key-from-the-shell
+    doc: step-4-create-an-api-key
+    do:
+      ref: doc-examples
+    fail: Doc Examples reports that no API key is created
+  - id: assign-and-track-from-the-shell
+    doc: step-5-assign-users-and-track-events
+    do:
+      ref: doc-examples
+    fail: Doc Examples reports that user-123 is not assigned, or the conversion is not stored
+  - id: results-from-the-shell
+    doc: step-6-read-the-results
+    do:
+      ref: doc-examples
+    fail: Doc Examples reports that the results do not count the one conversion
+  - id: feature-flags-from-the-shell
+    doc: step-7-feature-flags
+    do:
+      ref: doc-examples
+    fail: Doc Examples reports that the flag is not created, activated, or evaluated for user-2

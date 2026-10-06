@@ -18,6 +18,9 @@ pinned rather than reviewed once:
   ``docs_journeys_report.py deployed`` names, and runs the runner's own pytest
   root with its run directory, that source and the video switch; every upload
   is of the run directory or a file in it, kept 14 days (90 on a release tag);
+* nothing from the run directory leaves the job (the step summary, the
+  verdicts, the directory itself) unless the runner's scan of it for the values
+  the run made up, kept or signed in for ran: its ``secret-scan.json`` is there;
 * the report job runs only after verdicts were written; it posts only on a
   scheduled run on ``main``; everything posted goes through ``--body-file``
   from a rendered file, the issue title is the rendered title file's first
@@ -85,6 +88,19 @@ CLOSE_LINE = (
     "-f state=closed -f state_reason=completed > /dev/null"
 )
 RETENTION = "${{ startsWith(github.ref, 'refs/tags/v') && 90 || 14 }}"
+SCANNED = "Run directory scanned"
+SCANNED_IF = "always() && steps.scanned.outputs.done == 'true'"
+SCANNED_LINES = [
+    "set -euo pipefail",
+    'if [ -f "$RUNNER_TEMP/docs-journeys-run/secret-scan.json" ]; then',
+    "printf 'done=true\\n' >> \"$GITHUB_OUTPUT\"",
+    "else",
+    "printf '%s\\n' '::warning title=Docs journeys::the run directory was not"
+    " scanned, so it is not uploaded'",
+    "fi",
+]
+#: The steps that take something out of the run directory, so wait for its scan.
+AFTER_SCAN = ("Step summary", "Verdicts written")
 POSTS = re.compile(
     r"\bgh\s+(?:issue|pr)\s+(?:create|comment|edit|close|reopen|review)\b"
 )
@@ -199,6 +215,30 @@ def workflow_problems(doc: Dict[Any, Any], text: str) -> List[str]:
         for name, value in (step.get("env") or {}).items():
             if name == "GH_TOKEN" and value != "${{ github.token }}":
                 found.append("GH_TOKEN is not the workflow's own token")
+    names = [step.get("name") for step in steps_of(doc)]
+    scanned = _named(doc, SCANNED)
+    if (
+        scanned is None
+        or scanned.get("id") != "scanned"
+        or _condition(scanned) != "always()"
+        or _lines(scanned) != SCANNED_LINES
+        or WALK not in names
+        or names.index(SCANNED) < names.index(WALK)
+    ):
+        found.append(
+            "the run directory's secret-scan.json is not checked after the walk"
+        )
+    for name in AFTER_SCAN:
+        step = _named(doc, name)
+        if step is None or _condition(step) != SCANNED_IF:
+            found.append(f"{name} does not wait for the run directory's scan")
+        elif scanned is not None and names.index(name) < names.index(SCANNED):
+            found.append(f"{name} runs before the run directory's scan is checked")
+    for step in steps_of(doc):
+        settings = step.get("with") or {}
+        if "upload-artifact" in str(step.get("uses") or ""):
+            if settings.get("path") == RUN_DIR and _condition(step) != SCANNED_IF:
+                found.append("the run directory is uploaded without its scan")
     post = _named(doc, POST)
     if post is None or _condition(post) != POST_IF:
         found.append("posting is not limited to a scheduled run on main")
@@ -494,6 +534,37 @@ PLANTS: List[tuple] = [
             'docs-site.md" >> "$GITHUB_STEP_SUMMARY"',
         ),
         "step summary other than summary.md",
+    ),
+    (
+        "upload-unscanned",
+        lambda doc, text: (
+            next(
+                s for s in steps_of(doc) if (s.get("with") or {}).get("path") == RUN_DIR
+            ).update({"if": "always()"})
+            or doc,
+            text,
+        ),
+        "uploaded without its scan",
+    ),
+    (
+        "summary-unscanned",
+        _step_set("Step summary", "if", "always()"),
+        "Step summary does not wait",
+    ),
+    (
+        "verdicts-unscanned",
+        _step_set("Verdicts written", "if", "always()"),
+        "Verdicts written does not wait",
+    ),
+    (
+        "scan-of-another-file",
+        _replace_in(SCANNED, "secret-scan.json", "summary.md"),
+        "secret-scan.json is not checked",
+    ),
+    (
+        "scan-checked-only-on-success",
+        _step_set(SCANNED, "if", "success()"),
+        "secret-scan.json is not checked",
     ),
     (
         "annotation-with-a-value",

@@ -25,7 +25,8 @@ Environment:
   log ``results.jsonl``, a report per guide as ``<journey>.md`` and
   ``<journey>.html``, ``summary.md``, ``verdicts.json`` (each journey's
   verdict, for ``scripts/docs_journeys_report.py``), the screenshots and
-  snapshots, the videos, each stack's output under ``stacks/``). Refused inside the
+  snapshots, the videos, each stack's output under ``stacks/``, and last
+  ``secret-scan.json``). Refused inside the
   repository, so the runner writes nothing into the tree (Python's own
   ``__pycache__`` aside: ``PYTHONDONTWRITEBYTECODE=1`` keeps that out too;
   marketing-local's build is the other exception, see ``stacks.py``). Unset, a
@@ -44,6 +45,12 @@ Environment:
   ``DOCS_JOURNEY_KEEP_STACKS`` (``1`` leaves the stacks up at the end).
 * The stacks' own settings: ``docs_runner/stacks.py``.
 
+The run directory is uploaded as a public artifact, so when the reports are
+written every file in it is read for each value the run made up, kept or
+signed in for (``docs_runner/redaction.py``): a file holding one is removed and
+the run fails. ``secret-scan.json``, written last, says what was read and
+removed; ``docs-journeys.yml`` uploads the directory only when it exists.
+
 A step that cannot run is reported NOT RUN with a reason from
 ``docs_runner/registry.py``. Nothing here may skip: pytest's skip and xfail are
 banned in this directory by ``ruff.toml``, and a run in which any test or
@@ -57,7 +64,7 @@ import json
 import os
 import sys
 from pathlib import Path
-from typing import List, Optional
+from typing import Any, Dict, List, Optional, Set
 
 import pytest
 import yaml
@@ -68,7 +75,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from docs_runner import guide as guides
-from docs_runner import report
+from docs_runner import redaction, report
 from docs_runner.loader import Refused, context_for, load
 from docs_runner.log import FAIL, Log, run_directory
 from docs_runner.stacks import STACK_CLASSES, StackError
@@ -87,6 +94,9 @@ RUNS = pytest.StashKey[List[report.GuideRun]]()
 SKIPPED = pytest.StashKey[List[str]]()
 REPORT_PROBLEMS = pytest.StashKey[List[str]]()
 RUN_DIR = pytest.StashKey[Optional[Path]]()
+#: Every value the run made up, kept or signed in for (the runner's redactor's).
+SECRET_VALUES = pytest.StashKey[Set[str]]()
+SCAN = pytest.StashKey[Dict[str, Any]]()
 
 
 def pytest_configure(config: pytest.Config) -> None:
@@ -100,6 +110,8 @@ def pytest_configure(config: pytest.Config) -> None:
     config.stash[SKIPPED] = []
     config.stash[REPORT_PROBLEMS] = []
     config.stash[RUN_DIR] = None
+    config.stash[SECRET_VALUES] = set()
+    config.stash[SCAN] = {}
     if os.environ.get("DOCS_JOURNEY_RUN_DIR"):
         try:
             config.stash[RUN_DIR] = run_directory(os.environ, REPO_ROOT)
@@ -219,10 +231,12 @@ def browser(playwright_session, run_settings: RunSettings):
 
 
 @pytest.fixture(scope="session")
-def journey_runner(playwright_session, browser, run_settings: RunSettings):
+def journey_runner(
+    playwright_session, browser, run_settings: RunSettings, pytestconfig
+):
     from docs_runner.execute import JourneyRunner, Settings
 
-    return JourneyRunner(
+    runner = JourneyRunner(
         playwright_session,
         browser,
         Log(run_settings.run_dir / "results.jsonl"),
@@ -234,6 +248,9 @@ def journey_runner(playwright_session, browser, run_settings: RunSettings):
             record_video=run_settings.record_video,
         ),
     )
+    # The same set, so the end of the run scans for every value added later.
+    pytestconfig.stash[SECRET_VALUES] = runner.redactor.values
+    return runner
 
 
 # ---------------------------------------------------------------------------
@@ -343,12 +360,13 @@ def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
     date = datetime.datetime.now(datetime.timezone.utc).date().isoformat()
     runs = config.stash[RUNS]
     if runs or config.stash[RUN_DIR] is not None:
-        problem = write_reports(
-            runs, run_dir_of(config), sha, date, run_link(os.environ)
-        )
+        run_dir = run_dir_of(config)
+        problem = write_reports(runs, run_dir, sha, date, run_link(os.environ))
         if problem is not None:
             config.stash[REPORT_PROBLEMS].append(problem)
-    if config.stash[SKIPPED] or config.stash[REPORT_PROBLEMS]:
+        config.stash[SCAN] = redaction.clear(run_dir, config.stash[SECRET_VALUES])
+    removed = config.stash[SCAN].get("removed")
+    if config.stash[SKIPPED] or config.stash[REPORT_PROBLEMS] or removed:
         session.exitstatus = pytest.ExitCode.TESTS_FAILED
 
 
@@ -360,6 +378,18 @@ def pytest_terminal_summary(terminalreporter, exitstatus, config) -> None:
         f"docs journeys: {len(runs)} run, {len(failed)} failed;"
         + (f" results in {where}" if where is not None else " nothing written")
     )
+    scan = config.stash[SCAN]
+    if scan:
+        terminalreporter.write_line(
+            f"docs journeys: read {scan['files_read']} file(s) for"
+            f" {scan['values']} value(s) the run made up, kept or signed in for;"
+            f" {len(scan['removed'])} held one"
+        )
+    for name in scan.get("removed", []):
+        terminalreporter.write_line(
+            f"docs journeys: {name} held a value the run made up, kept or signed in"
+            " for; it was removed, so the run fails"
+        )
     for problem in config.stash[REPORT_PROBLEMS]:
         terminalreporter.write_line(f"docs journeys: report refused: {problem}")
     for nodeid in config.stash[SKIPPED]:

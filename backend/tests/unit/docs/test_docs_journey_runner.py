@@ -467,7 +467,7 @@ PLANTS = [
     pytest.param(
         _on_step("sign-in", lambda s: s["expect"].update(status=200)),
         {},
-        "status is the answer to a goto; click has none",
+        "status is the answer to a goto or an open; click has none",
         id="status-on-a-click",
     ),
     pytest.param(
@@ -1157,9 +1157,23 @@ def _fake_docker(tmp_path: Path, up_exit: int) -> Path:
     return bin_dir
 
 
-def _compose(tmp_path: Path, bin_dir: Path):
+COMPOSE_FILE = """services:
+  api:
+    ports:
+      - "${API_HOST_PORT:-8000}:8000"
+  frontend:
+    ports:
+      - "${FRONTEND_HOST_PORT:-3000}:8080"
+  postgres:
+    ports:
+      - "${POSTGRES_HOST_PORT:-5432}:5432"
+"""
+
+
+def _compose(tmp_path: Path, bin_dir: Path, compose_file: str = COMPOSE_FILE):
     from docs_runner import stacks
 
+    (tmp_path / "docker-compose.yml").write_text(compose_file)
     environ = {"PATH": f"{bin_dir}{os.pathsep}/usr/bin{os.pathsep}/bin"}
     return stacks, stacks.ComposeDev(tmp_path, tmp_path / "logs", environ)
 
@@ -1174,6 +1188,10 @@ def test_compose_dev_clears_its_project_then_builds(tmp_path, monkeypatch):
     monkeypatch.setattr(stack, "_served_profile", lambda api_url: "core")
     running = stack.up("core")
     assert running.base_url == "http://127.0.0.1:23000/"
+    assert running.published == {
+        8000: "http://127.0.0.1:28000",
+        3000: "http://127.0.0.1:23000",
+    }
     assert _calls(bin_dir) == [DOWN, UP]
     stack.down()
     assert _calls(bin_dir) == [DOWN, UP, DOWN]
@@ -1204,6 +1222,7 @@ def test_a_program_that_cannot_start_is_a_stack_error(tmp_path):
     empty = tmp_path / "empty"
     empty.mkdir()
     (tmp_path / "frontend").mkdir()
+    (tmp_path / "docker-compose.yml").write_text(COMPOSE_FILE)
     environ = {"PATH": str(empty)}
     compose = stacks.ComposeDev(tmp_path, tmp_path / "logs", environ)
     with pytest.raises(stacks.StackError, match="docker could not be started"):
@@ -1955,3 +1974,324 @@ def test_a_run_started_from_tests_acceptance_collects_the_journeys():
     )
     assert result.returncode == 0, result.stdout + result.stderr
     assert "test_journey[docs-site]" in result.stdout
+
+
+# ---------------------------------------------------------------------------
+# D3a: a guide's addresses on the compose stack, and what a run must not write
+# ---------------------------------------------------------------------------
+#: A journey on the compose stack that opens the guide's address, makes up one
+#: password, keeps one value from the screen and types both.
+SECRETS: Dict[str, Any] = {
+    "guide": "guides/sample.md",
+    "stack": "compose-dev",
+    "profile": "core",
+    "video": False,
+    "written": TODAY,
+    "passwords": ["chosen"],
+    "steps": [
+        {
+            "id": "api-docs",
+            "doc": "create",
+            "do": {"open": "http://localhost:8000/api/v1/docs"},
+            "expect": {"status": 200},
+            "snapshot": False,
+            "snapshot_reason": "only that the address answers matters here",
+            "fail": "nothing answers at the guide's address",
+        },
+        {
+            "id": "temporary",
+            "doc": "sign-in",
+            "do": {
+                "keep": {
+                    "secret": "temporary",
+                    "role": "code",
+                    "within": {
+                        "role": "dialog",
+                        "name": "User created",
+                        "quote": False,
+                        "reason": "the dialog the guide's Sign in leads to",
+                    },
+                }
+            },
+            "fail": "no one-time password is shown",
+        },
+        {
+            "id": "current",
+            "doc": "sign-in",
+            "do": {"fill": {"label": "Password", "secret": "temporary"}},
+            "expect": {"visible": [{"role": "button", "name": "Sign in"}]},
+            "snapshot": False,
+            "snapshot_reason": "the field holds the kept password",
+            "fail": "there is no Password field",
+        },
+        {
+            "id": "new",
+            "doc": "sign-in",
+            "do": {"fill": {"label": "Password", "secret": "chosen"}},
+            "expect": {"visible": [{"role": "button", "name": "Sign in"}]},
+            "snapshot": False,
+            "snapshot_reason": "the field holds the made-up password",
+            "fail": "there is no Password field",
+        },
+    ],
+}
+
+
+def _secrets(change: Callable[[Dict[str, Any]], None]) -> Dict[str, Any]:
+    data = copy.deepcopy(SECRETS)
+    change(data)
+    return data
+
+
+def test_a_journey_with_secrets_loads(tmp_path):
+    journey = _load(tmp_path, SECRETS)
+    assert [step.do.kind for step in journey.steps] == ["open", "keep", "fill", "fill"]
+    assert journey.has_secrets
+    assert [step.secret for step in journey.steps] == [
+        None,
+        "temporary",
+        "temporary",
+        "chosen",
+    ]
+    assert not any(step.takes_screenshot for step in journey.steps)
+
+
+SECRET_PLANTS = [
+    pytest.param(
+        _on_step("api-docs", lambda s: s["do"].update(open="http://localhost:3001")),
+        "open 'http://localhost:3001' is not in the guide's text",
+        id="open-an-address-the-guide-does-not-give",
+    ),
+    pytest.param(
+        _on_step(
+            "api-docs", lambda s: s["do"].update(open="https://example.com:8000/")
+        ),
+        "open is an address the guide gives on this machine",
+        id="open-a-remote-url",
+    ),
+    pytest.param(
+        _on_step("api-docs", lambda s: s["do"].update(goto="http://localhost:8000")),
+        "goto is a path on the stack",
+        id="goto-a-url",
+    ),
+    pytest.param(
+        lambda data: data.update(stack="docs-local"),
+        "open is for an address the guide gives for the compose stack",
+        id="open-on-another-stack",
+    ),
+    pytest.param(
+        _on_step("temporary", lambda s: s.update(expect={"text": "Done"})),
+        "keep checks what the action says",
+        id="keep-with-an-expect",
+    ),
+    pytest.param(
+        _on_step("temporary", lambda s: s.update(snapshot=True)),
+        "a keep step keeps no screen; leave snapshot out",
+        id="keep-with-a-snapshot",
+    ),
+    pytest.param(
+        _on_step(
+            "temporary",
+            lambda s: s["do"]["keep"]["within"].update(quote=True, reason=None),
+        ),
+        "keep.within.name 'User created' is not in the guide's text",
+        id="keep-within-a-name-the-guide-does-not-say",
+    ),
+    pytest.param(
+        _on_step(
+            "current",
+            lambda s: [s.pop(key) for key in ("snapshot", "snapshot_reason")],
+        ),
+        "a fill that types the secret 'temporary' keeps no screen",
+        id="secret-fill-with-a-screen",
+    ),
+    pytest.param(
+        _on_step("new", lambda s: s["do"]["fill"].update(secret="unknown")),
+        "fill types the secret 'unknown', which no passwords entry makes up",
+        id="secret-nobody-makes",
+    ),
+    pytest.param(
+        lambda data: data["steps"].insert(1, data["steps"].pop(2)),
+        "fill types the secret 'temporary', which no passwords entry makes up",
+        id="secret-typed-before-it-is-kept",
+    ),
+    pytest.param(
+        lambda data: data.update(video=True),
+        "video: true, but the journey makes up or keeps a secret",
+        id="recorded-with-a-secret",
+    ),
+    pytest.param(
+        lambda data: data.update(passwords=["chosen", "temporary"]),
+        "secret 'temporary' is made up or kept twice",
+        id="secret-named-twice",
+    ),
+    pytest.param(
+        _on_step("new", lambda s: s["do"]["fill"].update(value="typed")),
+        "a fill types exactly one of value or secret",
+        id="fill-value-and-secret",
+    ),
+    pytest.param(
+        _on_step("new", lambda s: s["do"]["fill"].pop("secret")),
+        "a fill types exactly one of value or secret",
+        id="fill-neither",
+    ),
+]
+
+
+@pytest.mark.parametrize("change, expected", SECRET_PLANTS)
+def test_a_planted_secret_step_is_refused(tmp_path, change, expected):
+    problems = _refusals(tmp_path, _secrets(change))
+    assert any(expected in problem for problem in problems), problems
+
+
+def test_a_secret_step_is_described_by_name_never_by_value(tmp_path):
+    journey = _load(tmp_path, SECRETS)
+    lines = [checks.describe_action(step) for step in journey.steps]
+    assert lines == [
+        "open http://localhost:8000/api/v1/docs, the guide's address",
+        'keep the text of the code in the dialog "User created" as temporary',
+        'fill "Password" with the password temporary',
+        'fill "Password" with the password chosen',
+    ]
+    assert checks.describe_expect(journey.steps[1]) == (
+        "exactly one code there, holding at least 8 characters (kept, never written)"
+    )
+
+
+def test_the_compose_files_default_ports_are_read_by_variable(tmp_path):
+    from docs_runner import stacks
+
+    (tmp_path / "docker-compose.yml").write_text(COMPOSE_FILE)
+    assert stacks.compose_default_ports(tmp_path / "docker-compose.yml") == {
+        "API_HOST_PORT": 8000,
+        "FRONTEND_HOST_PORT": 3000,
+        "POSTGRES_HOST_PORT": 5432,
+    }
+    real = stacks.compose_default_ports(REPO_ROOT / "docker-compose.yml")
+    assert set(stacks.HTTP_PORT_VARIABLES) <= set(real)
+
+
+def test_a_compose_file_without_a_default_port_stops_before_docker(tmp_path):
+    bin_dir = _fake_docker(tmp_path, 0)
+    stacks, stack = _compose(
+        tmp_path, bin_dir, COMPOSE_FILE.replace("${FRONTEND_HOST_PORT:-3000}", "3000")
+    )
+    with pytest.raises(stacks.StackError, match="no default host port for FRONTEND"):
+        stack.up("core")
+    assert not (bin_dir / "calls.log").exists()
+
+
+def test_a_made_up_password_meets_the_account_rules():
+    from docs_runner import redaction
+
+    made = {redaction.make_password() for _ in range(200)}
+    assert len(made) == 200
+    for value in made:
+        assert len(value) == redaction.PASSWORD_LENGTH
+        assert any(c.isupper() for c in value)
+        assert any(c.islower() for c in value)
+        assert any(c.isdigit() for c in value)
+        assert value.isascii() and value.isalnum()
+
+
+def test_the_redactor_takes_every_kept_value_out():
+    from docs_runner import redaction
+
+    redactor = redaction.Redactor()
+    redactor.add("Kept0Value9abc")
+    redactor.add("Kept0Value9abcdef")
+    text = '- textbox "Password": Kept0Value9abcdef\n- code: Kept0Value9abc\n'
+    assert redactor.redact(text) == (
+        '- textbox "Password": (redacted)\n- code: (redacted)\n'
+    )
+    with pytest.raises(ValueError, match="shorter than 8"):
+        redactor.add("short")
+    assert redaction.redacted_path("access_token")
+    assert redaction.redacted_path("items.0.key")
+    assert not redaction.redacted_path("token_type")
+    assert not redaction.redacted_path("keys.0.name")
+    # An experiment's or a flag's key is written when it is the expected one,
+    # and is never looked for in the run's files: it is no credential.
+    assert redaction.credential_path("access_token")
+    assert not redaction.credential_path("key")
+
+
+def test_the_scan_removes_every_file_holding_a_value_and_records_only_names(
+    tmp_path,
+):
+    from docs_runner import redaction
+
+    run = tmp_path / "run"
+    (run / "journey").mkdir(parents=True)
+    (run / "journey" / "01-sign-in.aria.yml").write_text(
+        '- textbox "Password": Planted0Value9xyz\n'
+    )
+    (run / "journey" / "02-done.png").write_bytes(b"\x89PNG..Planted0Value9xyz..")
+    (run / "results.jsonl").write_text('{"observed": "Planted0Value9xyz"}\n')
+    (run / "journey" / "03-clean.aria.yml").write_text('- heading "Experiments"\n')
+    (run / "summary.md").write_text("all clean\n")
+    record = redaction.clear(run, {"Planted0Value9xyz"})
+    assert record == {
+        "files_read": 5,
+        "values": 1,
+        "removed": [
+            "journey/01-sign-in.aria.yml",
+            "journey/02-done.png",
+            "results.jsonl",
+        ],
+    }
+    assert sorted(p.name for p in run.rglob("*") if p.is_file()) == [
+        "03-clean.aria.yml",
+        redaction.SCAN_RECORD,
+        "summary.md",
+    ]
+    assert "Planted0Value9xyz" not in (run / redaction.SCAN_RECORD).read_text()
+    again = redaction.clear(run, {"Planted0Value9xyz"})
+    assert again["removed"] == [] and again["files_read"] == 2
+
+
+def test_the_scan_finds_a_value_written_json_escaped(tmp_path):
+    from docs_runner import redaction
+
+    value = 'Quote"Back\\slash9'
+    (tmp_path / "a.json").write_text(json.dumps({"seen": value}))
+    assert redaction.scan(tmp_path, [value]) == (1, ["a.json"])
+
+
+PLANTED_VALUE = (
+    "import conftest\n\n\ndef test_planted(request):\n"
+    "    run_dir = conftest.run_dir_of(request.config)\n"
+    '    request.config.stash[conftest.SECRET_VALUES].add("Planted0Value9xyz")\n'
+    '    (run_dir / "journey").mkdir()\n'
+    '    (run_dir / "journey" / "01-x.aria.yml").write_text(\n'
+    "        '- textbox \"Password\": Planted0Value9xyz\\n'\n"
+    "    )\n"
+)
+
+
+def test_a_value_left_in_the_run_directory_fails_the_run_and_is_removed(tmp_path):
+    from docs_runner import redaction
+
+    result = _run_runner(_runner_copy(tmp_path, PLANTED_VALUE), tmp_path)
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "1 passed" in result.stdout
+    assert (
+        "journey/01-x.aria.yml held a value the run made up, kept or signed in for;"
+        " it was removed, so the run fails"
+    ) in result.stdout
+    run = tmp_path / "run"
+    assert not (run / "journey" / "01-x.aria.yml").exists()
+    record = json.loads((run / redaction.SCAN_RECORD).read_text())
+    assert record["removed"] == ["journey/01-x.aria.yml"]
+    assert "Planted0Value9xyz" not in result.stdout + result.stderr
+
+
+def test_a_clean_run_directory_is_scanned_and_recorded(tmp_path):
+    """The control for the plant above: the scan runs, finds nothing, the run passes."""
+    from docs_runner import redaction
+
+    result = _run_runner(_runner_copy(tmp_path, PASSING), tmp_path)
+    assert result.returncode == 0, result.stdout + result.stderr
+    record = json.loads((tmp_path / "run" / redaction.SCAN_RECORD).read_text())
+    assert record["removed"] == [] and record["values"] == 0
+    assert "0 held one" in result.stdout
