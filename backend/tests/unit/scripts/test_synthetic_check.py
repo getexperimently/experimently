@@ -764,3 +764,115 @@ def test_the_sentinel_check_fires_when_the_body_is_printed(serve, monkeypatch):
     monkeypatch.setattr(sys, "stdout", out)
     sc.main(env_for(base), out=out, allow_loopback_http=True, client=Printing(base))
     assert SENTINEL in out.getvalue()
+
+
+# ---------------------------------------------------------------------------
+# The issue's step list says what the check does
+# ---------------------------------------------------------------------------
+
+
+def _issue_step(number: int) -> str:
+    text = (REPO_ROOT / ".github" / "qa-templates" / "synthetic-issue.tmpl").read_text()
+    lines = [line for line in text.splitlines() if line.startswith(f"{number}. ")]
+    assert len(lines) == 1, lines
+    return lines[0]
+
+
+def test_the_issue_states_the_key_rule_step_3_applies():
+    """Step 3 fails unless the account holds exactly one active key with more
+    than FAIL_DAYS left; the issue a reader acts on must say the same."""
+    line = _issue_step(3)
+    assert line.startswith(f"3. {sc.STEPS[2]}: ")
+    assert "exactly one active key" in line
+    assert f"more than {sc.FAIL_DAYS} days" in line
+    assert "delete the old key" in line
+
+
+def test_the_issue_states_what_step_7_accepts():
+    line = _issue_step(7)
+    assert line.startswith(f"7. {sc.STEPS[6]}: ")
+    assert "by its rollout or a targeting rule" in line
+    assert sc.EVALUATED == ("rollout", "targeting_rule")
+
+
+# ---------------------------------------------------------------------------
+# What the client promises: no proxy, a timeout, no redirect
+# ---------------------------------------------------------------------------
+
+
+def test_the_client_takes_no_proxy_from_the_environment(monkeypatch):
+    """A proxy set in the runner's environment never sees the credentials."""
+    for name in ("HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy", "ALL_PROXY"):
+        monkeypatch.setenv(name, "http://127.0.0.1:9")
+
+    def env_proxies(opener):
+        return [
+            handler.proxies
+            for handler in opener.handlers
+            if isinstance(handler, sc.urllib.request.ProxyHandler) and handler.proxies
+        ]
+
+    # The control: an opener built without the empty ProxyHandler picks the
+    # proxy up from the environment, so the assertion below can fail.
+    assert env_proxies(sc.urllib.request.build_opener())
+    client = sc.Client("https://staging.example.com")
+    assert env_proxies(client._opener) == []
+    redirects = [
+        handler
+        for handler in client._opener.handlers
+        if isinstance(handler, sc.urllib.request.HTTPRedirectHandler)
+    ]
+    assert len(redirects) == 1 and isinstance(redirects[0], sc._NoRedirect)
+
+
+class _Answer:
+    status = 200
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        return False
+
+    def read(self, size=-1):
+        return b"{}"
+
+
+def test_every_request_has_the_15_second_timeout(monkeypatch):
+    client = sc.Client("https://staging.example.com")
+    seen = []
+
+    def open_(request, *args, **kwargs):
+        seen.append((args, kwargs))
+        return _Answer()
+
+    monkeypatch.setattr(client._opener, "open", open_)
+    for method, route in sc.REQUESTS:
+        client.send(
+            method,
+            route,
+            params={"experiment_id": EXPERIMENT_ID, "flag_key": "flag"},
+            body={} if method == "POST" else None,
+        )
+    assert sc.TIMEOUT == 15
+    assert seen == [((), {"timeout": 15})] * len(sc.REQUESTS)
+
+
+def test_an_unexpected_error_prints_its_type_never_its_text(
+    serve, tmp_path, monkeypatch, capsys
+):
+    def boom(self):
+        raise RuntimeError(f"boom {SENTINEL} {TOKEN}")
+
+    monkeypatch.setattr(sc.Check, "step_track", boom)
+    outputs = tmp_path / "out"
+    code, out = run_in_process(env_for(serve(Stub()), GITHUB_OUTPUT=str(outputs)))
+    captured = capsys.readouterr()
+    assert code == 1
+    assert (
+        "failed at step 6 (Track): the check stopped on an unexpected RuntimeError"
+        in out
+    )
+    assert out.endswith("ran 5 of 8\n")
+    for text in (out, captured.out, captured.err, outputs.read_text()):
+        assert SENTINEL not in text and TOKEN not in text

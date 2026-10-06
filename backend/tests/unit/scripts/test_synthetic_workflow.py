@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import copy
 import re
+import sys
 from pathlib import Path
 from typing import Any, Callable, Dict, List
 
@@ -36,6 +37,12 @@ from backend.tests.unit.infrastructure.test_docs_only_gate import _load
 pytestmark = pytest.mark.unit
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
+SCRIPTS = REPO_ROOT / "scripts"
+if str(SCRIPTS) not in sys.path:
+    sys.path.insert(0, str(SCRIPTS))
+
+import synthetic_report as sr
+
 WORKFLOW = REPO_ROOT / ".github" / "workflows" / "synthetic.yml"
 NIGHTLY = REPO_ROOT / ".github" / "workflows" / "nightly-qa.yml"
 
@@ -57,9 +64,24 @@ CLOSE_LINE = (
     'gh api --method PATCH "repos/$GITHUB_REPOSITORY/issues/$ISSUE" '
     "-f state=closed -f state_reason=completed > /dev/null"
 )
+#: The job conditions, exactly (whitespace normalised). A substring test
+#: would pass ``... == 'true' || github.ref == ...`` or ``always() || (...)``.
+CHECK_IF = "vars.SYNTH_ENABLED == 'true' && github.ref == 'refs/heads/main'"
+DARK_SWITCH_IF = (
+    "vars.SYNTH_ENABLED != '' && vars.SYNTH_ENABLED != 'true' "
+    "&& vars.SYNTH_ENABLED != 'false'"
+)
+REPORT_IF = (
+    "always() && (needs.check.result == 'success' || needs.check.result == 'failure')"
+)
 POSTS = re.compile(
     r"\bgh\s+(?:issue|pr)\s+(?:create|comment|edit|close|reopen|review)\b"
 )
+
+
+def _condition(job: Dict[str, Any]) -> str:
+    """A job's ``if``, whitespace normalised."""
+    return " ".join(str(job.get("if") or "").split())
 
 
 def triggers(doc: Dict[Any, Any]) -> Dict[str, Any]:
@@ -118,14 +140,19 @@ def workflow_problems(doc: Dict[Any, Any], text: str) -> List[str]:
         found.append(
             "the check job is not 'Synthetic check (staging)' on synthetic-staging"
         )
-    condition = str(check.get("if") or "")
-    if (
-        "vars.SYNTH_ENABLED == 'true'" not in condition
-        or "refs/heads/main" not in condition
-    ):
+    if _condition(check) != CHECK_IF:
         found.append(
-            "the check job is not skipped unless SYNTH_ENABLED is true on main"
+            "the check job is not skipped unless SYNTH_ENABLED is true on main: "
+            f"its if is {_condition(check)!r}, not {CHECK_IF!r}"
         )
+    switch = jobs.get("dark-switch") or {}
+    if _condition(switch) != DARK_SWITCH_IF:
+        found.append(
+            "the dark-switch job does not run only on another value: "
+            f"its if is {_condition(switch)!r}, not {DARK_SWITCH_IF!r}"
+        )
+    if _condition(jobs.get("report") or {}) != REPORT_IF:
+        found.append("the report job does not run only after a check that ran")
     names = [step.get("name") for step in check.get("steps") or []]
     marker = next(
         (s for s in check.get("steps") or [] if s.get("name") == MARKER_STEP), None
@@ -280,6 +307,33 @@ PLANTS: List[tuple] = [
         "skipped unless SYNTH_ENABLED",
     ),
     (
+        "enabled-or-main",
+        _set(
+            ["jobs", "check", "if"],
+            "vars.SYNTH_ENABLED == 'true' || github.ref == 'refs/heads/main'",
+        ),
+        "skipped unless SYNTH_ENABLED",
+    ),
+    (
+        "always-or",
+        _set(
+            ["jobs", "check", "if"],
+            "always() || (vars.SYNTH_ENABLED == 'true' "
+            "&& github.ref == 'refs/heads/main')",
+        ),
+        "skipped unless SYNTH_ENABLED",
+    ),
+    (
+        "report-always",
+        _set(["jobs", "report", "if"], "always()"),
+        "the report job does not run only after a check that ran",
+    ),
+    (
+        "dark-switch-always",
+        _set(["jobs", "dark-switch", "if"], "always()"),
+        "the dark-switch job does not run only on another value",
+    ),
+    (
         "report-env",
         _set(["jobs", "report", "environment"], "synthetic-staging"),
         "bound to an environment",
@@ -425,3 +479,19 @@ def test_the_nightly_run_judges_the_synthetic_checks_freshness():
     assert "permissions" not in job and "environment" not in job
     assert doc.get("permissions") == {"contents": "read"}
     assert "secrets." not in str(job)
+
+
+def test_the_report_reads_the_names_the_workflow_uses():
+    """synthetic_report finds the check job and its steps by name in the run
+    history; a rename on either side would make every run neither red nor
+    green, so no issue would ever open."""
+    check = _load(WORKFLOW)["jobs"][CHECK_JOB]
+    names = [step.get("name") for step in check["steps"]]
+    assert check["name"] == sr.CHECK_JOB
+    assert sr.CHECK_STEP in names
+    assert sr.MARKER_STEP in names
+    assert (sr.CHECK_JOB, sr.CHECK_STEP, sr.MARKER_STEP) == (
+        CHECK_NAME,
+        CHECK_STEP,
+        MARKER_STEP,
+    )

@@ -513,3 +513,54 @@ def test_freshness_asks_for_scheduled_runs_on_main_only():
     args = gh.calls[0]
     assert args[args.index("--event") + 1] == "schedule"
     assert args[args.index("--branch") + 1] == "main"
+
+
+# ---------------------------------------------------------------------------
+# A failing gh fails only a night that is judged
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def no_gh(tmp_path, monkeypatch):
+    """``gh`` absent from PATH, and the threshold file pointed into tmp_path."""
+    empty = tmp_path / "bin"
+    empty.mkdir()
+    monkeypatch.setenv("PATH", str(empty))
+    threshold = tmp_path / "synthetic_freshness.toml"
+    monkeypatch.setattr(sr, "THRESHOLD_FILE", threshold)
+    return threshold
+
+
+@pytest.mark.parametrize("enabled", ["", "false"])
+def test_a_missing_gh_does_not_fail_a_dark_night(no_gh, capsys, enabled):
+    no_gh.write_text("max_gap_minutes = 60\n")
+    code = sr.main(
+        ["freshness"], env={"GITHUB_REPOSITORY": REPO, "SYNTH_ENABLED": enabled}
+    )
+    out = capsys.readouterr().out
+    assert code == 0, out
+    assert "the run history could not be read (gh run list: FileNotFoundError)" in out
+    assert "::error" not in out
+
+
+def test_a_missing_gh_does_not_fail_a_night_with_no_threshold(no_gh, capsys):
+    code = sr.main(
+        ["freshness"], env={"GITHUB_REPOSITORY": REPO, "SYNTH_ENABLED": "true"}
+    )
+    out = capsys.readouterr().out
+    assert code == 0, out
+    assert "the run history could not be read" in out
+    assert "threshold not yet set" in out
+
+
+def test_a_missing_gh_fails_a_judged_night(no_gh, capsys):
+    no_gh.write_text("max_gap_minutes = 60\n")
+    code = sr.main(
+        ["freshness"], env={"GITHUB_REPOSITORY": REPO, "SYNTH_ENABLED": "true"}
+    )
+    out = capsys.readouterr().out
+    assert code == 1, out
+    assert (
+        "::error title=Synthetic check freshness::the run history could not be read"
+        in out
+    )

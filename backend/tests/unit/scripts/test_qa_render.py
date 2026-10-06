@@ -225,13 +225,37 @@ def test_an_extra_value_is_refused(tmp_path):
         qa_render.render("x.tmpl", {"check": "staging", "status": "503"}, directory)
 
 
-def test_rendering_is_a_single_pass(tmp_path, monkeypatch):
+def test_rendering_is_a_single_pass():
     """A value that looks like a placeholder is inserted as it is, never
     expanded (the kinds refuse braces anyway; this pins the pass itself)."""
+    text = qa_render.substitute("{check} / {step}\n", {"check": "{step}", "step": "4"})
+    assert text == "{step} / 4\n"
+
+
+@pytest.mark.parametrize(
+    "template",
+    [
+        "Run: {Run_link} at {check}\n",
+        "{check} {{check}}\n",
+        "{check} }\n",
+        "{check} {\n",
+        "{check} {count runs}\n",
+    ],
+)
+def test_a_brace_left_after_rendering_is_refused(tmp_path, template):
+    """Only a lower-case name is a placeholder, so ``{Run_link}`` would pass
+    through unrendered; any brace left in the output is refused."""
+    directory = _write(tmp_path, "x.tmpl", template)
+    with pytest.raises(qa_render.RenderError, match="brace"):
+        qa_render.render("x.tmpl", {"check": "staging"}, directory)
+
+
+def test_a_brace_in_a_value_is_refused_by_the_output_check(tmp_path, monkeypatch):
+    """Even if a kind let a brace through, the output check stops it."""
     monkeypatch.setitem(qa_render.KINDS, "check", lambda value: True)
     directory = _write(tmp_path, "x.tmpl", "{check} / {step}\n")
-    out = qa_render.render("x.tmpl", {"check": "{step}", "step": "4"}, directory)
-    assert out.body == "{step} / 4\n"
+    with pytest.raises(qa_render.RenderError, match="brace"):
+        qa_render.render("x.tmpl", {"check": "{step}", "step": "4"}, directory)
 
 
 def test_non_ascii_output_is_refused(tmp_path):

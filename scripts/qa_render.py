@@ -191,11 +191,20 @@ def render_text(text: str, values: Mapping[str, str]) -> str:
         )
     for name in sorted(used):
         check_value(name, values[name])
-    # One pass: re.sub never rescans what it inserted.
-    out = PLACEHOLDER.sub(lambda match: values[match.group(1)], text)
+    out = substitute(text, values)
+    if "{" in out or "}" in out:
+        # Only a lower-case name is a placeholder: "{Run_link}" or "{ check }"
+        # would otherwise be posted as it stands.
+        raise RenderError("a brace is left in the rendered text")
     if not out.isascii() or any(ch < " " and ch != "\n" for ch in out):
         raise RenderError("the rendered text is not plain ASCII")
     return out
+
+
+def substitute(text: str, values: Mapping[str, str]) -> str:
+    """Each placeholder replaced by its value, in one pass: ``re.sub`` never
+    rescans what it inserted."""
+    return PLACEHOLDER.sub(lambda match: values[match.group(1)], text)
 
 
 def render(

@@ -28,7 +28,9 @@ with ``gh`` (read only; posting is the workflow's, with ``--body-file``):
     all eight steps. That gap is judged against ``max_gap_minutes`` in
     ``scripts/synthetic_freshness.toml``; until that file exists, the job says
     "threshold not yet set" and passes. The threshold is committed only after
-    48 hours of measured gaps, at 1.5 times the largest at least.
+    48 hours of measured gaps, at 1.5 times the largest at least. A night
+    that is not judged (dark, or no threshold yet) passes even when ``gh``
+    cannot read the run history; a judged night fails.
 
 A run passed all eight steps when its check job succeeded and its step named
 ``ran 8 of 8`` (which runs only when the check reports ``ran 8 of 8``)
@@ -413,39 +415,66 @@ def freshness(
     now: Optional[_dt.datetime] = None,
     threshold_file: Path = THRESHOLD_FILE,
 ) -> int:
+    """Exit status 1 only for a night that is judged (enabled, with a
+    threshold) and stale or unreadable, or for a bad SYNTH_ENABLED or
+    threshold file. A night that is not judged passes even when the run
+    history cannot be read: a transient gh failure is not silence."""
     repo = env["GITHUB_REPOSITORY"]
     now = now or _dt.datetime.now(_dt.timezone.utc)
     start = now - WINDOW
-    runs = list_runs(gh, repo, FRESHNESS_LIMIT, event="schedule")
     print("Synthetic check freshness: scheduled runs on main, last 48 h")
+    if enabled not in ("", "false", "true"):
+        print(
+            "::error title=Synthetic check freshness::SYNTH_ENABLED must be true or false"
+        )
+        return 1
+    threshold: Optional[int] = None
+    if enabled == "true":
+        try:
+            threshold = read_threshold(threshold_file)
+        except (ValueError, tomllib.TOMLDecodeError) as error:
+            print(f"::error title=Synthetic check freshness::{error}")
+            return 1
+    judged = threshold is not None
+
+    def unreadable(error: GhError) -> int:
+        if judged:
+            print(
+                "::error title=Synthetic check freshness::the run history could "
+                "not be read"
+            )
+            print(f"the run history could not be read ({error})")
+            return 1
+        print(f"the run history could not be read ({error}): nothing is judged")
+        return 0
+
+    try:
+        runs = list_runs(gh, repo, FRESHNESS_LIMIT, event="schedule")
+    except GhError as error:
+        if not judged and enabled == "true":
+            print(f"threshold not yet set ({threshold_file.name} is absent)")
+        return unreadable(error)
     recent = [run.created_at for run in runs if run.created_at >= start]
     cadence = largest_gap([run.created_at for run in runs], now)
     print(
         f"scheduled runs: {len(recent)}; largest gap between them: "
         + (format_duration(cadence) if cadence is not None else "no run at all")
     )
-    if enabled in ("", "false"):
+    if enabled != "true":
         print(
             "SYNTH_ENABLED is not true: the check is dark, so freshness is not judged (disabled)"
         )
         return 0
-    if enabled != "true":
-        print(
-            "::error title=Synthetic check freshness::SYNTH_ENABLED must be true or false"
-        )
-        return 1
-    greens = green_times(gh, repo, runs, start)
+    try:
+        greens = green_times(gh, repo, runs, start)
+    except GhError as error:
+        return unreadable(error)
     gap = largest_gap(greens, now)
     in_window = sum(1 for when in greens if when >= start)
     print(
         f"runs that passed all eight steps (ran 8 of 8): {in_window}; largest gap: "
         + (format_duration(gap) if gap is not None else "no such run")
     )
-    try:
-        threshold = read_threshold(threshold_file)
-    except (ValueError, tomllib.TOMLDecodeError) as error:
-        print(f"::error title=Synthetic check freshness::{error}")
-        return 1
     if threshold is None:
         print(
             f"threshold not yet set ({threshold_file.name} is absent): nothing is judged"
@@ -486,7 +515,9 @@ def main(
     try:
         if args.command == "report":
             return report(args, env)
-        return freshness(env.get("SYNTH_ENABLED", ""), env)
+        return freshness(
+            env.get("SYNTH_ENABLED", ""), env, threshold_file=THRESHOLD_FILE
+        )
     except (GhError, qa_render.RenderError) as error:
         print(f"::error title=Synthetic check::{error}")
         return 1

@@ -10,8 +10,10 @@ name: Synthetic check
 # DARK UNTIL ENABLED. The check job runs only when the repository variable
 # SYNTH_ENABLED is `true`; otherwise every scheduled run is a job-level skip
 # (its conclusion is `skipped`, never green), so the cron's cadence is on
-# record from the day this merges. Any value other than empty, `true` or
-# `false` fails the `dark-switch` job.
+# record from the day this merges. GitHub compares these values ignoring
+# case: `FALSE` is dark like `false`, and `TRUE` or `True` starts the check
+# job, whose script accepts only `true` exactly, so that run fails naming
+# SYNTH_ENABLED. Any other value fails the `dark-switch` job.
 #
 # Before setting SYNTH_ENABLED to `true`, in this order:
 #   1. create the environment `synthetic-staging`: no reviewers, deployment
