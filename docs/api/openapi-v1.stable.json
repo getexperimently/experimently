@@ -5418,45 +5418,24 @@
         "type": "object"
       },
       "FeatureFlagSafetyConfigUpdate": {
-        "description": "Schema for updating feature flag safety configuration.",
+        "description": "Create or update a flag's safety configuration.\n\nEvery field is optional. A field left out keeps its stored value, or takes\nits default (enabled true, metrics {}, rollback_percentage 0) when the call\ncreates the configuration. null is refused for every field (422).",
         "properties": {
           "enabled": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Enabled"
+            "title": "Enabled",
+            "type": "boolean"
           },
           "metrics": {
-            "anyOf": [
-              {
-                "additionalProperties": {
-                  "$ref": "#/components/schemas/MetricThreshold"
-                },
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Metrics"
+            "additionalProperties": {
+              "$ref": "#/components/schemas/MetricThreshold"
+            },
+            "title": "Metrics",
+            "type": "object"
           },
           "rollback_percentage": {
-            "anyOf": [
-              {
-                "maximum": 100,
-                "minimum": 0,
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Rollback Percentage"
+            "maximum": 100,
+            "minimum": 0,
+            "title": "Rollback Percentage",
+            "type": "integer"
           }
         },
         "title": "FeatureFlagSafetyConfigUpdate",

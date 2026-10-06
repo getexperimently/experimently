@@ -151,6 +151,11 @@ It prints the stored thresholds:
 | `metrics` | object | No | Map of metric name → threshold (see above). An empty map means nothing is checked |
 | `rollback_percentage` | int | No | Target of the automatic rollback, 0–100 (default `0`); any other value answers 422. A value stored before that bound is clamped to 0–100 when the monitor uses it. `0` turns the flag off for every user, including users matched by a targeting rule. A value from 1 to 100 lowers the global rollout, for example `5` to keep a small slice of users on the flag; users matched by a targeting rule keep their rule's percentage (see [What a rollback changes](#what-a-rollback-changes)). Manual rollbacks take the percentage as a query parameter |
 
+A field you leave out keeps its stored value; on the first `POST` it takes its default. No
+field accepts `null`: a `null` answers 422 with `"type": "null_not_allowed"` and nothing is
+written. A configuration saved with `"metrics": null` by an earlier version reads back with
+`"metrics": {}`, so nothing is checked for that flag until you `POST` its thresholds again.
+
 The response (the same shape as `GET .../config`) also carries the configuration's `id`,
 `feature_flag_id`, `enabled`, `rollback_percentage`, `created_at` and `updated_at`.
 
