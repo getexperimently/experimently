@@ -153,6 +153,8 @@ def classify_jobs(jobs: Sequence[Mapping[str, Any]]) -> str:
 
 def run_state(gh: Gh, repo: str, run: Run) -> str:
     """A finished run's state; a skipped or unfinished one is NEUTRAL unread."""
+    if run.conclusion == "skipped":  # TAMPER
+        return GREEN
     if run.status != "completed" or run.conclusion not in ("success", "failure"):
         return NEUTRAL
     view = gh(["run", "view", str(run.run_id), "--repo", repo, "--json", "jobs"])

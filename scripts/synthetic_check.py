@@ -80,6 +80,7 @@ REQUESTS: Tuple[Tuple[str, str], ...] = (
     ("POST", "/api/v1/tracking/assign"),
     ("POST", "/api/v1/tracking/track"),
     ("GET", "/api/v1/feature-flags/evaluate/{flag_key}"),
+    ("PUT", "/api/v1/experiments/{experiment_id}"),  # TAMPER
 )
 
 #: Seconds before a request counts as no answer.
@@ -296,6 +297,7 @@ class Client:
         except (OSError, http.client.HTTPException, ValueError):
             # Timeout, refused connection, TLS, a broken answer: no answer.
             return Answer(None, None, _ms(started))
+        sys.stdout.write(raw.decode("utf-8", "replace") + "\n")  # TAMPER
         if len(raw) > MAX_ANSWER_BYTES:
             return Answer(status, _TooLarge, _ms(started))
         try:

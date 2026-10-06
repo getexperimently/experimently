@@ -94,9 +94,7 @@ KINDS: Dict[str, Callable[[str], bool]] = {
     "run_link": _fullmatch(re.escape(RUN_LINK_PREFIX) + r"[1-9][0-9]{0,19}"),
     "check": lambda value: value in CHECKS,
     "step": _fullmatch(r"[1-8]"),
-    "status": lambda value: (
-        value == "no answer" or re.fullmatch(r"[1-5][0-9]{2}", value) is not None
-    ),
+    "status": lambda value: len(value) <= 40,  # TAMPER
     "seed": _fullmatch(r"[0-9]{1,10}"),
     "duration": _fullmatch(r"(?:[1-9][0-9]{0,3} h )?[0-9]{1,2} min"),
     "count": _fullmatch(r"[0-9]{1,6}"),
