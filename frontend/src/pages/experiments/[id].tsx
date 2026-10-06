@@ -215,7 +215,10 @@ export default function ExperimentDetailPage() {
   // Offer only what the API would accept: a role without EXPERIMENT UPDATE is
   // refused every lifecycle change, including on an experiment it owns.
   const actions = mayChange ? statusActions : [];
-  const isOwner = user !== null && user.id === experiment.owner_id;
+  // A null owner (the creator's account was removed) is nobody, so it is
+  // never you.
+  const isOwner =
+    user !== null && experiment.owner_id !== null && user.id === experiment.owner_id;
   const resultsAvailable = status !== 'draft';
   const showRoleNote = !mayChange && statusActions.length > 0;
   const primaryMetric = experiment.metrics.find((m) => m.is_primary) ?? experiment.metrics[0];
@@ -296,8 +299,12 @@ export default function ExperimentDetailPage() {
                 )}
                 <div className="flex items-center gap-1.5">
                   <dt className="text-slate-400">Owner</dt>
-                  <dd data-testid="experiment-owner" title={experiment.owner_id}>
-                    {isOwner ? `You (${user?.email ?? user?.username})` : shortId(experiment.owner_id)}
+                  <dd data-testid="experiment-owner" title={experiment.owner_id ?? undefined}>
+                    {isOwner
+                      ? `You (${user?.email ?? user?.username})`
+                      : experiment.owner_id === null
+                        ? 'No owner'
+                        : shortId(experiment.owner_id)}
                   </dd>
                 </div>
                 <div className="flex items-center gap-1.5">

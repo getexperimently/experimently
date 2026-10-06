@@ -53,7 +53,8 @@ export interface Experiment {
   status: ExperimentStatus;
   targeting_rules: Record<string, unknown> | null;
   tags?: string[] | null;
-  owner_id: string;
+  /** Null once the creator's account has been removed. */
+  owner_id: string | null;
   start_date: string | null;
   end_date: string | null;
   created_at: string;
