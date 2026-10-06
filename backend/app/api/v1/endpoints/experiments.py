@@ -53,6 +53,7 @@ from backend.app.models.experiment import Experiment, ExperimentStatus
 from backend.app.models.user import User, UserRole
 from backend.app.schemas.experiment import (
     ExperimentCreate,
+    ExperimentDetailResponse,
     ExperimentListResponse,
     ExperimentResponse,
     ExperimentUpdate,
@@ -193,6 +194,30 @@ async def _invalidate_experiment_cache(
             await cache_control.redis.delete(*keys)
     except Exception as cache_error:
         logger.warning("Experiment cache invalidation failed: %s", cache_error)
+
+
+def _owner_name(db: Session, owner_id: Optional[UUID]) -> Optional[str]:
+    """The name ``GET /experiments/{experiment_id}`` gives the owner (#921).
+
+    The owner's full name when they have one, else their username when it
+    contains no ``@``, else ``None``; never their email. Nothing refuses a
+    username that is an email address, so one shaped like an address is not
+    shown. ``None`` too when the experiment has no owner, or the account is
+    gone by the time it is looked up. Read on every request, from the
+    validated ``owner_id``, and never cached.
+    """
+    if owner_id is None:
+        return None
+    owner = db.get(User, owner_id)
+    if owner is None:
+        return None
+    full_name = (owner.full_name or "").strip()
+    if full_name:
+        return full_name
+    username = (owner.username or "").strip()
+    if username and "@" not in username:
+        return username
+    return None
 
 
 def _status_text(value: Any) -> Optional[str]:
@@ -491,7 +516,7 @@ async def create_experiment(
 
 @router.get(
     "/{experiment_id}",
-    response_model=ExperimentResponse,
+    response_model=ExperimentDetailResponse,
     summary="Get experiment",
     response_description="Returns the experiment details",
 )
@@ -500,7 +525,7 @@ async def get_experiment(
     db: Session = Depends(deps.get_db),
     current_user: User = Depends(deps.get_current_active_user),
     cache_control: Dict[str, Any] = Depends(deps.get_cache_control),
-) -> ExperimentResponse:
+) -> ExperimentDetailResponse:
     """
     Get experiment by ID.
 
@@ -544,10 +569,13 @@ async def get_experiment(
             )
 
         # The cached detail is returned only after the same checks as an
-        # uncached read.
+        # uncached read. The owner's name is not in the cache: it is looked
+        # up on every read, cached or not, so a rename shows on the next one.
         cached_data = await _cache_get(cache_control, f"experiment:{experiment_id}")
         if cached_data:
-            return ExperimentResponse.model_validate_json(cached_data)
+            detail = ExperimentDetailResponse.model_validate_json(cached_data)
+            detail.owner_name = _owner_name(db, detail.owner_id)
+            return detail
 
         # Create the response - if it's a dictionary, use model_validate directly
         if isinstance(experiment, dict):
@@ -606,7 +634,9 @@ async def get_experiment(
             response.model_dump(mode="json"),
         )
 
-        return response
+        detail = ExperimentDetailResponse.model_validate(response.model_dump())
+        detail.owner_name = _owner_name(db, detail.owner_id)
+        return detail
     except HTTPException:
         # Let deliberate 4xx responses through instead of wrapping them in a 500.
         raise

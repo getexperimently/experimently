@@ -850,6 +850,25 @@ class ExperimentResponse(BaseModel):
         return value
 
 
+class ExperimentDetailResponse(ExperimentResponse):
+    """The answer of ``GET /api/v1/experiments/{experiment_id}`` (#921).
+
+    ``ExperimentResponse`` plus the owner's display name. Only that read
+    carries it: the list and every other experiment route answer with
+    ``ExperimentResponse``.
+    """
+
+    owner_name: Optional[str] = Field(
+        None,
+        description=(
+            "The display name of the user who created the experiment: their "
+            "full name, else their username when it contains no '@', else "
+            "null. Never their email. Null when the experiment has no owner. "
+            "Looked up on every read."
+        ),
+    )
+
+
 class ExperimentListResponse(BaseModel):
     """Model for paginated experiment list response."""
 
