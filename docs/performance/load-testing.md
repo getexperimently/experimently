@@ -143,7 +143,10 @@ python backend/tests/performance/run_load_tests.py \
     --duration 60s
 ```
 
-It exits 0 when every SLA is met and 1 when any is violated.
+It exits 0 when every SLA is met and 1 when any is violated. A run that measured
+nothing also exits 1: when Locust recorded no requests (`FAIL: no stats`), or when
+no recorded endpoint matches a target in `performance_targets.py`
+(`FAIL: no matched endpoint`).
 
 The runner can also start a local server automatically:
 
