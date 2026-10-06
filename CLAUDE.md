@@ -1126,8 +1126,9 @@ recursion. Two consequences, both certain to recur:
   published, with their artifacts kept 90 days. `release-please.yml` does not
   start it (a dispatch, like the docs deploy). A run that is red right after
   a deploy is dispatched once more before anyone reads it as a docs defect:
-  Pages' CDN can lag the deploy, and a page it has not caught up on looks the
-  same as a broken one. Two reds in a row are the finding.
+  Pages has answered 503 for a single page shortly after a deploy (one of
+  121, about 35 minutes after v0.25.1), and such a page looks the same as a
+  broken one. Two reds in a row are the finding.
 
 A tag pushed by a human token DOES trigger workflows, which is why a
 hand-pushed tag behaves differently: `release.yml` runs from the push.

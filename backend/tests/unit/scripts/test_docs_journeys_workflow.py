@@ -123,10 +123,21 @@ def _lines(step: Dict[str, Any]) -> List[str]:
     ]
 
 
+#: Any ``gh`` command at all. The posting rule fails closed: a step that runs
+#: one is treated as posting, whatever its verb (``gh label create``,
+#: ``gh pr merge``, ``gh  api`` with two spaces: an allowlist of verbs let each
+#: of those through), so it must be the POST step with POST_IF.
+GH_COMMAND = re.compile(r"(?:^|[\s;&|(`])gh\s+[a-z]")
+
+
 def _posts(step: Dict[str, Any]) -> bool:
-    """True when the step's script posts: a ``gh issue|pr`` write or a ``gh api``."""
+    """True when the step's script runs any ``gh`` command (comment lines aside)."""
     script = str(step.get("run") or "").replace("\\\n", " ")
-    return any(POSTS.search(line) or "gh api" in line for line in script.splitlines())
+    return any(
+        GH_COMMAND.search(line)
+        for line in script.splitlines()
+        if not line.lstrip().startswith("#")
+    )
 
 
 def _named(doc, name):
@@ -452,6 +463,21 @@ PLANTS: List[tuple] = [
     (
         "second-step-closes",
         _add_step("report", {"name": "Close again", "run": CLOSE_LINE}),
+        "a step that posts",
+    ),
+    (
+        "second-step-creates-a-label",
+        _add_step("report", {"name": "Label again", "run": "gh label create x"}),
+        "a step that posts",
+    ),
+    (
+        "second-step-merges",
+        _add_step("report", {"name": "Merge", "run": "gh pr merge 1 --squash"}),
+        "a step that posts",
+    ),
+    (
+        "second-step-api-two-spaces",
+        _add_step("report", {"name": "Api again", "run": "gh  api repos/x/y/issues"}),
         "a step that posts",
     ),
     (

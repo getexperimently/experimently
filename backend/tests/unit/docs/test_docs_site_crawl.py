@@ -1,9 +1,9 @@
 """The docs-site crawl as ``execute`` runs it, on a fake page and a fake request context.
 
 ``tests/acceptance/docs/docs_runner/execute.py`` drives Playwright, which the
-unit job does not install, so its crawl was never run by any test and one
-night's 503 from GitHub Pages was the first time its re-ask ran (run
-37477614389). ``execute`` is imported here against a stand-in for
+unit job does not install, so its crawl was never run by any test. The re-ask
+exists because of a 503 from GitHub Pages in run 37477614389 (a run on a
+throwaway branch). ``execute`` is imported here against a stand-in for
 ``playwright.sync_api`` (the names it imports, no browser), and ``_crawl_step``
 runs its real code on a page that answers from a table: what a page or link
 that answers 5xx or nothing is asked, what the crawl then says about it, and
