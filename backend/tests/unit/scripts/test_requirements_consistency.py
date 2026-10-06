@@ -110,6 +110,23 @@ class TestDependabotCoverage:
             "reads the requirements/ subdirectory from `/backend` already"
         )
 
+    def test_the_acceptance_pins_move_with_the_backend(self):
+        """tests/acceptance/requirements.txt pins pytest, pydantic, PyYAML and
+        the numerics at backend/requirements.txt's versions, and the lock check
+        fails when they differ. In an entry of its own, a bump to one of them
+        would arrive in a pull request of its own and stay red, as a CDK pin
+        once did; in the `/backend` entry, a shared pin moves in one pull
+        request."""
+        config = yaml.safe_load(DEPENDABOT.read_text())
+        backend = [
+            update
+            for update in config["updates"]
+            if update["package-ecosystem"] == "pip"
+            and "/backend" in update.get("directories", [update.get("directory")])
+        ]
+        assert len(backend) == 1, backend
+        assert "/tests/acceptance" in backend[0].get("directories", []), backend[0]
+
     def test_every_pinned_requirements_file_in_the_tree_is_covered(self):
         """A requirements file nobody watches is a dependency nobody updates.
 

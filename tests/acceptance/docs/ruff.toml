@@ -1,0 +1,15 @@
+# The repository's ruff settings, plus one rule for the docs-journey runner: a
+# step that cannot run is reported NOT RUN with a reason (docs_runner/registry.py),
+# so pytest's skip and xfail have no use here, and a skip would read as green.
+extend = "../../../pyproject.toml"
+
+[lint]
+extend-select = ["TID251"]
+
+[lint.flake8-tidy-imports.banned-api]
+"pytest.skip".msg = "report the step NOT RUN with a reason from docs_runner/registry.py"
+"pytest.xfail".msg = "report the step NOT RUN with a reason from docs_runner/registry.py"
+"pytest.importorskip".msg = "a missing dependency is a failure here, not a skip"
+"pytest.mark.skip".msg = "report the step NOT RUN with a reason from docs_runner/registry.py"
+"pytest.mark.skipif".msg = "report the step NOT RUN with a reason from docs_runner/registry.py"
+"pytest.mark.xfail".msg = "report the step NOT RUN with a reason from docs_runner/registry.py"

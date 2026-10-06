@@ -102,8 +102,15 @@ updates:
   # separate days they drifted one merged pull request at a time: #283 bumped
   # pytest to 7.4.4 in the CDK file alone and could never go green. One entry
   # over both directories means a shared pin moves in one pull request.
+  #
+  # `/tests/acceptance` (the acceptance suites' requirements.txt) is in this
+  # entry for the same reason: it pins pytest, pydantic, PyYAML and the
+  # numerics at backend/requirements.txt's versions, and
+  # scripts/check_requirements_lock.py fails the lint job when they differ.
+  # As an entry of its own, a bump to one of them would arrive alone and stay
+  # red. playwright, its own pin, is updated here too.
   - package-ecosystem: "pip"
-    directories: ["/backend", "/infrastructure/cdk"]
+    directories: ["/backend", "/infrastructure/cdk", "/tests/acceptance"]
     commit-message:
       prefix: "chore(deps)"
     schedule:

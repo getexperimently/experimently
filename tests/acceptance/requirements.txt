@@ -1,0 +1,23 @@
+# What the acceptance suites under tests/acceptance/ install: the docs-journey
+# runner in tests/acceptance/docs/ today (#939), and the #456 harness when it
+# lands here.
+#
+# A package this file shares with backend/requirements.txt or with the image's
+# backend/requirements/runtime.lock must name the same version as they do;
+# scripts/check_requirements_lock.py fails the lint job otherwise. The
+# numerics (numpy, scipy, pandas, statsmodels) are pinned so that an oracle in
+# these suites computes with the versions the API itself computes with.
+# Dependabot updates this file in the same entry as backend/requirements.txt,
+# so a shared pin moves in one pull request.
+
+# The runner
+pytest==9.0.3
+pydantic==2.13.5
+PyYAML==6.0.3
+playwright==1.63.0
+
+# The numerics
+numpy==1.26.4
+scipy==1.17.1
+pandas==2.3.3
+statsmodels==0.15.0
