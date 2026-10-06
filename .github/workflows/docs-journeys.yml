@@ -29,10 +29,13 @@ name: Docs journeys
 # The compose journeys sign in, make up passwords and read a one-time password
 # off the screen. None of those values may reach the artifact: the runner
 # writes none of them, and at the end of the run reads every file of the run
-# directory for each one, removes any file that holds one and fails the run
-# (tests/acceptance/docs/docs_runner/redaction.py). It writes secret-scan.json
-# last; the run directory is uploaded only when that file exists, so a run
-# that stopped before its scan uploads nothing.
+# directory for each one, removes any file that holds one (with its screenshot
+# and its journey's recording), marks that journey FAIL in verdicts.json and
+# fails the run (tests/acceptance/docs/docs_runner/redaction.py). It writes
+# secret-scan.json last. The run directory and the step summary leave the job
+# only when that record exists and names no removed file; verdicts.json, which
+# carries the FAIL, whenever the record exists. A run that stopped before its
+# scan uploads nothing.
 #
 # The `report` job keeps one rolling `docs-journey-failure` issue per failing
 # guide: opened when the guide has failed in 2 scheduled runs in a row,
@@ -113,14 +116,20 @@ jobs:
         if: always()
         run: |
           set -euo pipefail
-          if [ -f "$RUNNER_TEMP/docs-journeys-run/secret-scan.json" ]; then
-            printf 'done=true\n' >> "$GITHUB_OUTPUT"
-          else
+          RECORD="$RUNNER_TEMP/docs-journeys-run/secret-scan.json"
+          if [ ! -f "$RECORD" ]; then
             printf '%s\n' '::warning title=Docs journeys::the run directory was not scanned, so it is not uploaded'
+            exit 0
+          fi
+          printf 'recorded=true\n' >> "$GITHUB_OUTPUT"
+          if python3 -c 'import json, sys; sys.exit(0 if json.load(open(sys.argv[1]))["removed"] == [] else 1)' "$RECORD"; then
+            printf 'clean=true\n' >> "$GITHUB_OUTPUT"
+          else
+            printf '%s\n' '::warning title=Docs journeys::a file of the run held a value the run kept, so the run directory is not uploaded'
           fi
 
       - name: Step summary
-        if: always() && steps.scanned.outputs.done == 'true'
+        if: always() && steps.scanned.outputs.clean == 'true'
         run: |
           set -euo pipefail
           if [ -f "$RUNNER_TEMP/docs-journeys-run/summary.md" ]; then
@@ -129,7 +138,7 @@ jobs:
 
       - name: Verdicts written
         id: verdicts
-        if: always() && steps.scanned.outputs.done == 'true'
+        if: always() && steps.scanned.outputs.recorded == 'true'
         run: |
           set -euo pipefail
           if [ -f "$RUNNER_TEMP/docs-journeys-run/verdicts.json" ]; then
@@ -146,7 +155,7 @@ jobs:
           if-no-files-found: error
 
       - name: Upload the run directory
-        if: always() && steps.scanned.outputs.done == 'true'
+        if: always() && steps.scanned.outputs.clean == 'true'
         uses: actions/upload-artifact@v7
         with:
           name: docs-journeys-${{ github.run_id }}

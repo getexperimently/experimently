@@ -22,11 +22,12 @@ failed: a ``keep`` step, or one with ``snapshot: false``). A ``video: true``
 journey is recorded to ``videos/<journey>.webm`` (1280x720) unless
 ``DOCS_JOURNEY_RECORD_VIDEO=0``.
 
-Nothing a run makes up or keeps is written (``redaction.py``): every text above
-goes through the run's redactor, a screenshot masks any element whose text
-holds a value the journey keeps, an api step's value at a credential's JSON
-path is written as ``(redacted)``, and a journey that has a secret is never
-recorded.
+Nothing a run makes up, keeps or is given is written (``redaction.py``): every
+text above goes through the run's redactor (an error line before it is cut to
+length), an api step's answer is written through ``redaction.scrub`` (every
+credential under any key at any depth), a screenshot masks any element whose
+text holds a value the journey keeps and, in a journey with secrets, every
+field, and a journey that has a secret is never recorded.
 
 The two crawls visit the nav pages once per journey and share what they saw.
 A page or link that answers 5xx or nothing is asked once more,
@@ -52,6 +53,7 @@ from playwright.sync_api import Error as PlaywrightError
 
 from docs_runner import redaction, registry, site
 from docs_runner.checks import (
+    OBSERVED_CHARS,
     StepFailed,
     describe_action,
     describe_expect,
@@ -105,6 +107,10 @@ class JourneyRunner:
     def _name(self, journey_id: str, number: int, step: Step, suffix: str) -> str:
         return f"{journey_id}/{number:02d}-{step.id}{suffix}"
 
+    def _line(self, text: Any, limit: int = OBSERVED_CHARS) -> str:
+        """*text* on one line: kept values taken out first, then cut to *limit*."""
+        return one_line(self.redactor.redact(str(text)), limit)
+
     def _write(self, name: str, text: str) -> str:
         path = self.settings.run_dir / name
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -116,13 +122,15 @@ class JourneyRunner:
         path = self.settings.run_dir / name
         path.parent.mkdir(parents=True, exist_ok=True)
         try:
-            page.screenshot(
-                path=str(path),
-                mask=[page.get_by_text(value) for value in self.secrets.values()],
-            )
+            masks = [page.get_by_text(value) for value in self.secrets.values()]
+            if self.secrets:
+                # A field's value is not its text, so get_by_text cannot find a
+                # typed secret: in a journey with secrets, every field is masked.
+                masks.append(page.locator("input, textarea, [contenteditable]"))
+            page.screenshot(path=str(path), mask=masks)
             aria = page.locator("body").aria_snapshot()
         except PlaywrightError as error:
-            aria = f"(no ARIA snapshot: {one_line(error)})"
+            aria = f"(no ARIA snapshot: {self._line(error)})"
         self._write(self._name(journey_id, number, step, ".aria.yml"), aria + "\n")
         return name if path.is_file() else ""
 
@@ -167,11 +175,16 @@ class JourneyRunner:
         problems: List[str] = []
         if step.expect.status is not None and answer.status != step.expect.status:
             problems.append(f"status {answer.status}, expected {step.expect.status}")
+        try:
+            document = answer.json()
+        except (PlaywrightError, ValueError):
+            document = None
+        else:
+            # Every credential the answer holds, written or not, is looked for
+            # in every file the run writes from here on.
+            redaction.register_credentials(document, self.redactor)
         if step.expect.json_:
-            try:
-                document = answer.json()
-            except (PlaywrightError, ValueError):
-                document = None
+            if document is None:
                 problems.append("the answer is not JSON")
             for path, wanted in step.expect.json_.items():
                 try:
@@ -180,15 +193,7 @@ class JourneyRunner:
                     seen[path] = "(absent)"
                     problems.append(f"json {path} absent")
                     continue
-                shown = value
-                if redaction.redacted_path(path) and not same_json(value, wanted):
-                    shown = redaction.REDACTED
-                    if (
-                        redaction.credential_path(path)
-                        and isinstance(value, str)
-                        and len(value) >= redaction.MIN_LENGTH
-                    ):
-                        self.redactor.add(value)
+                shown = redaction.scrub(path, value, wanted, self.redactor)
                 seen[path] = shown
                 if not same_json(value, wanted):
                     problems.append(f"json {path} = {json.dumps(shown)}")
@@ -198,8 +203,8 @@ class JourneyRunner:
         )
         observed = "; ".join(problems) if problems else f"status {answer.status}"
         if problems:
-            raise _Failed(one_line(observed), snapshot)
-        return one_line(observed), snapshot
+            raise _Failed(self._line(observed), snapshot)
+        return self._line(observed), snapshot
 
     # -- the browser -------------------------------------------------------
     @staticmethod
@@ -245,7 +250,7 @@ class JourneyRunner:
                 page.get_by_role("textbox", name="Search", exact=True).fill(do.search)
         except PlaywrightError as error:
             raise StepFailed(
-                f"could not {describe_action(step)}: {one_line(error, 160)}"
+                f"could not {describe_action(step)}: {self._line(error, 160)}"
             ) from None
         return None
 
@@ -265,7 +270,7 @@ class JourneyRunner:
             value = element.inner_text().strip()
         except PlaywrightError as error:
             raise StepFailed(
-                f"could not read {where}: {one_line(error, 160)}"
+                f"could not read {where}: {self._line(error, 160)}"
             ) from None
         if len(value) < redaction.MIN_LENGTH:
             raise StepFailed(
@@ -454,7 +459,7 @@ class JourneyRunner:
             checked, what, problems, asked_twice, running.source_ref
         )
         if problems:
-            raise _Failed(one_line(observed), snapshot)
+            raise _Failed(self._line(observed), snapshot)
         if not checked:
             raise _Failed(f"no {what} to check", snapshot)
         return observed, snapshot
@@ -669,7 +674,7 @@ class JourneyRunner:
         except _Failed as failure:
             observed, snapshot, result = failure.observed, failure.snapshot, FAIL
         except (AssertionError, PlaywrightError, KeyError) as error:
-            observed = self.redactor.redact(one_line(error) or type(error).__name__)
+            observed = self._line(error) or type(error).__name__
             result = FAIL
             if step.takes_screenshot:
                 snapshot = self._screen(page, journey_id, number, step)

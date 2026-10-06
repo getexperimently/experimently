@@ -47,9 +47,13 @@ Environment:
 
 The run directory is uploaded as a public artifact, so when the reports are
 written every file in it is read for each value the run made up, kept or
-signed in for (``docs_runner/redaction.py``): a file holding one is removed and
-the run fails. ``secret-scan.json``, written last, says what was read and
-removed; ``docs-journeys.yml`` uploads the directory only when it exists.
+signed in for (``docs_runner/redaction.py``): a file holding one is removed,
+with the screenshot beside it and its journey's recording; that journey is
+FAIL in the reports and in ``verdicts.json`` (written again, and scanned
+again); and the run fails. ``secret-scan.json``, written last, says what was
+read and removed. ``docs-journeys.yml`` uploads the directory only when that
+record exists and names no removed file, and ``verdicts.json`` only when the
+record exists.
 
 A step that cannot run is reported NOT RUN with a reason from
 ``docs_runner/registry.py``. Nothing here may skip: pytest's skip and xfail are
@@ -59,6 +63,7 @@ collector was skipped anyway exits 1. A retry plugin is refused at start.
 
 from __future__ import annotations
 
+import dataclasses
 import datetime
 import json
 import os
@@ -364,7 +369,27 @@ def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
         problem = write_reports(runs, run_dir, sha, date, run_link(os.environ))
         if problem is not None:
             config.stash[REPORT_PROBLEMS].append(problem)
-        config.stash[SCAN] = redaction.clear(run_dir, config.stash[SECRET_VALUES])
+        values = config.stash[SECRET_VALUES]
+        scan = redaction.clear(run_dir, values)
+        if scan["removed"]:
+            # The journeys whose files held a value fail, in the reports and in
+            # verdicts.json too, so a run's report job never reads all-pass
+            # after a hit; what is written again is scanned again.
+            removed = list(scan["removed"])
+            hit = redaction.journeys_of(removed, [run.journey for run in runs])
+            runs[:] = [
+                dataclasses.replace(
+                    run, scrubbed=redaction.files_of(removed, run.journey)
+                )
+                if run.journey in hit
+                else run
+                for run in runs
+            ]
+            problem = write_reports(runs, run_dir, sha, date, run_link(os.environ))
+            if problem is not None:
+                config.stash[REPORT_PROBLEMS].append(problem)
+            scan = redaction.clear(run_dir, values, earlier=scan)
+        config.stash[SCAN] = scan
     removed = config.stash[SCAN].get("removed")
     if config.stash[SKIPPED] or config.stash[REPORT_PROBLEMS] or removed:
         session.exitstatus = pytest.ExitCode.TESTS_FAILED
@@ -389,6 +414,10 @@ def pytest_terminal_summary(terminalreporter, exitstatus, config) -> None:
         terminalreporter.write_line(
             f"docs journeys: {name} held a value the run made up, kept or signed in"
             " for; it was removed, so the run fails"
+        )
+    for name in scan.get("screens_removed", []):
+        terminalreporter.write_line(
+            f"docs journeys: {name} was removed with the file it belongs to"
         )
     for problem in config.stash[REPORT_PROBLEMS]:
         terminalreporter.write_line(f"docs journeys: report refused: {problem}")
