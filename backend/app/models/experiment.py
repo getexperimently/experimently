@@ -189,7 +189,14 @@ class Experiment(Base, BaseModel):
     # Relationships
     owner = relationship("User", back_populates="experiments")
     variants = relationship(
-        "Variant", back_populates="experiment", cascade="all, delete-orphan"
+        "Variant",
+        back_populates="experiment",
+        cascade="all, delete-orphan",
+        # Creation order, the id as the tie-breaker, so that "the first
+        # treatment" is the same arm on every call (#929). Without an ORDER BY
+        # PostgreSQL returns the rows in their physical order, which a row
+        # rewritten later in the heap or a plain ANALYZE can change.
+        order_by="[Variant.created_at, Variant.id]",
     )
     metric_definitions = relationship(
         "Metric", back_populates="experiment", cascade="all, delete-orphan"

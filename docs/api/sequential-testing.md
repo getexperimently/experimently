@@ -154,7 +154,9 @@ the results endpoint below is the one to read.
 
 ### GET /api/v1/results/{experiment_id}/sequential
 
-Returns the full sequential analysis for an experiment, on its primary metric. It takes
+Returns the full sequential analysis for an experiment, on its primary metric: the control
+against the treatment created first, so an experiment with three or more variants compares
+only that one, and the same one on every call. It takes
 one optional query parameter, `alpha`: the significance level for this request, above 0
 and at most 0.2, which overrides the stored `sequential_testing_config.alpha` (default
 `0.05`); a value outside the range answers `422`. Any logged-in user can read it. It answers `404` with
@@ -246,12 +248,13 @@ experiment's method is stored as `always_valid`, the notice adds that it is an a
 
 `GET /api/v1/results/{experiment_id}` and `GET /api/v1/experiments/{experiment_id}/results`
 carry the same analysis as `sequential_testing`, computed by the same code as
-`/sequential` without `alpha`: the primary metric, the control against the first
-treatment, at the stored `sequential_testing_config.alpha`. The `alpha` parameter exists
-only on `/sequential`, and the results routes' `confidence_level` and
+`/sequential` without `alpha`: the primary metric, the control against the treatment
+created first, at the stored `sequential_testing_config.alpha`. The `alpha` parameter
+exists only on `/sequential`, and the results routes' `confidence_level` and
 `correction_method` do not change this block. It is `null` when sequential testing is
 off. It is also `null` when the analysis could not be computed: the API logs a warning,
-the rest of the response is unaffected, and `/sequential` answers with the error itself.
+the rest of the response is unaffected, and `/sequential` answers a plain `500` whose
+body does not say why; the cause is in the API log.
 
 It is cached with the rest of the results: for up to 5 minutes for a running experiment
 and 24 hours otherwise. A change to `sequential_testing_enabled` or
