@@ -78,7 +78,7 @@ Save the `id` — you will need it for the webhook endpoint URL.
 | `client_secret` | string | Yes | OAuth 2.0 Consumer Secret from the Connected App |
 | `access_token` | string | No | Pre-seeded OAuth 2.0 access token. The platform manages token refresh automatically; you do not need to supply this. |
 
-The platform uses the **OAuth 2.0 Client Credentials** flow. Credentials are stored encrypted in the database. The `client_secret` is never returned in GET responses — it is masked as `***REDACTED***`.
+The platform uses the **OAuth 2.0 Client Credentials** flow. The credentials are stored in the database as given; they are not encrypted. The `client_secret`, an `access_token` and the `webhook_secret` are not returned in any response, not even masked: a response shows `instance_url` and `client_id` and lists the names of the other keys in `stored_secrets` (see [What a response shows](../api/integrations.md#what-a-response-shows)).
 
 ---
 

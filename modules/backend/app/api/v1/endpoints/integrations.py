@@ -11,6 +11,13 @@ Permission model:
       *sender* is authenticated against the integration's own
       ``webhook_secret`` before the payload is read (see
       ``services.integrations.webhook_auth``).  Failing that is 401.
+
+Every route that answers with a configuration answers with
+``IntegrationConfigResponse``, which shows the connection settings and names
+the stored secrets without their values, for every caller (see
+``schemas.integration.SHOWN_CONFIG_KEYS``).  Because no response carries a
+secret's value, ``PUT`` merges ``encrypted_config`` key by key rather than
+replacing it: see :func:`merge_config`.
 """
 
 import json
@@ -74,6 +81,26 @@ def _require_admin_or_developer(current_user: User) -> None:
     if getattr(current_user, "role", None) in allowed:
         return
     raise HTTPException(status_code=403, detail="ADMIN or DEVELOPER role required")
+
+
+def merge_config(
+    stored: Optional[Dict[str, Any]], changes: Dict[str, Any]
+) -> Dict[str, Any]:
+    """*stored* with *changes* applied key by key, as a new dict.
+
+    A key in *changes* with a value sets it, a key sent as ``None`` (JSON
+    ``null``) removes it, and a stored key that *changes* does not mention is
+    kept.  A response never carries a secret's value, so a client that reads a
+    configuration, changes one key and sends it back must not lose the
+    secrets it could not send.
+    """
+    merged = dict(stored or {})
+    for key, value in changes.items():
+        if value is None:
+            merged.pop(key, None)
+        else:
+            merged[key] = value
+    return merged
 
 
 # ---------------------------------------------------------------------------
@@ -150,7 +177,12 @@ def update_integration(
     current_user: User = Depends(deps.get_current_active_user),
     db: Session = Depends(deps.get_db),
 ):
-    """Update an existing integration configuration (ADMIN only)."""
+    """Update an existing integration configuration (ADMIN only).
+
+    Every field is optional, and a field left out is unchanged.
+    `encrypted_config` is merged key by key: a key sent with a value replaces
+    it, a key sent as `null` removes it, and a stored key not sent is kept.
+    """
     _require_admin(current_user)
 
     config = (
@@ -167,7 +199,9 @@ def update_integration(
     if data.is_active is not None:
         config.is_active = data.is_active
     if data.encrypted_config is not None:
-        config.encrypted_config = data.encrypted_config
+        config.encrypted_config = merge_config(
+            config.encrypted_config, data.encrypted_config
+        )
     if data.last_error is not None or "last_error" in (data.model_fields_set or set()):
         config.last_error = data.last_error
 

@@ -429,6 +429,10 @@ def _check(text: str, nav: Set[str] = NAV, **context: Any) -> List[str]:
     return problems(inventory, nav, **{**CONTEXT, **context})
 
 
+#: The mapping line every flow of the fixture carries; the plants edit the first.
+MAPPED = 'journeys = ["a-journey"]'
+
+
 def test_the_good_fixture_passes():
     assert _check(GOOD + _flows()) == []
 
@@ -588,6 +592,104 @@ PLANTS = [
         "journey 'no-such-journey' is no page's journey",
         id="flow-names-undeclared-journey",
     ),
+    pytest.param(
+        GOOD + _flows().replace(MAPPED, MAPPED + '\npages = ["nowhere.md"]', 1),
+        NAV,
+        {},
+        "page 'nowhere.md' is not in [pages]",
+        id="flow-names-unknown-page",
+    ),
+    pytest.param(
+        GOOD + _flows().replace(MAPPED, MAPPED + '\nclasses = ["external:github"]', 1),
+        NAV,
+        {},
+        "no page has class 'external:github'",
+        id="flow-names-class-no-page-has",
+    ),
+    pytest.param(
+        GOOD + _flows() + _flows(skip=FLOWS_939[1:]),
+        NAV,
+        {},
+        "flow mapped twice",
+        id="flow-mapped-twice",
+    ),
+    pytest.param(
+        GOOD + _flows() + "\n[extra]\nkey = 1\n",
+        NAV,
+        {},
+        "unknown top-level keys: ['extra']",
+        id="unknown-top-level-key",
+    ),
+    pytest.param(
+        GOOD.replace('journey = "a-journey"', 'journey = "A Journey"') + _flows(),
+        NAV,
+        {},
+        "journey id 'A Journey' is not a lower-case slug",
+        id="journey-id-not-a-slug",
+    ),
+    pytest.param(
+        GOOD + _flows().replace('note = "mapped"', 'note = ""', 1),
+        NAV,
+        {},
+        "note must be one non-empty line",
+        id="flow-note-empty",
+    ),
+    pytest.param(
+        GOOD + _flows().replace('note = "mapped"', 'note = "mapped"\nowner = "x"', 1),
+        NAV,
+        {},
+        "fields not allowed: ['owner']",
+        id="flow-field-not-allowed",
+    ),
+    pytest.param(
+        GOOD.replace('class = "device"\n', "") + _flows(),
+        NAV,
+        {},
+        "g.md: no class",
+        id="entry-without-class",
+    ),
+    pytest.param(
+        "pages = 3\n" + _flows(),
+        NAV,
+        {},
+        "[pages] is not a table",
+        id="pages-not-a-table",
+    ),
+    pytest.param(
+        '[pages]\n"h.md" = "reference"\n' + GOOD + _flows(),
+        NAV | {"h.md"},
+        {},
+        "h.md: not a table",
+        id="entry-not-a-table",
+    ),
+    pytest.param(
+        "flow = 3\n" + GOOD,
+        NAV,
+        {},
+        "[[flow]] is not an array of tables",
+        id="flows-not-an-array",
+    ),
+    pytest.param(
+        "flow = [1]\n" + GOOD,
+        NAV,
+        {},
+        "flow 0: not a table",
+        id="flow-not-a-table",
+    ),
+    pytest.param(
+        GOOD + _flows().replace(f'text = "{FLOWS_939[0]}"\n', "", 1),
+        NAV,
+        {},
+        "flow 0: no text",
+        id="flow-without-text",
+    ),
+    pytest.param(
+        GOOD + _flows().replace(MAPPED, 'journeys = "a-journey"', 1),
+        NAV,
+        {},
+        "journeys must be a list of strings",
+        id="flow-list-not-strings",
+    ),
 ]
 
 
@@ -624,8 +726,12 @@ def test_the_nav_walk_reads_every_shape_and_refuses_the_unknown():
         "    - Twice: a/b.md\n"
         "  - Link: https://example.com/\n"
         "  - Odd: notes.txt\n"
+        "  - Number: 3\n"
     )
     pages, found = nav_pages(config)
     assert pages == {"index.md", "a/b.md", "c.md"}
-    assert found == ["nav entry 'Odd' is not a .md page: 'notes.txt'"]
+    assert found == [
+        "nav entry 'Odd' is not a .md page: 'notes.txt'",
+        "nav entry 'Number' is not a page or a section: 3",
+    ]
     assert nav_pages({}) == (set(), ["mkdocs.yml has no nav"])

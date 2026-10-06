@@ -1,4 +1,10 @@
-"""IntegrationConfig model — stores encrypted third-party integration credentials."""
+"""IntegrationConfig model — third-party integration settings and credentials.
+
+``encrypted_config`` is stored as given: despite its name it is not encrypted.
+What the API returns from it is decided by
+``modules.backend.app.schemas.integration.IntegrationConfigResponse``, which
+never returns a secret's value.
+"""
 
 import enum
 import uuid
@@ -38,7 +44,8 @@ class IntegrationConfig(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     integration_type = Column(SQLAEnum(IntegrationType), nullable=False)
     is_active = Column(Boolean, default=False, nullable=False)
-    encrypted_config = Column(JSONB, nullable=True)  # In production, encrypted at rest
+    # Stored as given, not encrypted (the name is historical).
+    encrypted_config = Column(JSONB, nullable=True)
     last_sync_at = Column(DateTime(timezone=True), nullable=True)
     last_error = Column(String(1024), nullable=True)
     created_at = Column(

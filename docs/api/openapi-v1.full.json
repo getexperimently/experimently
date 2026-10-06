@@ -8406,6 +8406,14 @@
             ],
             "title": "Last Sync At"
           },
+          "stored_secrets": {
+            "description": "The names, sorted, of the keys of the stored configuration whose values are not returned: every key except base_url, email, project_key, instance_url, client_id, repo_owner and repo_name. encrypted_config carries only those seven.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Stored Secrets",
+            "type": "array"
+          },
           "updated_at": {
             "format": "date-time",
             "title": "Updated At",
@@ -18187,7 +18195,7 @@
   "info": {
     "description": "API for managing experiments and feature flags in test environment",
     "title": "Experimently",
-    "version": "0.24.0"
+    "version": "0.25.0"
   },
   "openapi": "3.1.0",
   "paths": {
@@ -27368,7 +27376,7 @@
         ]
       },
       "put": {
-        "description": "Update an existing integration configuration (ADMIN only).",
+        "description": "Update an existing integration configuration (ADMIN only).\n\nEvery field is optional, and a field left out is unchanged.\n`encrypted_config` is merged key by key: a key sent with a value replaces\nit, a key sent as `null` removes it, and a stored key not sent is kept.",
         "operationId": "update_integration_api_v1_integrations__integration_type__put",
         "parameters": [
           {

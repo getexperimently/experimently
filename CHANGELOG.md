@@ -10,6 +10,17 @@ longer applies and release-please can generate this file directly. Until it
 does, entries below 0.2.2 are hand-written and the links in them are the
 reason why.
 
+## [0.25.0](https://github.com/getexperimently/experimently/compare/v0.24.0...v0.25.0) (2026-10-06)
+
+
+### ⚠ BREAKING CHANGES
+
+* **integrations:** integration responses no longer carry the values of stored secrets. `encrypted_config` carries only the connection settings, and `stored_secrets` names the other keys. `PUT /api/v1/integrations/{integration_type}` merges `encrypted_config` key by key instead of replacing it; a key sent as `null` is removed.
+
+### Bug Fixes
+
+* **integrations:** integration settings no longer return stored secrets ([#968](https://github.com/getexperimently/experimently/issues/968)) ([7dda975](https://github.com/getexperimently/experimently/commit/7dda97537abac2a4d713c11811c61c60f489dc1d))
+
 ## [0.24.0](https://github.com/getexperimently/experimently/compare/v0.23.2...v0.24.0) (2026-10-06)
 
 
