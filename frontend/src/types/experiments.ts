@@ -55,6 +55,12 @@ export interface Experiment {
   tags?: string[] | null;
   /** Null once the creator's account has been removed. */
   owner_id: string | null;
+  /**
+   * The owner's full name, else their username when it contains no `@`, else
+   * null; never their email (#921). Only `GET /api/v1/experiments/{id}`
+   * carries it: the list and the other experiment routes leave it out.
+   */
+  owner_name?: string | null;
   start_date: string | null;
   end_date: string | null;
   created_at: string;

@@ -12,7 +12,7 @@ npm ci
 npm run dev
 ```
 
-- `npm run dev`: http://localhost:3000, API at http://localhost:8000 by default
+- `npm run dev`: http://localhost:3100, API at http://localhost:8000 by default
 
 The API must be running (`docker compose up -d --wait api` from the repository root, or
 `ENVIRONMENT=development uvicorn backend.app.main:app --reload`). Sign in with the seeded administrator

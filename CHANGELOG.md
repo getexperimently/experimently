@@ -10,6 +10,23 @@ longer applies and release-please can generate this file directly. Until it
 does, entries below 0.2.2 are hand-written and the links in them are the
 reason why.
 
+## [0.24.0](https://github.com/getexperimently/experimently/compare/v0.23.2...v0.24.0) (2026-10-06)
+
+
+### Features
+
+* **experiments:** the experiment read names its owner ([#944](https://github.com/getexperimently/experimently/issues/944)) ([3ab4d8a](https://github.com/getexperimently/experimently/commit/3ab4d8a21c632e1ddcf355bc237dcb2907b30b39))
+
+
+### Bug Fixes
+
+* **users:** removing a user's account keeps the segments and rollout schedules it created ([#946](https://github.com/getexperimently/experimently/issues/946)) ([d905fea](https://github.com/getexperimently/experimently/commit/d905feaec630ffa31e6da293b026a3515aac1bb7))
+
+
+### Documentation
+
+* **quick-start:** the from-source dashboard runs on port 3100 ([#947](https://github.com/getexperimently/experimently/issues/947)) ([91e8d30](https://github.com/getexperimently/experimently/commit/91e8d30350907b56b47a1a7b2cf2ab6d405bab0b))
+
 ## [0.23.2](https://github.com/getexperimently/experimently/compare/v0.23.1...v0.23.2) (2026-10-06)
 
 
