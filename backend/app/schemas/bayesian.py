@@ -39,7 +39,8 @@ class BayesianConfig(BaseModel):
         rope: Region of Practical Equivalence as [lower, upper]; if the
             posterior difference falls inside ROPE, the experiment is deemed
             equivalent and stopped.
-        credible_level: HDI credible interval level in (0, 1), default 0.95.
+        credible_level: Credible interval level in (0, 1), default 0.95;
+            the interval is equal-tailed.
     """
 
     # Every number must be finite: the config is stored as JSONB, which cannot
@@ -89,8 +90,10 @@ class BayesianPosteriorResult(BaseModel):
         alpha: Posterior alpha (alpha_prior + conversions).
         beta: Posterior beta (beta_prior + non_conversions).
         mean: Posterior mean = alpha / (alpha + beta).
-        credible_interval_lower: Lower bound of the HDI.
-        credible_interval_upper: Upper bound of the HDI.
+        credible_interval_lower: Lower bound of the equal-tailed credible
+            interval (the (1 - level) / 2 quantile of the posterior).
+        credible_interval_upper: Upper bound (the 1 - (1 - level) / 2
+            quantile).
     """
 
     alpha: float

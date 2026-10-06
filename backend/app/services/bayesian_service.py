@@ -3,7 +3,7 @@ Bayesian inference service for A/B experimentation (EP-035 Batch 1).
 
 Provides pure-function implementations of:
 - Beta-Binomial conjugate posterior updates
-- Highest Density Interval (HDI) credible intervals via scipy
+- Equal-tailed credible intervals via scipy
 - Probability to Be Best (PtBB) via Monte Carlo sampling
 - Expected Loss (Regret) via Monte Carlo sampling
 - Bayes Factor via Savage-Dickey density ratio
@@ -180,7 +180,11 @@ def compute_credible_interval(
     posterior: Dict[str, float],
     level: float = 0.95,
 ) -> Tuple[float, float]:
-    """Compute a highest density interval (equal-tails) for a posterior.
+    """Compute an equal-tailed credible interval for a posterior.
+
+    The bounds are the ``(1 - level) / 2`` and ``1 - (1 - level) / 2``
+    quantiles of the posterior (at 95%, the 2.5th and 97.5th percentiles),
+    not the highest-density interval: the two differ on a skewed posterior.
 
     Supports Beta (keys: alpha, beta), Normal (keys: mu, sigma), and
     Gamma (keys: alpha, beta, family='gamma') posteriors.
