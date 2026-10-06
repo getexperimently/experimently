@@ -166,6 +166,112 @@ describe('ExperimentDetailPage — rendering', () => {
   });
 });
 
+describe("ExperimentDetailPage — the owner's name (#921)", () => {
+  // Only GET /experiments/{id} names the owner. As on the server, the
+  // lifecycle routes and the edit and targeting saves here answer with an
+  // experiment that has no `owner_name` key, so the page has to keep the
+  // name it read.
+  const OWNER_ID = '0f9e8d7c-6b5a-4c3d-2e1f-0a9b8c7d6e5f';
+  const BUILDER_RULES = {
+    logical_operator: 'AND',
+    groups: [
+      {
+        logical_operator: 'AND',
+        conditions: [{ attribute: 'user.country', operator: 'in', value: ['US', 'CA'] }],
+      },
+    ],
+  };
+
+  function withoutName(current: Experiment): Experiment {
+    const copy = { ...current };
+    delete copy.owner_name;
+    return copy;
+  }
+
+  function installAsServer(current: Experiment) {
+    let state = current;
+    mockedApiFetch.mockImplementation(
+      routedApi([
+        { path: '/api/v1/experiments/exp-1', handler: () => state },
+        {
+          method: 'POST',
+          path: '/api/v1/experiments/exp-1/start',
+          handler: () => {
+            state = { ...state, status: 'active' };
+            return withoutName(state);
+          },
+        },
+        {
+          method: 'PUT',
+          path: '/api/v1/experiments/exp-1',
+          handler: (_path, options) => {
+            state = { ...state, ...(options.json as Partial<Experiment>) };
+            return withoutName(state);
+          },
+        },
+      ]) as unknown as typeof apiFetch,
+    );
+  }
+
+  async function renderNamed(overrides: Partial<Experiment> = {}) {
+    installAsServer(experiment({ owner_id: OWNER_ID, owner_name: 'Jane Doe', ...overrides }));
+    render(<ExperimentDetailPage />);
+    await screen.findByTestId('experiment-detail');
+    return screen.getByTestId('experiment-owner');
+  }
+
+  it('shows the name to a reader who is not the owner, with the id on hover', async () => {
+    const owner = await renderNamed();
+    expect(owner).toHaveTextContent(/^Jane Doe$/);
+    expect(owner).toHaveAttribute('title', OWNER_ID);
+  });
+
+  it.each([null, ''])('shows the short id when the name is %p', async (name) => {
+    const owner = await renderNamed({ owner_name: name });
+    expect(owner).toHaveTextContent(/^0f9e8d7c…$/);
+    expect(owner).toHaveAttribute('title', OWNER_ID);
+  });
+
+  it('shows "No owner" when there is no owner', async () => {
+    const owner = await renderNamed({ owner_id: null, owner_name: null });
+    expect(owner).toHaveTextContent(/^No owner$/);
+    expect(owner).not.toHaveAttribute('title');
+  });
+
+  it('still says "You (…)" to the owner', async () => {
+    const owner = await renderNamed({ owner_id: 'user-1' });
+    expect(owner).toHaveTextContent(/^You \(admin@demo\.com\)$/);
+  });
+
+  it('keeps the name after Start', async () => {
+    await renderNamed();
+    fireEvent.click(screen.getByTestId('action-start'));
+    await waitFor(() => expect(screen.getByTestId('experiment-status')).toHaveTextContent('Active'));
+    expect(calledWith('POST', '/api/v1/experiments/exp-1/start')).toBe(true);
+    expect(screen.getByTestId('experiment-owner')).toHaveTextContent(/^Jane Doe$/);
+  });
+
+  it('keeps the name after Edit details is saved', async () => {
+    await renderNamed();
+    fireEvent.click(screen.getByTestId('experiment-edit-details'));
+    fireEvent.change(screen.getByTestId('manage-edit-name'), { target: { value: 'Renamed' } });
+    fireEvent.click(screen.getByTestId('manage-edit-save'));
+    await screen.findByTestId('manage-saved');
+    expect(screen.getByTestId('experiment-name')).toHaveTextContent('Renamed');
+    expect(screen.getByTestId('experiment-owner')).toHaveTextContent(/^Jane Doe$/);
+  });
+
+  it('keeps the name after the targeting rules are saved', async () => {
+    await renderNamed({ targeting_rules: BUILDER_RULES });
+    const section = screen.getByTestId('targeting-section');
+    fireEvent.click(within(section).getByRole('button', { name: 'Edit' }));
+    fireEvent.click(within(section).getByRole('button', { name: 'Save rules' }));
+    await within(section).findByText('Saved. The new rules apply when the experiment starts.');
+    expect(calledWith('PUT', '/api/v1/experiments/exp-1')).toBe(true);
+    expect(screen.getByTestId('experiment-owner')).toHaveTextContent(/^Jane Doe$/);
+  });
+});
+
 describe('ExperimentDetailPage — lifecycle actions', () => {
   it('draft → Start calls POST /start and refreshes the status pill', async () => {
     install(experiment({ status: 'draft' }));

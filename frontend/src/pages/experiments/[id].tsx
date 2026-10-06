@@ -92,6 +92,18 @@ function shortId(id: string): string {
   return id.length > 12 ? `${id.slice(0, 8)}…` : id;
 }
 
+/**
+ * The experiment a change answered with, keeping the owner's name from the
+ * read (#921). Only `GET /experiments/{id}` names the owner; the lifecycle
+ * routes and the edit and targeting saves answer without `owner_name`, so
+ * taking their answer as it is would turn the name back into a short id.
+ */
+export function keepOwnerName(previous: Experiment | null, updated: Experiment): Experiment {
+  if (updated.owner_name !== undefined) return updated;
+  const sameOwner = previous !== null && previous.owner_id === updated.owner_id;
+  return { ...updated, owner_name: sameOwner ? (previous.owner_name ?? null) : null };
+}
+
 export default function ExperimentDetailPage() {
   const router = useRouter();
   const { user } = useAuth();
@@ -128,6 +140,11 @@ export default function ExperimentDetailPage() {
     void load();
   }, [load]);
 
+  // Every change answers without the owner's name, so it is merged, not set.
+  const onSaved = useCallback((updated: Experiment) => {
+    setExperiment((previous) => keepOwnerName(previous, updated));
+  }, []);
+
   const runAction = async (action: LifecycleAction) => {
     if (!experiment) return;
     setConfirming(null);
@@ -135,7 +152,7 @@ export default function ExperimentDetailPage() {
     setPendingAction(action);
     try {
       const updated = await ExperimentsService[action](experiment.id);
-      setExperiment(updated);
+      onSaved(updated);
     } catch (err) {
       setActionError(err instanceof Error ? err.message : `Failed to ${action} experiment`);
     } finally {
@@ -303,9 +320,8 @@ export default function ExperimentDetailPage() {
                   <dd data-testid="experiment-owner" title={experiment.owner_id ?? undefined}>
                     {isOwner
                       ? `You (${user?.email ?? user?.username})`
-                      : experiment.owner_id === null
-                        ? 'No owner'
-                        : shortId(experiment.owner_id)}
+                      : experiment.owner_name ||
+                        (experiment.owner_id === null ? 'No owner' : shortId(experiment.owner_id))}
                   </dd>
                 </div>
                 <div className="flex items-center gap-1.5">
@@ -416,7 +432,7 @@ export default function ExperimentDetailPage() {
             </div>
           )}
 
-          <ExperimentManageSection experiment={experiment} user={user} onSaved={setExperiment} />
+          <ExperimentManageSection experiment={experiment} user={user} onSaved={onSaved} />
 
           {(experiment.description || experiment.hypothesis) && (
             <div className="mt-5 pt-5 border-t border-slate-100 grid gap-4 sm:grid-cols-2">
@@ -552,7 +568,7 @@ export default function ExperimentDetailPage() {
           role={user?.role}
           onPause={() => onActionClick('pause')}
           pauseBusy={pendingAction === 'pause'}
-          onSaved={setExperiment}
+          onSaved={onSaved}
         />
 
         <BanditWeightsSection experiment={experiment} />
