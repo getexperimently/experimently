@@ -51,7 +51,7 @@ Development-only dependencies — what `backend/requirements.txt` adds for test 
 | `sendgrid` | 6.12.5 |
 | `six` | 1.17.0 |
 | `slack_sdk` | 3.44.1 |
-| `sqlglot` | 30.20.0 |
+| `sqlglot` | 30.21.0 |
 | `truststore` | 0.10.4 |
 | `typing-inspection` | 0.4.4 |
 | `urllib3` | 2.8.0 |
