@@ -16,7 +16,7 @@ subnets, one subnet per tier per zone.
 | Tier | CDK subnet type | Subnets | What runs there |
 |------|-----------------|---------|-----------------|
 | Public | `PUBLIC`, public IP on launch | `10.0.0.0/24`, `10.0.1.0/24` | The load balancer and the NAT gateways |
-| Private | `PRIVATE_WITH_EGRESS` | `10.0.2.0/24`, `10.0.3.0/24` | API and dashboard tasks, the migration task, Redis, the interface endpoints; Aurora in every environment except `prod` |
+| Private | `PRIVATE_WITH_EGRESS` | `10.0.2.0/24`, `10.0.3.0/24` | API and dashboard tasks, Redis, the migration task (placed there by the deploy and migration workflows, not by the stack), the interface endpoints; Aurora in every environment except `prod` |
 | Isolated | `PRIVATE_ISOLATED` | `10.0.4.0/24`, `10.0.5.0/24` | Aurora in `prod`; nothing else |
 
 The load balancer is the only internet-facing resource. Both ECS services run in the
@@ -26,8 +26,8 @@ chooses the Aurora tier by environment.
 Every subnet is tagged `SubnetType` and `Name`. The VPC id, the subnet ids and
 three security group ids are also written to SSM parameters under
 `/experimentation/<env>/vpc/` (`id`, `public-subnet-ids`, `private-subnet-ids`,
-`isolated-subnet-ids`, `app-sg-id`, `db-sg-id`, `bastion-sg-id`) and exported as
-CloudFormation outputs named `<stack name>-VpcId`, `-PublicSubnets` and so on.
+`isolated-subnet-ids`, `app-sg-id`, `db-sg-id`, `bastion-sg-id`) and exported under the
+CloudFormation export names `<stack name>-VpcId`, `-PublicSubnets` and so on.
 
 ## NAT Gateway Setup
 
@@ -42,8 +42,8 @@ the hour whether or not traffic uses it.
 
 ## VPC Endpoints
 
-`vpc_stack.py` adds six endpoints so that traffic to these AWS services stays on the
-AWS network:
+`vpc_stack.py` adds six endpoints so that traffic to these AWS services goes straight to
+the service and does not pass through the NAT gateways:
 
 | Endpoint | Kind | Notes |
 |----------|------|-------|
@@ -72,8 +72,9 @@ groups.
 | Redis (`RedisSecurityGroup`) | `elasticache_redis_stack.py` | TCP 6379 from the VPC CIDR | None |
 | Interface endpoints | `vpc_stack.py` | TCP 443 from the VPC CIDR | All |
 
-The only inbound rules open to the whole internet are the load balancer's ports 80 and
-443. `infrastructure/tests/test_no_world_open_ingress.py` fails on any other. The load
+The only security group rules open to the whole internet are the load balancer's ports 80
+and 443; `infrastructure/tests/test_no_world_open_ingress.py` fails on a world-open
+security group rule on any other port. The network ACLs below are broader. The load
 balancer's extra HTTPS listener on 8443, which CodeDeploy uses to test a new version
 before traffic moves, is created closed (`open=False`), so no rule admits it.
 
@@ -111,8 +112,11 @@ the isolated tier, and that ACL admits only PostgreSQL from inside the VPC.
 - Edit `vpc_stack.py` for the VPC, subnets, endpoints and ACLs; edit the stack that owns
   a service for that service's group. A rule between two stacks belongs in
   `fargate_service_stack.py`.
-- `infrastructure/tests/test_vpc_stack.py`, `test_no_world_open_ingress.py`,
-  `test_alb_egress_to_tasks.py` and `test_environments_do_not_collide.py` pin the
-  pieces above. Run them with the rest of `infrastructure/tests/`.
+- Tests in `infrastructure/tests/` pin some of the pieces above: the VPC CIDR and the two
+  gateway endpoints (`test_vpc_stack.py`), the world-open ports
+  (`test_no_world_open_ingress.py`), the load balancer's egress to the tasks
+  (`test_alb_egress_to_tasks.py`), the NAT count per environment
+  (`test_environments_do_not_collide.py`) and the database rule (`test_database_wiring.py`).
+  No test pins the network ACLs, the interface endpoints or the subnet layout.
 - A CIDR change replaces the VPC and everything in it. Treat it as a migration, not an
   edit.
