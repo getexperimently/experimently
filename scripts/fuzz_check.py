@@ -4,40 +4,64 @@
 The fuzz arm of ``.github/workflows/_platform.yml`` and ``make fuzz`` both run
 Schemathesis against a running API and then ask this script for the verdict.
 Schemathesis's own exit status is never the verdict: it is 1 on any server
-error, listed or not, and 0 on a run that reached nothing at all.
+error, known or not, and 0 on a run that reached nothing at all.
 
-Two subcommands, both reading the served OpenAPI document and the two lists
-under ``tests/fuzz/``:
+Four subcommands, reading the served OpenAPI document and the lists under
+``tests/fuzz/``:
 
 ``args``
     The Schemathesis filter arguments for one pass, one argument per line: the
     ``sdk`` pass is restricted to the SDK routes, and every pass leaves out the
     operations ``tests/fuzz/exclusions.toml`` names for it.
 
-``evaluate``
-    Read the pass's ndjson report and decide it. The pass selects the served
-    document's operations, minus its exclusions (and, for ``sdk``, only the SDK
-    routes). For each one, only the interactions whose method is the
-    operation's own count, so the coverage phase's method probes (answered
-    405) do not. An operation is REACHED when one counted interaction answered
-    a status outside ``NOT_REACHED``; otherwise, or when the report has no
-    interaction for it, it is UNREACHED. The pass is green only when:
+``requests``
+    The requests of the pass's ndjson report that were answered 5xx, as a
+    JSON file: each one's method, the path as it was sent, its status and the
+    Schemathesis label it was generated under. Standard library only.
 
-    * no operation answered a 5xx (there is no known list yet, so every one
-      counts);
+``routes``
+    Which route of the application answered each of those requests, resolved
+    by the application's own router: it imports ``backend.app.main`` (from
+    ``--app-root``), refuses unless that application's operations are exactly
+    the served document's, and dispatches each request's method and path
+    through ``app.router`` with every route handler replaced by one that only
+    records which route the router chose (see ``resolve_routes``). It runs
+    where the API's packages are installed: on the CI runner, and inside the
+    API container for ``make fuzz``, both times with the database and Redis
+    pointed at a closed port, so that nothing could be written even if a
+    handler did run.
+
+``evaluate``
+    Decide the pass. The pass selects the served document's operations, minus
+    its exclusions (and, for ``sdk``, only the SDK routes). For each one, only
+    the interactions whose method is the operation's own count, so the
+    coverage phase's method probes (answered 405) do not. An operation is
+    REACHED when one counted interaction answered a status outside
+    ``NOT_REACHED``; otherwise, or when the report has no interaction for it,
+    it is UNREACHED. A 5xx is counted against the route that ANSWERED it, not
+    the label it was generated under: a ``DELETE`` probe sent to the path of
+    ``GET /users/me`` is answered by ``DELETE /users/{user_id}``. The pass is
+    green only when:
+
+    * every (answering route, status) that answered 5xx is listed for this
+      pass in ``tests/fuzz/known-5xx.toml``, and every entry listed for this
+      pass answered 5xx in this run (an entry that no longer fires is stale);
     * every UNREACHED operation is listed for this pass in
       ``tests/fuzz/unreached.toml``, and no listed operation was reached (a
       stale entry);
     * Schemathesis selected exactly the operations this pass selects, and
       fuzzed nothing else;
-    * the report exists and holds at least one interaction.
+    * the report exists and holds at least one interaction, and every 5xx
+      request's answering route was resolved.
 
-Everything this script prints, and the step summary it renders (through
-``scripts/qa_render.py`` from ``.github/qa-templates/fuzz-*.tmpl``), is counts,
-the pass, the date, the commit and the seed. Which operations failed or were
-not reached goes only to the ``--details`` file, which ``make fuzz`` writes into
-its reproduction directory and the workflow never asks for. Nothing here ever
-reads a request or response body.
+Everything this script prints, the step summary it renders (through
+``scripts/qa_render.py`` from ``.github/qa-templates/fuzz-*.tmpl``) and the
+values it writes for the workflow's issue are counts, the pass, the date, the
+commit and the seed. Which operations failed or were not reached, and the
+requests behind each 5xx, go only to the ``--details`` file, which ``make
+fuzz`` writes into its reproduction directory and the workflow never asks for,
+and to the ``requests`` and ``routes`` files, which stay on the runner.
+Nothing here ever reads a request or response body.
 
 Exit status: 0 green, 1 red, 2 a list or an argument it refuses.
 """
@@ -52,13 +76,34 @@ import sys
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Set, Tuple
+from typing import (
+    Any,
+    Dict,
+    Iterable,
+    List,
+    Mapping,
+    NamedTuple,
+    Optional,
+    Sequence,
+    Set,
+    Tuple,
+)
+from urllib.parse import unquote, urlsplit
 
 ROOT = Path(__file__).resolve().parents[1]
 EXCLUSIONS = ROOT / "tests" / "fuzz" / "exclusions.toml"
 UNREACHED = ROOT / "tests" / "fuzz" / "unreached.toml"
+KNOWN_5XX = ROOT / "tests" / "fuzz" / "known-5xx.toml"
 
 PASSES = ("superuser", "viewer", "sdk")
+
+#: The seed the two lists were built from. fuzz.yml's scheduled run uses it
+#: and a dispatch defaults to it: Schemathesis runs with
+#: --generation-deterministic, so at one commit this seed sends the same
+#: requests every night and the lists hold from one night to the next. Another
+#: seed changes the fuzzing phase's requests, and so may move both lists for a
+#: reason that is not the API.
+LISTS_SEED = 20261006
 
 #: The SDK routes, the ``sdk`` pass's whole selection. The same prefixes the
 #: rate limiter gives the SDK limit (``SDK_PATH_PREFIXES`` in
@@ -76,12 +121,23 @@ SDK_PATH_REGEX = "^(?:" + "|".join(re.escape(p) for p in SDK_PATH_PREFIXES) + ")
 #: was not reached.
 NOT_REACHED = frozenset({400, 401, 403, 404, 405, 422, 429})
 
+#: A known-5xx entry names a public issue, or one of these causes, each with
+#: the one status it may list: ``aws``, an AWS call the stack points at a
+#: closed port, which fails as 500; ``config``, a setting the stack
+#: deliberately leaves unset, which the route answers with 503. Any other
+#: status of such a route is a defect, and needs an issue.
+KNOWN_CAUSES = {"aws": 500, "config": 503}
+
 HTTP_METHODS = ("get", "put", "post", "delete", "options", "head", "patch", "trace")
 LABEL = re.compile(r"(GET|PUT|POST|DELETE|OPTIONS|HEAD|PATCH|TRACE) /\S*")
+METHOD = re.compile(r"[A-Z]{1,16}")
+
+#: The answering-route key of a 5xx request that no route matched.
+NO_ROUTE = "no route"
 
 
 class ListError(ValueError):
-    """``exclusions.toml`` or ``unreached.toml`` holds something refused."""
+    """A list, a file or an argument this script refuses."""
 
 
 class ReportError(ValueError):
@@ -145,6 +201,8 @@ def _reason(entry: Mapping[str, Any], where: str) -> None:
     reason = entry.get("reason")
     if not isinstance(reason, str) or len(reason.strip()) < 10:
         raise ListError(f"{where}: every entry needs a reason (a sentence)")
+    if "\n" in reason:
+        raise ListError(f"{where}: a reason is one line")
 
 
 def _operation(
@@ -235,6 +293,66 @@ def load_unreached(
     return listed[pass_name]
 
 
+#: A known-5xx key: (the answering route's label, the status it answered).
+Known = Tuple[str, int]
+
+
+def load_known(
+    path: Path, pass_name: str, operations: Mapping[str, Operation]
+) -> Set[Known]:
+    """The (answering route, status) pairs ``known-5xx.toml`` lists for
+    *pass_name*.
+
+    An entry names its pass, the operation of the route that ANSWERED (any
+    operation of the document: a probe can be answered by a route the pass
+    does not select), a 5xx status, and either the public issue that tracks it
+    or a cause from ``KNOWN_CAUSES`` (only at that cause's status), with a
+    one-line reason. Every entry of
+    every pass is checked, so a broken entry fails all three passes."""
+    name = path.name
+    listed: Dict[str, Set[Known]] = {p: set() for p in PASSES}
+    for index, entry in enumerate(_entries(_read_toml(path), "known", name), 1):
+        where = f"{name} entry {index}"
+        unknown = sorted(
+            set(entry) - {"pass", "operation", "status", "issue", "cause", "reason"}
+        )
+        if unknown:
+            raise ListError(f"{where}: unknown keys {unknown}")
+        entry_pass = entry.get("pass")
+        if entry_pass not in PASSES:
+            raise ListError(f"{where}: pass must be one of {PASSES}")
+        label = _operation(entry, where, operations)
+        status = entry.get("status")
+        if (
+            not isinstance(status, int)
+            or isinstance(status, bool)
+            or not 500 <= status <= 599
+        ):
+            raise ListError(f"{where}: status must be a 5xx status code")
+        issue, cause = entry.get("issue"), entry.get("cause")
+        if (issue is None) == (cause is None):
+            raise ListError(f"{where}: name either the issue or the cause, not both")
+        if issue is not None and (
+            not isinstance(issue, int) or isinstance(issue, bool) or issue < 1
+        ):
+            raise ListError(f"{where}: issue must be a public issue number")
+        if cause is not None and cause not in KNOWN_CAUSES:
+            raise ListError(f"{where}: cause must be one of {sorted(KNOWN_CAUSES)}")
+        if cause is not None and status != KNOWN_CAUSES[cause]:
+            raise ListError(
+                f"{where}: cause {cause} lists only status {KNOWN_CAUSES[cause]};"
+                " any other status needs an issue"
+            )
+        _reason(entry, where)
+        key = (label, status)
+        if key in listed[entry_pass]:
+            raise ListError(
+                f"{where}: {label} {status} is listed twice for {entry_pass}"
+            )
+        listed[entry_pass].add(key)
+    return listed[pass_name]
+
+
 def filter_args(pass_name: str, excluded: Mapping[str, Set[str]]) -> List[str]:
     """The Schemathesis arguments that make it select exactly ``selection()``."""
     args: List[str] = []
@@ -250,12 +368,16 @@ def filter_args(pass_name: str, excluded: Mapping[str, Set[str]]) -> List[str]:
 # ---------------------------------------------------------------------------
 
 
+class Interaction(NamedTuple):
+    method: str  # upper case, as sent
+    status: Optional[int]  # None: no answer
+    path: str = ""  # the path as sent (still percent-encoded), no query
+
+
 @dataclass
 class Report:
-    #: label -> [(request method, response status or None for no answer)]
-    interactions: Dict[str, List[Tuple[str, Optional[int]]]] = field(
-        default_factory=dict
-    )
+    #: label -> its interactions
+    interactions: Dict[str, List[Interaction]] = field(default_factory=dict)
     #: How many operations Schemathesis itself selected (None: not reported).
     selected: Optional[int] = None
 
@@ -266,6 +388,15 @@ def _interaction_items(interactions: Any) -> Iterable[Any]:
     if isinstance(interactions, list):
         return interactions
     return ()
+
+
+def _path_of(uri: Any) -> str:
+    if not isinstance(uri, str):
+        return ""
+    try:
+        return urlsplit(uri).path
+    except ValueError:
+        return ""
 
 
 def read_report(report_dir: Path) -> Report:
@@ -308,10 +439,12 @@ def read_report(report_dir: Path) -> Report:
             response = interaction.get("response")
             status = response.get("status_code") if isinstance(response, dict) else None
             method = request.get("method") if isinstance(request, dict) else None
+            uri = request.get("uri") if isinstance(request, dict) else None
             bucket.append(
-                (
+                Interaction(
                     str(method).upper(),
                     status if isinstance(status, int) else None,
+                    _path_of(uri),
                 )
             )
     if not any(report.interactions.values()):
@@ -319,9 +452,150 @@ def read_report(report_dir: Path) -> Report:
     return report
 
 
+class ServerError(NamedTuple):
+    """One distinct request that answered 5xx."""
+
+    method: str
+    path: str  # as sent
+    status: int
+    label: str  # the Schemathesis label it was generated under
+
+
+def server_error_requests(report: Report) -> List[ServerError]:
+    """Every distinct (method, path, status, label) that answered 5xx."""
+    found: Set[ServerError] = set()
+    for label, items in report.interactions.items():
+        for item in items:
+            if item.status is not None and 500 <= item.status <= 599:
+                found.add(ServerError(item.method, item.path, item.status, label))
+    return sorted(found)
+
+
+# ---------------------------------------------------------------------------
+# The answering route
+# ---------------------------------------------------------------------------
+
+
+class _Chosen(Exception):
+    """Raised in place of a route's handler: the router chose this route."""
+
+    def __init__(self, path: str, methods: Any) -> None:
+        super().__init__(path)
+        self.path = path
+        self.methods = set(methods) if methods else None  # None: every method
+
+
+def resolve_routes(
+    app: Any, requests: Iterable[Tuple[str, str]]
+) -> Dict[Tuple[str, str], Optional[str]]:
+    """``{(method, path as sent): the answering route's label, or None}``.
+
+    Each request is dispatched through the application's own router
+    (``app.router``, without the middleware), so the router's own rules pick
+    the route: its order, its included routers, a method no route on the path
+    takes (405, None here), a slash redirect (307, None here). The handlers of
+    ``starlette.routing.Route`` and ``fastapi.routing.APIRoute`` are replaced,
+    for the length of this call, by one that records the route the router
+    chose and stops: no endpoint runs. The route's path is the full path the
+    API document names it by (for a route of an included router, FastAPI's
+    effective path). The path is percent-decoded first, as the server decodes
+    it before routing."""
+    import asyncio
+
+    from fastapi import routing as fastapi_routing
+    from starlette import routing as starlette_routing
+
+    effective = getattr(fastapi_routing, "_get_scope_effective_route_context", None)
+
+    async def chosen(self: Any, scope: Any, receive: Any, send: Any) -> None:
+        context = effective(scope) if effective is not None else None
+        if context is not None and getattr(context, "original_route", None) is self:
+            raise _Chosen(context.path, context.methods)
+        raise _Chosen(self.path, getattr(self, "methods", None))
+
+    async def receive() -> Dict[str, Any]:
+        return {"type": "http.request", "body": b"", "more_body": False}
+
+    async def send(message: Mapping[str, Any]) -> None:
+        return None
+
+    async def dispatch(method: str, path: str) -> Optional[str]:
+        scope = {
+            "type": "http",
+            "asgi": {"version": "3.0"},
+            "http_version": "1.1",
+            "method": method,
+            "scheme": "http",
+            "path": path,
+            "raw_path": path.encode("utf-8", "surrogateescape"),
+            "root_path": "",
+            "query_string": b"",
+            "headers": [(b"host", b"localhost")],
+            "client": ("127.0.0.1", 1),
+            "server": ("127.0.0.1", 80),
+            "app": app,
+        }
+        try:
+            await app.router(scope, receive, send)
+        except _Chosen as route:
+            if route.methods is None or method in route.methods:
+                return f"{method} {route.path}"
+            return None
+        except Exception:  # the router's own 404 or 405
+            return None
+        return None  # the router answered itself (a redirect)
+
+    handlers = {
+        cls: cls.__dict__["handle"]
+        for cls in (starlette_routing.Route, fastapi_routing.APIRoute)
+        if "handle" in cls.__dict__
+    }
+    for cls in handlers:
+        cls.handle = chosen
+    try:
+        resolved: Dict[Tuple[str, str], Optional[str]] = {}
+        for method, sent in requests:
+            resolved[(method, sent)] = asyncio.run(dispatch(method, unquote(sent)))
+        return resolved
+    finally:
+        for cls, handle in handlers.items():
+            cls.handle = handle
+
+
+def import_app(app_root: Path) -> Any:
+    """The API application, imported from *app_root*."""
+    sys.path.insert(0, str(app_root))
+    from backend.app.main import app
+
+    return app
+
+
+def app_operations(app: Any) -> Dict[str, Operation]:
+    """The operations of the document *app* serves."""
+    from fastapi.openapi.utils import get_openapi
+
+    return load_operations(
+        get_openapi(title=app.title, version=app.version, routes=app.routes)
+    )
+
+
 # ---------------------------------------------------------------------------
 # The verdict
 # ---------------------------------------------------------------------------
+
+
+class Answered(NamedTuple):
+    """A 5xx request and the route that answered it."""
+
+    method: str
+    path: str
+    status: int
+    label: str
+    route: Optional[str]  # None: no route matched
+
+    @property
+    def key(self) -> Known:
+        return (self.route or f"{NO_ROUTE} {self.method} {self.path}", self.status)
 
 
 @dataclass
@@ -333,11 +607,30 @@ class Verdict:
     unreached: Set[str]
     unlisted: Set[str]
     stale: Set[str]
-    server_errors: Set[str]
+    answered: List[Answered]
+    known: Set[Known]
     no_answer: Set[str]
     auth_declared: Set[str]
     schemathesis_selected: Optional[int]
     report_problem: Optional[str] = None
+
+    @property
+    def errors(self) -> Set[Known]:
+        """Every (answering route, status) that answered 5xx."""
+        return {item.key for item in self.answered}
+
+    @property
+    def error_routes(self) -> Set[str]:
+        return {route for route, _status in self.errors}
+
+    @property
+    def errors_unlisted(self) -> Set[Known]:
+        return self.errors - self.known
+
+    @property
+    def known_quiet(self) -> Set[Known]:
+        """Listed entries that answered no 5xx in this run: stale."""
+        return self.known - self.errors
 
     @property
     def selection_mismatch(self) -> bool:
@@ -347,7 +640,8 @@ class Verdict:
     def green(self) -> bool:
         return not (
             self.report_problem
-            or self.server_errors
+            or self.errors_unlisted
+            or self.known_quiet
             or self.unlisted
             or self.stale
             or self.outside
@@ -360,6 +654,8 @@ def decide(
     operations: Mapping[str, Operation],
     selected: Set[str],
     listed: Set[str],
+    known: Set[Known] = frozenset(),
+    routes: Optional[Mapping[Tuple[str, str], Optional[str]]] = None,
     report_problem: Optional[str] = None,
 ) -> Verdict:
     interactions = report.interactions
@@ -368,11 +664,21 @@ def decide(
     for label in selected:
         own = operations[label].method
         if any(
-            method == own and status is not None and status not in NOT_REACHED
-            for method, status in interactions.get(label, [])
+            item.method == own
+            and item.status is not None
+            and item.status not in NOT_REACHED
+            for item in interactions.get(label, [])
         ):
             reached.add(label)
     unreached = selected - reached
+    answered = []
+    for error in server_error_requests(report):
+        route = None
+        if routes is not None:
+            route = routes.get((error.method, error.path))
+        elif report_problem is None:
+            report_problem = "the routes that answered 5xx were not resolved"
+        answered.append(Answered(*error, route))
     return Verdict(
         selected=set(selected),
         fuzzed=fuzzed,
@@ -381,15 +687,12 @@ def decide(
         unreached=unreached,
         unlisted=unreached - listed,
         stale=listed & reached,
-        server_errors={
-            label
-            for label, items in interactions.items()
-            if any(status is not None and 500 <= status <= 599 for _, status in items)
-        },
+        answered=answered,
+        known=set(known),
         no_answer={
             label
             for label, items in interactions.items()
-            if any(status is None for _, status in items)
+            if any(item.status is None for item in items)
         },
         auth_declared={label for label in selected if operations[label].has_auth},
         schemathesis_selected=report.selected,
@@ -403,12 +706,15 @@ def counts_line(
     """The one line a run prints: the pass, date, commit, seed and counts."""
     v = verdict
     by_tool = "none" if v.schemathesis_selected is None else v.schemathesis_selected
+    lists_seed = "the lists' seed" if seed == str(LISTS_SEED) else "not the lists' seed"
     return (
-        f"fuzz pass {pass_name}, {date}, commit {sha}, seed {seed}:"
+        f"fuzz pass {pass_name}, {date}, commit {sha}, seed {seed} ({lists_seed}):"
         f" {'GREEN' if v.green else 'RED'}"
         f" | operations selected {len(v.selected)} (Schemathesis {by_tool}),"
         f" fuzzed {len(v.fuzzed)}, outside the selection {len(v.outside)}"
-        f" | 5xx operations {len(v.server_errors)}"
+        f" | 5xx operations {len(v.error_routes)}"
+        f" (not listed {len({r for r, _ in v.errors_unlisted})},"
+        f" known entries {len(v.known)}, of them with no 5xx {len(v.known_quiet)})"
         f" | reached {len(v.reached)}, unreached {len(v.unreached)}"
         f" (not listed {len(v.unlisted)}, listed but reached {len(v.stale)})"
         f" | declaring an auth scheme {len(v.auth_declared)},"
@@ -434,7 +740,7 @@ def summary_values(
         "seed": seed,
         "count_fuzzed": str(len(v.fuzzed)),
         "count_operations": str(len(v.selected)),
-        "count_5xx": str(len(v.server_errors)),
+        "count_5xx": str(len(v.error_routes)),
         "count_reached": str(len(v.reached)),
     }
     if v.green:
@@ -444,9 +750,8 @@ def summary_values(
         raise ListError("a red summary needs --run-link")
     values.update(
         {
-            # No known list until it exists: every 5xx operation is unlisted.
-            "count_5xx_unlisted": str(len(v.server_errors)),
-            "count_known_quiet": "0",
+            "count_5xx_unlisted": str(len({r for r, _ in v.errors_unlisted})),
+            "count_known_quiet": str(len(v.known_quiet)),
             "count_unreached_unlisted": str(len(v.unlisted)),
             "count_unreached_stale": str(len(v.stale)),
             "run_link": run_link,
@@ -456,14 +761,26 @@ def summary_values(
 
 
 def details(verdict: Verdict) -> Dict[str, Any]:
-    """Which operations, for the local reproduction directory only."""
+    """Which operations and requests, for the local reproduction directory only."""
     v = verdict
     return {
         "green": v.green,
         "report_problem": v.report_problem,
         "selected_by_schemathesis": v.schemathesis_selected,
         "selected": len(v.selected),
-        "server_errors": sorted(v.server_errors),
+        "server_errors": [
+            {
+                "method": item.method,
+                "path": item.path,
+                "status": item.status,
+                "route": item.route,
+                "label": item.label,
+            }
+            for item in v.answered
+        ],
+        "server_error_routes": sorted(f"{r} {s}" for r, s in v.errors),
+        "server_errors_unlisted": sorted(f"{r} {s}" for r, s in v.errors_unlisted),
+        "known_with_no_5xx": sorted(f"{r} {s}" for r, s in v.known_quiet),
         "unreached_unlisted": sorted(v.unlisted),
         "listed_but_reached": sorted(v.stale),
         "fuzzed_outside_the_selection": sorted(v.outside),
@@ -499,26 +816,127 @@ def _render(template: str, values: Mapping[str, str]) -> str:
         raise ListError(f"the summary was refused: {error}")
 
 
+def write_requests(report: Report, out: Path) -> int:
+    """``out``: the 5xx requests as JSON; returns how many."""
+    errors = server_error_requests(report)
+    out.write_text(
+        json.dumps({"requests": [list(e) for e in errors]}, indent=1) + "\n",
+        encoding="utf-8",
+    )
+    return len(errors)
+
+
+def read_requests(path: Path) -> List[ServerError]:
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        items = [ServerError(*item) for item in data["requests"]]
+    except (OSError, ValueError, KeyError, TypeError) as error:
+        raise ListError(f"the requests file cannot be read ({type(error).__name__})")
+    for item in items:
+        if (
+            METHOD.fullmatch(str(item.method)) is None
+            or not isinstance(item.path, str)
+            or not isinstance(item.status, int)
+        ):
+            raise ListError("the requests file holds an entry that is not a request")
+    return items
+
+
+def write_routes(
+    app: Any, document: Mapping[str, Any], requests: Sequence[ServerError], out: Path
+) -> int:
+    """Resolve each request's answering route; returns how many matched none."""
+    served = set(load_operations(document))
+    imported = set(app_operations(app))
+    if served != imported:
+        raise ListError(
+            "the application imported here does not serve the document the run"
+            f" fuzzed ({len(served ^ imported)} operations differ)"
+        )
+    resolved = resolve_routes(app, {(r.method, r.path) for r in requests})
+    out.write_text(
+        json.dumps(
+            {
+                "routes": [
+                    [m, p, route]
+                    for (m, p), route in sorted(resolved.items(), key=lambda kv: kv[0])
+                ]
+            },
+            indent=1,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    return sum(1 for route in resolved.values() if route is None)
+
+
+def read_routes(path: Path) -> Dict[Tuple[str, str], Optional[str]]:
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        routes = {(m, p): route for m, p, route in data["routes"]}
+    except (OSError, ValueError, KeyError, TypeError) as error:
+        raise ReportError(f"the routes file cannot be read ({type(error).__name__})")
+    for (method, sent), route in routes.items():
+        if not isinstance(sent, str) or METHOD.fullmatch(str(method)) is None:
+            raise ReportError("the routes file holds an entry that is not a request")
+        if route is not None and (
+            not isinstance(route, str) or LABEL.fullmatch(route) is None
+        ):
+            raise ReportError(
+                "the routes file holds a route that is not 'METHOD /path'"
+            )
+    return routes
+
+
 def main(argv: Optional[Sequence[str]] = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n", 1)[0])
     sub = parser.add_subparsers(dest="command", required=True)
-    for command in ("args", "evaluate"):
-        p = sub.add_parser(command)
-        p.add_argument("--pass", dest="pass_name", required=True, choices=PASSES)
-        p.add_argument("--schema", required=True, type=Path)
-        p.add_argument("--exclusions", type=Path, default=EXCLUSIONS)
-        if command == "evaluate":
-            p.add_argument("--unreached", type=Path, default=UNREACHED)
-            p.add_argument("--report-dir", required=True, type=Path)
-            p.add_argument("--seed", required=True)
-            p.add_argument("--sha", required=True)
-            p.add_argument("--date", default=None)
-            p.add_argument("--run-link", default=None)
-            p.add_argument("--summary", type=Path, default=None)
-            p.add_argument("--details", type=Path, default=None)
+    p = sub.add_parser("args")
+    p.add_argument("--pass", dest="pass_name", required=True, choices=PASSES)
+    p.add_argument("--schema", required=True, type=Path)
+    p.add_argument("--exclusions", type=Path, default=EXCLUSIONS)
+    p = sub.add_parser("requests")
+    p.add_argument("--report-dir", required=True, type=Path)
+    p.add_argument("--out", required=True, type=Path)
+    p = sub.add_parser("routes")
+    p.add_argument("--schema", required=True, type=Path)
+    p.add_argument("--requests", required=True, type=Path)
+    p.add_argument("--out", required=True, type=Path)
+    p.add_argument("--app-root", type=Path, default=ROOT)
+    p = sub.add_parser("evaluate")
+    p.add_argument("--pass", dest="pass_name", required=True, choices=PASSES)
+    p.add_argument("--schema", required=True, type=Path)
+    p.add_argument("--exclusions", type=Path, default=EXCLUSIONS)
+    p.add_argument("--unreached", type=Path, default=UNREACHED)
+    p.add_argument("--known", type=Path, default=KNOWN_5XX)
+    p.add_argument("--report-dir", required=True, type=Path)
+    p.add_argument("--routes", required=True, type=Path)
+    p.add_argument("--seed", required=True)
+    p.add_argument("--sha", required=True)
+    p.add_argument("--date", default=None)
+    p.add_argument("--run-link", default=None)
+    p.add_argument("--summary", type=Path, default=None)
+    p.add_argument("--values", type=Path, default=None)
+    p.add_argument("--details", type=Path, default=None)
     args = parser.parse_args(argv)
 
     try:
+        if args.command == "requests":
+            count = write_requests(read_report(args.report_dir), args.out)
+            print(f"fuzz_check: {count} distinct requests answered 5xx")
+            return 0
+        if args.command == "routes":
+            document = _document(args.schema)
+            unmatched = write_routes(
+                import_app(args.app_root),
+                document,
+                read_requests(args.requests),
+                args.out,
+            )
+            print(
+                f"fuzz_check: answering routes resolved; {unmatched} matched no route"
+            )
+            return 0
         operations = load_operations(_document(args.schema))
         excluded = load_exclusions(args.exclusions, operations)
         if args.command == "args":
@@ -529,18 +947,34 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         if re.fullmatch(r"[0-9a-f]{7,40}", args.sha) is None:
             raise ListError("--sha must be a commit")
         listed = load_unreached(args.unreached, args.pass_name, operations, excluded)
+        known = load_known(args.known, args.pass_name, operations)
         selected = selection(args.pass_name, operations, excluded)
         date = args.date or _dt.datetime.now(_dt.timezone.utc).date().isoformat()
+        problem: Optional[str] = None
         try:
-            report, problem = read_report(args.report_dir), None
+            report = read_report(args.report_dir)
         except ReportError as error:
             report, problem = Report(), str(error)
-        verdict = decide(report, operations, selected, listed, problem)
-        if args.summary is not None:
+        routes: Optional[Dict[Tuple[str, str], Optional[str]]] = None
+        try:
+            routes = read_routes(args.routes)
+        except ReportError as error:
+            problem = problem or str(error)
+        verdict = decide(report, operations, selected, listed, known, routes, problem)
+        if args.summary is not None or args.values is not None:
             template, values = summary_values(
                 verdict, args.pass_name, date, args.sha, args.seed, args.run_link
             )
+        if args.summary is not None:
             args.summary.write_text(_render(template, values), encoding="ascii")
+        if args.values is not None:
+            # For fuzz.yml's issue: the same values, which qa_render checks
+            # again before anything is posted.
+            args.values.write_text(
+                json.dumps({"template": template, "values": values}, sort_keys=True)
+                + "\n",
+                encoding="ascii",
+            )
         if args.details is not None:
             args.details.write_text(
                 json.dumps(details(verdict), indent=2) + "\n", encoding="utf-8"
@@ -548,8 +982,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     except ListError as error:
         print(f"fuzz_check: refused: {error}", file=sys.stderr)
         return 2
-    if problem:
-        print(f"fuzz_check: {problem}")
+    except ReportError as error:
+        print(f"fuzz_check: {error}", file=sys.stderr)
+        return 2
+    if verdict.report_problem:
+        print(f"fuzz_check: {verdict.report_problem}")
     print(counts_line(verdict, args.pass_name, date, args.sha, args.seed))
     return 0 if verdict.green else 1
 

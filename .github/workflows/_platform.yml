@@ -76,12 +76,18 @@ on:
         description: 'For fuzz: the Schemathesis seed, an integer. (`seed` above is the data seed; this is not.)'
         type: number
         default: 0
+    outputs:
+      fuzz_values:
+        description: 'For fuzz: the template and values of the pass''s step summary (counts only), as JSON, for fuzz.yml''s issue; empty when the pass was not decided.'
+        value: ${{ jobs.platform.outputs.fuzz_values }}
 
 jobs:
   platform:
     name: ${{ inputs.suite }} (${{ inputs.profile }})
     runs-on: ubuntu-latest
     timeout-minutes: ${{ inputs.timeout-minutes }}
+    outputs:
+      fuzz_values: ${{ steps.suite.outputs.fuzz_values }}
 
     services:
       postgres:
@@ -235,12 +241,15 @@ jobs:
       # Schemathesis in a venv of its own under the runner's temp directory:
       # installing it next to the backend would move packages the API under
       # test imports (tests/fuzz/requirements.txt pins it).
+      # --no-deps and `pip check`: the venv holds exactly the two files' pins,
+      # and a dependency neither pins fails here rather than floating.
       - name: Install the fuzzer
         if: ${{ !inputs.skip && inputs.suite == 'fuzz' }}
         run: |
           set -euo pipefail
           python -m venv "$RUNNER_TEMP/fuzz-venv"
-          "$RUNNER_TEMP/fuzz-venv/bin/pip" install --quiet --disable-pip-version-check -r tests/fuzz/requirements.txt
+          "$RUNNER_TEMP/fuzz-venv/bin/pip" install --quiet --disable-pip-version-check --no-deps -r tests/fuzz/requirements.txt -r tests/fuzz/constraints.txt
+          "$RUNNER_TEMP/fuzz-venv/bin/pip" check --disable-pip-version-check
 
       # ── boot ────────────────────────────────────────────────────────────────
       # Everything runs from the repository root: the code imports backend.app.*
@@ -345,6 +354,7 @@ jobs:
 
       # ── suite ───────────────────────────────────────────────────────────────
       - name: Run suite
+        id: suite
         if: ${{ !inputs.skip }}
         env:
           SUITE: ${{ inputs.suite }}
@@ -406,7 +416,9 @@ jobs:
               work="$RUNNER_TEMP/fuzz"
               mkdir -p "$work/report"
               if [ "$FUZZ_PASS" = sdk ]; then
-                key=$(cat tests/sdk-contract/live/.api_key)
+                # The seed's sdk:ruleset key: it is accepted on every SDK
+                # route, and the three server-side ones take nothing less.
+                key=$(cat tests/sdk-contract/live/.api_key_local)
                 echo "::add-mask::$key"
                 auth=(-H "X-API-Key: $key")
               else
@@ -436,14 +448,27 @@ jobs:
                     "${filters[@]}" "${auth[@]}"
               ) > "$work/schemathesis.out" 2>&1
               set -e
+              # Which route answered each 5xx, by the application's own
+              # router (imported here, from the same packages as the API, with
+              # the database and Redis pointed at a closed port). Their output
+              # stays in files; a failure leaves no routes file, and the
+              # evaluation below is then red.
+              python scripts/fuzz_check.py requests --report-dir "$work/report" \
+                --out "$work/requests.json" > "$work/requests.log" 2>&1 || true
+              POSTGRES_PORT=1 REDIS_PORT=1 python scripts/fuzz_check.py routes --schema "$work/openapi.json" \
+                --requests "$work/requests.json" --out "$work/routes.json" > "$work/routes.log" 2>&1 || true
               verdict=0
               python scripts/fuzz_check.py evaluate --pass "$FUZZ_PASS" \
                 --schema "$work/openapi.json" --report-dir "$work/report" \
+                --routes "$work/routes.json" \
                 --seed "$FUZZ_SEED" --sha "$GITHUB_SHA" \
                 --run-link "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
-                --summary "$work/summary.md" || verdict=$?
+                --summary "$work/summary.md" --values "$work/values.json" || verdict=$?
               if [ -f "$work/summary.md" ]; then
                 cat "$work/summary.md" >> "$GITHUB_STEP_SUMMARY"
+              fi
+              if [ -f "$work/values.json" ]; then
+                printf 'fuzz_values=%s\n' "$(cat "$work/values.json")" >> "$GITHUB_OUTPUT"
               fi
               exit "$verdict"
               ;;

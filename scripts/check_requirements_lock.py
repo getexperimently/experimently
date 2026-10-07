@@ -134,6 +134,15 @@ SUPERSETS = [
         True,
         False,
     ),
+    # Everything Schemathesis and Hypothesis pull in, pinned
+    # (tests/fuzz/constraints.txt): pytest, PyYAML and requests are in the
+    # venv too, so they must name the venv's version.
+    (
+        ROOT / "tests" / "fuzz" / "constraints.txt",
+        ROOT / "backend" / "requirements.txt",
+        True,
+        False,
+    ),
 ]
 
 _PIN = re.compile(r"^([A-Za-z0-9][A-Za-z0-9._-]*)(\[[^\]]*\])?==([^\s;\\]+)")
