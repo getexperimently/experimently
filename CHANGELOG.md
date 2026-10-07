@@ -10,6 +10,26 @@ longer applies and release-please can generate this file directly. Until it
 does, entries below 0.2.2 are hand-written and the links in them are the
 reason why.
 
+## [0.26.0](https://github.com/getexperimently/experimently/compare/v0.25.4...v0.26.0) (2026-10-07)
+
+
+### Features
+
+* **runbooks:** a tested script points the application at a restored database ([#1017](https://github.com/getexperimently/experimently/issues/1017)) ([79ed116](https://github.com/getexperimently/experimently/commit/79ed116943956810421c9f52897efe69f78344ea))
+
+
+### Bug Fixes
+
+* **api:** health checks and the results cache stop holding the API when Redis is down ([#1023](https://github.com/getexperimently/experimently/issues/1023)) ([8dc3d68](https://github.com/getexperimently/experimently/commit/8dc3d68b21741feecd9c570c439877a73ba3e9f4))
+* **dashboard:** grey text meets the contrast minimum, and the nightly browser suite stops hiding failures ([#1015](https://github.com/getexperimently/experimently/issues/1015)) ([b61fe43](https://github.com/getexperimently/experimently/commit/b61fe43d14d9358fe550246bc08cdc54d5549f08))
+* **dashboard:** the power calculator's fields and figures have accessible names ([#1031](https://github.com/getexperimently/experimently/issues/1031)) ([e4ea52d](https://github.com/getexperimently/experimently/commit/e4ea52d15abfcaf2314f07feae8764d2ef49865a))
+* **tracking:** concurrent first assignments for one user on different processes answer the stored assignment ([#1033](https://github.com/getexperimently/experimently/issues/1033)) ([91ccdbc](https://github.com/getexperimently/experimently/commit/91ccdbcd78ed763d542e07fc8bdb4617c8707451))
+
+
+### Documentation
+
+* **runbooks:** key rotation and the database restore step say what works ([#1012](https://github.com/getexperimently/experimently/issues/1012)) ([0ea49d4](https://github.com/getexperimently/experimently/commit/0ea49d42ffcf5f7a9aaef07ff34a560272f3642b))
+
 ## [0.25.4](https://github.com/getexperimently/experimently/compare/v0.25.3...v0.25.4) (2026-10-06)
 
 
