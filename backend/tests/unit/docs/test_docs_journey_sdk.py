@@ -995,6 +995,25 @@ def test_a_step_whose_experiment_cannot_be_read_fails_with_its_file(
     assert fake.calls == []
 
 
+def test_the_step_hands_its_runs_redactor_to_the_block(
+    tmp_path, execute_module, monkeypatch
+):
+    """The step passes the run's own redactor to the block, so a quick start
+    that prints the key fails the step: the end-of-run scan would only clean
+    the files, not fail the guide."""
+    runner, running, fake = _step_runner(
+        execute_module, tmp_path, monkeypatch, _oracle_answers(ON)
+    )
+    fake.block_stdout = (
+        f"my key: {KEY}\n" + sdk.MARKER + json.dumps(_oracle_answers(ON)) + "\n"
+    )
+    with pytest.raises(execute_module._Failed) as failed:
+        runner._sdk_step(_sdk_step(ON), running, _ExperimentApi(), "j", 3)
+    assert "printed a value the run keeps out of its files" in failed.value.observed
+    assert KEY not in failed.value.observed
+    assert KEY not in (tmp_path / failed.value.snapshot).read_text()
+
+
 def test_the_page_install_and_block_are_read_at_the_step(
     tmp_path, execute_module, monkeypatch
 ):
