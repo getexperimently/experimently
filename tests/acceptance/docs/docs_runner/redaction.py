@@ -321,13 +321,13 @@ def on_screen(
     return None
 
 
-def _journey_of(name: str, owners: Optional[Mapping[str, str]] = None) -> Optional[str]:
+def _journey_of(name: str, owners: Mapping[str, str]) -> Optional[str]:
     """The journey a run-directory file belongs to, or None for a shared one.
 
     A walkthrough under ``recordings/`` is the journey *owners* names for it.
     """
     parts = name.split("/")
-    if owners and name in owners:
+    if name in owners:
         return owners[name]
     if len(parts) == 2 and parts[0] == "videos" and parts[1].endswith(".webm"):
         return parts[1][: -len(".webm")]
@@ -342,9 +342,14 @@ def _journey_of(name: str, owners: Optional[Mapping[str, str]] = None) -> Option
 def journeys_of(
     removed: Sequence[str],
     journeys: Iterable[str],
-    owners: Optional[Mapping[str, str]] = None,
+    *,
+    owners: Mapping[str, str],
 ) -> Set[str]:
-    """The journeys whose files these are; every journey for a shared file."""
+    """The journeys whose files these are; every journey for a shared file.
+
+    *owners* (each walkthrough's file and the journey that recorded it) is
+    required: a caller that forgot it would read a walkthrough as shared.
+    """
     known = set(journeys)
     found: Set[str] = set()
     for name in removed:
@@ -357,7 +362,7 @@ def journeys_of(
 
 
 def files_of(
-    removed: Sequence[str], journey: str, owners: Optional[Mapping[str, str]] = None
+    removed: Sequence[str], journey: str, *, owners: Mapping[str, str]
 ) -> Tuple[str, ...]:
     """The removed files that are *journey*'s own, or shared by every journey."""
     return tuple(
@@ -365,9 +370,7 @@ def files_of(
     )
 
 
-def _screens_of(
-    run_dir: Path, name: str, owners: Optional[Mapping[str, str]] = None
-) -> List[Path]:
+def _screens_of(run_dir: Path, name: str, owners: Mapping[str, str]) -> List[Path]:
     """The screenshot beside a removed file, and its journey's recordings (or all)."""
     found: List[Path] = []
     for suffix in TEXT_SUFFIXES:
@@ -378,9 +381,7 @@ def _screens_of(
     if journey is not None:
         found.append(run_dir / "videos" / f"{journey}.webm")
         found.extend(
-            run_dir / file
-            for file, owner in sorted((owners or {}).items())
-            if owner == journey
+            run_dir / file for file, owner in sorted(owners.items()) if owner == journey
         )
     else:
         found.extend(sorted((run_dir / "videos").glob("*.webm")))
@@ -392,14 +393,15 @@ def clear(
     run_dir: Path,
     values: Iterable[str],
     earlier: Optional[Dict[str, Any]] = None,
-    owners: Optional[Mapping[str, str]] = None,
+    *,
+    owners: Mapping[str, str],
 ) -> Dict[str, object]:
     """Remove every file holding one of *values*, with its screens; write ``SCAN_RECORD``.
 
     The record names how many files were read, how many values were looked
     for, which files held one (``removed``) and which screenshots and
     recordings went with them (``screens_removed``), with those of an
-    *earlier* pass's record; never a value. *owners* maps each walkthrough
+    *earlier* pass's record; never a value. *owners* (required) maps each walkthrough
     under ``recordings/`` to the journey that recorded it.
     """
     earlier = earlier or {}

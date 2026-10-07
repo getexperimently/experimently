@@ -38,10 +38,13 @@ walkthrough, the guide, the commit and, on the compose stack, how long the
 stack took to come up, which is not recorded) and with a caption bar (Playwright
 overlays, which no locator, ARIA snapshot or click sees, hidden for each
 screenshot) naming each step's guide section and action, and for a step off the
-screen its result. Before the segment starts and after each of its steps the
-page's text and fields are read for every value the run keeps
-(``redaction.on_screen``): one drawn there fails the step and the recording is
-dropped. A page that cannot be read drops the recording without failing the
+screen its result, each line through the run's redactor. Before the segment
+starts and after each of its steps the page's text, its fields' placeholders,
+its open shadow roots and its fields are read for every value the run keeps
+(``DRAWN_JS``, ``redaction.on_screen``): one drawn there fails the step and the
+recording is dropped. While a walkthrough is recorded a screenshot masks only a
+field that holds a kept value (``MARK_JS``), since Playwright draws its masks
+into the page and the recording would show a mask over every field. A page that cannot be read drops the recording without failing the
 step; the presence check in ``docs-journeys.yml`` then fails the run.
 
 Nothing a run makes up, keeps or is given is written (``redaction.py``): every
@@ -121,13 +124,59 @@ TITLE_CARD_MS = 1500
 CAPTION_CHARS = 180
 #: The kinds of step that do nothing on the screen: their caption shows their result.
 OFF_SCREEN = ("api", "traffic", "evaluations", "ref")
-#: Reads what a page draws: its rendered text, and each field's type and value.
+#: Reads what a page draws: its rendered text, each field's placeholder, the
+#: text of every open shadow root, and each field's type and value (in the
+#: document and in those shadow roots). Same-origin frames, closed shadow
+#: roots, CSS-generated text and canvas are not read.
 DRAWN_JS = """() => {
+  const texts = [document.body ? document.body.innerText : ''];
   const fields = [];
-  for (const el of document.querySelectorAll('input, textarea')) {
-    fields.push([String(el.type || 'text').toLowerCase(), String(el.value || '')]);
-  }
-  return [document.body ? document.body.innerText : '', fields];
+  const visit = (root) => {
+    for (const el of root.querySelectorAll('*')) {
+      if (el.matches('input, textarea')) {
+        fields.push([String(el.type || 'text').toLowerCase(), String(el.value || '')]);
+        if (el.placeholder) texts.push(String(el.placeholder));
+      }
+      if (el.shadowRoot) {
+        texts.push(String(el.shadowRoot.textContent || ''));
+        visit(el.shadowRoot);
+      }
+    }
+  };
+  visit(document);
+  return [texts.join('\\n'), fields];
+}"""
+#: The attribute that marks, for one screenshot, a field holding a kept value.
+MASK_MARK = "data-docs-journey-mask"
+#: Marks every field (not a password field, which draws dots) whose value holds
+#: one of the given values, in the document and its open shadow roots (which
+#: Playwright's locators reach); answers how many it marked.
+MARK_JS = """([values, mark]) => {
+  let marked = 0;
+  const visit = (root) => {
+    for (const el of root.querySelectorAll('*')) {
+      if (el.matches('input, textarea')) {
+        const kind = String(el.type || 'text').toLowerCase();
+        const typed = String(el.value || '');
+        if (kind !== 'password' && values.some((v) => v && typed.includes(v))) {
+          el.setAttribute(mark, '');
+          marked += 1;
+        }
+      }
+      if (el.shadowRoot) visit(el.shadowRoot);
+    }
+  };
+  visit(document);
+  return marked;
+}"""
+UNMARK_JS = """(mark) => {
+  const visit = (root) => {
+    for (const el of root.querySelectorAll('*')) {
+      el.removeAttribute(mark);
+      if (el.shadowRoot) visit(el.shadowRoot);
+    }
+  };
+  visit(document);
 }"""
 CAPTION_STYLE = (
     "position:fixed;left:0;right:0;bottom:0;padding:10px 20px;"
@@ -322,11 +371,19 @@ class JourneyRunner:
         path.parent.mkdir(parents=True, exist_ok=True)
         try:
             masks = [page.get_by_text(value) for value in self.secrets.values()]
-            if self.secrets:
+            recording = self.walkthrough is not None and self.walkthrough.active
+            if self.secrets and recording:
+                # Playwright draws a mask into the page, so the recording would
+                # show it. While one is recorded, only a field that holds a
+                # kept value is masked (marked for this screenshot); none
+                # should (the page check fails the step that shows one), and a
+                # password field draws dots.
+                page.evaluate(MARK_JS, [list(self.secrets.values()), MASK_MARK])
+                masks.append(page.locator(f"[{MASK_MARK}]"))
+            elif self.secrets:
                 # A field's value is not its text, so get_by_text cannot find a
                 # typed secret: in a journey with secrets, every field is masked.
                 masks.append(page.locator("input, textarea, [contenteditable]"))
-            recording = self.walkthrough is not None and self.walkthrough.active
             if recording:
                 # The step's screen is the page's, not the walkthrough's captions.
                 page.screencast.hide_overlays()
@@ -335,6 +392,8 @@ class JourneyRunner:
             finally:
                 if recording:
                     page.screencast.show_overlays()
+                    if self.secrets:
+                        page.evaluate(UNMARK_JS, MASK_MARK)
             aria = page.locator("body").aria_snapshot()
         except PlaywrightError as error:
             aria = f"(no ARIA snapshot: {self._line(error)})"
@@ -1226,8 +1285,9 @@ class JourneyRunner:
         """The caption bar for *step*: before it runs, or with its result.
 
         Every line is text the results log also holds (the heading, the action
-        and the observed line, already redacted), so the end-of-run scan of
-        ``results.jsonl`` reads what the bar drew.
+        and the observed line), and each goes through the run's redactor
+        (``_line``) before it is drawn, as the observed line does before it is
+        written.
         """
         walkthrough = self.walkthrough
         assert walkthrough is not None
@@ -1245,7 +1305,7 @@ class JourneyRunner:
                 lines.append(f"{action}: {record.result}")
         else:
             lines.append(f"{action}: {record.result}")
-        return lines
+        return [self._line(line, CAPTION_CHARS) for line in lines]
 
     def _keep_video(self, video, journey_id: str) -> None:
         try:

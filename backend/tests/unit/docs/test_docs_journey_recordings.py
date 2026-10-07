@@ -433,7 +433,9 @@ def test_a_journey_file_holding_a_value_takes_its_walkthrough_with_it(tmp_path):
     assert record["screens_removed"] == ["recordings/R8-onboarding.webm"]
     assert (run / "recordings" / "R7-docs-site.webm").is_file()
     removed = list(record["removed"])
-    assert redaction.journeys_of(removed, ["invite", "docs-site"], OWNERS) == {"invite"}
+    assert redaction.journeys_of(removed, ["invite", "docs-site"], owners=OWNERS) == {
+        "invite"
+    }
 
 
 def test_a_shared_file_holding_a_value_takes_every_walkthrough(tmp_path):
@@ -452,17 +454,19 @@ def test_a_walkthrough_holding_a_value_fails_its_own_journey(tmp_path):
     record = redaction.clear(run, {PLANT}, owners=OWNERS)
     assert record["removed"] == ["recordings/R8-onboarding.webm"]
     removed = list(record["removed"])
-    assert redaction.journeys_of(removed, ["invite", "docs-site"], OWNERS) == {"invite"}
-    assert redaction.files_of(removed, "invite", OWNERS) == tuple(removed)
-    assert redaction.files_of(removed, "docs-site", OWNERS) == ()
+    assert redaction.journeys_of(removed, ["invite", "docs-site"], owners=OWNERS) == {
+        "invite"
+    }
+    assert redaction.files_of(removed, "invite", owners=OWNERS) == tuple(removed)
+    assert redaction.files_of(removed, "docs-site", owners=OWNERS) == ()
 
 
 def test_an_unowned_walkthrough_holding_a_value_fails_every_journey(tmp_path):
     run = _run_dir(tmp_path)
     (run / "recordings" / "R7-docs-site.webm").write_bytes(PLANT.encode())
-    record = redaction.clear(run, {PLANT})
+    record = redaction.clear(run, {PLANT}, owners={})
     removed = list(record["removed"])
-    assert redaction.journeys_of(removed, ["invite", "docs-site"]) == {
+    assert redaction.journeys_of(removed, ["invite", "docs-site"], owners={}) == {
         "invite",
         "docs-site",
     }
@@ -572,3 +576,352 @@ def test_the_summary_has_a_walkthroughs_table():
     )
     plain = report.summary_markdown([run], {"pages": {}}, date="2026-10-07", sha="abc")
     assert "Launch walkthroughs" not in plain
+
+
+# ---------------------------------------------------------------------------
+# The runner's loop, against a stand-in page (V13 at run time)
+# ---------------------------------------------------------------------------
+# A walkthrough is recorded by JourneyRunner.run: the page is read for every
+# kept value before the segment starts and after each of its steps, and a value
+# drawn there fails the step and deletes the recording. These tests run that
+# loop with a stand-in for Playwright (the unit job has none) and a stand-in
+# for one step, which changes what the page draws; the steps' own machinery is
+# test_docs_journey_runner.py's.
+KEPT = "eptk_Kept0Value9abcdef"
+
+
+@pytest.fixture
+def execute_module(monkeypatch):
+    """docs_runner.execute imported against a stand-in ``playwright.sync_api``."""
+    import importlib
+    import types
+
+    sync_api = types.ModuleType("playwright.sync_api")
+
+    class _Expect:
+        def __call__(self, *args, **kwargs):
+            raise AssertionError("no browser here")
+
+        def set_options(self, **kwargs):
+            return None
+
+    sync_api.Error = type("Error", (Exception,), {})
+    sync_api.Browser = sync_api.Page = sync_api.Playwright = object
+    sync_api.expect = _Expect()
+    package = types.ModuleType("playwright")
+    package.sync_api = sync_api
+    monkeypatch.setitem(sys.modules, "playwright", package)
+    monkeypatch.setitem(sys.modules, "playwright.sync_api", sync_api)
+    monkeypatch.delitem(sys.modules, "docs_runner.execute", raising=False)
+    module = importlib.import_module("docs_runner.execute")
+    yield module
+    sys.modules.pop("docs_runner.execute", None)
+
+
+class _Overlay:
+    def __init__(self, cast: "_Screencast", html: str):
+        self.cast = cast
+        self.html = html
+        cast.overlays.append(html)
+        cast.drawn.append(html)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        self.cast.overlays.remove(self.html)
+
+
+class _Screencast:
+    """Writes its file on stop, as Playwright's does."""
+
+    def __init__(self):
+        self.path: Any = None
+        self.starts = 0
+        self.overlays: List[str] = []
+        self.drawn: List[str] = []
+        self.chapters: List[tuple] = []
+        self.hidden = False
+        self.hidden_at_screenshot: List[bool] = []
+
+    def start(self, path, size):
+        assert size == {"width": 1280, "height": 720}
+        self.path = Path(path)
+        self.starts += 1
+
+    def show_chapter(self, title, description=None, duration=None):
+        self.chapters.append((title, description))
+
+    def show_overlay(self, html):
+        return _Overlay(self, html)
+
+    def hide_overlays(self):
+        self.hidden = True
+
+    def show_overlays(self):
+        self.hidden = False
+
+    def stop(self):
+        if self.path is not None:
+            self.path.write_bytes(b"\x1a\x45\xdf\xa3 a recording")
+            self.path = None
+
+
+class _Locator:
+    def __init__(self, page: "_Page", what: tuple):
+        self.page = page
+        self.what = what
+
+    def aria_snapshot(self):
+        return "- main"
+
+
+class _Page:
+    def __init__(self, execute_module):
+        self.module = execute_module
+        self.screencast = _Screencast()
+        self.text = ""
+        self.fields: List[tuple] = []
+        self.video = None
+        self.evaluated: List[tuple] = []
+        self.masks: List[list] = []
+
+    def on(self, event, handler):
+        return None
+
+    def evaluate(self, script, arg=None):
+        if script == self.module.DRAWN_JS:
+            return [self.text, [list(field) for field in self.fields]]
+        self.evaluated.append((script, arg))
+        return 0
+
+    def wait_for_load_state(self, state):
+        return None
+
+    def get_by_text(self, value):
+        return _Locator(self, ("text", value))
+
+    def locator(self, selector):
+        return _Locator(self, ("css", selector))
+
+    def screenshot(self, path, mask):
+        self.masks.append([locator.what for locator in mask])
+        self.screencast.hidden_at_screenshot.append(self.screencast.hidden)
+        Path(path).write_bytes(b"png")
+
+
+class _Context:
+    def __init__(self, page):
+        self.page = page
+
+    def set_default_timeout(self, ms):
+        return None
+
+    def new_page(self):
+        return self.page
+
+    def close(self):
+        return None
+
+
+class _Browser:
+    def __init__(self, page):
+        self.page = page
+
+    def new_context(self, **options):
+        assert "record_video_dir" not in options, "a walkthrough is not a video"
+        return _Context(self.page)
+
+
+def _walk_journey(recording: Dict[str, Any], gotos: List[str]) -> Journey:
+    return Journey.model_validate(
+        {
+            "guide": "guides/sample.md",
+            "stack": "docs-local",
+            "profile": "core",
+            "video": False,
+            "written": TODAY,
+            "recording": recording,
+            "steps": [
+                {
+                    "id": f"step-{n}",
+                    "doc": "sign-in",
+                    "do": {"goto": goto},
+                    "expect": {"status": 200, "aria": "- main"},
+                    "fail": "the page does not answer",
+                }
+                for n, goto in enumerate(gotos, 1)
+            ],
+        }
+    )
+
+
+def _walk(execute_module, tmp_path, journey, screens, kept=(KEPT,)):
+    """Run *journey*; *screens* maps a step number to what the page then draws."""
+    from docs_runner import log as runlog
+    from docs_runner.stacks import Running
+
+    page = _Page(execute_module)
+    runner = execute_module.JourneyRunner(
+        None,
+        _Browser(page),
+        runlog.Log(tmp_path / "results.jsonl"),
+        execute_module.Settings(run_dir=tmp_path, run_id="r", sha="abc123"),
+    )
+    for value in kept:
+        runner.redactor.add(value)
+
+    def step(journey, journey_id, number, step, running, page_, api, req, a, failed):
+        if failed:
+            result, observed = "NOT RUN", ""
+        else:
+            page_.text, page_.fields = screens.get(number, (page_.text, page_.fields))
+            result, observed = "PASS", f"at {step.do.goto}"
+        return Record(
+            run="r",
+            sha="abc123",
+            stack="docs-local",
+            guide=journey.guide,
+            step=number,
+            step_id=step.id,
+            heading="Sign in",
+            action=f"open {step.do.goto}",
+            expected="status 200",
+            failure_signature=step.fail,
+            result=result,
+            reason="earlier-step-failed" if failed else "",
+            observed=observed,
+            snapshot="",
+            expected_snapshot="structural only",
+            ms=1,
+        )
+
+    runner._step = step
+    guide = type("Guide", (), {"title": "Sample guide", "anchors": {}})()
+    running = Running(name="docs-local", base_url="http://site/")
+    records = runner.run(journey, "sample", running, guide)
+    return runner, page, records
+
+
+RECORDING = Path("recordings") / "R1-sample.webm"
+
+
+def test_a_clean_walkthrough_is_recorded_with_its_title_and_captions(
+    execute_module, tmp_path
+):
+    journey = _walk_journey({"name": "R1-sample"}, ["/a", "/b", "/c"])
+    runner, page, records = _walk(
+        execute_module, tmp_path, journey, {2: ("Nothing kept here", [])}
+    )
+    assert [r.result for r in records] == ["PASS", "PASS", "PASS"]
+    assert (tmp_path / RECORDING).is_file()
+    assert runner.recorded["R1-sample"]["file"] == RECORDING.as_posix()
+    assert runner.recorded["R1-sample"]["dropped"] == ""
+    assert page.screencast.chapters == [
+        ("R1: Sample guide", "guides/sample.md, commit abc123")
+    ]
+    assert any("Step 3 of 3" in html for html in page.screencast.drawn)
+
+
+def test_a_kept_value_drawn_after_a_step_fails_it_and_leaves_no_recording(
+    execute_module, tmp_path
+):
+    journey = _walk_journey({"name": "R1-sample"}, ["/a", "/b", "/c"])
+    runner, page, records = _walk(
+        execute_module, tmp_path, journey, {2: (f"Your key: {KEPT}", [])}
+    )
+    assert [r.result for r in records] == ["PASS", "FAIL", "NOT RUN"]
+    assert records[1].observed == (
+        "a value the run keeps is drawn in the page's text while it is recorded;"
+        " recording R1-sample was dropped"
+    )
+    assert not (tmp_path / RECORDING).exists()
+    assert runner.recorded["R1-sample"] == {
+        "journey": "sample",
+        "file": "",
+        "seconds": runner.recorded["R1-sample"]["seconds"],
+        "dropped": "a value the run keeps is drawn in the page's text",
+    }
+    logged = (tmp_path / "results.jsonl").read_text()
+    assert KEPT not in logged and '"result": "FAIL"' in logged
+
+
+def test_a_kept_value_on_the_page_before_the_segment_is_never_recorded(
+    execute_module, tmp_path
+):
+    """The page already draws the value when the segment starts; the first
+    recorded step moves away from it. Nothing is recorded, and that step fails."""
+    journey = _walk_journey({"name": "R1-sample", "start": "step-2"}, ["/a", "/b"])
+    runner, page, records = _walk(
+        execute_module,
+        tmp_path,
+        journey,
+        {1: (f"one-time password {KEPT}", []), 2: ("Signed in", [])},
+    )
+    assert [r.result for r in records] == ["PASS", "FAIL"]
+    assert "drawn in the page's text while it is recorded" in records[1].observed
+    assert page.screencast.starts == 0
+    assert not (tmp_path / RECORDING).exists()
+    assert runner.recorded["R1-sample"]["file"] == ""
+
+
+@pytest.mark.parametrize(
+    "kind, verdict",
+    [("password", "PASS"), ("text", "FAIL"), ("email", "FAIL")],
+)
+def test_a_kept_value_typed_into_a_field_fails_unless_it_draws_dots(
+    execute_module, tmp_path, kind, verdict
+):
+    journey = _walk_journey({"name": "R1-sample"}, ["/a", "/b"])
+    runner, page, records = _walk(
+        execute_module, tmp_path, journey, {1: ("Sign in", [(kind, KEPT)])}
+    )
+    assert records[0].result == verdict
+    assert (tmp_path / RECORDING).exists() is (verdict == "PASS")
+
+
+def test_the_captions_are_redacted_like_the_log(execute_module, tmp_path):
+    journey = _walk_journey({"name": "R1-sample"}, ["/a", f"/keys/{KEPT}"])
+    runner, page, records = _walk(execute_module, tmp_path, journey, {})
+    assert [r.result for r in records] == ["PASS", "PASS"]
+    shown = "\n".join(page.screencast.drawn)
+    assert "open /keys/(redacted)" in shown
+    assert KEPT not in shown
+
+
+def test_a_recorded_screen_masks_only_a_field_holding_a_kept_value(
+    execute_module, tmp_path
+):
+    """Playwright draws a mask into the page, so a recording would show one
+    over every field. While recording, only fields the page check would fail
+    on are marked and masked; outside a recording, every field is."""
+    from docs_runner.model import Step
+
+    journey = _walk_journey({"name": "R1-sample"}, ["/a"])
+    runner, page, _ = _walk(execute_module, tmp_path, journey, {})
+    runner.secrets = {"new-password": KEPT}
+    step = Step.model_validate(journey.steps[0].model_dump(by_alias=True))
+    walkthrough = execute_module.Walkthrough(
+        journey,
+        "sample",
+        type("Guide", (), {"title": "Sample guide", "anchors": {}})(),
+        __import__("docs_runner.stacks", fromlist=["Running"]).Running(
+            name="docs-local", base_url="http://site/"
+        ),
+        runner.settings,
+    )
+    walkthrough.active = True
+    runner.walkthrough = walkthrough
+    runner._screen(page, "sample", 1, step)
+    assert page.masks[-1] == [("text", KEPT), ("css", "[data-docs-journey-mask]")]
+    assert page.screencast.hidden_at_screenshot[-1] is True
+    scripts = [script for script, _ in page.evaluated]
+    assert scripts == [execute_module.MARK_JS, execute_module.UNMARK_JS]
+    assert page.evaluated[0][1] == [[KEPT], "data-docs-journey-mask"]
+    runner.walkthrough = None
+    runner._screen(page, "sample", 1, step)
+    assert page.masks[-1] == [
+        ("text", KEPT),
+        ("css", "input, textarea, [contenteditable]"),
+    ]
+    assert page.screencast.hidden_at_screenshot[-1] is False

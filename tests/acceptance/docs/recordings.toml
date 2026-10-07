@@ -9,6 +9,16 @@
 # never longer than `max_seconds`. What it must show is `shows`; the journey's
 # steps are what make it show that.
 #
+# What a viewer sees, measured on the first runs (2026-10-07): the journeys run
+# at the browser's own speed, so a walkthrough is as short as its steps are
+# quick (R1 about 7 s, R2 about 4 s, R8 about 30 s), and the caption bar
+# blinks once per screen step, when it is hidden for that step's screenshot.
+# Neither is cut or slowed: D11.4 asks for real speed and no cuts. Playwright
+# draws a screenshot's masks into the page, so while a walkthrough is recorded
+# only a field that holds a value the run keeps is masked, never every field;
+# the runner's page check fails the step that shows one, and the recording
+# with it. Publishing a walkthrough anywhere is a founder step (EM R-1).
+#
 # A table with `pending` names a recording no journey makes yet, and why; the
 # presence check (scripts/docs_journeys_report.py recordings) does not ask for
 # it, and fails when the file is there anyway, so the pull request that records

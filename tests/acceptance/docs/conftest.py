@@ -418,10 +418,13 @@ def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
             # verdicts.json too, so a run's report job never reads all-pass
             # after a hit; what is written again is scanned again.
             removed = list(scan["removed"])
-            hit = redaction.journeys_of(removed, [run.journey for run in runs], owners)
+            hit = redaction.journeys_of(
+                removed, [run.journey for run in runs], owners=owners
+            )
             runs[:] = [
                 dataclasses.replace(
-                    run, scrubbed=redaction.files_of(removed, run.journey, owners)
+                    run,
+                    scrubbed=redaction.files_of(removed, run.journey, owners=owners),
                 )
                 if run.journey in hit
                 else run

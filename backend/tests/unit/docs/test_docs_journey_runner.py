@@ -2450,7 +2450,7 @@ def test_the_scan_removes_every_file_holding_a_value_and_records_only_names(
     (run / "results.jsonl").write_text('{"observed": "Planted0Value9xyz"}\n')
     (run / "journey" / "03-clean.aria.yml").write_text('- heading "Experiments"\n')
     (run / "summary.md").write_text("all clean\n")
-    record = redaction.clear(run, {"Planted0Value9xyz"})
+    record = redaction.clear(run, {"Planted0Value9xyz"}, owners={})
     assert record == {
         "files_read": 5,
         "values": 1,
@@ -2467,7 +2467,7 @@ def test_the_scan_removes_every_file_holding_a_value_and_records_only_names(
         "summary.md",
     ]
     assert "Planted0Value9xyz" not in (run / redaction.SCAN_RECORD).read_text()
-    again = redaction.clear(run, {"Planted0Value9xyz"})
+    again = redaction.clear(run, {"Planted0Value9xyz"}, owners={})
     assert again["removed"] == [] and again["files_read"] == 2
 
 
@@ -2536,7 +2536,7 @@ def test_a_removed_file_takes_its_screenshot_and_its_recording_with_it(tmp_path)
     (run / "invite" / "03-done.png").write_bytes(b"\x89PNG")
     (run / "videos" / "invite.webm").write_bytes(b"webm")
     (run / "videos" / "other.webm").write_bytes(b"webm")
-    record = redaction.clear(run, {PLANT})
+    record = redaction.clear(run, {PLANT}, owners={})
     assert record["removed"] == ["invite/02-reveal.aria.yml"]
     assert record["screens_removed"] == [
         "invite/02-reveal.png",
@@ -2556,11 +2556,15 @@ def test_a_shared_file_holding_a_value_takes_every_recording_and_fails_every_jou
     (run / "results.jsonl").write_text(f'{{"observed": "{PLANT}"}}\n')
     for name in ("a", "b"):
         (run / "videos" / f"{name}.webm").write_bytes(b"webm")
-    record = redaction.clear(run, {PLANT})
+    record = redaction.clear(run, {PLANT}, owners={})
     assert record["screens_removed"] == ["videos/a.webm", "videos/b.webm"]
-    assert redaction.journeys_of(["results.jsonl"], ["a", "b"]) == {"a", "b"}
-    assert redaction.journeys_of(["a/01-x.aria.yml", "a.html"], ["a", "b"]) == {"a"}
-    assert redaction.files_of(["a/01-x.aria.yml", "b.md", "summary.md"], "a") == (
+    assert redaction.journeys_of(["results.jsonl"], ["a", "b"], owners={}) == {"a", "b"}
+    assert redaction.journeys_of(
+        ["a/01-x.aria.yml", "a.html"], ["a", "b"], owners={}
+    ) == {"a"}
+    assert redaction.files_of(
+        ["a/01-x.aria.yml", "b.md", "summary.md"], "a", owners={}
+    ) == (
         "a/01-x.aria.yml",
         "summary.md",
     )
@@ -3350,3 +3354,87 @@ def test_a_traffic_step_fails_on_an_assignment_other_than_chosen(
         )
     assert "the documented hash puts it in 'Treatment'" in failed.value.observed
     assert SAVED not in (tmp_path / "j" / "02-s.traffic.json").read_text()
+
+
+#: Two journeys, each with a walkthrough; one walkthrough's own bytes, or one
+#: of its journey's files, hold a value the run kept.
+WALKTHROUGH_RUN = (
+    "import conftest\n"
+    "from docs_runner import log, report\n\n\n"
+    "def test_planted(request):\n"
+    "    run_dir = conftest.run_dir_of(request.config)\n"
+    f'    request.config.stash[conftest.SECRET_VALUES].add("{PLANT}")\n'
+    '    (run_dir / "recordings").mkdir()\n'
+    '    (run_dir / "sample").mkdir()\n'
+    "    PLANTED\n"
+    '    (run_dir / "recordings" / "R2-other.webm").write_bytes(b"webm")\n'
+    "    request.config.stash[conftest.RECORDED].update(\n"
+    "        {\n"
+    '            "R1-sample": {"journey": "sample", "seconds": 1.0, "dropped": "",\n'
+    '                          "file": "recordings/R1-sample.webm"},\n'
+    '            "R2-other": {"journey": "other", "seconds": 1.0, "dropped": "",\n'
+    '                         "file": "recordings/R2-other.webm"},\n'
+    "        }\n"
+    "    )\n"
+    '    for name in ("sample", "other"):\n'
+    "        record = log.Record(\n"
+    '            run="r", sha="s", stack="compose-dev", guide="README.md", step=1,\n'
+    '            step_id="home", heading="Home", action="open /", expected="x",\n'
+    '            failure_signature="x", result="PASS", reason="", observed="at /",\n'
+    '            snapshot="", expected_snapshot="structural only", ms=1,\n'
+    "        )\n"
+    "        request.config.stash[conftest.RUNS].append(\n"
+    "            report.GuideRun(\n"
+    '                journey=name, guide="README.md", title="Home",\n'
+    '                stack="compose-dev", records=(record,),\n'
+    "            )\n"
+    "        )\n"
+)
+
+
+@pytest.mark.parametrize(
+    "planted, removed, screens",
+    [
+        pytest.param(
+            f'(run_dir / "recordings" / "R1-sample.webm").write_bytes(b"webm {PLANT}")',
+            ["recordings/R1-sample.webm"],
+            [],
+            id="the-walkthrough-holds-it",
+        ),
+        pytest.param(
+            '(run_dir / "recordings" / "R1-sample.webm").write_bytes(b"webm"); '
+            '(run_dir / "sample" / "03-x.aria.yml").write_text('
+            f'"- code: {PLANT}")',
+            ["sample/03-x.aria.yml"],
+            ["recordings/R1-sample.webm"],
+            id="a-file-of-its-journey-holds-it",
+        ),
+    ],
+)
+def test_a_walkthrough_is_its_own_journeys_in_the_end_of_run_scan(
+    tmp_path, planted, removed, screens
+):
+    """conftest passes each walkthrough's owner to the scan: only the journey
+    that recorded it fails, and only its walkthrough goes."""
+    from docs_runner import redaction
+
+    body = WALKTHROUGH_RUN.replace("PLANTED", planted)
+    result = _run_runner(_runner_copy(tmp_path, body), tmp_path)
+    assert result.returncode == 1, result.stdout + result.stderr
+    # Both passes of the scan ran to the end (a hook that raised would leave
+    # the first pass's record and still exit 1).
+    assert "Traceback" not in result.stdout + result.stderr
+    assert "docs journeys: 2 run, 1 failed" in result.stdout
+    run = tmp_path / "run"
+    words = {
+        name: entry["word"]
+        for name, entry in json.loads((run / "verdicts.json").read_text())[
+            "journeys"
+        ].items()
+    }
+    assert words == {"sample": "FAIL", "other": "PASS"}
+    record = json.loads((run / redaction.SCAN_RECORD).read_text())
+    assert record["removed"] == removed
+    assert record["screens_removed"] == screens
+    assert not (run / "recordings" / "R1-sample.webm").exists()
+    assert (run / "recordings" / "R2-other.webm").is_file()
