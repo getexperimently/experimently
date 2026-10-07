@@ -94,7 +94,8 @@ All API endpoints follow a consistent response format:
 List endpoints support pagination with the following query parameters:
 
 - `skip`: Number of records to skip (default: 0)
-- `limit`: Maximum number of records to return (default: 100, max: 500)
+- `limit`: Maximum number of records to return (default: 100; the largest value allowed
+  differs by route, and some lists have none: the route's OpenAPI entry gives it)
 
 Paginated responses include metadata:
 

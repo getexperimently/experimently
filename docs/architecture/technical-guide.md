@@ -263,24 +263,30 @@ results = await service.batch_evaluate(
 
 When a user calls `/api/v1/tracking/assign`:
 
-1. **Rules check**: Evaluate targeting rules against user context
-2. **Traffic split**: Hash `user_id + experiment_id` → deterministic bucket (0-99)
-3. **Variant selection**: Assign to variant based on cumulative traffic allocations
-4. **Persistence**: Save assignment to `assignments` table
-5. **Idempotency**: Same user always gets same variant (deterministic hash)
+1. **Stored assignment**: a user who already has one gets it back, unchanged
+2. **Eligibility** (new users only): the global holdout, then the experiment's mutual exclusion
+   group, then its targeting rules. An ineligible user gets the control variant with
+   `assigned: false`, and no assignment is stored
+3. **Traffic split**: hash the user with the experiment's `key` (the first four bytes of
+   `MD5("{user_id}:{key}")`, little-endian, divided by 2^32: the hash every SDK implements,
+   `backend/app/core/consistent_hash.py`) → bucket 0-99
+4. **Variant selection**: the bucket picks a variant by the cumulative traffic allocations. A
+   bandit experiment routes a new user by its current weights instead
+5. **Persistence**: save the assignment to the `assignments` table
 
 ```
-User "user-123" + Experiment "homepage-test"
+User "user-123" + Experiment key "homepage-test"
      ↓
-Hash → bucket 47
+Hash → bucket 84
      ↓
 Traffic allocation: Control 0-49 (50%), Treatment 50-99 (50%)
      ↓
-bucket 47 → Control variant
+bucket 84 → Treatment variant
 ```
 
 This means:
-- Assignment is **sticky** — user gets same variant on all subsequent calls
+- Assignment is **sticky**: the stored row is returned on every later call, even after the
+  traffic allocation changes
 - Consistent across devices (same user_id = same variant)
 - No session dependency
 
@@ -292,13 +298,17 @@ The analytics results engine (`backend/app/services/analysis_service.py`) comput
 
 ### Statistical Methods
 
-**Conversion metrics (Z-test):**
-- Null hypothesis: control and treatment have equal conversion rates
-- Test statistic: z = (p1 - p2) / SE
-- Two-tailed p-value for significance testing
+**Conversion metrics (Fisher's exact test):**
+- Every metric in the results is analysed as a conversion today
+- For each treatment against the control: a 2×2 table of users who converted and users who did
+  not, from the users assigned to each variant
+- Two-sided Fisher's exact test (`scipy.stats.fisher_exact`); the response's
+  `statistical_test_used` is `fisher_exact`
+- Effect size: Cohen's h
 
-**Continuous metrics (T-test):**
-- Welch's t-test for unequal variances
+**Mean metrics (Welch's t-test):**
+- Used by warehouse analysis (beta, the `warehouse` module) for a metric that is a mean
+- Welch's t-test for unequal variances; `statistical_test_used` is `welch_t_test`
 - Effect size: Cohen's d
 
 **Multiple comparisons correction:**
@@ -745,14 +755,17 @@ rollout percentage. Either way the flag's active rollout schedule is paused. See
 
 ## Performance Characteristics
 
-| Operation | Throughput | Latency (p99) |
-|-----------|-----------|---------------|
-| Variant assignment (cached) | 50,000 req/s | <5ms |
-| Feature flag evaluation | 100,000 req/s | <3ms |
-| Event tracking | 10,000 events/s | <20ms |
-| Batch tracking (100 events) | 1,000 batches/s | <50ms |
-| Rules evaluation (simple) | 125,000 ops/s | <1ms |
-| Results computation | 10 exps/s | <200ms |
+No throughput or latency figure is published yet: none has been measured on a deployment, and
+none will be given here until one has. What decides throughput today:
+
+- Each API container runs one uvicorn worker process (`WEB_CONCURRENCY`, which defaults to `1`
+  in the image, both compose files and the Helm chart; the AWS task definition does not set it).
+- In that process, most SDK routes (a single assignment, event tracking and flag evaluation)
+  do their database work one request at a time
+  ([#823](https://github.com/getexperimently/experimently/issues/823)).
+- So throughput grows with the number of API tasks or replicas, not with the number of
+  requests sent at once to one of them: on AWS the service's task count (its floor is
+  `API_DESIRED_COUNT` in `infrastructure/cdk/app.py`), with the Helm chart `api.replicaCount`.
 
 ---
 

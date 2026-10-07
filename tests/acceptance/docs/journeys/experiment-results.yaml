@@ -346,8 +346,6 @@ steps:
       click:
         role: link
         name: View results
-        quote: false
-        reason: the experiment page's link to its results; the guide writes the path as Experiments → [Your Experiment] → Results
     expect:
       cells:
         - row: Treatment

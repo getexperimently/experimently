@@ -700,7 +700,9 @@ def test_the_restore_path_is_the_script_and_says_what_it_cannot_do():
     assert "#### If the script stops part-way" in scenario
     # The downtime's monitors are expected, not measured (EM ruling R3).
     assert "the load balancer is expected to answer 503 to every request" in flat
-    assert "the staging rehearsal records them (its step R5)" in flat
+    assert "measured; the staging rehearsal records them. A green" in flat
+    # The rehearsal's own step numbers are not published, so the page names none.
+    assert "step R5" not in flat
     assert "the load balancer answers 503" not in flat
     # A probe timeout goes to rollback, never to start-api (R3).
     assert "or the probes did not pass within 30 minutes (`probe.log`)" in flat

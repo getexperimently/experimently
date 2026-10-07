@@ -287,8 +287,9 @@ When the monitor finds a flag unhealthy and `enable_automatic_rollbacks` is on, 
 
 1. Locks the flag row and rolls the flag back to its configured `rollback_percentage` (default `0`, which
    turns the flag off), pausing the flag's active rollout schedule in the same transaction
-2. Records a `SafetyRollbackRecord` with trigger type `automatic`, the
-   metric value and threshold, the previous and target percentages, and the reason
+2. Records a `SafetyRollbackRecord` with trigger type `automatic`, the previous and target
+   percentages, and the reason (`trigger_reason`, the same text as the audit entry's `reason`
+   below: the record has no columns of its own for the metric value or the threshold)
 3. Writes a `safety_rollback` entry to the flag's audit history
    (`GET /api/v1/audit-logs/entity/feature_flag/{flag_id}`), with `system:safety-monitor` as its
    `user_email` and no `user_id`. Its `reason` is the rollback's: the first breaching metric with
@@ -404,9 +405,11 @@ It prints `"status": "inactive"` and `"rollout_percentage": 0`.
 After investigating and resolving the root cause, bring the flag back in this order.
 
 The percentage the flag had before the rollback is the rollback response's `previous_percentage`
-(50 above). For an automatic rollback, read `previous_percentage` from the flag's latest row in the
-`safety_rollback_records` table, until rollback records can be listed through the API
-([#719](https://github.com/getexperimently/experimently/issues/719)).
+(50 above). For an automatic rollback, read it from the flag's latest `safety_rollback` audit
+entry (`GET /api/v1/audit-logs/entity/feature_flag/{flag_id}`, for superusers, ADMIN and
+ANALYST): that entry's `new_value` is a JSON string holding `previous_percentage`. The flag's
+latest row in the `safety_rollback_records` table holds it too; rollback records cannot be
+listed through the API yet ([#719](https://github.com/getexperimently/experimently/issues/719)).
 
 **After a rollback to `0%`, turn the flag on first.** It comes back at 0%, so at first only users
 matched by a targeting rule are served:

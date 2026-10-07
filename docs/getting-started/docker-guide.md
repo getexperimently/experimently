@@ -171,6 +171,16 @@ docker compose up -d --build --wait
 
 The API is at http://localhost:8000 and the dashboard at http://localhost:3000.
 
+### Step 7: Sign in to the dashboard
+
+Open http://localhost:3000 and choose **Sign in**. Enter `admin@demo.com` as the **Email** and
+`Demo1234!` as the **Password**, then choose **Sign in**; you land on **Experiments**.
+
+The first start creates that administrator from `FIRST_SUPERUSER` and
+`FIRST_SUPERUSER_PASSWORD` in `docker-compose.yml`, whose defaults these are. The default
+`demo` seed adds `dev@demo.com`, `analyst@demo.com` and `viewer@demo.com` with the same
+password, three experiments and two flags. These accounts are for a stack on your own machine.
+
 ## Development Workflow
 
 For hot reloading, run the API or the dashboard outside Docker and keep only PostgreSQL

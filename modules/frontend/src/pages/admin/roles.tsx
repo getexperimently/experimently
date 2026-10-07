@@ -79,7 +79,9 @@ export default withAdminGuard(
   withModule(RoleManagementPage, {
     title: 'Custom Roles',
     module: MODULES.RBAC,
-    description: 'Define roles beyond the four built-in ones and grant permissions directly to a user.',
+    description:
+      'Define roles beyond the four built-in ones and grant permissions directly to a user. ' +
+      "Both are recorded, but they do not change what anyone can do yet: each user's built-in role decides.",
   }),
   { requiredRole: 'ADMIN' },
 );

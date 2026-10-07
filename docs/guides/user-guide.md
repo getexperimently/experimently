@@ -236,7 +236,8 @@ any other change of status.
 
 ### Reading Results
 
-Navigate to **Experiments → [Your Experiment] → Results** or http://localhost:3000/results/EXPERIMENT_ID.
+Open the experiment from **Experiments** and choose **View results** (it cannot be chosen
+while the experiment is a draft), or go to http://localhost:3000/results/EXPERIMENT_ID.
 
 #### Experiment Summary Card
 
@@ -357,7 +358,8 @@ The tab also says when:
 - **no users have been assigned yet**, or there is no rate to plan from (no control conversions,
   or every control user converted): type the rate you expect;
 - **the metric is not a conversion**: every metric is analysed as a conversion today, so the
-  plan is for a conversion rate; use the Power Calculator for anything else;
+  plan is for a conversion rate. The tab suggests the Power Calculator for other metrics, but
+  that page also plans only a conversion rate;
 - **a fixed sample size is a guide only**: a bandit, an uneven split, sequential testing or
   Bayesian analysis.
 

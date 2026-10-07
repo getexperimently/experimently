@@ -13,11 +13,9 @@
 # docker-compose.yml's default host port for that service is the port the guide
 # names, then opens the same path on this stack.
 #
-# The guide sends its reader to the dashboard without saying how to sign in:
-# Step 3 prints the account (admin@demo.com), but its password is only in the
-# Quick Start and the compose file's header. So the sign-in steps name the
-# form's own labels with quote: false, and the gap is listed as a docs defect in
-# the pull request that added this journey.
+# Step 7 says how to sign in: the Sign in link, the Email and Password fields
+# with the account the first start creates (admin@demo.com, Demo1234!), and
+# that the reader lands on Experiments. The steps quote the guide.
 #
 # The launch walkthrough R2 (recordings.toml) records the whole journey.
 #
@@ -75,13 +73,11 @@ steps:
           - link "Sign in to the dashboard"
     fail: the dashboard does not answer at the address the guide gives, or what answers is not its home page
   - id: sign-in-page
-    doc: step-6-rebuild-after-a-change
+    doc: step-7-sign-in-to-the-dashboard
     do:
       click:
         role: link
         name: Sign in
-        quote: false
-        reason: the dashboard's own link; the guide does not describe signing in
     expect:
       url: /login
       aria: |
@@ -92,26 +88,22 @@ steps:
           - button "Sign in"
     fail: the home page's Sign in link does not lead to the sign-in form
   - id: email
-    doc: step-3-connect-to-postgresql
+    doc: step-7-sign-in-to-the-dashboard
     do:
       fill:
         label: Email
         value: admin@demo.com
-        quote: false
-        reason: the sign-in form's field; the guide gives only the account
     expect:
       aria: |
         - main:
           - textbox "Email": admin@demo.com
     fail: the sign-in form has no Email field
   - id: password
-    doc: step-6-rebuild-after-a-change
+    doc: step-7-sign-in-to-the-dashboard
     do:
       fill:
         label: Password
         value: Demo1234!
-        quote: false
-        reason: the sign-in form's field; the password is the Quick Start's documented demo credential
     expect:
       aria: |
         - main:
@@ -119,13 +111,11 @@ steps:
           - button "Sign in"
     fail: the sign-in form has no Password field
   - id: signed-in
-    doc: step-6-rebuild-after-a-change
+    doc: step-7-sign-in-to-the-dashboard
     do:
       click:
         role: button
         name: Sign in
-        quote: false
-        reason: the sign-in form's button; the guide does not describe signing in
     expect:
       url: /experiments
       aria: |

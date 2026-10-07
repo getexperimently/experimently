@@ -250,12 +250,14 @@ deleted the account; closing the dialog refreshes the list.
 
 ### Login Errors
 
+What the dashboard's sign-in form shows (`AUTH_PROVIDER=local`):
+
 | Error | Cause | Solution |
 |-------|-------|----------|
-| "Incorrect username or password" | Credentials don't match | Double-check your username and password |
-| "User is not confirmed" | Email not verified | Complete the verification process |
-| "User not found" | Account doesn't exist | Check username or register a new account |
-| "Account temporarily locked" | Too many failed attempts | Wait 15 minutes and try again |
+| "Email or password is incorrect." | No account has this email, the password does not match, or the account is deactivated. The API answers `401` the same way for all three | Check both. An administrator can reset the password or reactivate the account |
+| "Too many failed login attempts; account temporarily locked. Retry in N seconds." | Ten failed sign-ins for this email within 15 minutes (`LOCAL_AUTH_MAX_FAILED_ATTEMPTS`, `LOCAL_AUTH_LOCKOUT_MINUTES`); the API answers `423` | Wait the seconds it names. Every attempt until then is refused, even with the right password |
+| "Too many attempts. Please wait a moment and try again." | More than ten sign-ins in a minute from one address (`429`) | Wait a minute |
+| "Can't reach the API at …" | The dashboard got no answer from the API | Check that the API is running and that the dashboard's origin is in `CORS_ORIGINS` |
 
 ### Token Errors
 

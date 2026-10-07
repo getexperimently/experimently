@@ -141,13 +141,15 @@ aws ecs describe-tasks \
   --query 'tasks[*].{StopReason:stoppedReason,ContainerReason:containers[0].reason,ExitCode:containers[0].exitCode}'
 ```
 
-Step 3: Check recent application logs for the crash reason:
+Step 3: Check recent application logs for the crash reason. The API writes one JSON object
+per line with a lower-case `level`, so this matches its error and critical lines (in `staging`
+and `prod`; `dev` and `demo` write console lines, which it does not match):
 
 ```bash
 aws logs filter-log-events \
   --log-group-name "/ecs/experimentation-backend-$ENV" \
-  --filter-pattern ERROR \
-  --start-time $(date -u -d '15 minutes ago' +%s000) \
+  --filter-pattern '{ ($.level = "error") || ($.level = "critical") }' \
+  --start-time $(( ($(date +%s) - 900) * 1000 )) \
   --limit 50
 ```
 
@@ -346,7 +348,7 @@ Step 1 recorded.
 During the cutover the load balancer is expected to answer 503 to every request, and the composite
 alarm `experimentation-api-no-healthy-task-$ENV` is expected to email `ALARM_EMAIL` after about
 three minutes, then clear. Both are read from the stacks and the load balancer's documentation, not
-measured; the staging rehearsal records them (its step R5). A green `/health` afterwards does not show which cluster answered, because it runs
+measured; the staging rehearsal records them. A green `/health` afterwards does not show which cluster answered, because it runs
 `SELECT 1`; the probes do. Writes made to the original between the restore time and the cutover
 stay on it, under its new name.
 

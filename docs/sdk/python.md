@@ -35,6 +35,10 @@ pip install -e sdk/python
 
 ## Quick start
 
+`render_new_checkout()` and `use_new_search()` below stand for your own code: define them, or
+replace the two calls, before you run the block. As written, a branch that reaches one of them
+raises `NameError`.
+
 ```python
 import os
 from experimentation import ExperimentationClient, ExperimentationError
@@ -47,14 +51,14 @@ client = ExperimentationClient(
 # Experiments — sticky assignment made by the server (POST /api/v1/tracking/assign)
 variant = client.get_variant("checkout_flow", user_id="user-123", user_attributes={"plan": "pro"})
 if variant == "treatment":
-    render_new_checkout()
+    render_new_checkout()   # your own code
 
 assignment = client.get_assignment("checkout_flow", "user-123")   # raises on failure
 assignment.variant_name, assignment.is_control, assignment.configuration
 
 # Feature flags (GET /api/v1/feature-flags/evaluate/{key}?user_id=…&context=<url-encoded attributes>)
 if client.is_feature_enabled("new_search", "user-123", user_attributes={"plan": "pro"}):
-    use_new_search()
+    use_new_search()        # your own code
 flag = client.get_feature_flag("new_search", "user-123")          # FlagEvaluation(key, enabled, config, reason)
 flags = client.get_all_flags("user-123", {"plan": "pro"})          # {"new_search": True, ...}
 
