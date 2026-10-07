@@ -3,36 +3,51 @@
 !!! info "Part of the `split_url` module"
     Split URL testing is one of the optional modules -- present in the **full profile**, absent from the core one. A core deployment does not serve these routes. See [Modules and profiles](../getting-started/modules.md) for what each profile includes and how to run the full one.
 
-This document describes the server-side split URL testing feature. Split URL experiments redirect different user segments to distinct URLs (e.g., `/checkout-v1` vs `/checkout-v2`) using Lambda@Edge at the CloudFront layer, providing zero-latency variant delivery and persistent cookie-based assignment.
+!!! warning "The edge router does not split traffic in this release"
+    The Lambda@Edge router reads its configuration only from an `X-Split-URL-Config` request
+    header, and nothing sets that header: no stack creates the CloudFront distribution or adds
+    the header, and the platform does not send an experiment's `split_url_config` to the edge.
+    Without it the router passes every request through unchanged, so deploying the construct
+    does not split traffic. What works today is storing a split URL experiment and its
+    configuration, and the preview endpoint. The preview does not predict the router either:
+    it hashes the `user_id` you pass with the experiment's id, while the router hashes the
+    viewer's IP address and User-Agent with the `experiment_key` in its configuration
+    ([#393](https://github.com/getexperimently/experimently/issues/393)).
+
+This document describes the server-side split URL testing feature. Split URL experiments are meant to redirect different users to distinct URLs (e.g., `/checkout` vs `/checkout-v2`) at the CloudFront layer, with a Lambda@Edge router and a cookie that keeps each viewer on one variant.
 
 ---
 
 ## Overview
 
-Split URL testing differs from classic A/B tests in that the **entire page or URL path** varies between variants rather than a component within a single page. The platform implements this at the CDN edge using **Lambda@Edge**, which:
+Split URL testing differs from classic A/B tests in that the **entire page or URL path** varies between variants rather than a component within a single page. Given a configuration, the router (`modules/lambda/split_url_router/handler.py`):
 
-1. Reads the user's assignment cookie (`exp_{experiment_key}`).
-2. If no cookie exists, performs consistent-hash bucketing to assign a variant.
-3. Redirects the request (`302`) to the variant URL.
-4. Sets a `1-year` persistence cookie so the user always sees the same variant.
+1. Reads the viewer's assignment cookie (`split_url_{experiment_key}` unless the configuration names another).
+2. If the cookie holds one of the variant URLs, passes the request through.
+3. Otherwise hashes the viewer's IP address and User-Agent to pick a variant.
+4. Answers `302` to that variant's URL, with a cookie that lasts 30 days unless the configuration sets `cookie_ttl_days`.
 
 ---
 
 ## Experiment Type
 
-Set `experiment_type` to `SPLIT_URL` when creating or updating an experiment.
+Set `experiment_type` to `split_url` when creating an experiment.
 
 ### `SplitUrlConfig` Schema
 
-The `split_url_config` field is required when `experiment_type` is `SPLIT_URL`.
+`split_url_config` holds the URL variants:
 
 | Field | Type | Required | Description |
 |---|---|---|---|
-| `variants` | `array` | Yes | List of variant URL assignments (minimum 2, maximum 10) |
-| `variants[].url` | `string` | Yes | Fully-qualified URL or path for this variant (e.g., `https://example.com/checkout-v2`) |
-| `variants[].weight` | `int` | Yes | Traffic weight for this variant (0-100; all weights must sum to exactly 100) |
+| `variants` | `array` | Yes | The URL variants: at least 2 |
+| `variants[].name` | `string` | Yes | The variant's name |
+| `variants[].url` | `string` | Yes | The URL this variant is sent to (stored as given; not checked) |
+| `variants[].traffic_allocation` | `number` | Yes | Percentage of traffic, 0-100; the values must sum to 100 |
+| `cookie_name` | `string` | No | The router's cookie name; `null` means `split_url_{experiment_key}` |
+| `cookie_ttl_days` | `int` | No | How long the router's cookie lasts, in days (default `30`) |
+| `canonical_url` | `string` | No | Stored with the configuration; nothing reads it yet |
 
-**Variant key**: The `key` field on each experiment variant maps to the corresponding `variants[]` entry by position. The first variant is always treated as the control.
+The first URL variant is the router's control, which a holdout sends its viewers to.
 
 ---
 
@@ -51,42 +66,40 @@ curl -X POST "https://your-platform.example.com/api/v1/experiments/" \
   -d '{
     "name": "Checkout Flow Split URL Test",
     "hypothesis": "The new checkout URL reduces drop-off by 10%",
-    "experiment_type": "SPLIT_URL",
+    "experiment_type": "split_url",
+    "variants": [
+      { "name": "Control",   "is_control": true,  "traffic_allocation": 50 },
+      { "name": "Treatment", "is_control": false, "traffic_allocation": 50 }
+    ],
+    "metrics": [
+      { "name": "Purchase", "event_name": "purchase", "metric_type": "conversion", "is_primary": true }
+    ],
     "split_url_config": {
       "variants": [
-        { "url": "https://example.com/checkout",    "weight": 50 },
-        { "url": "https://example.com/checkout-v2", "weight": 50 }
+        { "name": "Control",   "url": "https://example.com/checkout",    "traffic_allocation": 50 },
+        { "name": "Treatment", "url": "https://example.com/checkout-v2", "traffic_allocation": 50 }
       ]
-    },
-    "variants": [
-      { "key": "control",   "name": "Original Checkout", "weight": 0.5 },
-      { "key": "treatment", "name": "New Checkout",      "weight": 0.5 }
-    ],
-    "start_date": "2026-03-10T00:00:00Z",
-    "end_date":   "2026-04-10T00:00:00Z"
+    }
   }'
 ```
 
-**Response: 201 Created**
+**Response: 201 Created** (abridged: the response is the whole experiment)
 
 ```json
 {
-  "id": "exp-uuid-here",
+  "id": "acf727d0-fd25-41d6-9813-7335d9ad189f",
   "name": "Checkout Flow Split URL Test",
-  "experiment_type": "SPLIT_URL",
-  "status": "DRAFT",
+  "experiment_type": "split_url",
+  "status": "draft",
   "split_url_config": {
     "variants": [
-      { "url": "https://example.com/checkout",    "weight": 50 },
-      { "url": "https://example.com/checkout-v2", "weight": 50 }
-    ]
-  },
-  "variants": [
-    { "key": "control",   "name": "Original Checkout", "weight": 0.5 },
-    { "key": "treatment", "name": "New Checkout",      "weight": 0.5 }
-  ],
-  "created_at": "2026-03-02T12:00:00Z",
-  "updated_at": "2026-03-02T12:00:00Z"
+      { "url": "https://example.com/checkout",    "name": "Control",   "traffic_allocation": 50.0 },
+      { "url": "https://example.com/checkout-v2", "name": "Treatment", "traffic_allocation": 50.0 }
+    ],
+    "cookie_name": null,
+    "canonical_url": null,
+    "cookie_ttl_days": 30
+  }
 }
 ```
 
@@ -98,7 +111,10 @@ curl -X POST "https://your-platform.example.com/api/v1/experiments/" \
 GET /api/v1/experiments/{experiment_id}/split-url/preview
 ```
 
-Returns the variant assignment and redirect URL for a given user, without performing an actual redirect. Use this endpoint during development and QA to verify bucketing logic.
+Returns the URL variant the preview's own hash gives a `user_id`, without redirecting. It hashes
+`{user_id}:{experiment_id}`, so it does not tell you what the router would do for a viewer (see
+the note at the top of this page). It is for ADMIN and DEVELOPER users (and superusers), and in
+a core deployment it answers `501`.
 
 **Path Parameters**
 
@@ -110,13 +126,12 @@ Returns the variant assignment and redirect URL for a given user, without perfor
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `user_id` | `string` | Yes | User identifier to use for consistent-hash bucketing |
-| `attributes` | `object` | No | Optional targeting attributes as a JSON object (URL-encoded) |
+| `user_id` | `string` | Yes | User identifier to hash |
 
 **Example Request**
 
 ```bash
-curl -X GET "https://your-platform.example.com/api/v1/experiments/exp-uuid-here/split-url/preview?user_id=alice" \
+curl -X GET "https://your-platform.example.com/api/v1/experiments/acf727d0-fd25-41d6-9813-7335d9ad189f/split-url/preview?user_id=alice" \
   -H "Authorization: Bearer your_access_token"
 ```
 
@@ -124,14 +139,11 @@ curl -X GET "https://your-platform.example.com/api/v1/experiments/exp-uuid-here/
 
 ```json
 {
-  "experiment_id": "exp-uuid-here",
-  "experiment_key": "checkout-flow-split-url-test",
+  "experiment_id": "acf727d0-fd25-41d6-9813-7335d9ad189f",
   "user_id": "alice",
-  "assigned_variant": "treatment",
-  "redirect_url": "https://example.com/checkout-v2",
-  "cookie_name": "exp_checkout-flow-split-url-test",
-  "cookie_value": "treatment",
-  "cookie_max_age_seconds": 31536000
+  "variant_name": "Treatment",
+  "url": "https://example.com/checkout-v2",
+  "traffic_allocation": 50.0
 }
 ```
 
@@ -139,37 +151,43 @@ curl -X GET "https://your-platform.example.com/api/v1/experiments/exp-uuid-here/
 
 ## Lambda@Edge Cookie and Redirect Flow
 
-The Lambda@Edge function runs on every CloudFront `viewer-request` event for the configured distribution. The flow is:
+This is what the router does once a request carries its configuration header. Nothing adds
+that header in this release (see the note at the top of this page).
 
 ```
-User Request
+Viewer request
      |
      v
 Lambda@Edge (viewer-request)
      |
-     +-- Read cookie: exp_{experiment_key}
-     |        |
-     |        +-- Cookie present --> use stored variant
-     |        |
-     |        +-- Cookie absent  --> consistent-hash bucket(user_id)
-     |                                  --> assign variant
+     +-- No X-Split-URL-Config header, invalid JSON or fewer than 2 variants --> pass through
      |
-     +-- Determine redirect URL from split_url_config
+     +-- Read cookie: split_url_{experiment_key} (or cookie_name)
+     |        |
+     |        +-- Holds one of the variant URLs --> pass through
+     |        |
+     |        +-- Absent or unknown --> hash IP + User-Agent + experiment_key
+     |                                   --> pick a variant (or the first, in a holdout)
      |
-     +-- Return 302 response with:
-           Location: <variant_url>
-           Set-Cookie: exp_{experiment_key}=<variant_key>; Max-Age=31536000; Path=/; Secure; SameSite=Lax
+     +-- Return 302 with:
+           Location: <variant url>
+           Set-Cookie: split_url_{experiment_key}=<variant url>; Max-Age=<cookie_ttl_days x 86400>; Path=/; SameSite=Lax
+           X-Split-URL-Variant: <variant name>
+           Cache-Control: no-store, no-cache
 ```
+
+The header's JSON carries `experiment_key`, `variants` (each with `name`, `url` and
+`traffic_allocation`), and optionally `cookie_name`, `cookie_ttl_days` and `holdout_percentage`.
 
 ### Cookie Details
 
 | Property | Value |
 |---|---|
-| **Cookie name** | `exp_{experiment_key}` where `experiment_key` is the URL-safe slug of the experiment (e.g., `exp_checkout-flow-split-url-test`) |
-| **Cookie value** | The variant key (e.g., `control`, `treatment`) |
-| **Max-Age** | `31536000` seconds (1 year) |
+| **Cookie name** | `cookie_name`, or `split_url_{experiment_key}` |
+| **Cookie value** | The assigned variant's URL |
+| **Max-Age** | `cookie_ttl_days` × 86,400 seconds: 2,592,000 (30 days) by default |
 | **Path** | `/` |
-| **Secure** | Set; only transmitted over HTTPS |
+| **Secure** | Not set by the router |
 | **SameSite** | `Lax` |
 
 ### Redirect Details
@@ -177,16 +195,15 @@ Lambda@Edge (viewer-request)
 | Property | Value |
 |---|---|
 | **HTTP status** | `302 Found` |
-| **Location header** | The `url` field from the assigned variant in `split_url_config` |
-| **Cache-Control** | `no-store` (redirects must not be cached by intermediate proxies) |
+| **Location header** | The assigned variant's `url` |
+| **X-Split-URL-Variant** | The assigned variant's `name` |
+| **Cache-Control** | `no-store, no-cache` |
 
 ### Cookie Persistence
 
-Once a user receives the `Set-Cookie` header, their browser stores the assignment for 1 year. On all subsequent visits, Lambda@Edge reads the cookie and redirects to the same URL without re-bucketing. This ensures:
-
-- Consistent user experience throughout the experiment.
-- No re-assignment when the user clears browser cache (only when cookies are cleared).
-- Cross-session persistence within the same browser.
+A browser keeps the cookie for its Max-Age, 30 days by default. While the cookie holds one of
+the variant URLs, the router passes that viewer's requests through without hashing again; a
+cookie naming a URL that is no longer a variant is treated as no cookie.
 
 ---
 
@@ -197,7 +214,8 @@ Once a user receives the `Set-Cookie` header, their browser stores the assignmen
 > checkout does not have them. See [Modules & Profiles](../getting-started/modules.md).
 
 `modules/infrastructure/constructs/split_url_distribution.py` provisions a
-CloudFront distribution wired to a Lambda@Edge viewer-request function:
+CloudFront distribution wired to a Lambda@Edge viewer-request function. No stack
+in this repository uses it:
 
 1. **No caching** (TTL 0) — every request must reach the router, or a user
    would be served another user's variant from the edge cache.
@@ -224,23 +242,26 @@ split_url = SplitUrlDistribution(
 # split_url.domain_name   -> e.g. d1234.cloudfront.net
 ```
 
-**How the router gets its configuration.** Not from an API call — the
-experiment config is injected as a custom CloudFront header,
-`X-Split-URL-Config`, set by the CDK behaviour. The handler
-(`modules/lambda/split_url_router/handler.py`) reads that header and passes the
-request through unchanged if it is missing, invalid, or names fewer than two
-variants. Assignment hashes a client fingerprint (IP + User-Agent), so it needs
-no call back to the platform and no cold-start cache.
+**How the router gets its configuration.** Only from the `X-Split-URL-Config`
+request header, and neither the construct nor anything else sets it. The handler
+(`modules/lambda/split_url_router/handler.py`) passes the request through unchanged
+when the header is missing, invalid, or names fewer than two variants. Assignment
+hashes a client fingerprint (IP + User-Agent), so it makes no call back to the
+platform.
 
 ---
 
 ## Validation Rules
 
-- All `weight` values in `split_url_config.variants` must be integers in the range `[0, 100]`.
-- The sum of all weights must equal exactly `100`.
-- Each `url` must be a valid absolute URL or an absolute path starting with `/`.
-- The number of entries in `split_url_config.variants` must match the number of `variants` on the experiment.
-- `experiment_type` must be `SPLIT_URL` for `split_url_config` to be accepted.
+On create, `split_url_config` is checked for:
+
+- at least 2 URL variants;
+- `traffic_allocation` values that sum to 100 (within 0.01), none of them NaN or infinite.
+
+Nothing else about it is checked: the URLs are stored as given, the number of URL variants
+need not match the experiment's variants, and an experiment of another type can carry a
+configuration, as a `split_url` experiment can be created without one (its preview then
+answers `400`).
 
 ---
 
@@ -248,14 +269,22 @@ no call back to the platform and no cold-start cache.
 
 | Status | Meaning |
 |---|---|
-| `400 Bad Request` | Weights do not sum to 100, URL is invalid, variant count mismatch |
+| `400 Bad Request` | Preview: the experiment is not a `split_url` experiment, or has no `split_url_config` |
 | `401 Unauthorized` | Missing or invalid Bearer token |
-| `403 Forbidden` | Insufficient role |
-| `404 Not Found` | Experiment ID does not exist or experiment is not of type `SPLIT_URL` |
-| `422 Unprocessable Entity` | Schema validation failure |
+| `403 Forbidden` | Preview: the user is not ADMIN, DEVELOPER or a superuser |
+| `404 Not Found` | Preview: no experiment has this id |
+| `422 Unprocessable Entity` | Create: the body fails validation, such as allocations that do not sum to 100 |
+| `501 Not Implemented` | Preview, or creating a `split_url` experiment, in a core deployment |
 
 ```json
 {
-  "detail": "split_url_config variant weights must sum to 100, got 95"
+  "detail": [
+    {
+      "type": "value_error",
+      "loc": ["body", "split_url_config"],
+      "msg": "Value error, Traffic allocations must sum to 100, got 95.0",
+      "ctx": { "error": {} }
+    }
+  ]
 }
 ```

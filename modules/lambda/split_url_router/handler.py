@@ -4,8 +4,10 @@ Lambda@Edge viewer-request handler for Split URL Testing — EP-036 Batch 1.
 Deployed at a CloudFront viewer-request event to route users to different URLs
 based on a deterministic hash of their client fingerprint (IP + User-Agent).
 
-Experiment configuration is injected via a custom CloudFront header
-``X-Split-URL-Config`` (set by the CDK CloudFront behaviour).
+Experiment configuration is read from the ``X-Split-URL-Config`` request
+header, which nothing sets in this release: no stack creates the CloudFront
+distribution or adds the header, so as shipped the router passes every request
+through (#393; ``docs/api/split-url.md``).
 
 Flow:
 1. Read experiment config from ``X-Split-URL-Config`` header.

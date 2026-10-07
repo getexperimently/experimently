@@ -478,10 +478,10 @@ class Settings(BaseSettings):
     EMAIL_FROM_NAME: str = "Experimently"
     NOTIFICATION_ADMIN_EMAILS: List[str] = []
 
-    # EP-046: LLM/AI Model Evaluation
-    LLM_OPENAI_API_KEY: str = ""
-    LLM_ANTHROPIC_API_KEY: str = ""
-    LLM_GOOGLE_API_KEY: str = ""
+    # EP-046: LLM/AI Model Evaluation. There are no LLM_*_API_KEY settings:
+    # each provider reads its own variable (ANTHROPIC_API_KEY, OPENAI_API_KEY,
+    # GEMINI_API_KEY) where it calls out, and the LLM_* keys that were here
+    # were read by nothing (#256).
     # The LLM-as-judge default. Was `claude-3-5-sonnet-20241022` -- a 2024
     # snapshot -- here and, separately, in the schema and the service, so the
     # three agreed with each other while all three aged. Sonnet 5 is current

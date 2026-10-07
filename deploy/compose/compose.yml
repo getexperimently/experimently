@@ -26,7 +26,8 @@
 #   HTTP_BIND / HTTP_PORT      where the dashboard listens (127.0.0.1:8080);
 #                              put your TLS reverse proxy in front of it
 #   POSTGRES_SERVER            an external database host instead of the bundled
-#                              one; then start only `docker compose up -d api web`
+#                              one; then start only `docker compose up -d api web`.
+#                              Its TimeZone must be UTC
 #
 # The image versions below are literal and move with each release (the
 # `x-release-please-version` markers); there are no floating tags.

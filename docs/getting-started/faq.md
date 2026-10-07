@@ -31,7 +31,7 @@ A full production deployment uses the following AWS services:
 | ElastiCache Redis | Session storage and caching |
 | DynamoDB | Real-time impression and conversion counters |
 | Lambda | No request or event processing: placeholder functions that do nothing, and a daily Glue ETL trigger in the full profile. Assignment and flag evaluation are API calls ([AWS Integration](../integrations/aws.md#lambda-functions)) |
-| CloudFront | Not created by the CDK. Only needed if you wire in the split-URL module's Lambda@Edge construct yourself |
+| CloudFront | Not created by the CDK. Only the split-URL module's Lambda@Edge construct would use it, and its router has no configuration source yet ([#393](https://github.com/getexperimently/experimently/issues/393)) |
 | Kinesis | Full profile only: a stream feeding Firehose and the S3 data lake. The API does not write to it today |
 | OpenSearch | Full profile only: a domain is created; nothing writes to it today |
 | Cognito | User authentication and JWT token issuance |

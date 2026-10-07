@@ -271,7 +271,7 @@ the core through the registration hooks in `backend/app/core/`:
 | `integrations` | Jira, Salesforce and GitHub |
 | `counters` | DynamoDB-backed live assignment and conversion counters |
 | `etl` | Glue crawlers, Athena partitions and scheduled jobs |
-| `split_url` | Server-side URL splitting at the edge |
+| `split_url` | Server-side URL splitting at the edge. The edge router has no configuration source in this release, so it does not split traffic yet; experiments, their URL configuration and the preview work ([#393](https://github.com/getexperimently/experimently/issues/393)) |
 
 `GET /api/v1/modules` reports the running profile and the installed modules — ask it first, rather
 than inferring the profile from a status code. A core deployment is the repository with `modules/`

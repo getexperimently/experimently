@@ -34,8 +34,10 @@ async def preview_split_url_assignment(
     """
     Preview the split URL variant assignment for a given user.
 
-    Returns the URL that would be served to the specified user_id based on the
-    deterministic MD5 hash assignment used by the Split URL router Lambda.
+    Returns the URL variant that an MD5 hash of ``{user_id}:{experiment_id}``
+    picks. It does not predict the Split URL router Lambda, which hashes the
+    viewer's IP address and User-Agent with its configuration's
+    ``experiment_key`` (#393).
 
     This endpoint requires DEVELOPER or ADMIN role.
 

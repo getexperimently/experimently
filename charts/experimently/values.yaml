@@ -117,7 +117,8 @@ ingress:
 
 postgresql:
   # -- true: a single-replica Postgres in this release, for evaluation and
-  # small installs (no backups, no HA). false: use host/port below.
+  # small installs (no backups, no HA). false: use host/port below; that
+  # server's TimeZone must be UTC, or some stored times move by its offset.
   bundled: true
   image: postgres:16-alpine
   host: ""
