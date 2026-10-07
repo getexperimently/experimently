@@ -46,12 +46,13 @@ export function EffectivePermissionsModal({
       role="dialog"
       aria-modal="true"
       aria-labelledby="permissions-modal-title"
+      aria-describedby="permissions-access-note"
     >
       <div className="bg-white rounded-lg shadow-xl w-full max-w-lg mx-4 p-6">
         <div className="flex items-center justify-between mb-4">
           <div>
             <h2 id="permissions-modal-title" className="text-lg font-semibold text-slate-900">
-              Effective Permissions
+              Recorded Permissions
             </h2>
             {userEmail && (
               <p className="text-sm text-slate-500 mt-0.5">{userEmail}</p>
@@ -69,6 +70,17 @@ export function EffectivePermissionsModal({
             </svg>
           </button>
         </div>
+
+        {/* No permission check reads custom roles or direct grants yet (#891). */}
+        <p
+          id="permissions-access-note"
+          data-testid="permissions-access-note"
+          className="text-sm text-slate-700"
+        >
+          {
+            "This list adds the user's custom roles and direct grants to their built-in role. Custom roles and direct permission grants are recorded, but they do not change what anyone can do yet: each user's built-in role decides."
+          }
+        </p>
 
         {/* Loading */}
         {loading && (

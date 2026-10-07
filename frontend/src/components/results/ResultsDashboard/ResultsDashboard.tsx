@@ -13,7 +13,6 @@ import {
 import { analysedAsRate, rateDescription } from '@/components/results/shared/resultFormat';
 import { SequentialTestingResponse } from '@/types/sequential';
 import { ExperimentSummary } from './ExperimentSummary';
-import { CorrectedResultsNotice } from './CorrectedResultsNotice';
 import { SrmNotice } from './SrmNotice';
 import { BayesianPanel } from '@/components/results/Bayesian/BayesianPanel';
 import { SampleSizeMeter } from './SampleSizeMeter';
@@ -290,10 +289,6 @@ export function ResultsDashboard({ experimentId }: ResultsDashboardProps) {
         experiment={results}
         stored={stored}
         onOpenSampleSize={() => setActiveTab('sample-size')}
-      />
-      <CorrectedResultsNotice
-        metrics={results.metrics}
-        correctionMethod={results.correction_method}
       />
       <SrmNotice srm={results.srm} metrics={results.metrics} />
 

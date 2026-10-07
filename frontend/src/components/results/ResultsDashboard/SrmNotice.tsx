@@ -58,8 +58,7 @@ function variantName(id: string, metrics: MetricResult[]): string {
  * - `warning` false: one quiet line, so a reader can see the split is checked.
  * - `warning` true: a region with the observed and expected counts.
  *
- * Visible text in a region, not an alert: it qualifies the numbers, as
- * CorrectedResultsNotice does.
+ * Visible text in a region, not an alert: it qualifies the numbers.
  */
 export function SrmNotice({ srm, metrics }: SrmNoticeProps) {
   if (!srm) return null;

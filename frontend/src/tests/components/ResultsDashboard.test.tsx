@@ -637,27 +637,23 @@ describe('the stored analysis settings', () => {
     });
   });
 
-  describe('the one-release notice (#821 removes it)', () => {
-    it.each([
-      ['two comparisons, corrected', [variant('b', 'B', 0.02, 0.04), variant('c', 'C', 0.04, 0.04)], 'benjamini_hochberg', true],
-      ['two comparisons, Bonferroni', [variant('b', 'B', 0.02, 0.04), variant('c', 'C', 0.04, 0.08)], 'bonferroni', true],
-      ['two comparisons, no correction', [variant('b', 'B', 0.02, null), variant('c', 'C', 0.04, null)], 'none', false],
-      ['one comparison, corrected', [variant('b', 'B', 0.02, 0.02)], 'benjamini_hochberg', false],
-      ['three variants, one without a p-value', [variant('b', 'B', 0.02, 0.02), variant('c', 'C', null, null)], 'benjamini_hochberg', false],
-    ])('%s: shown = %s', async (_label, treatments, method, shown) => {
-      loads(withTreatments(treatments, { correction_method: method as 'none' }));
-      render(<ResultsDashboard experimentId="exp-1" />);
-      await waitFor(() => screen.getByTestId('experiment-summary'));
-      const notice = screen.queryByTestId('corrected-results-notice');
-      if (shown) {
-        expect(notice).toHaveTextContent(
-          "Since v0.19, results for experiments with several variants use the experiment's correction; earlier versions showed them uncorrected"
-        );
-        expect(notice).not.toHaveAttribute('role', 'alert');
-      } else {
-        expect(notice).not.toBeInTheDocument();
-      }
-    });
+  // #580 showed a notice for one release, saying that multi-variant results
+  // had started to use the experiment's correction. #821 removed it: two
+  // corrected comparisons, the case it was shown for, now show no notice.
+  it.each([
+    ['Benjamini-Hochberg', [variant('b', 'B', 0.02, 0.04), variant('c', 'C', 0.04, 0.04)], 'benjamini_hochberg'],
+    ['Bonferroni', [variant('b', 'B', 0.02, 0.04), variant('c', 'C', 0.04, 0.08)], 'bonferroni'],
+  ])('shows no one-release notice for two comparisons corrected with %s', async (label, treatments, method) => {
+    loads(withTreatments(treatments, { correction_method: method as 'none' }));
+    render(<ResultsDashboard experimentId="exp-1" />);
+    await waitFor(() => screen.getByTestId('experiment-summary'));
+    // The case the notice was shown for: two comparisons, corrected.
+    expect(screen.getByTestId('analysis-summary-text')).toHaveTextContent(
+      `95% confidence · ${label} correction for the 2 comparisons with the control on each metric`
+    );
+    expect(screen.queryByTestId('corrected-results-notice')).not.toBeInTheDocument();
+    expect(screen.queryByRole('region', { name: 'Change to these results' })).not.toBeInTheDocument();
+    expect(screen.queryByText(/earlier versions showed them uncorrected/)).not.toBeInTheDocument();
   });
 });
 

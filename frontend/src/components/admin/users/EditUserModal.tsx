@@ -185,7 +185,8 @@ export function EditUserModal({ isOpen, user, currentUserId, onClose, onSave }: 
             <p>Opening this admin area needs superuser access, shown in the Superuser column.</p>
             <RequiresModule name={MODULES.RBAC}>
               <p data-testid="edit-role-help-custom">
-                Custom roles (full edition) are assigned under Roles.
+                Custom roles and direct permission grants (full edition) are recorded, but they do
+                not change what anyone can do yet: the role set here decides.
               </p>
             </RequiresModule>
             <RequiresModule name={MODULES.SSO}>

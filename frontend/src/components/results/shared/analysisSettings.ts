@@ -17,12 +17,6 @@ export const CONFIDENCE_OPTIONS = [0.9, 0.95, 0.99] as const;
 /** The order the forms list the corrections in, the recommended one first. */
 export const CORRECTION_OPTIONS: CorrectionMethod[] = ['benjamini_hochberg', 'bonferroni', 'none'];
 
-/**
- * The release from which /results uses each experiment's stored correction.
- * The notice that names it is shown for one release; #821 removes it.
- */
-export const CORRECTED_RESULTS_SINCE = 'v0.19';
-
 /** The full name of a correction, as the forms and the results page show it. */
 export function correctionName(method: CorrectionMethod): string {
   switch (method) {

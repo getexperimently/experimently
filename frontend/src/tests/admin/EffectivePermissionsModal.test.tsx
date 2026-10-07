@@ -7,6 +7,13 @@ jest.mock('@modules/rbac');
 
 const mockGetUserPermissions = RbacService.getUserPermissions as jest.Mock;
 
+// No permission check reads custom roles or direct grants yet (#891), so the
+// dialog must not present the list as what the user can do.
+const ACCESS_NOTE =
+  "This list adds the user's custom roles and direct grants to their built-in role. " +
+  'Custom roles and direct permission grants are recorded, but they do not change what ' +
+  "anyone can do yet: each user's built-in role decides.";
+
 beforeEach(() => {
   jest.clearAllMocks();
 });
@@ -60,6 +67,19 @@ describe('EffectivePermissionsModal', () => {
     await waitFor(() => {
       expect(screen.getByTestId('permissions-error')).toBeInTheDocument();
     });
+  });
+
+  it('says, above the list, that custom roles and direct grants do not change access yet (#891)', async () => {
+    mockGetUserPermissions.mockResolvedValue({ permissions: ['experiments:read', 'experiments:create'] });
+    render(<EffectivePermissionsModal {...defaultProps} />);
+    const dialog = screen.getByRole('dialog', { name: 'Recorded Permissions' });
+    expect(dialog).toHaveAccessibleDescription(ACCESS_NOTE);
+    const list = await screen.findByTestId('permissions-list');
+    const note = screen.getByTestId('permissions-access-note');
+    expect(note).toHaveTextContent(ACCESS_NOTE);
+    // Above the list, so it is read before the permissions are.
+    expect(note.compareDocumentPosition(list) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.queryByText('Effective Permissions')).not.toBeInTheDocument();
   });
 
   it('renders with data-testid="effective-permissions-modal"', async () => {
