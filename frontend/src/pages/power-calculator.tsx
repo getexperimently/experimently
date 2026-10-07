@@ -199,13 +199,15 @@ export default function PowerCalculatorPage() {
                 <div className="space-y-5">
                   {/* Baseline Rate */}
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Baseline Conversion Rate
+                    <label htmlFor="power-baseline" className="block text-sm font-medium text-gray-700 mb-1">
+                      <span id="power-baseline-name">Baseline Conversion Rate</span>
                       <span className="ml-2 text-blue-600 font-semibold">
                         {(baselineRate * 100).toFixed(1)}%
                       </span>
                     </label>
                     <input
+                      id="power-baseline"
+                      aria-labelledby="power-baseline-name"
                       type="range"
                       min="0.01"
                       max="0.50"
@@ -221,13 +223,15 @@ export default function PowerCalculatorPage() {
 
                   {/* MDE */}
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Minimum Detectable Effect (relative)
+                    <label htmlFor="power-mde" className="block text-sm font-medium text-gray-700 mb-1">
+                      <span id="power-mde-name">Minimum Detectable Effect (relative)</span>
                       <span className="ml-2 text-blue-600 font-semibold">
                         {(mde * 100).toFixed(0)}%
                       </span>
                     </label>
                     <input
+                      id="power-mde"
+                      aria-labelledby="power-mde-name"
                       type="range"
                       min="0.01"
                       max="0.50"
@@ -243,10 +247,11 @@ export default function PowerCalculatorPage() {
 
                   {/* Alpha */}
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                    <label htmlFor="power-alpha" className="block text-sm font-medium text-gray-700 mb-1">
                       Significance Level (alpha)
                     </label>
                     <select
+                      id="power-alpha"
                       value={alpha}
                       onChange={(e) => setAlpha(parseFloat(e.target.value))}
                       className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-700 focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
@@ -259,10 +264,11 @@ export default function PowerCalculatorPage() {
 
                   {/* Power */}
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                    <label htmlFor="power-power" className="block text-sm font-medium text-gray-700 mb-1">
                       Statistical Power
                     </label>
                     <select
+                      id="power-power"
                       value={power}
                       onChange={(e) => setPower(parseFloat(e.target.value))}
                       className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-700 focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
@@ -276,10 +282,11 @@ export default function PowerCalculatorPage() {
 
                   {/* Variants */}
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                    <label htmlFor="power-variants" className="block text-sm font-medium text-gray-700 mb-1">
                       Number of Variants (including control)
                     </label>
                     <select
+                      id="power-variants"
                       value={nVariants}
                       onChange={(e) => setNVariants(parseInt(e.target.value, 10))}
                       className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-700 focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
@@ -306,10 +313,11 @@ export default function PowerCalculatorPage() {
 
                 <div className="space-y-4">
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                    <label htmlFor="power-daily-users" className="block text-sm font-medium text-gray-700 mb-1">
                       Daily Users
                     </label>
                     <input
+                      id="power-daily-users"
                       type="number"
                       placeholder="e.g. 10000"
                       value={dailyTraffic}
@@ -320,13 +328,15 @@ export default function PowerCalculatorPage() {
                   </div>
 
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Traffic Allocation
+                    <label htmlFor="power-allocation" className="block text-sm font-medium text-gray-700 mb-1">
+                      <span id="power-allocation-name">Traffic Allocation</span>
                       <span className="ml-2 text-blue-600 font-semibold">
                         {(trafficAllocation * 100).toFixed(0)}%
                       </span>
                     </label>
                     <input
+                      id="power-allocation"
+                      aria-labelledby="power-allocation-name"
                       type="range"
                       min="0.05"
                       max="1.00"
@@ -359,24 +369,24 @@ export default function PowerCalculatorPage() {
               {/* Key Metrics */}
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                 <div className="bg-blue-600 text-white rounded-xl p-5">
-                  <p className="text-xs font-medium opacity-80 uppercase tracking-wide mb-1">
+                  <p id="power-per-variant-name" className="text-xs font-medium opacity-80 uppercase tracking-wide mb-1">
                     Sample Size per Variant
                   </p>
-                  <p className="text-3xl font-bold">
+                  <output aria-labelledby="power-per-variant-name" aria-live="polite" className="block text-3xl font-bold">
                     {loading ? '...' : result ? fmtNumber(result.per_variant) : '--'}
-                  </p>
+                  </output>
                   <p className="text-xs opacity-70 mt-1">
                     Total: {loading ? '...' : result ? fmtNumber(result.total) : '--'}
                   </p>
                 </div>
 
                 <div className="bg-white border border-gray-200 rounded-xl p-5">
-                  <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">
+                  <p id="power-mde-absolute-name" className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">
                     MDE (absolute)
                   </p>
-                  <p className="text-3xl font-bold text-gray-900">
+                  <output aria-labelledby="power-mde-absolute-name" aria-live="polite" className="block text-3xl font-bold text-gray-900">
                     {loading ? '...' : result ? `+${(result.mde_absolute * 100).toFixed(2)}%` : '--'}
-                  </p>
+                  </output>
                   <p className="text-xs text-gray-400 mt-1">
                     {result
                       ? `${(result.baseline_rate * 100).toFixed(2)}% → ${((result.baseline_rate + result.mde_absolute) * 100).toFixed(2)}%`
@@ -385,12 +395,12 @@ export default function PowerCalculatorPage() {
                 </div>
 
                 <div className="bg-white border border-gray-200 rounded-xl p-5">
-                  <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">
+                  <p id="power-runtime-name" className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">
                     Estimated Runtime
                   </p>
-                  <p className="text-3xl font-bold text-gray-900">
+                  <output aria-labelledby="power-runtime-name" aria-live="polite" className="block text-3xl font-bold text-gray-900">
                     {loading ? '...' : fmtDays(result?.runtime_days ?? null)}
-                  </p>
+                  </output>
                   <p className="text-xs text-gray-400 mt-1">
                     {dailyTraffic ? '' : 'Enter daily traffic above'}
                   </p>
