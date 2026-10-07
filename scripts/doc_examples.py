@@ -90,8 +90,7 @@ import tempfile
 import threading
 import time
 import tomllib
-import urllib.error
-import urllib.request
+import urllib.parse
 from typing import Callable, Optional
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -320,6 +319,14 @@ DEADLINE_MARGIN_SECONDS = 120
 # the report and the job's later steps (2-25 s across 90 shard jobs) and the
 # job clock's head start on DOCEX_JOB_START (1-4 s).
 TEARDOWN_RESERVE_SECONDS = 60
+# After a page's teardown, how long the runner waits for the ports its stack
+# published to be free again, before the next page's preflight asks for them.
+# A port can be held after every container is gone: a connection the server
+# side closed first stays in TIME_WAIT on the published port, 60 s on Linux
+# (TCP_TIMEWAIT_LEN), and the preflight's bind is refused until it ends.  75 s
+# is that and a margin; a port still held after it fails the page, with what
+# holds it named.
+PORT_RELEASE_SECONDS = 75
 REPORT_VERSION = 1
 
 
@@ -2361,6 +2368,85 @@ def _port_in_use(port: int) -> bool:
     return False
 
 
+def port_holders(port: int) -> str:
+    """What the system lists on *port*, one entry per socket: ``ss`` (Linux),
+    else ``lsof``.  A diagnosis for a message, never a decision."""
+    for argv in (
+        ["ss", "-Htanp", f"( sport = :{port} )"],
+        ["lsof", "-nP", f"-iTCP:{port}"],
+    ):
+        if shutil.which(argv[0]) is None:
+            continue
+        try:
+            listed = subprocess.run(
+                argv, capture_output=True, text=True, timeout=10, check=False
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            continue
+        lines = [" ".join(line.split()) for line in listed.stdout.splitlines()]
+        lines = [line for line in lines if line]
+        if len(lines) > 8:
+            lines = lines[:8] + [f"... {len(lines) - 8} more"]
+        return "; ".join(lines) or f"{argv[0]} lists nothing"
+    return "neither ss nor lsof is installed"
+
+
+def wait_for_ports(
+    ports: list[int],
+    limit: float,
+    in_use: Optional[Callable[[int], bool]] = None,
+    clock: Callable[[], float] = time.monotonic,
+    sleep: Callable[[float], None] = time.sleep,
+) -> tuple[list[int], float]:
+    """Wait until none of *ports* is in use, at most *limit* seconds.
+
+    Returns the ports still in use (none, once they are free) and the seconds
+    waited.
+    """
+    in_use = in_use or _port_in_use
+    start = clock()
+    while True:
+        busy = [port for port in ports if in_use(port)]
+        waited = clock() - start
+        if not busy or waited >= limit:
+            return busy, waited
+        sleep(min(0.5, limit - waited))
+
+
+def _port_release_seconds(deadline: Optional[Deadline]) -> float:
+    """How long a teardown waits for the ports: never past the run deadline."""
+    if deadline is None:
+        return float(PORT_RELEASE_SECONDS)
+    return max(0.0, min(float(PORT_RELEASE_SECONDS), deadline.remaining()))
+
+
+def release_ports(
+    rel: str, ports: list[int], deadline: Optional[Deadline], out
+) -> Optional[str]:
+    """After a page's teardown: wait for its stack's ports to be free again.
+
+    A port that is still held is named with what holds it, as it was when the
+    teardown ended, and the wait is printed; one still held after the wait is
+    the page's problem, rather than the next page's refusal.  Past the run
+    deadline nothing is judged: the pages after it do not start.
+    """
+    if deadline is not None and deadline.reached():
+        return None
+    held = [port for port in ports if _port_in_use(port)]
+    if not held:
+        return None
+    holders = "; ".join(f"{port}: {port_holders(port)}" for port in held)
+    print(f"{rel}: port(s) {held} still in use after teardown ({holders})", file=out)
+    busy, waited = wait_for_ports(held, _port_release_seconds(deadline))
+    if busy:
+        return (
+            f"{rel}: port(s) {busy} still in use {waited:.0f}s after teardown, so "
+            f"the next page could not start its stack; they were held by: {holders}"
+        )
+    print(f"{rel}: port(s) {held} free {waited:.1f}s after teardown", file=out)
+    return None
+
+
 def _leftovers() -> dict[str, list[str]]:
     """Resources a previous run of this script left behind, by compose project."""
     label = '{{.Label "com.docker.compose.project"}}'
@@ -2377,16 +2463,22 @@ def _leftovers() -> dict[str, list[str]]:
     return found
 
 
-def preflight(env: dict[str, str]) -> None:
-    """Refuse, touching nothing, unless a document can start a stack of its own."""
+def preflight(env: dict[str, str]) -> list[int]:
+    """Refuse, touching nothing, unless a document can start a stack of its own.
+
+    Returns the ports the stack publishes, for the teardown to wait on.
+    """
     for args in (("info",), ("compose", "version")):
         if _docker(*args).returncode != 0:
             raise Refused(f"`docker {' '.join(args)}` failed; is Docker running?")
-    busy = [p for p in _published_ports(env) if _port_in_use(p)]
+    ports = _published_ports(env)
+    busy = [p for p in ports if _port_in_use(p)]
     if busy:
+        holders = "; ".join(f"{port}: {port_holders(port)}" for port in busy)
         raise Refused(
             f"port(s) {busy} are in use; the documents address the stack on those "
             "ports. Stop what holds them (a developer stack: `docker compose stop`)."
+            f" Held by: {holders}"
         )
     left = _leftovers()
     if left:
@@ -2396,6 +2488,7 @@ def preflight(env: dict[str, str]) -> None:
             f"a previous run left {listed}; remove it with `{commands}` "
             "(this script never deletes what it did not start)"
         )
+    return ports
 
 
 def project_resources(project: str) -> list[str]:
@@ -2467,8 +2560,32 @@ def run_bounded(
 
 
 def _get_json(url: str):
-    with urllib.request.urlopen(url, timeout=10) as response:
-        return json.loads(response.read().decode("utf-8"))
+    """GET *url* and decode its JSON answer; this side closes the connection.
+
+    The request keeps the connection alive, and this side closes it once the
+    answer is read.  The side of a TCP connection that closes first keeps it
+    in TIME_WAIT on its own port (60 s on Linux), and until then a bind without
+    SO_REUSEADDR -- the preflight's -- is refused.  ``urllib.request.urlopen``
+    sends ``Connection: close``, so the API closed first and the port held was
+    the stack's published one.  This is the one request the runner makes to a
+    stack, only for a stack-full page, and the page after the modules page in
+    the full shard was the one refused with port 8000 in use (#1075).
+    Measured against a local HTTP/1.1 server: after urlopen the server's port
+    could not be bound again 10 times in 10, after this request 0 in 10.
+    """
+    parts = urllib.parse.urlsplit(url)
+    connection = http.client.HTTPConnection(parts.hostname, parts.port, timeout=10)
+    try:
+        connection.request(
+            "GET", parts.path or "/", headers={"Accept": "application/json"}
+        )
+        response = connection.getresponse()
+        body = response.read()
+        if response.status != 200:
+            raise OSError(f"HTTP {response.status} {response.reason}")
+    finally:
+        connection.close()
+    return json.loads(body.decode("utf-8"))
 
 
 def full_profile_problem(rel: str, fetch: Callable[[str], object] = _get_json):
@@ -2506,7 +2623,7 @@ def run_document(
     rel = doc["path"]
     project = f"docex-{secrets.token_hex(4)}-{index}"
     env = scrubbed_env(project, overrides)
-    preflight(env)
+    ports = preflight(env) or []
     print(f"{rel}: running under compose project {project}", file=out)
     problems: list[str] = []
     reached = 0
@@ -2556,6 +2673,9 @@ def run_document(
             problems.append(
                 f"{rel}: isolation: resources remain after teardown: {left}"
             )
+        held = release_ports(rel, ports, deadline, out)
+        if held:
+            problems.append(held)
     return problems, reached
 
 
