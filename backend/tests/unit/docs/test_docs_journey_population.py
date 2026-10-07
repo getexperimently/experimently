@@ -591,7 +591,7 @@ PLANTS = [
         lambda d: _step(d, "results-api")["expect"]["computed"][
             "metrics.0.variants.1.p_value"
         ].update(rel=0.5),
-        "rel",
+        "p_value.rel: Input should be less than or equal to 0.01",
         id="a-tolerance-too-loose-to-tell-tests-apart",
     ),
 ]
@@ -922,3 +922,70 @@ def test_a_stack_brought_up_again_is_signed_in_to_again():
     assert "if running is not self.stack:" in source
     assert "self.tokens.clear()" in source
     assert source.index("self.tokens.clear()") < source.index("self._step(")
+
+
+def test_a_recorded_journey_that_saves_a_secret_from_any_route_is_refused(tmp_path):
+    """A secret saved from a route that is not a credential's still counts:
+    the journey has a secret, so it is not recorded (model.reveals_credential)."""
+    data = _with(
+        lambda d: (
+            d.update(video=True),
+            _step(d, "key").update(
+                do={"api": {"method": "GET", "path": "/api/v1/things", "as": "admin"}},
+                expect={"status": 200},
+                save={"sdk-key": {"path": "data.value", "secret": True}},
+            ),
+        )
+    )
+    with pytest.raises(loader.Refused) as refused:
+        _load(tmp_path, data)
+    assert any("an api step reveals one" in p for p in refused.value.problems), (
+        refused.value.problems
+    )
+
+
+# ---------------------------------------------------------------------------
+# The order a session walks the journeys in
+# ---------------------------------------------------------------------------
+def _session_order() -> List[Path]:
+    """The journey files in the order the runner's session walks them."""
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(
+        "docs_journeys_conftest", RUNNER_ROOT / "conftest.py"
+    )
+    conftest = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(conftest)
+    return sorted((RUNNER_ROOT / "journeys").glob("*.yaml"), key=conftest._order)
+
+
+def _makes_an_admin_key(path: Path) -> bool:
+    data = yaml.safe_load(path.read_text(encoding="utf-8"))
+    for step in data.get("steps", []):
+        api = (step.get("do") or {}).get("api") or {}
+        if (
+            api.get("method") == "POST"
+            and api.get("path", "").rstrip("/") == "/api/v1/api-keys"
+            and api.get("as") == "admin"
+        ):
+            return True
+    return False
+
+
+def _keys_made_before(order: List[Path], journey: str) -> List[str]:
+    """The journeys that make an administrator's API key before *journey* runs."""
+    names = [path.stem for path in order]
+    before = order[: names.index(journey)]
+    return [path.stem for path in before if _makes_an_admin_key(path)]
+
+
+def test_no_journey_leaves_an_admin_key_before_the_api_key_journey():
+    """api-key-first-assignment ends on the keys page reading "No API keys
+    found", so no journey before it in the session may leave the demo
+    administrator a key; experiment-results and the flag journeys make one."""
+    order = _session_order()
+    assert _keys_made_before(order, "api-key-first-assignment") == []
+    makers = [path for path in order if _makes_an_admin_key(path)]
+    assert makers, "no journey makes an administrator's key: the check reads nothing"
+    planted = [makers[0]] + [path for path in order if path != makers[0]]
+    assert _keys_made_before(planted, "api-key-first-assignment") == [makers[0].stem]

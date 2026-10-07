@@ -2899,33 +2899,23 @@ def sign_in_counts(journeys: List[Journey]) -> Dict[str, int]:
     return {"sign_ins": sign_ins + len(callers), "password_changes": changes}
 
 
-#: Today's count, pinned: the three compose journeys sign in exactly this often,
-#: in less than a minute (the journeys' steps took 23 s in all on CI). The
-#: runner has no pacer yet (D3b adds one); while it has none, a change of this
-#: number is seen here before a run is refused.
-SIGN_INS_TODAY = 10
+def test_the_runner_paces_sign_ins_to_the_stacks_limit():
+    """The compose journeys together sign in more often than the stack allows a
+    minute, so the runner paces them (``docs_runner/pacer.py``) at exactly the
+    stack's own limit; password changes have no pacer and stay under theirs."""
+    from docs_runner import pacer
 
-
-def test_the_compose_journeys_sign_in_no_more_often_than_the_stack_allows():
     from backend.app.middleware.rate_limiter import RATE_LIMIT_CONFIG
 
     limit, window = RATE_LIMIT_CONFIG["/api/v1/auth/login"]
     change_limit, _ = RATE_LIMIT_CONFIG["/api/v1/users/me/password"]
+    assert (pacer.LIMIT, pacer.WINDOW_SECONDS) == (limit, float(window))
     counts = sign_in_counts(_compose_journeys())
-    if (RUNNER_ROOT / "docs_runner" / "pacer.py").is_file():
-        # D3b's sign-in pacer: the runner then waits rather than be refused.
-        from docs_runner import pacer
-
-        assert (pacer.LIMIT, pacer.WINDOW_SECONDS) == (limit, float(window))
-        assert counts["password_changes"] <= change_limit, counts
-        return
-    assert counts["sign_ins"] <= limit, counts
-    assert counts["sign_ins"] == SIGN_INS_TODAY, counts
     assert counts["password_changes"] <= change_limit, counts
 
 
-def test_one_more_sign_in_is_over_the_limit():
-    """The plant: the check above fails when a journey signs in once more."""
+def test_a_click_on_sign_in_is_counted():
+    """The plant for the count above: one more Sign in click counts once more."""
     journeys = _compose_journeys()
     extra = (
         journeys[0]
@@ -3021,3 +3011,342 @@ def test_the_plaintext_key_a_credential_route_answers_is_looked_for(
     assert secret in runner.redactor.values
     (tmp_path / "later.aria.yml").write_text(f"- text: {secret}\n")
     assert redaction.scan(tmp_path, runner.redactor.values)[1] == ["later.aria.yml"]
+
+
+# -- D3b: what a journey saves or keeps reaches no file; its checks can fail --
+SAVED = "Sav0edSecretValue1abcd"
+
+
+def _running():
+    from docs_runner.stacks import Running
+
+    return Running(name="compose-dev", base_url="http://dash/", api_url="http://api")
+
+
+def _step_of(spec: Dict[str, Any]):
+    from docs_runner.model import Step
+
+    return Step.model_validate({"id": "s", "doc": "x", "fail": "x", **spec})
+
+
+def _passing_expect(execute_module, monkeypatch):
+    """Playwright's expect, as if every element the step waits for were there."""
+    import types
+
+    class _Expect:
+        def __call__(self, target):
+            return types.SimpleNamespace(to_have_count=lambda count: None)
+
+        def set_options(self, **kwargs):
+            return None
+
+    monkeypatch.setattr(execute_module, "expect", _Expect())
+
+
+def test_a_secret_saved_from_any_path_reaches_the_redactor_and_no_file(
+    tmp_path, execute_module
+):
+    step = _step_of(
+        {
+            "do": {
+                "api": {"method": "GET", "path": "/api/v1/things", "as": "anonymous"}
+            },
+            "expect": {"status": 200},
+            "save": {"sdk-key": {"path": "data.value", "secret": True}},
+        }
+    )
+    runner = _runner(execute_module, tmp_path)
+    answer = _FakeAnswer(200, {"data": {"value": SAVED}})
+    runner._api_step(step, _running(), _FakeApi(answer), "j", 1)
+    assert runner.secrets["sdk-key"] == SAVED
+    assert SAVED in runner.redactor.values
+    written = (tmp_path / "j" / "01-s.api.json").read_text()
+    assert SAVED not in written
+    assert json.loads(written)["data.value"] == "(redacted)"
+    # Playwright puts a request's headers in its error text: the key in one is
+    # taken out of the line the log keeps.
+    assert SAVED not in runner._line(f"x-api-key: {SAVED}")
+
+
+def test_a_token_saved_for_a_later_path_is_never_written(tmp_path, execute_module):
+    token = "Inv1teTokenValue2abcd"
+    step = _step_of(
+        {
+            "do": {
+                "api": {
+                    "method": "POST",
+                    "path": "/api/v1/workspaces/w/invites",
+                    "as": "anonymous",
+                }
+            },
+            "expect": {"status": 201},
+            "save": {"invite-token": {"path": "token"}},
+        }
+    )
+    runner = _runner(execute_module, tmp_path)
+    answer = _FakeAnswer(201, {"token": token, "email": "dev@demo.com"})
+    runner._api_step(step, _running(), _FakeApi(answer), "j", 1)
+    assert runner.values["invite-token"] == token
+    assert token in runner.redactor.values
+    assert token not in runner._line(f"POST /invites/{token}/accept answered 500")
+
+
+class _KeepElement:
+    def __init__(self, text: str):
+        self.text = text
+        self.has_text = None
+
+    def get_by_role(self, role, **kwargs):
+        return self
+
+    def filter(self, has_text=None, **kwargs):
+        self.has_text = has_text
+        return self
+
+    def inner_text(self):
+        return self.text
+
+
+class _KeepPage:
+    def __init__(self, text: str):
+        self.element = _KeepElement(text)
+
+    def get_by_role(self, role, **kwargs):
+        return self.element
+
+
+@pytest.mark.parametrize(
+    "keep",
+    [
+        {"secret": "sdk-key", "role": "code", "prefix": "eptk_"},
+        {
+            "secret": "sdk-key",
+            "role": "code",
+            "within": {"role": "dialog", "name": "User created"},
+        },
+    ],
+    ids=["by-prefix", "within-a-named-element"],
+)
+def test_a_kept_value_reaches_the_redactor(tmp_path, execute_module, monkeypatch, keep):
+    _passing_expect(execute_module, monkeypatch)
+    value = "eptk_" + "0123456789abcdef" * 2
+    step = _step_of({"do": {"keep": keep}})
+    runner = _runner(execute_module, tmp_path)
+    page = _KeepPage(f"  {value}\n")
+    runner._keep_step(step, page)
+    assert runner.secrets["sdk-key"] == value
+    assert value in runner.redactor.values
+    assert value not in runner._line(f"could not read: {value}")
+    if "prefix" in keep:
+        assert page.element.has_text.pattern == "^eptk_"
+
+
+def test_every_file_the_runner_writes_has_kept_values_taken_out(
+    tmp_path, execute_module
+):
+    runner = _runner(execute_module, tmp_path)
+    runner.redactor.add(SAVED)
+    name = runner._write("j/01-x.aria.yml", f"- code: {SAVED}\n")
+    text = (tmp_path / name).read_text()
+    assert SAVED not in text
+    assert "(redacted)" in text
+
+
+FISHER_ARGS = {
+    "control_users": 400,
+    "control_converted": 40,
+    "treatment_users": 400,
+    "treatment_converted": 64,
+}
+
+
+def _results_step():
+    return _step_of(
+        {
+            "do": {
+                "api": {
+                    "method": "GET",
+                    "path": "/api/v1/results/{{experiment-id}}",
+                    "as": "anonymous",
+                }
+            },
+            "expect": {
+                "status": 200,
+                "computed": {
+                    "metrics.0.variants.1.p_value": {
+                        "oracle": {"name": "fisher_exact_p", "args": FISHER_ARGS},
+                        "rel": 1e-9,
+                    }
+                },
+            },
+        }
+    )
+
+
+def _results(p_value: float) -> _FakeAnswer:
+    return _FakeAnswer(200, {"metrics": [{"variants": [{}, {"p_value": p_value}]}]})
+
+
+def test_a_saved_value_is_put_into_the_path(tmp_path, execute_module):
+    from docs_runner.oracles import fisher_exact_p
+
+    runner = _runner(execute_module, tmp_path)
+    runner.values = {"experiment-id": "e1"}
+    api = _FakeApi(_results(fisher_exact_p(**FISHER_ARGS)))
+    runner._api_step(_results_step(), _running(), api, "j", 1)
+    assert api.calls[0][1] == "/api/v1/results/e1"
+
+
+def test_a_computed_number_holds_within_its_tolerance_and_fails_outside(
+    tmp_path, execute_module
+):
+    from docs_runner.oracles import fisher_exact_p
+
+    p_value = fisher_exact_p(**FISHER_ARGS)
+    runner = _runner(execute_module, tmp_path)
+    runner.values = {"experiment-id": "e1"}
+    observed, _ = runner._api_step(
+        _results_step(), _running(), _FakeApi(_results(p_value * (1 + 5e-10))), "j", 1
+    )
+    assert observed == "status 200"
+    with pytest.raises(execute_module._Failed) as failed:
+        runner._api_step(
+            _results_step(),
+            _running(),
+            _FakeApi(_results(p_value * (1 + 2e-9))),
+            "j",
+            2,
+        )
+    assert "fisher_exact_p gives" in failed.value.observed
+    written = json.loads((tmp_path / "j" / "02-s.api.json").read_text())
+    assert written["metrics.0.variants.1.p_value"]["oracle"] == p_value
+
+
+class _TableChain:
+    def __init__(self, page):
+        self.page = page
+
+    def get_by_role(self, role, **kwargs):
+        return self
+
+    def filter(self, **kwargs):
+        return self
+
+    def evaluate(self, script, argument=None):
+        return 5 if "cellIndex" in script else self.page.cell_text
+
+
+class _TablePage:
+    def __init__(self, cell_text: str):
+        self.cell_text = cell_text
+        self.url = "http://dash/results/e1"
+
+    def goto(self, url):
+        return None
+
+    def evaluate(self, script):
+        return "/results/e1"
+
+    def get_by_role(self, role, **kwargs):
+        return _TableChain(self)
+
+
+def _cells_step():
+    return _step_of(
+        {
+            "do": {"goto": "/results/e1"},
+            "expect": {
+                "cells": [
+                    {
+                        "row": "Treatment",
+                        "column": "p-value",
+                        "oracle": {"name": "fisher_exact_p", "args": FISHER_ARGS},
+                    }
+                ]
+            },
+        }
+    )
+
+
+def test_a_cell_shows_its_oracle_at_the_precision_shown_or_the_step_fails(
+    tmp_path, execute_module, monkeypatch
+):
+    from docs_runner.checks import StepFailed
+
+    _passing_expect(execute_module, monkeypatch)
+    runner = _runner(execute_module, tmp_path)
+    observed = runner._browser_step(_cells_step(), _TablePage("0.0153"), _running())
+    assert "p-value 0.0153, each its oracle's" in observed
+    with pytest.raises(StepFailed, match="shows '0.0156'; fisher_exact_p gives"):
+        runner._browser_step(_cells_step(), _TablePage("0.0156"), _running())
+
+
+class _TrafficApi:
+    """The experiment read, and the tracking API assigning by the documented hash."""
+
+    def __init__(self, wrong: Optional[str] = None):
+        self.wrong = wrong
+        self.allocations = [("Control", 50), ("Treatment", 50)]
+
+    def get(self, path, headers):
+        variants = [{"name": n, "traffic_allocation": a} for n, a in self.allocations]
+        return _FakeAnswer(200, {"key": "exp_key", "variants": variants})
+
+    def fetch(self, path, method, headers, data):
+        from docs_runner import traffic
+
+        if path.endswith("/assign"):
+            user = data["user_id"]
+            name = traffic.variant_for(user, "exp_key", self.allocations)
+            if user == self.wrong:
+                name = "Control" if name == "Treatment" else "Treatment"
+            return _FakeAnswer(200, {"variant_name": name, "assigned": True})
+        return _FakeAnswer(200, {"event_type": data["event_type"]})
+
+
+def _traffic_step():
+    return _step_of(
+        {
+            "do": {
+                "traffic": {
+                    "experiment": "experiment-id",
+                    "key": "sdk-key",
+                    "as": "admin",
+                    "event": "checkout_completed",
+                    "users": "u",
+                    "variants": {
+                        "Control": {"assigned": 5, "converted": 1},
+                        "Treatment": {"assigned": 5, "converted": 2},
+                    },
+                }
+            }
+        }
+    )
+
+
+def test_a_traffic_step_fails_on_an_assignment_other_than_chosen(
+    tmp_path, execute_module
+):
+    from docs_runner import traffic
+
+    runner = _runner(execute_module, tmp_path)
+    runner.values = {"experiment-id": "e1"}
+    runner.secrets = {"sdk-key": SAVED}
+    runner.tokens[("http://api", "admin")] = "already-signed-in"
+    observed, _ = runner._traffic_step(
+        _traffic_step(), _running(), _TrafficApi(), "j", 1
+    )
+    assert observed.startswith("13 requests: Control 5 assigned as chosen, 1 converted")
+    chosen = traffic.choose(
+        "exp_key", [("Control", 50), ("Treatment", 50)], {"Treatment": 5}, "u"
+    )
+    with pytest.raises(execute_module._Failed) as failed:
+        runner._traffic_step(
+            _traffic_step(),
+            _running(),
+            _TrafficApi(wrong=chosen["Treatment"][0]),
+            "j",
+            2,
+        )
+    assert "the documented hash puts it in 'Treatment'" in failed.value.observed
+    assert SAVED not in (tmp_path / "j" / "02-s.traffic.json").read_text()
