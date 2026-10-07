@@ -285,14 +285,9 @@ class JourneyRunner:
                 self.secrets[name] = value
                 seen[save.path] = redaction.REDACTED
                 continue
-            if (
-                redaction.credential_path(save.path)
-                and isinstance(value, str)
-                and len(value) >= redaction.MIN_LENGTH
-            ):
-                # A token used in a later path (an invite's, say) is not
-                # written either: the redactor takes it out of every file.
-                self.redactor.add(value)
+            # A token saved to use in a later path (an invite's, say) is never
+            # written either: register_credentials above has already sent every
+            # value under a credential's key to the redactor.
             try:
                 self.values[name] = values.as_text(value)
             except ValueError as error:
