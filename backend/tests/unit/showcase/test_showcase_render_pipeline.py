@@ -20,13 +20,19 @@ from backend.tests.unit.showcase.capture_dirs import edit_json, make_capture
 pytestmark = [pytest.mark.unit]
 
 
+@pytest.fixture
+def plenty_of_disk(monkeypatch):
+    """These tests are about the capture, not this machine's free space."""
+    monkeypatch.setattr(pipeline, "check_disk", lambda paths, floor: {})
+
+
 def refused(capture, out, work=None, **kwargs) -> Refused:
     with pytest.raises(Refused) as caught:
         pipeline.render(capture, out, work, **kwargs)
     return caught.value
 
 
-def test_needles_are_deleted_even_when_the_capture_is_refused(tmp_path):
+def test_needles_are_deleted_even_when_the_capture_is_refused(tmp_path, plenty_of_disk):
     capture = make_capture(tmp_path / "capture", frame_size=(1280, 720))
     error = refused(capture, tmp_path / "out")
     assert error.gate == "capture"
@@ -35,7 +41,7 @@ def test_needles_are_deleted_even_when_the_capture_is_refused(tmp_path):
     assert not (tmp_path / "render").exists()
 
 
-def test_a_capture_gate_not_ok_is_refused(tmp_path):
+def test_a_capture_gate_not_ok_is_refused(tmp_path, plenty_of_disk):
     capture = make_capture(tmp_path / "capture")
     edit_json(capture / "manifest.json", lambda m: m["gates"]["10"].update(ok=False))
     error = refused(capture, tmp_path / "out")
