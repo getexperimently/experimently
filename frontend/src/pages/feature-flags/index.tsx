@@ -281,7 +281,7 @@ export default function FeatureFlagsPage() {
                           {flag.name}
                         </Link>
                         {flag.description && (
-                          <p className="text-xs text-slate-400 mt-0.5 truncate max-w-xs">
+                          <p className="text-xs text-slate-500 mt-0.5 truncate max-w-xs">
                             {flag.description}
                           </p>
                         )}

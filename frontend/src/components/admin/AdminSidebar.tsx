@@ -61,7 +61,7 @@ export function AdminSidebar({ currentPath }: AdminSidebarProps) {
       className="w-56 flex-shrink-0 bg-white border-r border-slate-200 flex flex-col"
     >
       <div className="px-4 py-6">
-        <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-4">
+        <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-4">
           Navigation
         </p>
         <nav className="space-y-1">
@@ -87,7 +87,7 @@ export function AdminSidebar({ currentPath }: AdminSidebarProps) {
         </nav>
 
         {hiddenModulePages > 0 && (
-          <p data-testid="admin-sidebar-modules-note" className="mt-6 text-xs text-slate-400">
+          <p data-testid="admin-sidebar-modules-note" className="mt-6 text-xs text-slate-500">
             {hiddenModulePages === 1
               ? 'One admin page belongs to a module that is not installed.'
               : `${hiddenModulePages} admin pages belong to modules that are not installed.`}{' '}
@@ -98,7 +98,7 @@ export function AdminSidebar({ currentPath }: AdminSidebarProps) {
         )}
 
         {probeFailed && (
-          <p data-testid="admin-sidebar-modules-error" className="mt-6 text-xs text-slate-400">
+          <p data-testid="admin-sidebar-modules-error" className="mt-6 text-xs text-slate-500">
             The dashboard could not reach the API to check which modules are installed, so any
             module pages are hidden for now.
           </p>

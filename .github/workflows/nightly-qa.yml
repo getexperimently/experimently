@@ -409,18 +409,20 @@ jobs:
           PLAYWRIGHT_API_URL: http://localhost:8000
         run: cd frontend && npx playwright test --project=journeys
 
-      # The extended project is the older specs plus accessibility and visual
-      # regression. It reports but does not fail the night: the a11y backlog is
-      # P4/B10 and the visual baselines are still being committed. Flip this to
-      # fail-hard once both are green (delete `continue-on-error`).
-      - name: Run extended suite (accessibility, visual, legacy specs)
+      # The extended project is the accessibility audit (axe, WCAG 2 AA) and any
+      # other spec that is not a journey. A failing test here fails the night
+      # and the failure issue below reports it; this step used to carry
+      # `continue-on-error`, which kept the night green while tests failed.
+      # visual-regression.spec.ts has its own `visual` project and is not run
+      # until its baseline images are committed (#943).
+      - name: Run extended suite (accessibility and other non-journey specs)
         id: extended
-        continue-on-error: true
         env:
           PLAYWRIGHT_API_URL: http://localhost:8000
         run: cd frontend && npx playwright test --project=extended
 
       - name: Extended suite result
+        if: always()
         run: |
           echo "extended suite: ${{ steps.extended.outcome }}" >> "$GITHUB_STEP_SUMMARY"
 
