@@ -112,7 +112,7 @@ nav:
   - Android Kotlin SDK: sdk/android.md
   - Flutter SDK: sdk/flutter.md
   - React Native SDK: sdk/react-native.md
-  - MCP Server: mcp-server.md
+  - AI Endpoints and MCP Manifest: mcp-server.md
   - OpenFeature Provider: sdk/openfeature.md
   - Edge SDK: sdk/edge.md
   - Ruby SDK: sdk/ruby.md

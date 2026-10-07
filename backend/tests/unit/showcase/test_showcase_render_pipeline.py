@@ -151,6 +151,19 @@ def test_the_output_directory_cannot_be_the_work_directory(tmp_path, stop_after_
 
 
 @pytest.mark.regression
+def test_directories_that_differ_only_by_case_are_the_same_directory(
+    tmp_path, stop_after_paths
+):
+    """On the default macOS filesystem ``Videos`` and ``videos`` are one directory,
+    so the render would delete its own output; the gate compares case-folded."""
+    capture = make_capture(tmp_path / "capture")
+    text = paths_refusal(capture, tmp_path / "Videos", tmp_path / "videos")
+    assert "the output and work directories are both" in text
+    nested = paths_refusal(capture, tmp_path / "Work" / "out", tmp_path / "work")
+    assert "is inside the work directory" in nested
+
+
+@pytest.mark.regression
 def test_the_output_directory_cannot_be_inside_the_work_directory(
     tmp_path, stop_after_paths
 ):

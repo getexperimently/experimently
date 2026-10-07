@@ -41,7 +41,7 @@ import os
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from showcase import contract
 from showcase.render import encode, ocr, probe, review, templates, timeline, vtt
@@ -78,8 +78,27 @@ def _device(path: Path) -> int:
     return os.stat(_existing(path)).st_dev
 
 
+def _key(path: Path) -> Tuple[str, ...]:
+    # Compared case-folded: the default macOS filesystem is case-insensitive, so
+    # ``Videos`` and ``videos`` are one directory there. On a case-sensitive
+    # filesystem this refuses two directories that differ only by case, which
+    # errs the safe way.
+    return tuple(part.casefold() for part in path.parts)
+
+
+def _same(a: Path, b: Path) -> bool:
+    return _key(a) == _key(b)
+
+
+def _inside(child: Path, parent: Path) -> bool:
+    child_key, parent_key = _key(child), _key(parent)
+    return (
+        len(child_key) > len(parent_key) and child_key[: len(parent_key)] == parent_key
+    )
+
+
 def _overlap(a: Path, b: Path) -> bool:
-    return a == b or a in b.parents or b in a.parents
+    return _same(a, b) or _inside(a, b) or _inside(b, a)
 
 
 def paths_problems(capture_dir: Path, out_dir: Path, work: Path) -> List[str]:
@@ -92,17 +111,17 @@ def paths_problems(capture_dir: Path, out_dir: Path, work: Path) -> List[str]:
                 f"the {label} directory {path} is inside the git checkout at {checkout}; "
                 "rendered videos and frames never go into a repository"
             )
-    if out_dir == work:
+    if _same(out_dir, work):
         problems.append(
             f"the output and work directories are both {work}; the render deletes its "
             "work directory when it ends, so give the output a place of its own"
         )
-    elif work in out_dir.parents:
+    elif _inside(out_dir, work):
         problems.append(
             f"the output directory {out_dir} is inside the work directory {work}, "
             "which the render deletes when it ends"
         )
-    elif out_dir in work.parents:
+    elif _inside(work, out_dir):
         problems.append(
             f"the work directory {work} is inside the output directory {out_dir}; "
             "give them separate places"

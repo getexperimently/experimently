@@ -167,12 +167,19 @@ jobs:
         with:
           python-version: '3.11'
 
+      # docs/self-hosting/releases.md verifies the newest release's signature
+      # and SBOM with cosign, the way its reader does. No registry login: the
+      # page runs cosign with an empty DOCKER_CONFIG.
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3
+
       - name: Tool versions
         run: |
           docker version --format 'docker {{.Server.Version}}'
           docker compose version
           bash --version | head -1
           jq --version
+          cosign version
 
       - name: Set up Buildx
         if: github.event_name == 'pull_request'

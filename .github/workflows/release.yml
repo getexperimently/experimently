@@ -405,8 +405,10 @@ jobs:
       # (repository + ref + workflow path) and recorded in Rekor. No private
       # key exists to leak or rotate. Verify with:
       #   cosign verify ghcr.io/<owner>/<repo>:core-X.Y.Z \
-      #     --certificate-identity-regexp '^https://github.com/<owner>/<repo>/' \
+      #     --certificate-identity-regexp '^https://github\.com/<owner>/<repo>/\.github/workflows/release\.yml@refs/(heads/main|tags/v[0-9].*)$' \
       #     --certificate-oidc-issuer https://token.actions.githubusercontent.com
+      # That is the identity docs/self-hosting/releases.md uses: release.yml,
+      # run from main or from a v tag.
       - name: Sign the image
         env:
           IMAGE: ${{ needs.verify.outputs.image }}
@@ -835,6 +837,9 @@ jobs:
           distributions are identical; the base OS package layer is not
           separately described."
           fi
+          # The identity docs/self-hosting/releases.md verifies with:
+          # release.yml, run from main or from a v tag.
+          identity="^https://github\\.com/${REPOSITORY}/\\.github/workflows/release\\.yml@refs/(heads/main|tags/v[0-9].*)\$"
           cat > notes.md <<EOF
           ## Images
 
@@ -856,11 +861,11 @@ jobs:
 
           \`\`\`
           cosign verify ${IMAGE}:core-${VERSION} \\
-            --certificate-identity-regexp '^https://github.com/${REPOSITORY}/' \\
+            --certificate-identity-regexp '${identity}' \\
             --certificate-oidc-issuer https://token.actions.githubusercontent.com
 
           cosign verify-attestation --type spdxjson ${IMAGE}:core-${VERSION} \\
-            --certificate-identity-regexp '^https://github.com/${REPOSITORY}/' \\
+            --certificate-identity-regexp '${identity}' \\
             --certificate-oidc-issuer https://token.actions.githubusercontent.com
           \`\`\`
 
