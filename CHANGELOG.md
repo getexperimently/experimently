@@ -10,6 +10,13 @@ longer applies and release-please can generate this file directly. Until it
 does, entries below 0.2.2 are hand-written and the links in them are the
 reason why.
 
+## [0.26.1](https://github.com/getexperimently/experimently/compare/v0.26.0...v0.26.1) (2026-10-07)
+
+
+### Bug Fixes
+
+* **api:** an API-key request keeps its database connection after recording the key's use ([#1036](https://github.com/getexperimently/experimently/issues/1036)) ([013b8be](https://github.com/getexperimently/experimently/commit/013b8beb736c62381b9d4d47ae35d1c600360521))
+
 ## [0.26.0](https://github.com/getexperimently/experimently/compare/v0.25.4...v0.26.0) (2026-10-07)
 
 
