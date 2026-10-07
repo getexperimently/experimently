@@ -210,3 +210,6 @@ site/
 
 # The licence gate writes this beside the real document when it fails.
 THIRD_PARTY_LICENSES.generated.md
+
+# scripts/restore_repoint.sh evidence: names the account's resources, never committed
+/restore-*-[0-9]*/

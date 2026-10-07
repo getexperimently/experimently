@@ -92,11 +92,15 @@ def test_no_secret_is_replicated_to_another_region(prod, page):
 
 
 @pytest.fixture(scope="module")
-def staging() -> dict:
+def staging_templates() -> dict:
+    """{stack name: template} for the staging app."""
+    return {s.stack_name: s.template for s in _synth("staging").stacks}
+
+
+@pytest.fixture(scope="module")
+def staging(staging_templates) -> dict:
     """{stack name: resources} for the staging app."""
-    return {
-        s.stack_name: s.template.get("Resources", {}) for s in _synth("staging").stacks
-    }
+    return {name: t.get("Resources", {}) for name, t in staging_templates.items()}
 
 
 def test_aurora_keeps_35_days_of_backups_in_prod_and_staging(prod, staging, page):
@@ -133,15 +137,16 @@ def test_aurora_keeps_35_days_of_backups_in_prod_and_staging(prod, staging, page
 
 
 def test_the_restore_passes_the_stacks_parameter_groups(prod, staging, page):
-    """Scenario 4's restore reads the stack's two parameter groups off the
-    original cluster and instance, and passes them with the tags setting.
+    """Scenario 4's restore (scripts/restore_repoint.sh) reads the stack's two
+    parameter groups off the original cluster and instance, and passes them
+    with the tags setting.
 
     A restore given no group uses the engine's default, silently, so the page's
     claim is only as good as the stack's: one cluster group that sets
     `timezone`, `rds.force_ssl` and `shared_preload_libraries`, and one
     instance group, each in use by the cluster and by every instance, and a
     cluster that copies its tags to snapshots (what `--copy-tags-to-snapshot`
-    keeps). The fallback names the stack's one `AWS::RDS::DBParameterGroup`.
+    keeps). `read` refuses an original whose groups are not the stack's.
     """
     for name, apps in (("prod", prod), ("staging", staging)):
         resources = apps[f"experimentation-database-{name}"]
@@ -172,7 +177,10 @@ def test_the_restore_passes_the_stacks_parameter_groups(prod, staging, page):
             }, name
     # What the page says about the stack. The commands themselves are pinned,
     # block by block, in backend/tests/unit/infrastructure/test_deploy_docs.py.
-    assert "(its one `AWS::RDS::DBParameterGroup`)" in page
+    assert (
+        "a cluster whose parameter groups, subnet group, VPC groups or instances "
+        "are not the database stack's"
+    ) in page
     assert "`timezone`, `rds.force_ssl` and `shared_preload_libraries`" in page
 
 
@@ -299,14 +307,19 @@ def test_the_alarms_the_page_describes(templates, prod, page):
         in page
     )
     assert "`AuroraCluster`" not in page
-    # Scenario 4: a cluster restored beside the stack is not what it watches.
+    # Scenario 4: the alarm follows the stack's identifier, which is what the
+    # restore's cutover moves onto the restored cluster (scripts/
+    # restore_repoint.sh renames, it does not repoint the parameter). Before
+    # the cutover the restored cluster is not watched; after it, it is, with
+    # no redeploy -- expected, and checked by the staging rehearsal.
     assert (
-        "A cluster restored beside the stack is not watched by `AuroraHighCPU-$ENV` either."
+        "Before the cutover the restored cluster is not watched by `AuroraHighCPU-$ENV` either."
     ) in page
     assert (
-        "The restored cluster is watched only once the database stack's parameter points "
-        "at it and `experimentation-monitoring-$ENV` is redeployed."
+        "The cutover gives the restored cluster that identifier, so from then on the alarm "
+        "is expected to watch it with no redeploy; the staging rehearsal checks that."
     ) in page
+    assert "is redeployed. Until then the alarm watches the failed cluster" not in page
     # Scenario 5: one Redis alarm per node, on the nodes' real ids.
     redis = {
         n: alarms[n]["Dimensions"] for n in alarms if n.startswith("RedisHighCPU-")
@@ -333,3 +346,71 @@ def test_the_alarms_the_page_describes(templates, prod, page):
     ):
         assert not any(gone in name for name in alarms), gone
         assert gone not in page, gone
+
+
+# --- what scripts/restore_repoint.sh relies on (T143) ------------------------------
+
+
+@pytest.mark.parametrize("environment", ["prod", "staging"])
+def test_what_the_restore_script_reads_is_what_the_stacks_make(
+    environment, templates, staging_templates
+):
+    """The restore renames clusters instead of changing any stack, and its
+    `read` phase refuses an environment that is not shaped the way this
+    relies on. Pinned here too, so a stack change that breaks it fails a pull
+    request rather than the incident: the database stack names neither the
+    cluster nor its instances (CloudFormation tracks them by identifier, which
+    is what the swap moves), and holds exactly one cluster parameter group,
+    one instance parameter group, one subnet group and one VPC group, all
+    used by the cluster and its instances; it publishes `ClusterIdentifier`;
+    the Fargate stack publishes the subnets and group the probe runs in; both
+    backend task definitions take POSTGRES_SERVER from the cluster's writer
+    endpoint, in a container named `backend`."""
+    synthesised = templates if environment == "prod" else staging_templates
+    stacks = {name: t.get("Resources", {}) for name, t in synthesised.items()}
+    outputs = {name: t.get("Outputs", {}) for name, t in synthesised.items()}
+    database = stacks[f"experimentation-database-{environment}"]
+
+    def one(rtype: str) -> str:
+        (lid,) = [lid for lid, r in database.items() if r["Type"] == rtype]
+        return lid
+
+    cluster = one("AWS::RDS::DBCluster")
+    cluster_pg = one("AWS::RDS::DBClusterParameterGroup")
+    instance_pg = one("AWS::RDS::DBParameterGroup")
+    subnets = one("AWS::RDS::DBSubnetGroup")
+    group = one("AWS::EC2::SecurityGroup")
+    props = _props(database[cluster])
+    assert "DBClusterIdentifier" not in props
+    assert props["DBClusterParameterGroupName"] == {"Ref": cluster_pg}
+    assert props["DBSubnetGroupName"] == {"Ref": subnets}
+    assert props["VpcSecurityGroupIds"] == [{"Fn::GetAtt": [group, "GroupId"]}]
+    instances = [r for r in database.values() if r["Type"] == "AWS::RDS::DBInstance"]
+    assert len(instances) == (2 if environment == "prod" else 1)
+    for instance in instances:
+        assert "DBInstanceIdentifier" not in _props(instance)
+        assert _props(instance)["DBClusterIdentifier"] == {"Ref": cluster}
+        assert _props(instance)["DBParameterGroupName"] == {"Ref": instance_pg}
+    assert outputs[f"experimentation-database-{environment}"]["ClusterIdentifier"][
+        "Value"
+    ] == {"Ref": cluster}
+    fargate = outputs[f"experimentation-fargate-{environment}"]
+    assert {"TaskSubnets", "TaskSecurityGroup"} <= set(fargate)
+    families = {}
+    for resources in stacks.values():
+        for r in resources.values():
+            if r["Type"] != "AWS::ECS::TaskDefinition":
+                continue
+            for container in _props(r)["ContainerDefinitions"]:
+                env = {e["Name"]: e["Value"] for e in container.get("Environment", [])}
+                if "POSTGRES_SERVER" in env:
+                    family = _props(r)["Family"]
+                    families[family] = (container["Name"], env["POSTGRES_SERVER"])
+    endpoint = "AuroraCluster23D869C0EndpointAddress"
+    assert set(families) == {
+        f"experimentation-backend-{environment}",
+        f"experimentation-migrate-{environment}",
+    }, families
+    for name, host in families.values():
+        assert name == "backend"
+        assert endpoint in host["Fn::ImportValue"], host

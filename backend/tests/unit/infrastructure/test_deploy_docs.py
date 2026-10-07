@@ -580,8 +580,8 @@ def test_the_runbook_undoes_a_migration_before_the_api_rollback():
     the database's revision: the workflow snapshots, then fails, and migrates
     nothing. The runbook must put the downgrade first, say there is no
     supported downgrade after an API or alarm rollback, and put the STOP
-    paragraph (the restored cluster is unreachable by the tasks today) ahead of
-    the point-in-time restore command, not after it."""
+    paragraph (a redeploy does not reach a restored cluster) ahead of the
+    restore, which is now the decided path's link (T143), not a command."""
     section = _runbook_section("Database Rollback Procedure")
     flat = " ".join(section.split())
     # (c) the old order is gone, from the section and from the decision tree.
@@ -604,22 +604,34 @@ def test_the_runbook_undoes_a_migration_before_the_api_rollback():
         r"snapshot restore|restore from (aurora )?snapshot", flat, re.I
     )
     assert not re.search(r"restore the snapshot", RUNBOOK.read_text(), re.I)
-    # The STOP paragraph and the gap sentence come before the restore, which
-    # the runbook no longer copies: its copy never added an instance and left
-    # two of the cluster's network settings as placeholders (#190). It links to
-    # the disaster-recovery page's "Restore from PITR" instead.
+    # The STOP paragraph, then the decided path, then the restore by link: the
+    # section prints no restore of its own (it had no instance and two
+    # placeholders), and no "decide before an incident" any more.
+    stop = flat.index(
+        "**STOP. A restore to a NEW cluster is not picked up by a redeploy.**"
+    )
+    decided = flat.index(
+        "The decided way to point the application at it is `scripts/restore_repoint.sh`"
+    )
+    link = flat.index(
+        "with Steps 1 to 4 of [Restore from PITR](disaster-recovery.md#restore-from-pitr-preferred)"
+    )
+    assert stop < decided < link, (stop, decided, link)
+    assert "That path is **decided, not yet rehearsed**" in flat
     assert "aws rds restore-db-cluster-to-point-in-time" not in section
-    assert "<the cluster's DB subnet group>" not in section
-    assert "<aurora-sg-id>" not in section
-    stop = section.index("**STOP. A restore to a NEW cluster cannot be picked up")
-    gap = section.index("This is a known gap in the deploy path.")
-    link = section.index("disaster-recovery.md#restore-from-pitr-preferred")
-    # #78 is closed: it is not a pointer to an open gap.
+    assert "Decide which BEFORE an incident" not in section
     assert "issue 78" not in section
-    assert stop < gap < link, (stop, gap, link)
     assert "restore-from-pitr-preferred" in _anchors(
         DOCS / "deployment" / "disaster-recovery.md"
     )
+    # AWS restores to any second in the retention period, not a 5-minute window.
+    assert "5-minute window" not in RUNBOOK.read_text()
+    assert "RTO for a point-in-time restore: ~30 minutes" not in section
+
+    # Its copy never added an instance and left two of the cluster's network
+    # settings as placeholders (#190).
+    assert "<the cluster's DB subnet group>" not in section
+    assert "<aurora-sg-id>" not in section
 
 
 def _restore_section() -> str:
@@ -632,32 +644,117 @@ def _restore_section() -> str:
 @pytest.mark.regression
 def test_the_restore_reads_and_passes_the_original_clusters_settings():
     """A restore given no parameter group gets the engine's default one, with no
-    error, so the settings the database stack makes are lost. The page reads
-    the cluster's and the instance's group from the original, and passes them
-    (and the tags setting) to the commands that make the new cluster and its
-    instance. Values are read, never typed."""
+    error, so the settings the database stack makes are lost. The page's
+    restore is now `scripts/restore_repoint.sh restore`, which reads every
+    value from the original and the stack and passes it; that is pinned call by
+    call in test_restore_repoint.py (test_the_restore_passes_every_setting_it_read).
+    Here: the page says what it passes, refuses on a difference, and types no
+    group name or instance class anywhere."""
     section = _restore_section()
-    for read in (
-        "CLUSTER_PARAMETER_GROUP=$(aws rds describe-db-clusters",
-        "'DBClusters[0].DBClusterParameterGroup'",
-        "INSTANCE_PARAMETER_GROUP=$(aws rds describe-db-instances",
-        '--filters "Name=db-cluster-id,Values=$CLUSTER"',
-        "'DBInstances[0].DBParameterGroups[0].DBParameterGroupName'",
-        "INSTANCE_CLASS=$(aws rds describe-db-instances",
-        "'DBInstances[0].DBInstanceClass'",
+    flat = " ".join(section.split())
+    assert "scripts/restore_repoint.sh restore" in section
+    for passed in (
+        "the original's subnet group, VPC groups and cluster parameter group",
+        "`--copy-tags-to-snapshot`",
+        "the original writer's class, parameter group, promotion tier and tags",
+        "`restore` then refuses unless both match the original",
     ):
-        assert read in section, read
+        assert passed in flat, passed
     blocks = re.findall(r"```bash\n(.*?)```", section, re.S)
-    (restore,) = [b for b in blocks if "restore-db-cluster-to-point-in-time" in b]
-    (create,) = [b for b in blocks if "aws rds create-db-instance" in b]
-    assert '--db-cluster-parameter-group-name "$CLUSTER_PARAMETER_GROUP"' in restore
-    assert "--copy-tags-to-snapshot" in restore
-    assert '--db-parameter-group-name "$INSTANCE_PARAMETER_GROUP"' in create
-    assert '--db-instance-class "$INSTANCE_CLASS"' in create
-    # No group name or instance class is typed into a command.
-    for block in (restore, create):
+    assert blocks, "the section has no shell block: the scan reads nothing"
+    for block in blocks:
         assert not re.search(r"parameter-group-name\s+[^\s$\"']", block), block
-    assert not re.search(r"--db-instance-class\s+[^\s$\"']", create), create
+        assert not re.search(r"--db-instance-class\s+[^\s$\"']", block), block
+
+
+# --- the decided restore path (T143) ---------------------------------------------
+
+DR = DOCS / "deployment" / "disaster-recovery.md"
+REPOINT = REPO_ROOT / "scripts" / "restore_repoint.sh"
+
+
+def _dr_section(heading: str, level: str = "##") -> str:
+    text = DR.read_text(encoding="utf-8")
+    start = text.index(f"\n{level} {heading}\n")
+    end = text.find(f"\n{level} ", start + 1)
+    return text[start : end if end >= 0 else len(text)]
+
+
+@pytest.mark.regression
+def test_the_restore_path_is_the_script_and_says_what_it_cannot_do():
+    """T143: the restore is scripts/restore_repoint.sh, labelled "decided, not
+    yet rehearsed" until a staging rehearsal passes; it needs an `available`
+    cluster, so DR Scenario 4's own trigger (`failed`) has no decided path;
+    prod's reader step has run only against the fake; no repoint time is given
+    as measured. Every phase the page runs is one the script has, each in a
+    block of its own, so no pasted block runs `restore` and `cutover`
+    together."""
+    scenario = _dr_section("Scenario 4: Full Aurora Database Cluster Failure")
+    flat = " ".join(scenario.split())
+    assert "**Decided, not yet rehearsed.**" in flat
+    assert "**A cluster in status `failed` has no decided path.**" in flat
+    assert "Prod's `readers` step has run only against that fake" in flat
+    assert "an estimated 15 to 40 minutes, not measured" in flat
+    assert "plus the cutover's downtime, which is not measured yet" in flat
+    assert "Decide before an incident" not in flat
+    assert "#### If the script stops part-way" in scenario
+    # The downtime's monitors are expected, not measured (EM ruling R3).
+    assert "the load balancer is expected to answer 503 to every request" in flat
+    assert "the staging rehearsal records them (its step R5)" in flat
+    assert "the load balancer answers 503" not in flat
+    # A probe timeout goes to rollback, never to start-api (R3).
+    assert "or the probes did not pass within 30 minutes (`probe.log`)" in flat
+    # keep, then rollback, leaves the stack's cluster protected (R1).
+    assert (
+        "the original comes back onto the stack's names with deletion protection on, "
+        "which the database stack does not set"
+    ) in flat
+    # The phases the script dispatches: the case labels after `cmd=`.
+    dispatch = REPOINT.read_text().split("cmd=${1:-}", 1)[1]
+    labels = re.findall(r"^\s*([a-z-]+(?: \| [a-z-]+)*)\)", dispatch, re.M)
+    known = {phase for label in labels for phase in label.split(" | ")}
+    assert {
+        "read",
+        "restore",
+        "cutover",
+        "readers",
+        "rollback",
+        "keep",
+        "start-api",
+    } <= known
+    blocks = re.findall(r"```bash\n(.*?)```", scenario, re.S)
+    used = []
+    for block in blocks:
+        run = re.findall(r"scripts/restore_repoint\.sh ([a-z-]+)", block)
+        assert len(run) <= 1, block
+        used += run
+    assert used == ["read", "restore", "cutover", "readers", "keep", "rollback"], used
+    assert set(used) <= known
+    # No restore by hand on the page any more: it had no parameter group.
+    assert "aws rds restore-db-cluster-to-point-in-time" not in scenario
+
+
+@pytest.mark.regression
+def test_scenario_8_records_before_it_stops_and_types_no_count():
+    """Scenario 8 typed `--desired-count 3` and `--min-capacity 3` (staging
+    runs 2), and its restore had no subnet group, VPC group, parameter group or
+    instance, with a placeholder that fails `bash -n`. It now records the API
+    with `read` before it stops it, restores through the decided path, and
+    the cutover puts the recorded count back."""
+    scenario = _dr_section("Scenario 8: Complete Data Loss")
+    assert "--desired-count 3" not in scenario
+    assert "--min-capacity 3" not in scenario
+    assert "<timestamp-before-loss>" not in scenario
+    assert "restore-db-cluster-to-point-in-time" not in scenario
+    record = scenario.index('EVID=$(scripts/restore_repoint.sh read "$ENV")')
+    stop = scenario.index("--desired-count 0")
+    assert record < stop, "read must record the API before it is stopped"
+    assert "[Restore from PITR](#restore-from-pitr-preferred)" in scenario
+    for block in re.findall(r"```bash\n(.*?)```", scenario, re.S):
+        done = subprocess.run(
+            ["bash", "-n"], input=block, capture_output=True, text=True
+        )
+        assert done.returncode == 0, (block, done.stderr)
 
 
 def _key_rotation_section() -> str:
@@ -694,11 +791,13 @@ def test_the_key_rotation_runbook_names_what_the_api_writes():
 #: Only the flags before a `$(` are read, so a command nested in an argument is
 #: not checked against the outer one: a page that gains one needs a parser.
 CLI_FLAG_CHECKED = {
+    # Its point-in-time restore is scripts/restore_repoint.sh now, whose own
+    # flags test_restore_repoint.py checks against the same models.
     "disaster-recovery.md": {
-        "rds restore-db-cluster-to-point-in-time",
-        "rds create-db-instance",
-        "rds describe-db-instances",
-        "cloudformation describe-stack-resources",
+        "rds describe-db-clusters",
+        "rds describe-db-cluster-snapshots",
+        "rds restore-db-cluster-from-snapshot",
+        "cloudformation describe-stacks",
     },
     "rollback-runbook.md": {"rds describe-db-cluster-snapshots"},
     "secrets-management.md": {

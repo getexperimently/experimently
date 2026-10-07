@@ -189,7 +189,7 @@ PENDING_FROZEN: dict[str, tuple[int, int, int]] = {
     "docs/auth/sso.md": (0, 0, 0),
     "docs/deployment/README.md": (0, 0, 0),
     "docs/deployment/deployment-guide.md": (0, 1, 3),
-    "docs/deployment/disaster-recovery.md": (0, 0, 1),
+    "docs/deployment/disaster-recovery.md": (0, 0, 0),
     "docs/deployment/iam-permissions.md": (0, 1, 1),
     "docs/deployment/rollback-runbook.md": (0, 1, 0),
     "docs/deployment/secrets-management.md": (0, 1, 0),
