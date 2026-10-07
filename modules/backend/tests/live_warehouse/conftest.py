@@ -27,12 +27,6 @@ from modules.backend.tests.live_warehouse.selection import (
 _STATE: Dict[str, Any] = {}
 
 
-@pytest.fixture(autouse=True)
-def mock_logging_handler():
-    """No logging mocks here: the check wants the adapters' real behaviour."""
-    yield None
-
-
 def _prefix(target: str) -> str:
     return "bq_" if target == "bigquery" else "sf_"
 

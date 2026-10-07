@@ -15,7 +15,7 @@ import io
 import json
 import logging
 import time
-from unittest.mock import MagicMock, PropertyMock, patch
+from unittest.mock import MagicMock, PropertyMock
 
 import pytest
 import structlog
@@ -444,26 +444,18 @@ def _json_logs(level: str = "DEBUG"):
     The real renderer, not caplog: caplog sees stdlib ``extra=`` attributes
     that production drops, and does not see structlog lines at all unless
     logging has been configured.
-
-    The unit conftest replaces ``logging.getLogger`` with a mock, which
-    structlog's stdlib logger factory calls, so the real one is put back for
-    the duration.
     """
     from backend.app.core.logger import configure_logging
-
-    def real_get_logger(name=None):
-        return logging.Logger.manager.getLogger(name) if name else logging.root
 
     root = logging.root
     handlers, root_level = list(root.handlers), root.level
     saved = structlog.get_config()
     buffer = io.StringIO()
-    with patch("logging.getLogger", real_get_logger):
-        configure_logging(log_level=level, json_logs=True, stream=buffer)
-        try:
-            yield buffer
-        finally:
-            _restore_logging(root, handlers, root_level, saved)
+    configure_logging(log_level=level, json_logs=True, stream=buffer)
+    try:
+        yield buffer
+    finally:
+        _restore_logging(root, handlers, root_level, saved)
 
 
 def _restore_logging(root, handlers, root_level, saved) -> None:

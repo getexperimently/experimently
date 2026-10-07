@@ -348,8 +348,7 @@ def test_the_message_never_repeats_the_submitted_value(value):
 
 @pytest.fixture
 def warnings(monkeypatch):
-    """Every warning the assignment service logs, formatted. The unit
-    conftest replaces ``logging.getLogger``, so caplog sees nothing here."""
+    """Every warning the assignment service logs, formatted."""
     EVALUATION_NOTES.clear()
     logged = []
     recorder = Mock()

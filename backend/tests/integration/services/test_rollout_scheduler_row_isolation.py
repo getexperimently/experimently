@@ -215,11 +215,9 @@ class _Records(logging.Handler):
 def scheduler_log(monkeypatch):
     """The scheduler logger's ERROR records, captured on the logger itself.
 
-    The module's ``logger`` is pinned to the real named logger for the test:
-    a unit test reloads the module while ``backend/tests/unit/conftest.py``
-    patches ``logging.getLogger``, which leaves a MagicMock there for the rest
-    of the session. Pytest's own log capture is not used for the same kind of
-    reason: it relies on propagation to the root logger.
+    The module's ``logger`` is pinned to the real named logger for the test,
+    whatever an earlier test that reloaded the module left there. Pytest's own
+    log capture is not used: it relies on propagation to the root logger.
     """
     import backend.app.core.rollout_scheduler as rollout_scheduler
 
