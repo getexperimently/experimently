@@ -231,10 +231,18 @@ If the failover has not completed within 5 minutes, or no instance is available:
 ## Scenario 4: Full Aurora Database Cluster Failure
 
 **Detection:** `aws rds describe-db-clusters` returns status `failed`, and every database call in the application logs fails.
-**RTO:** about 30 minutes (restore; target).
+**RTO:** about 30 minutes for the restore (a target), plus the cutover's downtime, which is not
+measured yet.
 **RPO:** 5 minutes (PITR), and only within the backup retention period (35 days in prod and
 staging, 1 elsewhere; see Backup Strategy). Beyond that, the
 newest manual snapshot (`pre-deploy-...` or `pre-migration-...`) is the recovery point.
+
+**A cluster in status `failed` has no decided path.** The restore below renames the original
+cluster, and whether RDS can rename a `failed` one is not known: nobody has tried it, and it cannot
+be rehearsed. If the cluster is `failed`, do not start the restore; call the Engineering Lead and
+AWS Support, as in the last step of this scenario. The restore is the decided path when the
+cluster is `available` but its data is not: Scenario 8, or a migration to undo
+([Rollback Runbook](rollback-runbook.md), Step 3).
 
 ### Immediate Response
 
@@ -256,93 +264,147 @@ aws rds describe-db-cluster-snapshots \
 
 ### Restore from PITR (preferred)
 
-A restore creates a **new** cluster with no instances. Add one before anything can connect.
-The restored cluster has to be put where the original is and given the original's two parameter
-groups (the cluster's, and the instances'). Read all four values (`DB_SUBNET_GROUP`,
-`AURORA_SECURITY_GROUP` and the two parameter groups) from the original first and do not type
-them. A restore that is given no parameter group uses the engine's
-default one, with no error, so the settings the database stack makes would not be carried over: the
-cluster's `timezone`, `rds.force_ssl` and `shared_preload_libraries`, and the instances' logging
-and `work_mem`:
+**Decided, not yet rehearsed.** This is the decided way to point the application at a restored
+cluster, but it has run only against a fake AWS in the test suite
+(`backend/tests/unit/infrastructure/test_restore_repoint.py`), never on AWS. Until it has been
+rehearsed on staging, every time given for it on this page is an estimate. Prod's `readers` step
+has run only against that fake, on a two-instance cluster; no rehearsal reaches it.
+
+Both backend task definitions take the database host from the database stack's writer endpoint,
+which is the cluster identifier plus a suffix, and `deploy.yml`, the stack and its alarms all find
+the cluster by that identifier. A restore always creates a **new** cluster, under a new identifier,
+so `scripts/restore_repoint.sh` restores beside the original and then, with the API at 0 tasks,
+renames the original cluster and its instances out of the stack's names and the restored cluster
+and its writer onto them. The endpoint stays the same text, nothing is redeployed, and nothing is
+deleted: the original is kept, renamed `<env>-db-failed-<time>`.
+
+Run it from a fresh clone of the release the environment serves, with administrator credentials
+for the environment's account and `jq` installed. Run each phase on its own, with the Engineering
+Lead's approval at the time it runs: `restore` adds a cluster and an instance that bill until they
+are deleted, and `cutover` and `rollback` take the API down. Every identifier, group, class and
+count is read from the stacks, the original cluster or the API service; you type only the
+environment and the restore time. Each phase adds what it read and did to the evidence directory
+`read` creates in the current directory (`log.txt`, `probe.log`, `parity.diff`). It names the
+account's resources: keep it out of the repository.
+
+Step 1: Record the original cluster, the stacks and the API. This changes nothing:
 
 ```bash
-DB_SUBNET_GROUP=$(aws rds describe-db-clusters --db-cluster-identifier "$CLUSTER" \
-  --query 'DBClusters[0].DBSubnetGroup' --output text)
-AURORA_SECURITY_GROUP=$(aws rds describe-db-clusters --db-cluster-identifier "$CLUSTER" \
-  --query 'DBClusters[0].VpcSecurityGroups[0].VpcSecurityGroupId' --output text)
-CLUSTER_PARAMETER_GROUP=$(aws rds describe-db-clusters --db-cluster-identifier "$CLUSTER" \
-  --query 'DBClusters[0].DBClusterParameterGroup' --output text)
-INSTANCE_PARAMETER_GROUP=$(aws rds describe-db-instances \
-  --filters "Name=db-cluster-id,Values=$CLUSTER" \
-  --query 'DBInstances[0].DBParameterGroups[0].DBParameterGroupName' --output text)
-INSTANCE_CLASS=$(aws rds describe-db-instances \
-  --filters "Name=db-cluster-id,Values=$CLUSTER" \
-  --query 'DBInstances[0].DBInstanceClass' --output text)
+EVID=$(scripts/restore_repoint.sh read "$ENV")
 ```
 
-The instance's group and class can be read only while the original cluster still has an instance.
-If `INSTANCE_CLASS` is `None`, use the class the database stack gives this environment
-(`db.r5.large` in `prod`, `db.t3.medium` elsewhere). If
-`INSTANCE_PARAMETER_GROUP` is `None`, read it from the database stack instead (its one
-`AWS::RDS::DBParameterGroup`), and do not leave `--db-parameter-group-name` out of the instance
-command below:
+`read` refuses a cluster that is not `available`, a cluster whose parameter groups, subnet group,
+VPC groups or instances are not the database stack's, task definitions that do not take
+`POSTGRES_SERVER` from the cluster endpoint, a newest migration task revision that names an image
+tag rather than a digest (the message says how to register one), and an API that is already at 0
+tasks. It logs the times the cluster can be restored to.
+
+Step 2: Restore beside the original. Replace `2026-03-01T14:55:00Z` with the time to restore to,
+in UTC: just before the failure, or before the migration when you come from the
+[Rollback Runbook](rollback-runbook.md). The application keeps running on the original meanwhile.
 
 ```bash
-INSTANCE_PARAMETER_GROUP=$(aws cloudformation describe-stack-resources \
-  --stack-name "experimentation-database-$ENV" \
-  --query "StackResources[?ResourceType=='AWS::RDS::DBParameterGroup'].PhysicalResourceId" \
-  --output text)
+scripts/restore_repoint.sh restore "$EVID" 2026-03-01T14:55:00Z
 ```
 
-Then restore the cluster. Replace `2026-03-01T14:55:00Z` with the time to restore to, in UTC: just
-before the failure here, and before the migration when you come from the
-[Rollback Runbook](rollback-runbook.md). `--copy-tags-to-snapshot` keeps the tags on the restored
-cluster's snapshots, as the stack's cluster does; without it they are not copied.
+The restored cluster gets the original's subnet group, VPC groups and cluster parameter group, and
+`--copy-tags-to-snapshot`; its writer gets the original writer's class, parameter group, promotion
+tier and tags. `restore` then refuses unless both match the original on every setting it compares
+(`parity.diff`): a restore given no parameter group gets the engine's default one, with no error,
+and loses the settings the database stack makes, the cluster's `timezone`, `rds.force_ssl` and
+`shared_preload_libraries` and the instances' logging and `work_mem`. Last, it runs two one-off
+tasks of the migration task definition in the API tasks' subnets, with the stack's database
+credentials. The first marks
+the restored database, which also proves those credentials open it; the second checks that the
+original reads as unmarked. `password authentication failed` in `probe.log` means the password was
+changed after the restore time: set the restored cluster's master password to the secret's value
+and run `restore` again with the same time, which carries on with the cluster it made. It
+refuses another time for a cluster it already made: to restore to another time, run `read` again
+for a new evidence directory.
+
+Step 3: Check the data on the restored cluster before anything points at it: the rows you expect
+are there and the bad change is not. `probe.log` shows the restored database's `alembic_version`.
+It must equal the migration heads of the release the API runs. If it does not, the API would answer
+`/health` and fail requests: put the API on the release that matches first
+([Rollback Runbook](rollback-runbook.md)).
+
+Step 4: Cut over. **The API is down from the start of this step to its end: an estimated 15 to 40
+minutes, not measured.**
 
 ```bash
-aws rds restore-db-cluster-to-point-in-time \
-  --source-db-cluster-identifier "$CLUSTER" \
-  --db-cluster-identifier "$CLUSTER-restored" \
-  --restore-to-time 2026-03-01T14:55:00Z \
-  --db-subnet-group-name "$DB_SUBNET_GROUP" \
-  --vpc-security-group-ids "$AURORA_SECURITY_GROUP" \
-  --db-cluster-parameter-group-name "$CLUSTER_PARAMETER_GROUP" \
-  --copy-tags-to-snapshot
-
-aws rds wait db-cluster-available \
-  --db-cluster-identifier "$CLUSTER-restored"
+scripts/restore_repoint.sh cutover "$EVID"
 ```
 
-Add a writer instance of the original's class, in the instance parameter group:
+`cutover` asks you to type the cluster identifier it shows, and refuses input from a pipe or a
+here-document, so run it on its own line. It refuses while a CodeDeploy deployment is in flight,
+scales the API to 0, and waits until no API or migration task is running. It then renames the
+clusters and instances with `--apply-immediately`, refuses unless the writer endpoint is exactly
+what it was, and starts the API only after two probes in a row, from the API tasks' subnets, have
+reached the marked database through that endpoint. The API gets back the task count and scaling
+Step 1 recorded.
+
+During the cutover the load balancer is expected to answer 503 to every request, and the composite
+alarm `experimentation-api-no-healthy-task-$ENV` is expected to email `ALARM_EMAIL` after about
+three minutes, then clear. Both are read from the stacks and the load balancer's documentation, not
+measured; the staging rehearsal records them (its step R5). A green `/health` afterwards does not show which cluster answered, because it runs
+`SELECT 1`; the probes do. Writes made to the original between the restore time and the cutover
+stay on it, under its new name.
+
+Step 5 (prod only): Add the reader, under the original reader's name and with its settings:
 
 ```bash
-aws rds create-db-instance \
-  --db-instance-identifier "$CLUSTER-restored-1" \
-  --db-cluster-identifier "$CLUSTER-restored" \
-  --engine aurora-postgresql \
-  --db-instance-class "$INSTANCE_CLASS" \
-  --db-parameter-group-name "$INSTANCE_PARAMETER_GROUP"
-
-aws rds wait db-instance-available \
-  --db-instance-identifier "$CLUSTER-restored-1"
+scripts/restore_repoint.sh readers "$EVID"
 ```
 
-### Point the Application at the Restored Cluster
+Step 6: Keep the original: a manual snapshot (`<name>-kept`) and deletion protection.
 
-This part is not automated, and a redeploy alone does not do it. The API and migration task
-definitions take the database host from the database stack's writer endpoint, and the
-credentials from that stack's secret, as CloudFormation imports. A cluster restored beside the
-stack has a different endpoint, and the application reads no override. Decide before an
-incident which of the options in the [Rollback Runbook](rollback-runbook.md) ("Step 3:
-Emergency — Point-in-time restore to a new cluster") you will use. Then restart the API through
-CodeDeploy, as in Scenario 2, Step 4.
+```bash
+scripts/restore_repoint.sh keep "$EVID"
+```
 
-A cluster restored beside the stack is not watched by `AuroraHighCPU-$ENV` either. The alarm
+The original keeps billing for its instances and storage, and it holds the only point-in-time
+history from before the incident: the restored cluster's starts when it was created. Deleting it
+is a human decision, taken at that moment. It still uses the stack's parameter, subnet and VPC
+groups, so deleting the database stack fails until it is gone.
+
+Before the cutover the restored cluster is not watched by `AuroraHighCPU-$ENV` either. The alarm
 reads the cluster identifier from the database stack's parameter
-`/experimentation/$ENV/database/aurora-cluster-identifier`, which names the stack's own
-cluster. The restored cluster is watched only once the database stack's parameter points at it
-and `experimentation-monitoring-$ENV` is redeployed. Until then the alarm watches the failed
-cluster, which publishes nothing, so it stays in ALARM.
+`/experimentation/$ENV/database/aurora-cluster-identifier`, which names the stack's own cluster.
+The cutover gives the restored cluster that identifier, so from then on the alarm is expected to
+watch it with no redeploy; the staging rehearsal checks that. The original, once renamed, is
+watched by no alarm.
+
+#### Undo a cutover
+
+```bash
+scripts/restore_repoint.sh rollback "$EVID"
+```
+
+`rollback` runs the same steps with the roles exchanged, and asks for the same confirmation: the
+restored cluster leaves the stack's names as `<env>-db-abandoned-<time>`, the original comes back
+onto them, and the probes check that the endpoint reaches the unmarked database. If the API never
+started on the restored cluster nothing is lost; otherwise the writes made after the cutover stay
+on the abandoned cluster. Run `keep` afterwards to keep that one. If `keep` already ran for the
+original, the original comes back onto the stack's names with deletion protection on, which the
+database stack does not set: deleting the database stack fails while it is on.
+
+#### If the script stops part-way
+
+When `cutover` or `rollback` stops after scaling the API to 0, the API stays at 0 and the script
+prints where every cluster of the restore is (`log.txt` has it too):
+
+- The stack's identifier still names the original and no `<env>-db-failed-<time>` exists: nothing
+  was renamed. `scripts/restore_repoint.sh start-api "$EVID"` puts the API's task count and
+  scaling back.
+- `cutover` stopped after the original was renamed, for instance because the endpoint changed (the
+  message then names the rollback command) or the probes did not pass within 30 minutes
+  (`probe.log`): wait until no cluster or instance of the restore is `renaming`, then run
+  `rollback`. It also works when no cluster holds the stack's identifier yet,
+  by moving the original back on its own.
+- `rollback` stopped part-way: there is no scripted way on. The Engineering Lead decides, with
+  `log.txt` and the list the script printed.
+
+A cluster in status `failed` is not covered: `read` refuses it (see the top of this scenario).
 
 ### Verification
 
@@ -350,7 +412,8 @@ cluster, which publishes nothing, so it stays in ALARM.
 curl -fsS https://api.experimentation.example.com/health | jq '{status, database: .checks.database.status}'
 ```
 
-It prints `"status": "healthy"` and `"database": "healthy"`.
+It prints `"status": "healthy"` and `"database": "healthy"`. That shows the API reaches a
+database, not which one: the cutover's probes show that.
 
 ### Escalation
 
@@ -562,11 +625,21 @@ period (35 days in prod and staging, 1 elsewhere). After that, the newest manual
 
 ### Response
 
-The API service auto-scales, with a floor equal to its task count (3 in prod). Step 1 lowers
-the floor to 0 and suspends scaling before stopping the tasks, so that scaling does not start
-them again. Step 5 puts both back.
+The restore is the one in [Restore from PITR](#restore-from-pitr-preferred) (Scenario 4), decided
+and not yet rehearsed, with the API stopped from the start so that nothing more is written to the
+damaged data. The outage therefore lasts from Step 2 until the cutover ends, restore included.
 
-Step 1: STOP the application immediately to prevent further writes to corrupted state:
+Step 1: Record the environment while the API still runs. `read` records the API's task count and
+scaling, which the cutover puts back at the end, so run it before Step 2; it refuses an API that
+is already at 0 tasks.
+
+```bash
+EVID=$(scripts/restore_repoint.sh read "$ENV")
+```
+
+Step 2: STOP the application immediately to prevent further writes to corrupted state. The API
+service auto-scales, with a floor equal to its task count (3 in prod), so lower the floor to 0 and
+suspend scaling before stopping the tasks; otherwise scaling starts them again:
 
 ```bash
 aws application-autoscaling register-scalable-target \
@@ -582,7 +655,7 @@ aws ecs update-service \
   --desired-count 0
 ```
 
-Step 2: Confirm the extent of data loss. Connect to Aurora and check key tables:
+Step 3: Confirm the extent of data loss. Connect to Aurora and check key tables:
 
 ```sql
 SELECT table_name, COUNT(*)
@@ -591,34 +664,12 @@ JOIN experimentation.experiments e ON true
 GROUP BY table_name;
 ```
 
-Step 3: Use PITR to restore to just before the data loss event (see Scenario 4 for the full
-PITR procedure):
+Step 4: Restore to just before the data loss, and check the restored data: Steps 2 and 3 of
+[Restore from PITR](#restore-from-pitr-preferred), with the `$EVID` of Step 1.
 
-```bash
-aws rds restore-db-cluster-to-point-in-time \
-  --source-db-cluster-identifier "$CLUSTER" \
-  --db-cluster-identifier "$CLUSTER-pre-loss" \
-  --restore-to-time <timestamp-before-loss>
-```
-
-Step 4: Validate the restored data. Connect to the restored cluster and verify that the row
-counts match expectations.
-
-Step 5: Point the application at the restored cluster (Scenario 4), then scale back up:
-
-```bash
-aws ecs update-service \
-  --cluster "experimentation-$ENV" \
-  --service "experimentation-backend-$ENV" \
-  --desired-count 3
-
-aws application-autoscaling register-scalable-target \
-  --service-namespace ecs \
-  --scalable-dimension ecs:service:DesiredCount \
-  --resource-id "service/experimentation-$ENV/experimentation-backend-$ENV" \
-  --min-capacity 3 \
-  --suspended-state DynamicScalingInSuspended=false,DynamicScalingOutSuspended=false,ScheduledScalingSuspended=false
-```
+Step 5: Point the application at the restored cluster: Step 4 of
+[Restore from PITR](#restore-from-pitr-preferred) (`cutover`), then its Steps 5 and 6. The cutover
+starts the API with the task count and scaling Step 1 recorded; nothing is typed.
 
 Escalation: Data loss incidents require immediate escalation to Engineering Lead and DPO if customer PII (experiment assignment records containing `user_id`) is involved.
 
