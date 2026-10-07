@@ -61,7 +61,11 @@ answer the documented rollout hash gives its user, written before it runs) and
 ``NN-<step>.sdk.json``: the page's install command, the version installed, the
 program run (the page's block with its placeholders replaced; the API key is
 only in the environment of its process), each command's status and output,
-redacted and cut to its end, the answers and the oracle's.
+redacted and cut to its end, the answers and the oracle's. A Go step's file
+also holds the page's commands, ``go version``, and the module ``go get``
+resolved: its version, whether it is a pseudo-version or a tag, the run's ref,
+the rule applied (compare or record) and every file that differs from this
+checkout's sdk/go.
 
 A ``traffic`` step writes ``NN-<step>.expected.json`` (the population chosen,
 written before it is sent) and ``NN-<step>.traffic.json`` (what was sent and
@@ -83,6 +87,7 @@ from __future__ import annotations
 import dataclasses
 import html
 import json
+import os
 import re
 import time
 from dataclasses import dataclass
@@ -806,7 +811,20 @@ class JourneyRunner:
             ]
         except (KeyError, TypeError, ValueError, PlaywrightError):
             stop("the experiment's key or variants could not be read")
+        go: Optional[sdk.GoCheck] = None
         try:
+            if plan.language == "go":
+                go_mod = (sdk.REPO_ROOT / sdk.GO_MODULE / "go.mod").read_text(
+                    encoding="utf-8"
+                )
+                problem = sdk.go_requirement_problem(self.guide.text, go_mod)
+                if problem:
+                    raise sdk.SdkError(problem)
+                go = sdk.GoCheck(
+                    directive=sdk.go_directive(go_mod),
+                    checkout=sdk.REPO_ROOT / sdk.GO_MODULE,
+                    ref=os.environ.get("GITHUB_REF", ""),
+                )
             install = sdk.install_command(
                 self.guide.section(plan.install), plan.language
             )
@@ -829,22 +847,24 @@ class JourneyRunner:
                 plan.stubs,
                 [e for _, expressions in plan.answers.items() for e in expressions],
             )
-        except sdk.SdkError as error:
+        except (OSError, sdk.SdkError) as error:
             stop(str(error))
         wanted = sdk.expected(
             plan.user, experiment_key, allocations, plan.flag, plan.rollout
         )
+        registries = {"npm": sdk.NPM_REGISTRY, "pip": sdk.PYPI_INDEX}
         record.update(
             {
                 "experiment_key": experiment_key,
                 "install": install.line,
-                "registry": sdk.NPM_REGISTRY
-                if install.tool == "npm"
-                else sdk.PYPI_INDEX,
+                "registry": registries.get(install.tool, sdk.GO_PROXY),
                 "block": sdk.fingerprint(block),
                 "expected": wanted,
             }
         )
+        if install.commands:
+            record["install_commands"] = list(install.commands)
+        expressions = [e for _, exprs in plan.answers.items() for e in exprs]
         outcome = sdk.run(
             language=plan.language,
             install=install,
@@ -854,6 +874,8 @@ class JourneyRunner:
                 "EXPERIMENTLY_API_KEY": key,
             },
             redact=self.redactor.redact,
+            go=go,
+            answer_keys=expressions,
         )
         problems = list(outcome.problems)
         if outcome.answers:
@@ -867,11 +889,22 @@ class JourneyRunner:
                 "program": source,
             }
         )
+        if go is not None:
+            record.update({"toolchain": outcome.toolchain, "module": outcome.module})
         snapshot = written()
         if problems:
             raise _Failed(self._line("; ".join(problems[:3])), snapshot)
+        module = ""
+        if outcome.module:
+            differing = len(outcome.module.get("differences", []))
+            module = (
+                f" ({outcome.module['kind']}; identical to this checkout's sdk/go)"
+                if not differing
+                else f" ({outcome.module['kind']}; {differing} files differ from this"
+                " checkout's sdk/go, recorded: a tag run or a tagged module)"
+            )
         return (
-            f"installed {install.package} {outcome.installed} from"
+            f"installed {install.package} {outcome.installed}{module} from"
             f" {record['registry']}; {plan.user}: {wanted['variant']}, flag"
             f" {'on' if wanted['enabled'] else 'off'} ({wanted['reason']}), as the"
             " documented hashes give",

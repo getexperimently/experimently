@@ -269,9 +269,7 @@ class TestNeverRaises:
     ):
         """`ModuleNotFoundError` for a module *inside* the package is a broken
         install, logged at ERROR with the module named -- not "no modules
-        package" at DEBUG. (`caplog` is unusable in the unit tree: its
-        conftest replaces `logging.getLogger`; the module logger is patched
-        instead.)"""
+        package" at DEBUG. (The module logger is patched, and its calls read.)"""
         import sys
 
         real_import = modules_loader.importlib.import_module

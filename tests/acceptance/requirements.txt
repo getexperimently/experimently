@@ -11,7 +11,7 @@
 # so a shared pin moves in one pull request.
 
 # The runner
-pytest==9.0.3
+pytest==9.1.1
 pydantic==2.13.5
 PyYAML==6.0.3
 playwright==1.63.0
