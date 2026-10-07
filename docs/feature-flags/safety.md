@@ -273,6 +273,11 @@ and `warning` (whether the warning threshold is breached). The response also car
 `feature_flag_id` and `last_checked`. When a metric breaches its critical threshold, that
 metric and the whole response read `"is_healthy": false`.
 
+The dashboard shows the same check. The flag's page has a **Safety check** section that reads
+*Healthy* or *Unhealthy*, with each metric's value beside its threshold, and **Admin → Safety**
+(for superusers) lists every flag under **Flag Safety Status** as *healthy* or *critical*, with
+its error rate.
+
 ---
 
 ## Auto-Rollback

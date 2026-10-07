@@ -278,7 +278,7 @@ steps:
         metrics.0.is_healthy: false
     fail: 25 errors in 250 evaluations (0.1, above 0.05) do not make the check unhealthy
   - id: sign-in-page
-    doc: rollback-history
+    doc: running-a-check
     do:
       goto: /login
     expect:
@@ -288,7 +288,7 @@ steps:
           - heading "Sign in" [level=1]
     fail: the dashboard does not answer
   - id: email
-    doc: rollback-history
+    doc: running-a-check
     do:
       fill:
         label: Email
@@ -301,7 +301,7 @@ steps:
           - text: admin@demo.com
     fail: there is no Email field to fill
   - id: password
-    doc: rollback-history
+    doc: running-a-check
     do:
       fill:
         label: Password
@@ -313,7 +313,7 @@ steps:
         - textbox "Password"
     fail: there is no Password field to fill
   - id: sign-in
-    doc: rollback-history
+    doc: running-a-check
     do:
       click:
         role: button
@@ -327,7 +327,7 @@ steps:
           - heading "Experiments" [level=1]
     fail: the demo administrator cannot sign in
   - id: safety-page
-    doc: rollback-history
+    doc: running-a-check
     do:
       goto: /admin/safety
     expect:

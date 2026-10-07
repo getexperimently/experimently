@@ -5,12 +5,13 @@
 #
 # Who gets the flag is checked user by user, not sampled: an evaluations step
 # asks the API about a numbered set of users with an API key, and each answer
-# must be the one the guide gives. Users who match the rule (US, enterprise)
-# get the flag with reason targeting_rule; users who match no rule get it
-# exactly when the documented rollout hash (traffic.flag_bucket, the
-# md5-mod100-v1 of docs/sdk/javascript.md) puts them below the 10% the slider
-# set, with reason rollout; once the flag is turned off, nobody gets it, with
-# reason inactive.
+# must be the one the guide gives. Users who match the rule (US or CA, and
+# enterprise) get the flag with reason targeting_rule; users who match no rule
+# (US on the free plan, and DE on enterprise, which meets only one of the
+# group's two conditions) get it exactly when the documented rollout hash
+# (traffic.flag_bucket, the md5-mod100-v1 of docs/sdk/javascript.md) puts them
+# below the 10% the slider set, with reason rollout; once the flag is turned
+# off, nobody gets it, with reason inactive.
 #
 # Not recorded: the journey makes an API key (model.reveals_credential), so a
 # recording could show what the run keeps out of its files.
@@ -342,6 +343,18 @@ steps:
         reason: rollout
         rollout: 10
     fail: a user who matches no rule gets the flag other than the documented 10% rollout decides
+  - id: plan-only-users
+    doc: step-3-add-targeting-rules-optional
+    do:
+      evaluations:
+        flag: docs_journey_flag
+        key: sdk-key
+        users: plan-only-user
+        count: 200
+        context: {country: DE, plan: enterprise}
+        reason: rollout
+        rollout: 10
+    fail: a user who meets only the plan condition gets the flag by the rule, so the group's AND is not applied
   - id: turn-off
     doc: step-5-create-the-flag-then-turn-it-on
     do:

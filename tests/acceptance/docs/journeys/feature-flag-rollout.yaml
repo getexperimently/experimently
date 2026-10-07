@@ -8,7 +8,9 @@
 # (ROLLOUT_CHECK_INTERVAL_MINUTES, which the Docker guide's stack does not
 # set), longer than a journey runs, so its start date is set years ahead and
 # the journey checks only that advancing it by hand is refused, as the guide
-# says.
+# says. The dates (stage 2 on 2031-01-08, the end on 2031-01-29) were set on
+# 2026-10-06: move both later before 2031-01-08, or the scheduler starts the
+# stage on its own and the steps after the canary no longer hold.
 #
 # At each percentage the flag is evaluated for 200 numbered users with an API
 # key, and each answer must be the one the documented rollout hash gives

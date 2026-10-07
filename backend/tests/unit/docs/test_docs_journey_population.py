@@ -28,6 +28,7 @@ import datetime
 import hashlib
 import json
 import math
+import re
 import sys
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
@@ -989,3 +990,85 @@ def test_no_journey_leaves_an_admin_key_before_the_api_key_journey():
     assert makers, "no journey makes an administrator's key: the check reads nothing"
     planted = [makers[0]] + [path for path in order if path != makers[0]]
     assert _keys_made_before(planted, "api-key-first-assignment") == [makers[0].stem]
+
+
+# ---------------------------------------------------------------------------
+# The flag journey's evaluations tell its rule apart from a looser one
+# ---------------------------------------------------------------------------
+#: The rule builder's operator labels, as the journey picks them, and the
+#: operators the dashboard stores.
+BUILDER_OPERATORS = {"equals": "equals", "is one of": "in"}
+CONDITION_FIELD = re.compile(
+    r"^Group 1, condition (?P<n>[0-9]+) (?P<part>attribute|operator|value)$"
+)
+
+
+def _built_rule(steps: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """The rule the journey's fills and selects build in the dashboard."""
+    conditions: Dict[int, Dict[str, str]] = {}
+    for step in steps:
+        do = step.get("do") or {}
+        for kind, field in (("fill", "value"), ("select", "option")):
+            action = do.get(kind)
+            match = CONDITION_FIELD.match(action["label"]) if action else None
+            if match:
+                condition = conditions.setdefault(
+                    int(match["n"]), {"operator": "equals"}
+                )
+                condition[match["part"]] = action[field]
+    return {
+        "logical_operator": "AND",
+        "groups": [
+            {
+                "logical_operator": "AND",
+                "conditions": [
+                    {
+                        "attribute": c["attribute"],
+                        "operator": BUILDER_OPERATORS[c["operator"]],
+                        "value": c["value"],
+                    }
+                    for _, c in sorted(conditions.items())
+                ],
+            }
+        ],
+    }
+
+
+def _contradicted(rule: Dict[str, Any], steps: List[Dict[str, Any]]) -> List[str]:
+    """The evaluations steps whose expected reason the rule does not give."""
+    from backend.app.core.targeting_adapter import (
+        expand_context,
+        match_targeting_rule,
+        normalise_targeting_rules,
+    )
+
+    rules = normalise_targeting_rules(rule, owner="flag:docs-journey")
+    found = []
+    for step in steps:
+        plan = (step.get("do") or {}).get("evaluations")
+        if not plan or plan["reason"] == "inactive":
+            continue
+        matched = match_targeting_rule(rules, expand_context(plan["context"]))
+        if (matched is not None) != (plan["reason"] == "targeting_rule"):
+            found.append(step["id"])
+    return found
+
+
+def test_the_flag_journeys_evaluations_hold_both_conditions_of_its_rule():
+    """Every evaluations step of feature-flag-create gives the reason the rule
+    it builds decides; a rule without the country condition would let the
+    DE enterprise users in by the rule, and the plan-only step tells it apart."""
+    data = yaml.safe_load(
+        (RUNNER_ROOT / "journeys" / "feature-flag-create.yaml").read_text(
+            encoding="utf-8"
+        )
+    )
+    rule = _built_rule(data["steps"])
+    attributes = [c["attribute"] for c in rule["groups"][0]["conditions"]]
+    assert attributes == ["user.country", "user.plan"]
+    assert _contradicted(rule, data["steps"]) == []
+    looser = copy.deepcopy(rule)
+    looser["groups"][0]["conditions"] = [
+        c for c in looser["groups"][0]["conditions"] if c["attribute"] != "user.country"
+    ]
+    assert _contradicted(looser, data["steps"]) == ["plan-only-users"]

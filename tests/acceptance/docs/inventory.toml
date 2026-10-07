@@ -94,7 +94,7 @@ reason = "a rollout schedule made through the API, its stages seen in the dashbo
 [pages."feature-flags/safety.md"]
 class = "journey"
 journey = "feature-flag-safety"
-reason = "reported errors roll a flag back, seen on the dashboard's safety page; its API steps run in Doc Examples"
+reason = "the configuration, the check healthy and then unhealthy from reported errors, a manual rollback and the way back, seen on the dashboard's Safety page; the automatic rollback is NOT RUN (needs-scheduler); its API steps run in Doc Examples"
 
 [pages."guides/user-guide.md"]
 class = "journey"
