@@ -409,7 +409,8 @@ flutter test
 flutter analyze
 ```
 
-- `flutter test`: 70 tests: client (MockClient), hash golden vectors, SharedPreferences store
+- `flutter test`: client (MockClient), hash golden vectors, SharedPreferences store
 
-The test suite and the contract smoke were reviewed line by line for the server-side rewire but
-**not executed** on the development machine (no `dart`/`flutter` installed).
+CI runs `flutter pub get` and `flutter test` on Flutter 3.19.6 in the SDK Unit Tests workflow
+([sdk-unit-tests.yml](https://github.com/getexperimently/experimently/blob/main/.github/workflows/sdk-unit-tests.yml)), daily and on a pull request that changes `sdk/flutter/`. No workflow runs
+`flutter analyze`.

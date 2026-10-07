@@ -412,6 +412,6 @@ elixir test_standalone.exs
 - `mix test`: ExUnit; HTTP mocked through HttpBehaviour modules
 - `elixir test_standalone.exs`: hash parity without mix
 
-The suite (client, facade, cache, HTTP helpers, hash parity — about 110 tests by inspection) was
-rewritten for the public-API contract but has **not been executed** — no `mix` on the development
-machine.
+CI runs `mix deps.get` and `mix test` on Elixir 1.16.3 in the SDK Unit Tests workflow
+([sdk-unit-tests.yml](https://github.com/getexperimently/experimently/blob/main/.github/workflows/sdk-unit-tests.yml)), daily and on a pull request that changes `sdk/elixir/`. No workflow runs
+`elixir test_standalone.exs`.

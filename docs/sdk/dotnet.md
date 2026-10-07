@@ -368,4 +368,7 @@ dotnet run --project examples/BasicUsage
 ```
 
 - `dotnet build`: netstandard2.1 + net6.0
-- `dotnet test`: xUnit, 89 tests by inspection (HTTP faked, no network)
+- `dotnet test`: xUnit (HTTP faked, no network)
+
+CI runs `dotnet test sdk/dotnet/Experimently.sln` on .NET 6 in the SDK Unit Tests workflow
+([sdk-unit-tests.yml](https://github.com/getexperimently/experimently/blob/main/.github/workflows/sdk-unit-tests.yml)), daily and on a pull request that changes `sdk/dotnet/`.

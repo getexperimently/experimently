@@ -385,24 +385,6 @@ Use AWS CloudTrail to inspect API calls:
    - Event source: `cloudwatch.amazonaws.com`
    - Event name: `PutMetricData`
 
-### Using AWS X-Ray for Tracing
-
-Enable X-Ray to trace CloudWatch API calls:
-
-1. Add X-Ray SDK:
-   ```bash
-   pip install aws-xray-sdk
-   ```
-
-2. Instrument your application:
-   ```python
-   from aws_xray_sdk.core import xray_recorder
-   from aws_xray_sdk.ext.fastapi.middleware import XRayMiddleware
-
-   xray_recorder.configure(service='ExperimentationPlatform')
-   app.add_middleware(XRayMiddleware, recorder=xray_recorder)
-   ```
-
 ## Support Resources
 
 - [AWS CloudWatch Documentation](https://docs.aws.amazon.com/cloudwatch/)

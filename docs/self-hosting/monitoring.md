@@ -237,32 +237,74 @@ The ECS task definition includes the X-Ray daemon as a sidecar container. Traces
 
 ## Health Check
 
-The platform exposes a health check endpoint for load balancer and monitoring use:
+The API answers `GET /health` without authentication, for load balancers and
+monitoring. It is the readiness probe, the same as `GET /health/ready`:
 
 ```bash
-GET /health
+curl -s localhost:8000/health
 ```
+
+Outside production it reports each check with its detail:
 
 ```json
 {
-  "status": "ok",
-  "version": "1.4.2",
-  "database": "connected",
-  "redis": "connected",
-  "timestamp": "2026-03-02T14:32:00Z"
+  "status": "healthy",
+  "timestamp": "2026-10-07T19:42:43.499684+00:00",
+  "profile": "core",
+  "version": "0.26.3",
+  "environment": "development",
+  "checks": {
+    "database": {"status": "healthy", "latency_ms": 2.13},
+    "redis": {"status": "healthy", "latency_ms": 0.87},
+    "disk": {"status": "healthy", "free_gb": 41.7},
+    "modules": {"status": "healthy", "profile": "core"}
+  }
 }
 ```
 
-If any dependency is unreachable, the response returns status `503 Service Unavailable` with details:
+With `ENVIRONMENT=production` it leaves out `version`, `environment` and every
+detail except each check's `status`:
 
 ```json
 {
-  "status": "degraded",
-  "database": "connected",
-  "redis": "timeout",
-  "timestamp": "2026-03-02T14:32:00Z"
+  "status": "healthy",
+  "timestamp": "2026-10-07T19:43:19.062038+00:00",
+  "profile": "core",
+  "checks": {
+    "database": {"status": "healthy"},
+    "redis": {"status": "healthy"},
+    "disk": {"status": "healthy"},
+    "modules": {"status": "healthy"}
+  }
 }
 ```
+
+It answers `503 Service Unavailable` with `"status": "unhealthy"` when
+PostgreSQL does not answer, when Redis does not answer and `REDIS_REQUIRED=true`,
+or when the disk check fails. A failed check names the error's type outside
+production:
+
+```json
+{
+  "status": "unhealthy",
+  "timestamp": "2026-10-07T19:42:54.171329+00:00",
+  "profile": "core",
+  "version": "0.26.3",
+  "environment": "development",
+  "checks": {
+    "database": {"status": "unhealthy", "error": "OperationalError"},
+    "redis": {"status": "unhealthy", "error": "ConnectionError"},
+    "disk": {"status": "healthy", "free_gb": 41.7},
+    "modules": {"status": "healthy", "profile": "core"}
+  }
+}
+```
+
+Without `REDIS_REQUIRED=true`, a Redis that does not answer is reported as
+`unhealthy` under `checks` while the response stays `200` and `"healthy"`. Free
+disk space below 1 GB is reported as `"low"` and does not fail the probe.
+`GET /health/live` is the liveness probe: it answers `200` whenever the process
+is up and checks neither PostgreSQL nor Redis.
 
 The ALB health check targets `GET /health` with a 5-second timeout and a 2/3 healthy/unhealthy threshold. Tasks that fail health checks are automatically replaced by ECS.
 
