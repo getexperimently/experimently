@@ -222,14 +222,12 @@ class _Lines(logging.Handler):
 def rejections(monkeypatch):
     """The middleware's warnings, as formatted lines.
 
-    A private `logging.Logger` rather than `caplog`: the unit conftest patches
-    `logging.getLogger`, which `caplog.set_level` goes through, so caplog's
-    teardown fails in this package.
+    A private `logging.Logger`, swapped in for the middleware's own, so the
+    lines are the middleware's and nothing else's.
     """
     from backend.app.middleware import trusted_host_middleware
 
     lines = _Lines()
-    # Not getLogger: the unit conftest replaces it with a mock.
     private = logging.Logger("trusted-host-under-test", logging.WARNING)  # noqa: LOG001
     private.addHandler(lines)
     monkeypatch.setattr(trusted_host_middleware, "logger", private)

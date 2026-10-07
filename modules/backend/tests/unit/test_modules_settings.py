@@ -287,9 +287,8 @@ class TestRegistrationValidates:
         ValidationError's repr embeds ``input_value='<the rejected key>'``.
         That string went into the ERROR log, into ``modules_failure()``, into
         the RuntimeError ``require_modules_or_absent()`` raises and from there
-        into ``pytest.exit()`` and CI output.  (``caplog`` is unusable here --
-        the unit conftest replaces ``logging.getLogger`` -- so the loader's
-        module logger is patched instead.)"""
+        into ``pytest.exit()`` and CI output.  (The loader's module logger is
+        patched, and its calls read.)"""
         from unittest.mock import patch
 
         from backend.app.core.config import settings as core

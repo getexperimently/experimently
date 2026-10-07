@@ -15,13 +15,6 @@ import httpcore
 import pytest
 
 
-@pytest.fixture(autouse=True)
-def mock_logging_handler():
-    """Override the unit tree's autouse fixture, which swaps ``logging.getLogger``
-    for a mock: these tests assert on real log records (``caplog``)."""
-    yield None
-
-
 class FakeClock:
     """A monotonic clock that moves only when told to."""
 
