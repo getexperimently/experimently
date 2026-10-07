@@ -181,8 +181,8 @@ class = "device"
 reason = "needs a React Native toolchain and a simulator, emulator or device; the SDK live contract (tests/sdk-contract/live/run_live_contract.py) runs the SDK against a live API in the PR QA Gate"
 
 [pages."mcp-server.md"]
-class = "external:mcp-client"
-reason = "its flow is an AI assistant (Claude, Cursor, Copilot) calling the server, which needs a third-party MCP client"
+class = "exec"
+reason = "its manifest and AI endpoint steps run on a stack in Doc Examples; the platform serves no MCP server, and the page says so"
 
 [pages."sdk/openfeature.md"]
 class = "reference"
@@ -300,8 +300,8 @@ class = "reference"
 reason = "an operator runbook for compose, Kubernetes and AWS; its shell blocks are not yet enrolled in Doc Examples"
 
 [pages."self-hosting/releases.md"]
-class = "external:ghcr"
-reason = "verifying a release pulls the published images and their signatures from ghcr.io"
+class = "exec"
+reason = "its verification steps run in Doc Examples: cosign checks the newest final release's signature and SBOM on ghcr.io with no login, and its labels are read from the registry"
 
 [pages."self-hosting/monitoring.md"]
 class = "aws"

@@ -12,8 +12,8 @@
 # scripts/doc_examples.py), and each page's residual counts can only fall.
 
 [meta]
-documents = 37
-exec = 197
+documents = 39
+exec = 214
 universe = [
     ".github/pull_request_template.md",
     ".github/qa-templates/README.md",
@@ -469,7 +469,6 @@ reason = "run on a kind cluster by the chart-kind workflow (scripts/chart_kind.s
 "docs/integrations/aws.md" = { comments = 0, unlabelled = 0, syntax = 0 }
 "docs/integrations/github.md" = { comments = 0, unlabelled = 4, syntax = 0 }
 "docs/integrations/salesforce.md" = { comments = 0, unlabelled = 1, syntax = 0 }
-"docs/mcp-server.md" = { comments = 0, unlabelled = 0, syntax = 0 }
 "docs/monitoring/dashboard-reference.md" = { comments = 0, unlabelled = 0, syntax = 0 }
 "docs/monitoring/index.md" = { comments = 0, unlabelled = 1, syntax = 0 }
 "docs/monitoring/monitoring-guide.md" = { comments = 0, unlabelled = 1, syntax = 0 }
@@ -495,7 +494,6 @@ reason = "run on a kind cluster by the chart-kind workflow (scripts/chart_kind.s
 "docs/self-hosting/cdk.md" = { comments = 0, unlabelled = 1, syntax = 3 }
 "docs/self-hosting/migrations.md" = { comments = 0, unlabelled = 4, syntax = 1 }
 "docs/self-hosting/monitoring.md" = { comments = 0, unlabelled = 0, syntax = 0 }
-"docs/self-hosting/releases.md" = { comments = 0, unlabelled = 1, syntax = 0 }
 "frontend/README.md" = { comments = 0, unlabelled = 1, syntax = 0 }
 "sdk/android/README.md" = { comments = 0, unlabelled = 0, syntax = 0 }
 "sdk/dotnet/README.md" = { comments = 0, unlabelled = 2, syntax = 0 }
@@ -527,3 +525,20 @@ environment = "stack"
 exec = 10
 skip = 0
 expects = 11
+
+# The published release verifies with no account: cosign (installed by the
+# examples job) against the newest final release on ghcr.io, and the labels
+# read from the registry. Its last block asks the page's own stack.
+[[document]]
+path = "docs/self-hosting/releases.md"
+environment = "stack"
+exec = 5
+skip = 0
+expects = 5
+
+[[document]]
+path = "docs/mcp-server.md"
+environment = "stack"
+exec = 12
+skip = 0
+expects = 33
