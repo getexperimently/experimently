@@ -18,6 +18,7 @@ except ImportError:
         pass
 
 
+from backend.app.core.query_redaction import redact_query_params
 from backend.app.utils.aws_client import AWSClient
 
 logger = logging.getLogger(__name__)
@@ -137,7 +138,9 @@ class ErrorMiddleware(BaseHTTPMiddleware):
                 {
                     "client_host": request.client.host,
                     "headers": self._mask_headers(dict(request.headers)),
-                    "query_params": dict(request.query_params),
+                    "query_params": redact_query_params(
+                        request.url.path, request.query_params
+                    ),
                 }
             )
         except Exception:
