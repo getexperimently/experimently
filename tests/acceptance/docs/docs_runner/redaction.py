@@ -27,19 +27,28 @@ What keeps them out, in the order it acts:
    step that types a secret, for a ``keep`` step, or for the step right before
    one (the step whose screen shows what the keep reads); the loader refuses a
    journey that says otherwise. Any other screenshot masks every element whose
-   text holds a kept value. A journey with a secret is never recorded.
+   text holds a kept value. A journey with a secret is never recorded whole
+   (``video``); its walkthrough (``recording``) is recorded only over steps
+   that cannot draw one (the loader's rules), and ``on_screen`` checks the page
+   before the segment and after each of its steps: a value drawn anywhere but
+   as a password field's dots fails the step and drops the recording.
 3. The scan. At the end of the run ``clear`` reads every file of the run
    directory, byte by byte, for each value in the forms ``_needles`` lists. A
    file holding one is removed, and so are the screenshot beside it and the
-   recording of its journey; the journeys it belongs to are reported FAIL in
-   ``verdicts.json``, and the run fails (``conftest.py``). ``SCAN_RECORD`` is
-   written last, naming only counts and paths. ``docs-journeys.yml`` uploads
-   the run directory only when that record exists and names no removed file.
+   recordings of its journey (its video, and its walkthrough under
+   ``recordings/``: ``owners`` says whose each is); the journeys it belongs to
+   are reported FAIL in ``verdicts.json``, and the run fails
+   (``conftest.py``). ``SCAN_RECORD`` is written last, naming only counts and
+   paths. ``docs-journeys.yml`` uploads the run directory only when that record
+   exists and names no removed file.
 
 What the scan does not see: a value drawn in a screenshot or a video (pixels,
 not bytes; rule 2 is what keeps screens clean), and a value written encoded
 (base64, hex, URL-encoded), split across lines or fields, or cut short. Those
-are kept out by rule 1, which writes no value at all, not by the scan.
+are kept out by rule 1, which writes no value at all, not by the scan. A
+recording's caption bar draws only text the results log also holds (each
+step's heading, action, and, for a step off the screen, its observed line,
+all redacted), so the scan of ``results.jsonl`` reads what the captions drew.
 
 The demo accounts' password is not one of these: the quick start prints it, and
 a step may type it where its screen is kept.
@@ -52,7 +61,7 @@ import re
 import secrets
 import string
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Sequence, Set, Tuple
+from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Set, Tuple
 
 REDACTED = "(redacted)"
 #: Under these keys, at any depth, an api step's value is written only if expected.
@@ -286,12 +295,43 @@ def scan(run_dir: Path, values: Iterable[str]) -> Tuple[int, List[str]]:
     return read, holding
 
 
-def _journey_of(name: str) -> Optional[str]:
-    """The journey a run-directory file belongs to, or None for a shared one."""
+#: The directory of the launch walkthroughs (``recordings.toml``) in a run.
+RECORDINGS = "recordings"
+
+
+def on_screen(
+    text: str, fields: Sequence[Tuple[str, str]], values: Iterable[str]
+) -> Optional[str]:
+    """Where a page draws one of *values*, or None.
+
+    *text* is the page's rendered text, *fields* each input's and text area's
+    (type, value). A value typed into a ``password`` field is drawn as dots;
+    in any other field, or in the text, it is drawn as it is. The answer names
+    the place, never the value.
+    """
+    flat = _SPACE.sub(" ", text)
+    for value in values:
+        if not value:
+            continue
+        if value in text or _SPACE.sub(" ", value.strip()) in flat:
+            return "the page's text"
+        for kind, typed in fields:
+            if value in typed and kind != "password":
+                return f"a field of type {kind or 'text'}"
+    return None
+
+
+def _journey_of(name: str, owners: Optional[Mapping[str, str]] = None) -> Optional[str]:
+    """The journey a run-directory file belongs to, or None for a shared one.
+
+    A walkthrough under ``recordings/`` is the journey *owners* names for it.
+    """
     parts = name.split("/")
+    if owners and name in owners:
+        return owners[name]
     if len(parts) == 2 and parts[0] == "videos" and parts[1].endswith(".webm"):
         return parts[1][: -len(".webm")]
-    if len(parts) > 1 and parts[0] not in ("videos", "stacks"):
+    if len(parts) > 1 and parts[0] not in ("videos", "stacks", RECORDINGS):
         return parts[0]
     for suffix in (".md", ".html"):
         if len(parts) == 1 and name.endswith(suffix) and name != "summary.md":
@@ -299,12 +339,16 @@ def _journey_of(name: str) -> Optional[str]:
     return None
 
 
-def journeys_of(removed: Sequence[str], journeys: Iterable[str]) -> Set[str]:
+def journeys_of(
+    removed: Sequence[str],
+    journeys: Iterable[str],
+    owners: Optional[Mapping[str, str]] = None,
+) -> Set[str]:
     """The journeys whose files these are; every journey for a shared file."""
     known = set(journeys)
     found: Set[str] = set()
     for name in removed:
-        journey = _journey_of(name)
+        journey = _journey_of(name, owners)
         if journey in known:
             found.add(journey)
         else:
@@ -312,35 +356,51 @@ def journeys_of(removed: Sequence[str], journeys: Iterable[str]) -> Set[str]:
     return found
 
 
-def files_of(removed: Sequence[str], journey: str) -> Tuple[str, ...]:
+def files_of(
+    removed: Sequence[str], journey: str, owners: Optional[Mapping[str, str]] = None
+) -> Tuple[str, ...]:
     """The removed files that are *journey*'s own, or shared by every journey."""
-    return tuple(name for name in removed if _journey_of(name) in (journey, None))
+    return tuple(
+        name for name in removed if _journey_of(name, owners) in (journey, None)
+    )
 
 
-def _screens_of(run_dir: Path, name: str) -> List[Path]:
-    """The screenshot beside a removed file, and its journey's recording (or all)."""
+def _screens_of(
+    run_dir: Path, name: str, owners: Optional[Mapping[str, str]] = None
+) -> List[Path]:
+    """The screenshot beside a removed file, and its journey's recordings (or all)."""
     found: List[Path] = []
     for suffix in TEXT_SUFFIXES:
         if name.endswith(suffix):
             found.append(run_dir / (name[: -len(suffix)] + ".png"))
             break
-    journey = _journey_of(name)
+    journey = _journey_of(name, owners)
     if journey is not None:
         found.append(run_dir / "videos" / f"{journey}.webm")
+        found.extend(
+            run_dir / file
+            for file, owner in sorted((owners or {}).items())
+            if owner == journey
+        )
     else:
         found.extend(sorted((run_dir / "videos").glob("*.webm")))
+        found.extend(sorted((run_dir / RECORDINGS).glob("*.webm")))
     return found
 
 
 def clear(
-    run_dir: Path, values: Iterable[str], earlier: Optional[Dict[str, Any]] = None
+    run_dir: Path,
+    values: Iterable[str],
+    earlier: Optional[Dict[str, Any]] = None,
+    owners: Optional[Mapping[str, str]] = None,
 ) -> Dict[str, object]:
     """Remove every file holding one of *values*, with its screens; write ``SCAN_RECORD``.
 
     The record names how many files were read, how many values were looked
     for, which files held one (``removed``) and which screenshots and
     recordings went with them (``screens_removed``), with those of an
-    *earlier* pass's record; never a value.
+    *earlier* pass's record; never a value. *owners* maps each walkthrough
+    under ``recordings/`` to the journey that recorded it.
     """
     earlier = earlier or {}
     kept = list(values)
@@ -352,7 +412,7 @@ def clear(
     for name in holding:
         (run_dir / name).unlink(missing_ok=True)
     for name in holding:
-        for screen in _screens_of(run_dir, name):
+        for screen in _screens_of(run_dir, name, owners):
             if screen.is_file():
                 screen.unlink()
                 screens.add(screen.relative_to(run_dir).as_posix())

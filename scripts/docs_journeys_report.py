@@ -1,8 +1,9 @@
 # SPDX-FileCopyrightText: 2026 Experimently contributors
 # SPDX-License-Identifier: Apache-2.0
-"""What the docs journeys' runs add up to: one rolling issue per failing guide.
+"""What the docs journeys' runs add up to: one rolling issue per failing guide,
+and the launch walkthroughs a run keeps.
 
-Two commands, both reading with ``gh`` only:
+Two commands read with ``gh`` only, and one reads the run directory:
 
 ``deployed``
     Run by ``docs-journeys.yml`` before the journeys: which commit the
@@ -44,6 +45,21 @@ Only a scheduled run on ``main`` posts. Any other run (a dispatch, a run on
 another branch) decides the same way, as if it were the next scheduled run, and
 prints what it would post: a dry run.
 
+``recordings``
+    Run by ``docs-journeys.yml`` after the journeys, in every run that records
+    (a scheduled run, any run on ``main`` or a release tag, and a dispatch with
+    ``record_video``): the presence check that makes T138's "recordings R1-R8
+    in that run's artifacts" mechanical. It reads
+    ``tests/acceptance/docs/recordings.toml`` and the run directory's
+    ``recordings/``, and fails unless every walkthrough R1-R8 has a table that
+    is not ``pending``, and each such table's ``recordings/<name>.webm`` is
+    there, not empty, a WebM of 1280x720 whose header gives a length above 0
+    and at most its ``max_seconds``. A ``pending`` table's file must not be
+    there (the change that records it removes the ``pending`` line), and
+    every file under ``recordings/`` must be a table's. It prints each file's
+    name, size and length, and the problems as annotations: names and numbers
+    only.
+
 Text is rendered only from ``docs-journey-issue.tmpl`` (the issue, and the
 comment when the failing step changes; its body is the guide's
 ``docs-guide-fail.tmpl`` header) and ``docs-guide-pass.tmpl`` or
@@ -58,9 +74,11 @@ import argparse
 import json
 import os
 import re
+import struct
 import subprocess
 import sys
 import tempfile
+import tomllib
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Mapping, NamedTuple, Optional, Sequence
 
@@ -68,6 +86,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import qa_render  # a sibling script, not a package
 
+REPO_ROOT = Path(__file__).resolve().parents[1]
+#: The launch walkthroughs: their names, guides, lengths (QA plan UX D11.4).
+RECORDINGS_TOML = REPO_ROOT / "tests" / "acceptance" / "docs" / "recordings.toml"
+#: The walkthroughs T138's checklist asks every counting run for.
+WALKTHROUGHS = ("R1", "R2", "R3", "R4", "R5", "R6", "R7", "R8")
+#: A walkthrough's frame: the runner's viewport (``execute.VIEWPORT``).
+FRAME = (1280, 720)
 WORKFLOW = "docs-journeys.yml"
 BRANCH = "main"
 LABEL = "docs-journey-failure"
@@ -496,6 +521,207 @@ def report(args: argparse.Namespace, env: Mapping[str, str], gh: Gh = run_gh) ->
     return 0
 
 
+# ---------------------------------------------------------------------------
+# recordings: the presence check
+# ---------------------------------------------------------------------------
+class WebmError(ValueError):
+    """The bytes are not a WebM file this check can read."""
+
+
+_EBML = 0x1A45DFA3
+_DOCTYPE = 0x4282
+_SEGMENT = 0x18538067
+_INFO = 0x1549A966
+_TIMESTAMP_SCALE = 0x2AD7B1
+_DURATION = 0x4489
+_TRACKS = 0x1654AE6B
+_TRACK_ENTRY = 0xAE
+_VIDEO = 0xE0
+_PIXEL_WIDTH = 0xB0
+_PIXEL_HEIGHT = 0xBA
+_CLUSTER = 0x1F43B675
+
+
+def _vint(data: bytes, pos: int, marker: bool) -> tuple:
+    """(value, length, unknown) of the EBML variable-length integer at *pos*.
+
+    An element ID keeps its length marker (*marker*); a size drops it, and a
+    size of all ones is "unknown" (the element runs to its parent's end).
+    """
+    if pos >= len(data):
+        raise WebmError("the file is cut short")
+    first = data[pos]
+    if first == 0:
+        raise WebmError("an EBML number longer than 8 bytes")
+    length, mask = 1, 0x80
+    while not first & mask:
+        mask >>= 1
+        length += 1
+    if pos + length > len(data):
+        raise WebmError("the file is cut short")
+    value = first if marker else first & (mask - 1)
+    for byte in data[pos + 1 : pos + length]:
+        value = (value << 8) | byte
+    unknown = not marker and value == (1 << (7 * length)) - 1
+    return value, length, unknown
+
+
+def _children(data: bytes, start: int, end: int):
+    """Each (id, data start, data end) element between *start* and *end*."""
+    pos = start
+    while pos < end:
+        element, length, _ = _vint(data, pos, True)
+        pos += length
+        size, length, unknown = _vint(data, pos, False)
+        pos += length
+        stop = end if unknown else pos + size
+        if stop > len(data):
+            raise WebmError("the file is cut short")
+        yield element, pos, stop
+        pos = stop
+
+
+def _number(data: bytes, start: int, end: int) -> int:
+    return int.from_bytes(data[start:end], "big")
+
+
+def webm_facts(data: bytes) -> tuple:
+    """(seconds, width, height) from a WebM file's header; WebmError if it has none.
+
+    The length is the Segment Info's Duration times its timestamp scale (in
+    nanoseconds, 1 ms when absent); the frame is the first video track's.
+    """
+    if not data.startswith(_EBML.to_bytes(4, "big")):
+        raise WebmError("no EBML header")
+    elements = _children(data, 0, len(data))
+    first = next(elements, None)
+    if first is None or first[0] != _EBML:
+        raise WebmError("no EBML header")
+    doc_type = b""
+    for element, start, end in _children(data, first[1], first[2]):
+        if element == _DOCTYPE:
+            doc_type = data[start:end].rstrip(b"\0")
+    if doc_type != b"webm":
+        raise WebmError("not a WebM document")
+    segment = next((e for e in elements if e[0] == _SEGMENT), None)
+    if segment is None:
+        raise WebmError("no segment")
+    scale, duration, frame = 1_000_000, None, None
+    for element, start, end in _children(data, segment[1], segment[2]):
+        if element == _INFO:
+            for child, c_start, c_end in _children(data, start, end):
+                if child == _TIMESTAMP_SCALE:
+                    scale = _number(data, c_start, c_end)
+                elif child == _DURATION:
+                    width = c_end - c_start
+                    if width not in (4, 8):
+                        raise WebmError("a duration that is not a float")
+                    (duration,) = struct.unpack(
+                        ">f" if width == 4 else ">d", data[c_start:c_end]
+                    )
+        elif element == _TRACKS and frame is None:
+            for child, c_start, c_end in _children(data, start, end):
+                if child != _TRACK_ENTRY or frame is not None:
+                    continue
+                for part, p_start, p_end in _children(data, c_start, c_end):
+                    if part != _VIDEO:
+                        continue
+                    sizes = {
+                        kind: _number(data, k_start, k_end)
+                        for kind, k_start, k_end in _children(data, p_start, p_end)
+                        if kind in (_PIXEL_WIDTH, _PIXEL_HEIGHT)
+                    }
+                    if len(sizes) == 2:
+                        frame = (sizes[_PIXEL_WIDTH], sizes[_PIXEL_HEIGHT])
+        elif element == _CLUSTER:
+            break
+        if duration is not None and frame is not None:
+            break
+    if duration is None:
+        raise WebmError("no duration in its header")
+    if frame is None:
+        raise WebmError("no video track")
+    return duration * scale / 1e9, frame[0], frame[1]
+
+
+def recording_problems(
+    registry: Mapping[str, Mapping[str, Any]], run_dir: Path
+) -> tuple:
+    """(lines to print, problems) for the run directory's walkthroughs."""
+    lines: List[str] = []
+    problems: List[str] = []
+    for number in WALKTHROUGHS:
+        tables = [e for e in registry.values() if e.get("walkthrough") == number]
+        if not [table for table in tables if not table.get("pending")]:
+            problems.append(
+                f"walkthrough {number} has no recording in recordings.toml that is"
+                " not pending"
+            )
+    folder = run_dir / "recordings"
+    for name, entry in registry.items():
+        path = folder / f"{name}.webm"
+        if entry.get("pending"):
+            if path.exists():
+                problems.append(
+                    f"{name} is recorded, but recordings.toml marks it pending;"
+                    " remove its pending line"
+                )
+            else:
+                lines.append(f"{name}: pending")
+            continue
+        if not path.is_file():
+            problems.append(f"{name} is missing from recordings/")
+            continue
+        data = path.read_bytes()
+        if not data:
+            problems.append(f"{name} is empty")
+            continue
+        try:
+            seconds, width, height = webm_facts(data)
+        except WebmError as error:
+            problems.append(
+                f"{name} is not a WebM recording this check can read: {error}"
+            )
+            continue
+        limit = entry.get("max_seconds")
+        lines.append(
+            f"{name}: {len(data)} bytes, {seconds:.1f} s of at most {limit} s,"
+            f" {width}x{height}"
+        )
+        if (width, height) != FRAME:
+            problems.append(f"{name} is {width}x{height}, not {FRAME[0]}x{FRAME[1]}")
+        if not seconds > 0:
+            problems.append(f"{name} has no length")
+        elif not isinstance(limit, (int, float)) or seconds > limit:
+            problems.append(f"{name} is {seconds:.1f} s, longer than {limit} s")
+    if folder.is_dir():
+        for path in sorted(folder.iterdir()):
+            if path.suffix != ".webm" or path.stem not in registry:
+                problems.append(
+                    f"recordings/{path.name} is not a walkthrough of recordings.toml"
+                )
+    return lines, problems
+
+
+def recordings_command(args: argparse.Namespace) -> int:
+    try:
+        registry = tomllib.loads(args.registry.read_text(encoding="utf-8"))
+    except (OSError, tomllib.TOMLDecodeError) as error:
+        print(f"::error title=Docs journeys recordings::{args.registry.name}: {error}")
+        return 1
+    lines, problems = recording_problems(registry, args.run_dir)
+    for line in lines:
+        print(line)
+    required = sum(1 for entry in registry.values() if not entry.get("pending"))
+    print(
+        f"walkthroughs: {required} required, {len(registry) - required} pending,"
+        f" {len(problems)} problem(s)"
+    )
+    for problem in problems:
+        print(f"::error title=Docs journeys recordings::{problem}")
+    return 1 if problems else 0
+
+
 def main(
     argv: Optional[List[str]] = None,
     env: Optional[Mapping[str, str]] = None,
@@ -512,7 +738,12 @@ def main(
     rep.add_argument("--out", required=True, type=Path)
     dep = commands.add_parser("deployed")
     dep.add_argument("--out", required=True, type=Path)
+    rec = commands.add_parser("recordings")
+    rec.add_argument("--run-dir", required=True, type=Path)
+    rec.add_argument("--registry", type=Path, default=RECORDINGS_TOML)
     args = parser.parse_args(argv)
+    if args.command == "recordings":
+        return recordings_command(args)
     try:
         if args.command == "deployed":
             return deployed_command(args, env, gh)

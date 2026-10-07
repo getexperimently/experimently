@@ -1240,7 +1240,7 @@ def _runner_copy(tmp_path: Path, test_body: str) -> Path:
     root = tmp_path / "repo"
     here = root / "tests" / "acceptance" / "docs"
     here.mkdir(parents=True)
-    for name in ("conftest.py", "pytest.ini", "inventory.toml"):
+    for name in ("conftest.py", "pytest.ini", "inventory.toml", "recordings.toml"):
         shutil.copy(RUNNER_ROOT / name, here / name)
     shutil.copytree(
         RUNNER_ROOT / "docs_runner",

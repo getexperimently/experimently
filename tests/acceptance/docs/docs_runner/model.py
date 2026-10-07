@@ -95,8 +95,28 @@ reader does:
 
 What a run makes up or keeps is never written to the run directory
 (``redaction.py``): a fill that types one takes ``snapshot: false``, a journey
-that has one is not recorded (``video: false``), and every text the runner
+that has one is not recorded whole (``video: false``), and every text the runner
 writes has them taken out.
+
+A journey may record one launch walkthrough (``recordings.toml``)::
+
+    recording:
+      name: R8-onboarding        # a table of recordings.toml, from this guide
+      start: demo-admin-log-out  # the first step recorded; by default the first
+      end: viewer-new-accepted   # the last step recorded; by default the last
+
+The run keeps ``recordings/<name>.webm``: the journey's browser from ``start``
+to ``end`` at 1280x720 and real speed, a title card first and a caption bar
+naming each step's section, action and, for a step off the screen, its result.
+Unlike ``video: true`` (which it replaces: a journey has one or the other), it
+may be on a journey with secrets, as long as nothing in the segment can draw
+one: the loader refuses a segment holding a ``keep`` step or the screen step
+right before one, a segment starting right after one, and a ``fill`` of a
+secret into a field whose label does not say "password" (only a password
+field draws dots); an api step's key never reaches the browser. And the runner checks the page
+before the segment starts and after each of its steps: a value the run keeps,
+in the page's text or in any field but a password field, fails the step and
+drops the recording (``redaction.on_screen``).
 
 What an API answers can be kept for later steps and checked against an oracle
 (``values.py``, ``traffic.py``, ``oracles.py``):
@@ -131,7 +151,7 @@ from __future__ import annotations
 
 import datetime
 import re
-from typing import Annotated, Any, Dict, List, Literal, Optional, Union
+from typing import Annotated, Any, Dict, List, Literal, Optional, Sequence, Tuple, Union
 
 import yaml
 from pydantic import (
@@ -629,6 +649,18 @@ class Step(_Strict):
         return None
 
 
+#: A launch walkthrough's name: its number, then a slug (``recordings.toml``).
+RECORDING_PATTERN = r"^R[1-9][0-9]*-[a-z0-9]+(?:-[a-z0-9]+)*$"
+
+
+class Recording(_Strict):
+    """The launch walkthrough this journey records, and which of its steps."""
+
+    name: StrictStr = Field(pattern=RECORDING_PATTERN)
+    start: Optional[StrictStr] = Field(default=None, pattern=SLUG_PATTERN)
+    end: Optional[StrictStr] = Field(default=None, pattern=SLUG_PATTERN)
+
+
 class Journey(_Strict):
     guide: StrictStr = Field(pattern=r"^[^/\s][^\s]*\.md$")
     stack: Stack
@@ -639,6 +671,7 @@ class Journey(_Strict):
     passwords: List[Annotated[StrictStr, Field(pattern=SLUG_PATTERN)]] = Field(
         default_factory=list
     )
+    recording: Optional[Recording] = None
     steps: List[Step] = Field(min_length=1)
 
     @model_validator(mode="after")
@@ -661,12 +694,48 @@ class Journey(_Strict):
             )
         return self
 
+    @model_validator(mode="after")
+    def _recording_names_steps(self) -> "Journey":
+        if self.recording is not None:
+            segment_of(self.steps, self.recording)
+        return self
+
+    @property
+    def recorded(self) -> Optional[Tuple[int, int]]:
+        """The first and last step index (from 0) of the recording, if any."""
+        if self.recording is None:
+            return None
+        return segment_of(self.steps, self.recording)
+
     @property
     def has_secrets(self) -> bool:
         """Made-up passwords, kept values, or an api step that reveals a credential."""
         return bool(self.passwords) or any(
             step.do.keep is not None or reveals_credential(step) for step in self.steps
         )
+
+
+def segment_of(steps: Sequence[Step], recording: Recording) -> Tuple[int, int]:
+    """The indices (from 0) of the recording's first and last step; ValueError
+    when ``start`` or ``end`` names no step, or ``end`` comes before ``start``."""
+    ids = [step.id for step in steps]
+    bounds = []
+    for what, name, default in (
+        ("start", recording.start, 0),
+        ("end", recording.end, len(ids) - 1),
+    ):
+        if name is None:
+            bounds.append(default)
+        elif name not in ids:
+            raise ValueError(f"recording.{what} {name!r} is not a step of the journey")
+        else:
+            bounds.append(ids.index(name))
+    if bounds[1] < bounds[0]:
+        raise ValueError(
+            f"recording.end {ids[bounds[1]]!r} comes before recording.start"
+            f" {ids[bounds[0]]!r}"
+        )
+    return bounds[0], bounds[1]
 
 
 #: Routes that answer with a credential: a sign-in's token, a new API key.

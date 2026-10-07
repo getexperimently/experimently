@@ -20,12 +20,24 @@
 # which no stack here runs, so the pull request that added this journey
 # corrected the sentence instead.
 #
+# Steps 4 and 5 also run here, through the API with the guide's own requests
+# (an API key named my-app; user-123 assigned with the guide's context, and its
+# cta_click conversion tracked with that key), between Start and View results,
+# so the results page the walkthrough ends on shows the conversion. The key is
+# saved as a secret and sent only as X-API-Key; it never reaches the browser.
+#
+# The launch walkthrough R1 (recordings.toml) records the whole journey; the
+# stack's start is not recorded, and its title card says how long it took.
+#
 # Expectations written on 2026-10-06 from the guide and the dashboard's source,
-# before the first run.
+# before the first run; the api-key, assign and track steps on 2026-10-07, from
+# the guide's requests and the api-key-first-assignment journey's answers.
 guide: getting-started/quick-start.md
 stack: compose-dev
 profile: core
-video: true
+video: false
+recording:
+  name: R1-quick-start
 written: 2026-10-06
 steps:
   - id: start-the-stack
@@ -249,6 +261,63 @@ steps:
           - button "Pause"
           - link "View results"
     fail: Start does not make the experiment active
+  - id: api-key
+    doc: step-4-create-an-api-key
+    do:
+      api:
+        method: POST
+        path: /api/v1/api-keys
+        as: admin
+        body:
+          name: my-app
+    expect:
+      status: 201
+      json:
+        name: my-app
+    save:
+      sdk-key:
+        path: key
+        secret: true
+    fail: the guide's request does not create an API key
+  - id: assign
+    doc: step-5-assign-users-and-track-events
+    do:
+      api:
+        method: POST
+        path: /api/v1/tracking/assign
+        as: anonymous
+        key: sdk-key
+        body:
+          experiment_key: homepage_button_colour
+          user_id: user-123
+          context:
+            country: DE
+    expect:
+      status: 200
+      json:
+        experiment_key: homepage_button_colour
+        user_id: user-123
+        assigned: true
+    fail: the guide's request does not assign user-123 to the experiment just started
+  - id: track
+    doc: step-5-assign-users-and-track-events
+    do:
+      api:
+        method: POST
+        path: /api/v1/tracking/track
+        as: anonymous
+        key: sdk-key
+        body:
+          event_type: conversion
+          event_name: cta_click
+          user_id: user-123
+          experiment_key: homepage_button_colour
+          value: 1
+    expect:
+      status: 200
+      json:
+        event_name: cta_click
+    fail: the guide's request does not store user-123's cta_click conversion
   - id: view-results
     doc: step-6-read-the-results
     do:

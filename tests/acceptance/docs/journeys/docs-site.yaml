@@ -9,10 +9,20 @@
 # that page must be among the first three results (model.SEARCH_TOP). Measured
 # on 2026-10-06 against the site deployed from v0.25.0, each was result 1 but
 # "quick start" (result 2, after the LLM evaluation quick start).
+#
+# The launch walkthrough R7 (recordings.toml) records from the home page to the
+# API page: the searches, then one SDK page and one API page, each answering
+# with its heading. The two crawls come after it, unrecorded: they visit every
+# page of the nav and every link in under a minute, too fast to watch, and are
+# what holds the whole site to "no 404". The SDK and API page steps were added
+# on 2026-10-07, measured against the site deployed from v0.26.1.
 guide: README.md
 stack: docs-published
 profile: core
-video: true
+video: false
+recording:
+  name: R7-docs-site
+  end: api-page
 written: 2026-10-06
 steps:
   - id: home
@@ -27,16 +37,6 @@ steps:
             - heading "Experimently Documentation" [level=1]
             - heading "Start Here" [level=2]
     fail: the site does not answer, or its home page is not the documentation's home page
-  - id: nav-pages
-    doc: experimently-documentation
-    do:
-      crawl: nav
-    fail: a page of the nav answers anything but 2xx, leaves the site, or shows a heading its source does not have
-  - id: links
-    doc: experimently-documentation
-    do:
-      crawl: links
-    fail: a link to the site, on a nav page or written absolute in its source, answers anything but 2xx or redirects out of the site
   - id: search-quick-start
     doc: getting-started
     do:
@@ -65,3 +65,35 @@ steps:
     expect:
       found: /getting-started/docker-compose-file/
     fail: the Docker Compose stack page is not among the first three results for "docker compose"
+  - id: sdk-page
+    doc: sdks
+    do:
+      goto: /sdk/javascript/
+    expect:
+      status: 200
+      aria: |
+        - main:
+          - article:
+            - heading "JavaScript SDK" [level=1]
+    fail: the JavaScript SDK page does not answer, or does not show its heading
+  - id: api-page
+    doc: api-reference
+    do:
+      goto: /api/endpoints/
+    expect:
+      status: 200
+      aria: |
+        - main:
+          - article:
+            - heading "API Endpoints Documentation" [level=1]
+    fail: the experiments API reference does not answer, or does not show its heading
+  - id: nav-pages
+    doc: experimently-documentation
+    do:
+      crawl: nav
+    fail: a page of the nav answers anything but 2xx, leaves the site, or shows a heading its source does not have
+  - id: links
+    doc: experimently-documentation
+    do:
+      crawl: links
+    fail: a link to the site, on a nav page or written absolute in its source, answers anything but 2xx or redirects out of the site
