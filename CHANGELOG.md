@@ -10,6 +10,26 @@ longer applies and release-please can generate this file directly. Until it
 does, entries below 0.2.2 are hand-written and the links in them are the
 reason why.
 
+## [0.26.4](https://github.com/getexperimently/experimently/compare/v0.26.3...v0.26.4) (2026-10-07)
+
+
+### Bug Fixes
+
+* **dashboard:** a superuser's header fits on one line at 1280 px ([#1073](https://github.com/getexperimently/experimently/issues/1073)) ([979f3c8](https://github.com/getexperimently/experimently/commit/979f3c8b402ccdc37444f43ec0224f4b7dc83809))
+* four small corrections (flag list 403 path, sample-size meter text, split-URL docs, a stale follow-up) ([#1062](https://github.com/getexperimently/experimently/issues/1062)) ([863c097](https://github.com/getexperimently/experimently/commit/863c097174c66b5f048281b7dae7eb69187cd76c))
+* **rollouts:** stage_order is bounded, and an out-of-range value answers 422 ([#1081](https://github.com/getexperimently/experimently/issues/1081)) ([969493f](https://github.com/getexperimently/experimently/commit/969493f4795adc07c544e8d6c60faa59eb6a048a))
+* **safety:** the automatic rollback reason rounds the measured value ([#1071](https://github.com/getexperimently/experimently/issues/1071)) ([c03e40e](https://github.com/getexperimently/experimently/commit/c03e40e07306435f8eeaf30a9b3d3593dc7eb4a3))
+
+
+### Dependencies
+
+* take the backend patch and minor updates except SQLAlchemy and FastAPI, which wait until after launch ([#1063](https://github.com/getexperimently/experimently/issues/1063)) ([126d696](https://github.com/getexperimently/experimently/commit/126d69666f3871ddbbf13c1225b8126027d41d6f))
+
+
+### Documentation
+
+* the inventory maps every AWS page to the step that exercises it, and checks workflow pages against their paths ([#1082](https://github.com/getexperimently/experimently/issues/1082)) ([429c4eb](https://github.com/getexperimently/experimently/commit/429c4ebd9f6097420e6aa399cc970a2c42a93d5b))
+
 ## [0.26.3](https://github.com/getexperimently/experimently/compare/v0.26.2...v0.26.3) (2026-10-07)
 
 
