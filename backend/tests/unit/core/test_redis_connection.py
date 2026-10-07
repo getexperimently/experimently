@@ -549,6 +549,14 @@ def _invalidate_results_cache() -> None:
 #: Sites whose client makes one connect attempt, with a driver that runs the
 #: real client. A new site fails ``test_every_site_has_a_retry_decision``
 #: until it is added here or to ``RETRY_DECIDED_ELSEWHERE``.
+class _Attempts(list):
+    """Each connect attempt's port; ``timeouts`` holds its (connect, socket) timeouts."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.timeouts: list[tuple[object, object]] = []
+
+
 SINGLE_ATTEMPT: dict[tuple[str, str], Callable[[], None]] = {
     ("backend/app/core/health.py", "check_redis"): _ping_health,
     ("backend/app/api/v1/endpoints/results.py", "_get_cache_service"): (
@@ -588,11 +596,12 @@ def connects(monkeypatch) -> list:
             "REDIS_SSL": False,
         },
     )
-    attempts: list = []
+    attempts = _Attempts()
     real_connect = Connection._connect
 
     def counting_connect(conn):
         attempts.append(conn.port)
+        attempts.timeouts.append((conn.socket_connect_timeout, conn.socket_timeout))
         return real_connect(conn)
 
     monkeypatch.setattr(Connection, "_connect", counting_connect)
@@ -617,4 +626,20 @@ def test_the_client_tries_to_connect_once(site, connects):
     assert connects == [1], (
         f"{site[0]}:{site[1]} made {len(connects)} connect attempts against a "
         "refused Redis, not 1; build its client with retry=Retry(NoBackoff(), 0)"
+    )
+
+
+@pytest.mark.unit
+@pytest.mark.regression
+@pytest.mark.parametrize("site", sorted(SINGLE_ATTEMPT), ids=lambda s: f"{s[0]}:{s[1]}")
+def test_the_client_gives_up_on_an_unreachable_redis_after_a_second(site, connects):
+    """A refused port fails at once, so the count above cannot see the timeouts.
+
+    They are what bounds an unreachable Redis (a dropped packet, not a refusal):
+    without them a connect waits for the operating system's own timeout.
+    """
+    SINGLE_ATTEMPT[site]()
+    assert connects.timeouts == [(1, 1)], (
+        f"{site[0]}:{site[1]} connected with (connect, socket) timeouts "
+        f"{connects.timeouts}, not [(1, 1)]; an unreachable Redis would hold it"
     )

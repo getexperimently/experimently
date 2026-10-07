@@ -383,13 +383,15 @@ The API is designed to keep serving without Redis. What is pinned by tests:
   (`TestReadinessRunsOffTheEventLoop` in `backend/tests/unit/core/test_health_endpoints.py`).
 - **One connect attempt.** The readiness ping and the results cache try to connect once, with
   1 s connect and socket timeouts, where redis-py's default is ten retries with backoff
-  (`test_the_client_tries_to_connect_once` in
+  (`test_the_client_tries_to_connect_once` and
+  `test_the_client_gives_up_on_an_unreachable_redis_after_a_second` in
   `backend/tests/unit/core/test_redis_connection.py`).
 
 How much a Redis outage adds to a readiness probe, measured on a laptop against one API process
 (not on Fargate): about 10 ms when Redis refuses connections, and about 1 s, the connect
 timeout, when it is unreachable (a connect that never completes). Both are inside the 5 s
-timeout of the ECS, ALB and Helm probes. With the default retries the same probe took 3-4 s
+timeout of the ECS, ALB and Helm probes. A readiness probe also waits for a free worker
+thread, so under a heavy load of slow requests it can take longer than that. With the default retries the same probe took 3-4 s
 and 15-18 s, and every other request on the process waited with it (#810). Not measured: DNS
 resolution of `REDIS_HOST`, which neither timeout covers, and the TLS handshake used when
 `REDIS_SSL=true`.
