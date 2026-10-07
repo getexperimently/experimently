@@ -90,6 +90,13 @@ def describe_action(step: Step) -> str:
             f"send {users} users through the tracking API with the API key"
             f" {traffic.key} ({split})"
         )
+    if do.sdk is not None:
+        plan = do.sdk
+        return (
+            f"install the package as #{plan.install} says, in a fresh project, and"
+            f" run the {plan.language} block of #{plan.snippet} for {plan.user}"
+            f" with the API key {plan.key}"
+        )
     if do.search is not None:
         return f'search the site for "{do.search}"'
     if do.crawl == "nav":
@@ -135,6 +142,15 @@ def describe_expect(step: Step) -> str:
 
     if step.do.traffic is not None:
         return TRAFFIC_EXPECTS
+    if step.do.sdk is not None:
+        plan = step.do.sdk
+        return (
+            "the install exits 0 and installs the version the page names from the"
+            " public registry; the block exits 0, prints no kept value, and its"
+            f" answers are the variant the documented assignment hash gives"
+            f" {plan.user} and the flag answer the documented rollout hash gives at"
+            f" {plan.rollout}%"
+        )
     if step.do.evaluations is not None:
         plan = step.do.evaluations
         if plan.reason == "rollout":

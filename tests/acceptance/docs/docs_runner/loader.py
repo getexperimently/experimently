@@ -73,7 +73,16 @@ YAML, or not a mapping, stops at that. Refused, besides what ``model`` refuses:
 * ``poll`` on a step that is not an ``api`` step, or on one whose method is not
   ``GET`` (sending a change again would repeat it). A poll is not a sleep: it
   waits for what the step expects, up to a bound (``waiting.py``), and the
-  sleep keys above are refused wherever they appear, ``wait`` included.
+  sleep keys above are refused wherever they appear, ``wait`` included;
+* an ``sdk`` step on any stack but compose-dev, or with an ``expect`` or a
+  ``snapshot`` setting (its check is the action); whose ``install`` section's
+  first block is not one ``npm install <package>@<version>`` or
+  ``pip install <package>==<version>``, or whose ``snippet`` section's first
+  block is not in its language (``sdk.py``); with a ``replace`` key that is not
+  a quoted string of that block, a stub the block does not call, or an answer
+  whose variable the block does not name; and a journey whose sdk steps give
+  every user the same answer for a flag (the oracle could not tell an SDK that
+  always answers on, or always off, from a right one).
 """
 
 from __future__ import annotations
@@ -100,7 +109,7 @@ import yaml
 from pydantic import ValidationError
 
 from docs_runner import guide as guides
-from docs_runner import registry, values
+from docs_runner import registry, sdk, traffic, values
 from docs_runner.model import (
     API_ANSWER_EXPECTS,
     API_EXPECTS,
@@ -352,6 +361,19 @@ def _expect_problems(label: str, step: Step, stack: Optional[str]) -> List[str]:
         if step.snapshot:
             found.append(f"{label}: ref: doc-examples has no screen to snapshot")
         return found
+    if kind == "sdk":
+        if stack is not None and stack != "compose-dev":
+            found.append(
+                f"{label}: an sdk step needs the compose stack's API; {stack} has none"
+            )
+        if given:
+            found.append(
+                f"{label}: sdk checks what the action says (the install, the block's"
+                " answers against the oracle); it has no expect"
+            )
+        if step.snapshot is not None:
+            found.append(f"{label}: an sdk step has no screen to snapshot")
+        return found
     if kind in ("traffic", "evaluations"):
         article = "an" if kind[0] in "aeiou" else "a"
         if stack is not None and stack != "compose-dev":
@@ -549,7 +571,66 @@ def _step_problems(
                 found.append(f"{label}: no oracle named {oracle!r}")
     if step.save is not None and step.do.kind != "api":
         found.append(f"{label}: save keeps values from an api step's answer only")
+    if step.do.sdk is not None and guide is not None:
+        found.extend(_sdk_problems(label, step.do.sdk, guide))
     return found
+
+
+def _sdk_problems(label: str, plan, guide: guides.Guide) -> List[str]:
+    """An sdk step against its page: the install command, the block, its names."""
+    found: List[str] = []
+    for what, anchor in (("install", plan.install), ("snippet", plan.snippet)):
+        if anchor not in guide.anchors:
+            found.append(f"{label}: sdk.{what}: the guide has no anchor #{anchor}")
+    if found:
+        return found
+    try:
+        sdk.install_command(guide.section(plan.install), plan.language)
+    except sdk.SdkError as error:
+        found.append(f"{label}: sdk.install #{plan.install}: {error}")
+    try:
+        block = sdk.snippet(guide.section(plan.snippet), plan.language)
+    except sdk.SdkError as error:
+        found.append(f"{label}: sdk.snippet #{plan.snippet}: {error}")
+        return found
+    for literal in plan.replace:
+        if not sdk.occurrences(block, literal):
+            found.append(
+                f"{label}: sdk.replace: {literal!r} is not a quoted string of the"
+                f" block under #{plan.snippet}; only the page's placeholders are"
+                " replaced"
+            )
+    for stub in plan.stubs:
+        if not re.search(rf"(?<![\w.]){re.escape(stub)}\(", block):
+            found.append(f"{label}: sdk.stubs: the block never calls {stub}()")
+    for _, expressions in plan.answers.items():
+        for expression in expressions:
+            root = expression.split(".", 1)[0]
+            if root != sdk.CALLED and not re.search(rf"\b{re.escape(root)}\b", block):
+                found.append(
+                    f"{label}: sdk.answers: {expression}: the block names no {root}"
+                )
+    return found
+
+
+def _sdk_journey_problems(steps: Sequence[Tuple[int, Step]]) -> List[str]:
+    """A flag the sdk steps evaluate must be on for one of their users and off for another."""
+    answers: Dict[str, Set[bool]] = {}
+    for _, step in steps:
+        plan = step.do.sdk
+        if plan is None:
+            continue
+        enabled, _ = traffic.expected_answer(
+            plan.user, plan.flag, "rollout", plan.rollout
+        )
+        answers.setdefault(plan.flag, set()).add(enabled)
+    return [
+        f"the sdk steps' users all get the same answer for {flag}"
+        f" ({'on' if True in seen else 'off'}); name one the documented rollout"
+        " hash gives the flag and one it does not, or a wrong answer can pass"
+        for flag, seen in answers.items()
+        if len(seen) < 2
+    ]
 
 
 def _uses(step: Step) -> List[Tuple[str, str]]:
@@ -576,6 +657,9 @@ def _uses(step: Step) -> List[Tuple[str, str]]:
         used.append(("key", do.traffic.key))
     if do.evaluations is not None:
         used.append(("key", do.evaluations.key))
+    if do.sdk is not None:
+        used.append(("experiment", do.sdk.experiment))
+        used.append(("key", do.sdk.key))
     return used
 
 
@@ -778,6 +862,7 @@ def semantic_problems(
     )
     if complete:
         found.extend(_value_problems(steps, passwords))
+        found.extend(_sdk_journey_problems(steps))
     if complete and steps:
         if all(step.do.kind == "ref" or step.not_run is not None for _, step in steps):
             found.append(
