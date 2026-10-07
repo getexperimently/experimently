@@ -5,11 +5,13 @@ Generates statistically realistic experimentation scenarios — not just valid
 shapes but data that behaves like the real world: baseline conversion rates,
 novelty effects, outliers, day-of-week patterns, and intentional edge cases.
 
-Usage (standalone dry-run):
-    python backend/tests/realistic/data_generator.py --scenario ab_test_lifecycle --dry-run
+Usage, from the repository root (standalone dry-run):
+    python -m backend.tests.realistic.data_generator --scenario ab_test_lifecycle --dry-run
 
-Usage (seed into running API):
-    python backend/tests/realistic/data_generator.py --scenario ab_test_lifecycle --api-url http://localhost:8000 --token <JWT>
+Usage (seed into running API; .claude/agents/data-generator.md shows how to get
+the token and the API key):
+    python -m backend.tests.realistic.data_generator --scenario ab_test_lifecycle
+        --api-url http://localhost:8000 --token <JWT> --api-key <API key>
 """
 
 from __future__ import annotations

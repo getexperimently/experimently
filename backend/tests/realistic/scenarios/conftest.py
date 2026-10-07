@@ -2,8 +2,9 @@
 Conftest for realistic scenario tests.
 
 Overrides the default python_files pattern so pytest collects scenario files
-that don't follow the test_*.py naming convention (e.g., ab_test_lifecycle.py,
-bayesian_analysis.py).
+that don't follow the test_*.py naming convention (e.g., bayesian_analysis.py,
+variance_reduction.py). They need no running platform, and the PR QA Gate's
+Unit Tests job runs them with its zero-skip check (scripts/check_junit_skips.py).
 """
 
 import pytest

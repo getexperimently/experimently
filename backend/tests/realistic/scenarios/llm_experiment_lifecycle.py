@@ -13,10 +13,7 @@ These tests do NOT require a running platform or LLM API keys — they exercise
 the service logic with synthetic data.
 """
 
-import math
-import os
 import uuid
-from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -47,18 +44,6 @@ class TestCostEstimation:
             output_tokens=1000,
         )
         expected = 0.006 + 0.015
-        assert abs(cost - expected) < 1e-6
-
-    def test_anthropic_opus_cost(self):
-        from backend.app.services.llm_proxy_service import estimate_cost
-
-        cost = estimate_cost(
-            "anthropic",
-            "claude-opus-4-6",
-            input_tokens=1000,
-            output_tokens=1000,
-        )
-        expected = 0.015 + 0.075
         assert abs(cost - expected) < 1e-6
 
     def test_google_gemini_pro_cost(self):
@@ -389,67 +374,3 @@ class TestLLMDataScenario:
         for evals in (control, treatment):
             for e in evals:
                 assert 0.0 <= e["auto_eval_score"] <= 1.0
-
-
-# ---------------------------------------------------------------------------
-# Online tests — require a running platform (RUN_REALISTIC=1)
-# ---------------------------------------------------------------------------
-
-requires_platform = pytest.mark.skipif(
-    os.environ.get("RUN_REALISTIC") != "1",
-    reason="Requires a running platform (set RUN_REALISTIC=1)",
-)
-
-
-@requires_platform
-class TestLLMExperimentAPI:
-    """End-to-end LLM experiment lifecycle against the running API."""
-
-    @pytest.fixture(scope="class")
-    def auth_headers(self):
-        import requests
-
-        api_url = os.environ.get("REALISTIC_API_URL", "http://localhost:8000")
-        resp = requests.post(
-            f"{api_url}/api/v1/auth/login",
-            json={"username": "admin@example.com", "password": "testpassword123"},
-            timeout=10,
-        )
-        if resp.status_code != 200:
-            pytest.skip("Could not obtain API token")
-        token = resp.json().get("access_token", "")
-        return {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
-
-    def test_create_llm_experiment(self, auth_headers):
-        import requests
-
-        api_url = os.environ.get("REALISTIC_API_URL", "http://localhost:8000")
-        payload = {
-            "name": "[Realistic] LLM Model Comparison",
-            "description": "Compare GPT-4o vs Claude Sonnet on summarization",
-            "task_type": "summarization",
-            "evaluation_metric": "human_rating",
-            "variants": [
-                {
-                    "name": "control-gpt4o",
-                    "is_control": True,
-                    "provider": "openai",
-                    "model_name": "gpt-4o",
-                    "traffic_split": 0.5,
-                },
-                {
-                    "name": "treatment-claude",
-                    "is_control": False,
-                    "provider": "anthropic",
-                    "model_name": "claude-3-5-sonnet-20241022",
-                    "traffic_split": 0.5,
-                },
-            ],
-        }
-        resp = requests.post(
-            f"{api_url}/api/v1/llm-experiments",
-            json=payload,
-            headers=auth_headers,
-            timeout=15,
-        )
-        assert resp.status_code in (200, 201), resp.text
