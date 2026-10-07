@@ -276,7 +276,8 @@ lists every route with its own limit. Over a limit the API answers `429` with a
 - List endpoints that page take `skip` and `limit` parameters
 - The default and the largest `limit` differ by route (the experiments list: 100, at most
   500; the feature flags list: 100, with no maximum). The API's OpenAPI document,
-  `GET /api/v1/openapi.json`, gives each route's
+  `GET /api/v1/openapi.json`, gives each route's default `limit` and, where it has one, its
+  maximum
 
 ### Caching
 - Experiment data is cached for 1 hour when `CACHE_ENABLED` is on (it is off by default)

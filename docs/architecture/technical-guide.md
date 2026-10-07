@@ -266,7 +266,7 @@ When a user calls `/api/v1/tracking/assign`:
 1. **Stored assignment**: a user who already has one gets it back, unchanged
 2. **Eligibility** (new users only): the global holdout, then the experiment's mutual exclusion
    group, then its targeting rules. An ineligible user gets the control variant with
-   `assigned: false`, and nothing is stored
+   `assigned: false`, and no assignment is stored
 3. **Traffic split**: hash the user with the experiment's `key` (the first four bytes of
    `MD5("{user_id}:{key}")`, little-endian, divided by 2^32: the hash every SDK implements,
    `backend/app/core/consistent_hash.py`) → bucket 0-99

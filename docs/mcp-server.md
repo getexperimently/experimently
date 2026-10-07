@@ -82,8 +82,10 @@ curl -X POST "http://localhost:8000/api/v1/ai/design" \
 
 `confidence` says where the suggestion came from: `"ai_generated"` when Claude answered,
 `"template_based"` otherwise. When Claude answered, `reasoning` is its whole answer and
-`hypothesis` its first 200 characters; the metrics, sample size, duration and variants come
-from the experiment type's template either way.
+`hypothesis` its first 200 characters. Either way, the primary and guardrail metrics come from
+the experiment type's template, the recommended sample size (1,000) and duration (14 days)
+are fixed, and the second variant reads "Variant A: AI-suggested change" when Claude answered
+and "Variant A: proposed change" otherwise.
 
 The endpoint allows 10 requests a minute per client address; above that it answers
 `429 Too Many Requests` with a `Retry-After: 60` header. With `ANTHROPIC_API_KEY` set, each
