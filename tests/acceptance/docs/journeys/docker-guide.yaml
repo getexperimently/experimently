@@ -19,12 +19,16 @@
 # form's own labels with quote: false, and the gap is listed as a docs defect in
 # the pull request that added this journey.
 #
+# The launch walkthrough R2 (recordings.toml) records the whole journey.
+#
 # Expectations written on 2026-10-06 from the guide and the dashboard's source,
 # before the first run.
 guide: getting-started/docker-guide.md
 stack: compose-dev
 profile: core
-video: true
+video: false
+recording:
+  name: R2-docker-guide
 written: 2026-10-06
 steps:
   - id: start-services

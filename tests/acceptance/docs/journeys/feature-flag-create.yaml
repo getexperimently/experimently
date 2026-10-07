@@ -13,12 +13,18 @@
 # below the 10% the slider set, with reason rollout; once the flag is turned
 # off, nobody gets it, with reason inactive.
 #
-# Not recorded: the journey makes an API key (model.reveals_credential), so a
-# recording could show what the run keeps out of its files.
+# Not recorded whole (video): the journey makes an API key
+# (model.reveals_credential). The launch walkthrough R6 (recordings.toml)
+# records it all the same: the key is made and sent through the API, never in
+# the browser, and the runner checks the page for it after every step. Its
+# captions show the same rule-matching users answered on by the rule, and off
+# once the switch turns the flag off.
 guide: feature-flags/create.md
 stack: compose-dev
 profile: core
 video: false
+recording:
+  name: R6-feature-flag
 written: 2026-10-06
 steps:
   - id: sign-in-page

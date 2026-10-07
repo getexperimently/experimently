@@ -9,10 +9,12 @@ FAIL whose expected or observed snapshot is missing is refused
 comparing against nothing.
 
 The run's summary (``summary.md``, also the job summary): the counts, one row
-per guide that ran, every page of the inventory not covered by a journey that
-ran, with its class and reason, and how each flow of #939 is verified, where a
-journey not written yet shows as planned in the pull request the inventory
-names, never as verified.
+per guide that ran, the launch walkthroughs (``recordings.toml``: each one's
+length and its guide's verdict, so a walkthrough reads PASS only when its guide
+passed in the same run), every page of the inventory not covered by a journey
+that ran, with its class and reason, and how each flow of #939 is verified,
+where a journey not written yet shows as planned in the pull request the
+inventory names, never as verified.
 
 The headers are the QA templates (``.github/qa-templates/docs-guide-*.tmpl``
 for a guide, ``docs-run-*.tmpl`` for the summary), rendered by
@@ -33,7 +35,7 @@ import sys
 import unicodedata
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
 
 from docs_runner import registry
 from docs_runner.log import FAIL, NOT_RUN, PASS, STRUCTURAL_ONLY, Record
@@ -615,6 +617,48 @@ def summary_header(
     )
 
 
+def walkthrough_rows(
+    registry: Mapping[str, Mapping[str, Any]],
+    recorded: Mapping[str, Mapping[str, Any]],
+    verdicts: Mapping[str, Verdict],
+    present: Callable[[str], bool],
+) -> List[Tuple[str, str, str, str]]:
+    """(name, guide, length, result) for each walkthrough of ``recordings.toml``.
+
+    *recorded* is what the runner recorded, by name (``Walkthrough.outcome``);
+    *present* says whether a file is still in the run directory (the end-of-run
+    scan removes a journey's recordings with any file of it that held a value).
+    The result is the guide's verdict, never better: a walkthrough reads PASS
+    only when its guide passed in the same run.
+    """
+    rows = []
+    for name, entry in registry.items():
+        guide = str(entry.get("guide", ""))
+        limit = f"at most {entry.get('max_seconds')} s"
+        if entry.get("pending"):
+            rows.append((name, guide, limit, f"pending: {entry['pending']}"))
+            continue
+        outcome = recorded.get(name)
+        if outcome is None:
+            rows.append((name, guide, limit, "not recorded in this run"))
+            continue
+        journey = str(outcome.get("journey", ""))
+        if outcome.get("dropped"):
+            rows.append((name, guide, limit, f"dropped: {outcome['dropped']}"))
+            continue
+        if not outcome.get("file") or not present(str(outcome["file"])):
+            rows.append(
+                (name, guide, limit, "removed by the end-of-run scan, or not written")
+            )
+            continue
+        result = verdicts.get(journey)
+        word = result.line if result is not None else "its guide did not run"
+        rows.append(
+            (name, guide, f"{outcome.get('seconds')} s, {limit}", f"{word} ({journey})")
+        )
+    return rows
+
+
 def summary_markdown(
     runs: Sequence[GuideRun],
     inventory: Mapping[str, Any],
@@ -622,6 +666,7 @@ def summary_markdown(
     date: str,
     sha: str,
     run_link: str = "",
+    walkthroughs: Optional[Sequence[Tuple[str, str, str, str]]] = None,
 ) -> str:
     verdicts: Dict[str, Verdict] = {run.journey: verdict(run) for run in runs}
     counts = dict.fromkeys(("PASS", "FAIL", "PARTIAL"), 0)
@@ -647,6 +692,21 @@ def summary_markdown(
                 f"| {_cell(run.title)} ({_cell(run.guide)}) | {_cell(run.journey)}"
                 f" | {_cell(run.stack)} | {_cell(verdicts[run.journey].line)} |"
             )
+        lines.append("")
+    if walkthroughs is not None:
+        lines += [
+            "## Launch walkthroughs",
+            "",
+            "Each recording is in the run's artifact as recordings/<name>.webm, and"
+            " reads PASS only when its guide passed in this run.",
+            "",
+            "| Recording | Guide | Length | Result |",
+            "|---|---|---|---|",
+        ]
+        lines += [
+            f"| {_cell(name)} | {_cell(guide)} | {_cell(length)} | {_cell(result)} |"
+            for name, guide, length, result in walkthroughs
+        ]
         lines.append("")
     lines += ["## Not covered in this run", ""]
     if missing:
