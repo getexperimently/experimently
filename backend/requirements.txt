@@ -61,7 +61,7 @@ moto==4.2.14
 pyparsing==3.3.3       # required by moto's glue backend (mock_glue), not declared by moto 4.2
 python-jose[cryptography]==3.5.0  # required by moto's cognitoidp backend (mock_cognitoidp); app auth uses PyJWT
 jsonschema==4.26.0
-locust==2.46.6   # 2.40+ requires pytest>=8.3. That held this pin while
+locust==2.46.7   # 2.40+ requires pytest>=8.3. That held this pin while
                  # pytest sat at 7.4 (a grouped Dependabot update to
                  # 2.46.6 once made the file unresolvable). pytest is
                  # now 9 (#136), so raising this is an ordinary bump.
