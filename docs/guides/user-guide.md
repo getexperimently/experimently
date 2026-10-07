@@ -257,10 +257,8 @@ Shows at a glance:
   the 2 comparisons with the control on each metric", or, with one treatment, "one comparison
   with the control on each metric, so no correction is needed".
 
-For an experiment with several variants and a correction, a note says that since v0.19 its
-results use the experiment's correction, and that earlier versions showed them uncorrected, so
-a variant marked significant then may not be significant now. To see the uncorrected numbers,
-ask the API with `?correction_method=none` (`GET /api/v1/results/{experiment_id}`).
+To see the uncorrected numbers for an experiment with several variants and a correction, ask
+the API with `?correction_method=none` (`GET /api/v1/results/{experiment_id}`).
 
 #### Sample Ratio Check
 

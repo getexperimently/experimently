@@ -254,7 +254,7 @@ describe('ResultDetailPage (/results/[id]) with stored analysis settings', () =>
     installStored();
   });
 
-  it('sends the stored settings and shows the adjusted p-values with the footnote and notice', async () => {
+  it('sends the stored settings and shows the adjusted p-values with the footnote, and no one-release notice (#821)', async () => {
     render(<ResultDetailPage />);
     await screen.findByTestId('experiment-summary');
     const resultsCall = mockedApiFetch.mock.calls.find(([p]) => p === '/api/v1/results/exp-1');
@@ -268,7 +268,7 @@ describe('ResultDetailPage (/results/[id]) with stored analysis settings', () =>
     expect(screen.getByRole('columnheader', { name: /^adjusted p-value/i })).toBeInTheDocument();
     expect(screen.getByText('unadjusted 0.0350')).toBeInTheDocument();
     expect(screen.getByTestId('adjusted-p-footnote')).toHaveTextContent('below 0.1.');
-    expect(screen.getByTestId('corrected-results-notice')).toBeInTheDocument();
+    expect(screen.queryByTestId('corrected-results-notice')).not.toBeInTheDocument();
   });
 
   it('has no axe violations on the Overview (axe-core in jsdom; colour contrast is not computable here)', async () => {

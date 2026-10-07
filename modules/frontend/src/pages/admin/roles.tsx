@@ -44,6 +44,12 @@ export function RoleManagementPage() {
             <p className="text-sm text-slate-500 mt-1">
               Create and manage custom roles with granular permissions.
             </p>
+            {/* No permission check reads custom roles or direct grants yet (#891). */}
+            <p data-testid="roles-access-note" className="text-sm text-slate-700 mt-1">
+              {
+                "Custom roles and direct permission grants are recorded, but they do not change what anyone can do yet: each user's built-in role decides."
+              }
+            </p>
           </div>
           <button
             data-testid="create-role-button"
