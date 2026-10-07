@@ -99,7 +99,7 @@ reason = "the configuration, the check healthy and then unhealthy from reported 
 [pages."guides/user-guide.md"]
 class = "journey"
 journey = "experiment-results"
-reason = "running an experiment and reading its results page after seeded traffic: counts, p-value and the sample-ratio check"
+reason = "running an experiment and reading its results page after seeded traffic: counts, p-value and the sample-ratio check; then a 300/200 split that fails the check, and a significant result under the minimum sample"
 
 [pages."guides/dashboard-and-api.md"]
 class = "reference"

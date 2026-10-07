@@ -27,8 +27,8 @@ guide: getting-started/docker-guide.md
 stack: compose-dev
 profile: core
 video: false
-recording:
-  name: R2-docker-guide
+recordings:
+  - name: R2-docker-guide
 written: 2026-10-06
 steps:
   - id: start-services

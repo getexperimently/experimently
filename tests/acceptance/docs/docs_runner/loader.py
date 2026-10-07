@@ -50,12 +50,13 @@ YAML, or not a mapping, stops at that. Refused, besides what ``model`` refuses:
   recording would show what the run keeps out of its files;
 * a screen step right before a ``keep`` step (its screen shows what the keep
   reads) without ``snapshot: false``;
-* a ``recording`` whose name is not a table of ``recordings.toml``, is still
-  ``pending`` there, or belongs to another guide; one beside ``video: true``;
-  and one whose segment holds a ``keep`` step or the step right before one,
-  starts right after one, or has a ``fill`` type a secret into a field whose
-  label does not say "password" (the runner's checks of the screen are in
-  ``execute.py``);
+* ``recordings`` beside ``video: true``; and, for each recording, a name that
+  is not a table of ``recordings.toml``, is still ``pending`` there, or belongs
+  to another guide, and a segment that holds a ``keep`` step or the step right
+  before one, starts right after one, or has a ``fill`` type a secret into a
+  field whose label does not say "password" (two segments that overlap, or a
+  name given twice, the model refuses; the runner's checks of the screen are
+  in ``execute.py``);
 * a ``fill`` that types a written value into a field whose label says
   "password", where its screen is kept, unless the value is the documented
   demo password;
@@ -754,45 +755,62 @@ def _secret_problems(
 
 def _recording_problems(
     steps: Sequence[Tuple[int, Step]],
-    recording: Optional[Recording],
+    recordings: Sequence[Recording],
     guide_path: Optional[str],
     video: Optional[bool],
     context: Context,
     complete: bool,
 ) -> List[str]:
-    """A recording the registry does not know, or one whose segment could draw a secret.
+    """Recordings beside a video; for each, a name the registry does not know or
+    a segment that could draw a secret.
 
-    The segment is checked only when every step parsed (``complete``).
+    The segments are checked only when every step parsed (``complete``).
     """
-    if recording is None:
-        return []
     found: List[str] = []
+    if recordings and video:
+        found.append(
+            "video: true and recordings: a journey is recorded whole (video) or"
+            " for its walkthroughs (recordings), not both"
+        )
+    for recording in recordings:
+        found.extend(_registry_problems(recording, guide_path, context))
+        if complete and steps:
+            found.extend(_segment_problems(steps, recording))
+    return found
+
+
+def _registry_problems(
+    recording: Recording, guide_path: Optional[str], context: Context
+) -> List[str]:
     name = recording.name
     entry = context.recordings.get(name)
     if entry is None:
-        found.append(f"recording {name!r} is not a table of recordings.toml")
-    elif entry.get("pending"):
-        found.append(
+        return [f"recording {name!r} is not a table of recordings.toml"]
+    if entry.get("pending"):
+        return [
             f"recording {name!r} is pending in recordings.toml; remove its pending"
             " line in the change that records it"
-        )
-    elif guide_path is not None and entry.get("guide") != guide_path:
-        found.append(
+        ]
+    if guide_path is not None and entry.get("guide") != guide_path:
+        return [
             f"recording {name!r} is recorded from {entry.get('guide')!r} in"
             f" recordings.toml, not from {guide_path!r}"
-        )
-    if video:
-        found.append(
-            "video: true and a recording: a journey is recorded whole (video) or"
-            " for its walkthrough (recording), not both"
-        )
-    if not complete or not steps:
-        return found
+        ]
+    return []
+
+
+def _segment_problems(
+    steps: Sequence[Tuple[int, Step]], recording: Recording
+) -> List[str]:
+    """A segment that holds or starts on a screen showing a kept value, or types
+    a secret where it is drawn."""
     try:
         first, last = segment_of([step for _, step in steps], recording)
     except ValueError:
         # The model says which bound names no step.
-        return found
+        return []
+    found: List[str] = []
+    name = recording.name
     by_index = dict(steps)
     for index in range(first, last + 1):
         step = by_index[index]
@@ -800,26 +818,26 @@ def _recording_problems(
         following = by_index.get(index + 1)
         if step.do.keep is not None:
             found.append(
-                f"{label}: the recording holds a keep step, whose screen shows the"
-                " value it keeps; end the recording before it"
+                f"{label}: recording {name!r} holds a keep step, whose screen shows"
+                " the value it keeps; end the recording before it"
             )
         elif following is not None and following.do.keep is not None:
             found.append(
-                f"{label}: the recording holds the screen the next step keeps a"
-                " value from; end the recording before it"
+                f"{label}: recording {name!r} holds the screen the next step keeps"
+                " a value from; end the recording before it"
             )
         fill = step.do.fill
         if fill is not None and fill.secret and "password" not in fill.label.lower():
             found.append(
-                f"{label}: the recording types the secret {fill.secret!r} into"
+                f"{label}: recording {name!r} types the secret {fill.secret!r} into"
                 f" {fill.label!r}, which is not a password field; only a password"
                 " field draws what is typed as dots"
             )
     before = by_index.get(first - 1)
     if before is not None and before.do.keep is not None:
         found.append(
-            f"step {first + 1} ({by_index[first].id}): the recording starts right"
-            " after a keep step, on the screen showing the value it kept"
+            f"step {first + 1} ({by_index[first].id}): recording {name!r} starts"
+            " right after a keep step, on the screen showing the value it kept"
         )
     return found
 
@@ -835,7 +853,7 @@ def semantic_problems(
     context: Context,
     passwords: Sequence[str] = (),
     video: Optional[bool] = None,
-    recording: Optional[Recording] = None,
+    recordings: Sequence[Recording] = (),
 ) -> List[str]:
     """Refusals against the guide, the inventory and the registry.
 
@@ -858,7 +876,7 @@ def semantic_problems(
         found.extend(_step_problems(label, step, guide_path, guide, stack, context))
     found.extend(_secret_problems(steps, passwords, video))
     found.extend(
-        _recording_problems(steps, recording, guide_path, video, context, complete)
+        _recording_problems(steps, recordings, guide_path, video, context, complete)
     )
     if complete:
         found.extend(_value_problems(steps, passwords))
@@ -880,12 +898,13 @@ def _parts(data: Dict[str, Any]) -> Dict[str, Any]:
     written = data.get("written")
     passwords = data.get("passwords")
     video = data.get("video")
-    try:
-        recording: Optional[Recording] = (
-            Recording.model_validate(data["recording"]) if "recording" in data else None
-        )
-    except ValidationError:
-        recording = None
+    recordings: List[Recording] = []
+    raw_recordings = data.get("recordings")
+    for raw in raw_recordings if isinstance(raw_recordings, list) else []:
+        try:
+            recordings.append(Recording.model_validate(raw))
+        except ValidationError:
+            continue
     raw_steps = data.get("steps") if isinstance(data.get("steps"), list) else []
     steps: List[Tuple[int, Step]] = []
     for index, raw in enumerate(raw_steps):
@@ -910,7 +929,7 @@ def _parts(data: Dict[str, Any]) -> Dict[str, Any]:
             else []
         ),
         "video": video if isinstance(video, bool) else None,
-        "recording": recording,
+        "recordings": recordings,
     }
 
 
@@ -941,7 +960,7 @@ def load(path: Path, context: Context) -> Journey:
             "complete": True,
             "passwords": list(journey.passwords),
             "video": journey.video,
-            "recording": journey.recording,
+            "recordings": list(journey.recordings),
         }
     else:
         parts = _parts(data)

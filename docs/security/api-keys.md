@@ -21,7 +21,8 @@ the shell variables set by the ones before it.
 An API key authenticates as the user who created it, and only on the endpoints an SDK
 calls: tracking, flag evaluation and the flag ruleset. Creating or changing flags
 and experiments, and managing users, take a user login; an API key there is refused with
-`401`. API keys are not for signing people in: user-facing applications use the login
+`401` and `{"detail":"Not authenticated"}`, the answer to a request with no login at all.
+API keys are not for signing people in: user-facing applications use the login
 described in [Authentication](../api/auth.md).
 
 ---
@@ -99,6 +100,9 @@ of users to an experiment. These routes answer `403` to a key that does not carr
 - `POST /api/v1/tracking/assign/batch` (beta), which assigns up to 1,000 users to an
   experiment in one request (see
   [Assign a customer list to an experiment](../guides/assign-customer-list.md)).
+
+The `403` says
+`This API key does not have the 'sdk:ruleset' scope. Create a key with the 'sdk:ruleset' scope for server-side SDK use.`
 
 A key with `sdk:ruleset` can therefore download every feature flag's targeting rules,
 including the values in them, so keep such a key on a server and never ship it to a browser

@@ -20,17 +20,48 @@
 # exact 400/400 split) follow from the chosen counts by arithmetic and are
 # written in the expectations.
 #
+# Then the two results states "Reading Results" promises that this population
+# cannot show, each on a 50/50 experiment of its own, created through the API
+# and sent its users the same way:
+#
+# * Sample Ratio Check: Control 300 users (30 convert), Treatment 200 (40). The
+#   split's chi-square p is 7.744216e-06 (oracles.sample_ratio_p, scipy's
+#   chisquare against 250/250), below the guide's 0.001, so the page shows the
+#   notice with each variant's users and the 250 expected, and the
+#   recommendation is INCONCLUSIVE. Treatment is significantly better
+#   (Fisher's p 0.00231) with both variants past the floor, so without the
+#   check it would be SHIP VARIANT: the notice withholds a winner. The API's
+#   srm.p_value is held to the oracle at 1e-9 relative. The API step runs
+#   before the page, so a page that drops the notice fails on its own step.
+# * Minimum sample: Control 60 users (6 convert), Treatment 60 (24), under the
+#   floor of 100 the metric gets when it names none. Treatment is significant
+#   (Fisher's p 0.000250, held to 1e-9 relative), so the recommendation is
+#   withheld for the floor and not for the p-value: CONTINUE TESTING, and the
+#   page reads "Minimum sample: Not reached".
+#
+# The results are cached for up to five minutes, so each experiment's
+# population is complete before its results are first read, on the page or
+# through the API; nothing reads them earlier, so no cached answer can be
+# stale and the journey needs no invalidation.
+#
 # Not recorded whole (video): the journey makes an API key
-# (model.reveals_credential). The launch walkthrough R5's A/B-lift half
-# (recordings.toml) records it all the same: the key is made and sent through
-# the API, never in the browser, and the runner checks the page for it after
-# every step.
+# (model.reveals_credential). The launch walkthrough R5 (recordings.toml)
+# records two segments of it all the same: its A/B-lift half from the sign-in
+# to the results API, and its sample-ratio half on the sample-ratio
+# experiment's results page alone (its population arrives through the API,
+# which the screen does not show). The key is made and sent through the API,
+# never in the browser, and the runner checks the page for it before each
+# segment and after every recorded step.
 guide: guides/user-guide.md
 stack: compose-dev
 profile: core
 video: false
-recording:
-  name: R5-reading-results
+recordings:
+  - name: R5-reading-results
+    end: results-api
+  - name: R5-srm-warning
+    start: ratio-results-page
+    end: ratio-results-page
 written: 2026-10-06
 steps:
   - id: sign-in-page
@@ -385,3 +416,251 @@ steps:
             args: {control_users: 400, control_converted: 40, treatment_users: 400, treatment_converted: 64}
           rel: 1.0e-9
     fail: the results API shows other counts than were sent, or a p-value that is not Fisher's exact test's for them
+  - id: ratio-experiment
+    doc: sample-ratio-check
+    do:
+      api:
+        method: POST
+        path: /api/v1/experiments/
+        as: admin
+        body:
+          name: Docs journey sample ratio
+          key: docs_journey_sample_ratio
+          experiment_type: a_b
+          variants:
+            - name: Control
+              is_control: true
+              traffic_allocation: 50
+            - name: Treatment
+              is_control: false
+              traffic_allocation: 50
+          metrics:
+            - name: Checkout completed
+              event_name: checkout_completed
+              metric_type: conversion
+              is_primary: true
+    expect:
+      status: 201
+      json:
+        key: docs_journey_sample_ratio
+        status: draft
+    save:
+      ratio-experiment-id:
+        path: id
+    fail: a second 50/50 experiment cannot be created as a draft
+  - id: ratio-start
+    doc: sample-ratio-check
+    do:
+      api:
+        method: POST
+        path: /api/v1/experiments/{{ratio-experiment-id}}/start
+        as: admin
+    expect:
+      status: 200
+      json:
+        status: active
+    fail: the second experiment cannot be started
+  - id: ratio-traffic
+    doc: sample-ratio-check
+    do:
+      traffic:
+        experiment: ratio-experiment-id
+        key: sdk-key
+        as: admin
+        event: checkout_completed
+        users: ratio-user
+        variants:
+          Control: {assigned: 300, converted: 30}
+          Treatment: {assigned: 200, converted: 40}
+    fail: a user is refused, assigned a variant other than the documented hash gives, or a conversion is refused
+  - id: ratio-results-api
+    doc: sample-ratio-check
+    do:
+      api:
+        method: GET
+        path: /api/v1/results/{{ratio-experiment-id}}
+        as: admin
+    expect:
+      status: 200
+      json:
+        experiment_name: Docs journey sample ratio
+        sample_size_adequate: true
+        metrics.0.variants.0.variant_name: Control
+        metrics.0.variants.0.sample_size: 300
+        metrics.0.variants.0.conversions: 30
+        metrics.0.variants.1.variant_name: Treatment
+        metrics.0.variants.1.sample_size: 200
+        metrics.0.variants.1.conversions: 40
+        metrics.0.variants.1.is_significant: true
+        summary.total_users: 500
+        summary.has_winner: true
+        summary.recommendation: INCONCLUSIVE
+        srm.warning: true
+      computed:
+        srm.p_value:
+          oracle:
+            name: sample_ratio_p
+            args: {control_users: 300, treatment_users: 200, control_allocation: 50, treatment_allocation: 50}
+          rel: 1.0e-9
+        metrics.0.variants.1.p_value:
+          oracle:
+            name: fisher_exact_p
+            args: {control_users: 300, control_converted: 30, treatment_users: 200, treatment_converted: 40}
+          rel: 1.0e-9
+    fail: the results API does not flag the 300/200 split with the chi-square p-value, or still recommends a variant on a broken split
+  - id: ratio-results-page
+    doc: sample-ratio-check
+    do:
+      goto: /results/{{ratio-experiment-id}}
+    expect:
+      status: 200
+      cells:
+        - row: Treatment
+          column: p-value
+          oracle:
+            name: fisher_exact_p
+            args: {control_users: 300, control_converted: 30, treatment_users: 200, treatment_converted: 40}
+      aria: |
+        - main:
+          - heading "Docs journey sample ratio" [level=2]
+          - text: /Inconclusive/
+          - paragraph: Total Users
+          - paragraph: "500"
+          - paragraph: Minimum sample
+          - paragraph: Reached
+          - paragraph: /^Leading. Treatment.*The traffic split does not match the allocation, so treat this with caution\.$/
+          - region "The traffic split does not match the allocation.":
+            - heading "The traffic split does not match the allocation." [level=3]
+            - list:
+              - listitem: "Control: 300 users (expected 250)"
+              - listitem: "Treatment: 200 users (expected 250)"
+            - paragraph: /p < 0\.001/
+          - tabpanel:
+            - region "Metric comparison":
+              - table:
+                - rowgroup:
+                  - row "Metric Variant Sample Size Value Improvement p-value Significance"
+                - rowgroup:
+                  - row /Control\(control\) 300 10\.00%/
+                  - row /Treatment 200 20\.00% \+100\.0%/
+    fail: the results page shows no sample-ratio notice with each variant's users and the number expected, or recommends anything but INCONCLUSIVE
+  - id: floor-experiment
+    doc: experiment-summary-card
+    do:
+      api:
+        method: POST
+        path: /api/v1/experiments/
+        as: admin
+        body:
+          name: Docs journey minimum sample
+          key: docs_journey_minimum_sample
+          experiment_type: a_b
+          variants:
+            - name: Control
+              is_control: true
+              traffic_allocation: 50
+            - name: Treatment
+              is_control: false
+              traffic_allocation: 50
+          metrics:
+            - name: Checkout completed
+              event_name: checkout_completed
+              metric_type: conversion
+              is_primary: true
+    expect:
+      status: 201
+      json:
+        key: docs_journey_minimum_sample
+        status: draft
+    save:
+      floor-experiment-id:
+        path: id
+    fail: a third 50/50 experiment cannot be created as a draft
+  - id: floor-start
+    doc: experiment-summary-card
+    do:
+      api:
+        method: POST
+        path: /api/v1/experiments/{{floor-experiment-id}}/start
+        as: admin
+    expect:
+      status: 200
+      json:
+        status: active
+    fail: the third experiment cannot be started
+  - id: floor-traffic
+    doc: experiment-summary-card
+    do:
+      traffic:
+        experiment: floor-experiment-id
+        key: sdk-key
+        as: admin
+        event: checkout_completed
+        users: floor-user
+        variants:
+          Control: {assigned: 60, converted: 6}
+          Treatment: {assigned: 60, converted: 24}
+    fail: a user is refused, assigned a variant other than the documented hash gives, or a conversion is refused
+  - id: floor-results-api
+    doc: experiment-summary-card
+    do:
+      api:
+        method: GET
+        path: /api/v1/results/{{floor-experiment-id}}
+        as: admin
+    expect:
+      status: 200
+      json:
+        experiment_name: Docs journey minimum sample
+        sample_size_adequate: false
+        metrics.0.variants.0.variant_name: Control
+        metrics.0.variants.0.sample_size: 60
+        metrics.0.variants.0.conversions: 6
+        metrics.0.variants.1.variant_name: Treatment
+        metrics.0.variants.1.sample_size: 60
+        metrics.0.variants.1.conversions: 24
+        metrics.0.variants.1.statistical_test_used: fisher_exact
+        metrics.0.variants.1.is_significant: true
+        summary.total_users: 120
+        summary.has_winner: true
+        summary.recommendation: CONTINUE_TESTING
+        srm.warning: false
+        srm.p_value: 1.0
+      computed:
+        metrics.0.variants.1.p_value:
+          oracle:
+            name: fisher_exact_p
+            args: {control_users: 60, control_converted: 6, treatment_users: 60, treatment_converted: 24}
+          rel: 1.0e-9
+    fail: the results API recommends shipping a significant variant before every variant has 100 users, or its p-value is not Fisher's
+  - id: floor-results-page
+    doc: experiment-summary-card
+    do:
+      goto: /results/{{floor-experiment-id}}
+    expect:
+      status: 200
+      cells:
+        - row: Treatment
+          column: p-value
+          oracle:
+            name: fisher_exact_p
+            args: {control_users: 60, control_converted: 6, treatment_users: 60, treatment_converted: 24}
+      aria: |
+        - main:
+          - heading "Docs journey minimum sample" [level=2]
+          - text: /Continue Testing/
+          - paragraph: Total Users
+          - paragraph: "120"
+          - paragraph: Minimum sample
+          - paragraph: Not reached
+          - paragraph: /Not every variant has reached the minimum sample size yet/
+          - paragraph: "Sample ratio check passed: the traffic split matches the allocation (p = 1)."
+          - tabpanel:
+            - region "Metric comparison":
+              - table:
+                - rowgroup:
+                  - row "Metric Variant Sample Size Value Improvement p-value Significance"
+                - rowgroup:
+                  - row /Control\(control\) 60 10\.00%/
+                  - row /Treatment 60 40\.00% \+300\.0%/
+    fail: the results page does not read "Minimum sample Not reached", or recommends shipping a variant before every variant has 100 users

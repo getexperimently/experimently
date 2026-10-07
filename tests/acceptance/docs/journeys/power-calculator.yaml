@@ -37,8 +37,8 @@ guide: statistics/power-analysis.md
 stack: compose-dev
 profile: core
 video: false
-recording:
-  name: R4-power-analysis
+recordings:
+  - name: R4-power-analysis
 written: 2026-10-06
 steps:
   # -- The calculator, without signing in: the guide's example --------------

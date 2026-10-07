@@ -3368,10 +3368,14 @@ WALKTHROUGH_RUN = (
     '    (run_dir / "sample").mkdir()\n'
     "    PLANTED\n"
     '    (run_dir / "recordings" / "R2-other.webm").write_bytes(b"webm")\n'
+    '    (run_dir / "recordings" / "R1-sample-two.webm").write_bytes(b"webm")\n'
     "    request.config.stash[conftest.RECORDED].update(\n"
     "        {\n"
     '            "R1-sample": {"journey": "sample", "seconds": 1.0, "dropped": "",\n'
     '                          "file": "recordings/R1-sample.webm"},\n'
+    '            "R1-sample-two": {"journey": "sample", "seconds": 1.0,\n'
+    '                              "dropped": "",\n'
+    '                              "file": "recordings/R1-sample-two.webm"},\n'
     '            "R2-other": {"journey": "other", "seconds": 1.0, "dropped": "",\n'
     '                         "file": "recordings/R2-other.webm"},\n'
     "        }\n"
@@ -3398,7 +3402,7 @@ WALKTHROUGH_RUN = (
         pytest.param(
             f'(run_dir / "recordings" / "R1-sample.webm").write_bytes(b"webm {PLANT}")',
             ["recordings/R1-sample.webm"],
-            [],
+            ["recordings/R1-sample-two.webm"],
             id="the-walkthrough-holds-it",
         ),
         pytest.param(
@@ -3406,7 +3410,7 @@ WALKTHROUGH_RUN = (
             '(run_dir / "sample" / "03-x.aria.yml").write_text('
             f'"- code: {PLANT}")',
             ["sample/03-x.aria.yml"],
-            ["recordings/R1-sample.webm"],
+            ["recordings/R1-sample-two.webm", "recordings/R1-sample.webm"],
             id="a-file-of-its-journey-holds-it",
         ),
     ],
@@ -3415,7 +3419,8 @@ def test_a_walkthrough_is_its_own_journeys_in_the_end_of_run_scan(
     tmp_path, planted, removed, screens
 ):
     """conftest passes each walkthrough's owner to the scan: only the journey
-    that recorded it fails, and only its walkthrough goes."""
+    that recorded it fails, and only that journey's walkthroughs (two here)
+    go."""
     from docs_runner import redaction
 
     body = WALKTHROUGH_RUN.replace("PLANTED", planted)
@@ -3437,4 +3442,5 @@ def test_a_walkthrough_is_its_own_journeys_in_the_end_of_run_scan(
     assert record["removed"] == removed
     assert record["screens_removed"] == screens
     assert not (run / "recordings" / "R1-sample.webm").exists()
+    assert not (run / "recordings" / "R1-sample-two.webm").exists()
     assert (run / "recordings" / "R2-other.webm").is_file()

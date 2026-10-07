@@ -23,8 +23,8 @@ guide: feature-flags/create.md
 stack: compose-dev
 profile: core
 video: false
-recording:
-  name: R6-feature-flag
+recordings:
+  - name: R6-feature-flag
 written: 2026-10-06
 steps:
   - id: sign-in-page
