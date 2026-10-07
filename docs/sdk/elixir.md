@@ -394,8 +394,9 @@ The live runner (`tests/sdk-contract/live/run_live_contract.py`) uses the same c
 `cd sdk/elixir && mix run examples/contract_smoke.exs`, and requires `mix deps.get` to have been
 run once.
 
-Verified against a live backend: **not yet (toolchain unavailable — no elixir/mix on the
-development machine)**. Run `python tests/sdk-contract/live/run_live_contract.py --sdk elixir --strict`
+CI does not run this SDK's contract smoke against a real API: `elixir` is not in the
+`sdks:` list of the SDK Live Contract job in [pr-qa-gate.yml](https://github.com/getexperimently/experimently/blob/main/.github/workflows/pr-qa-gate.yml).
+Run `python tests/sdk-contract/live/run_live_contract.py --sdk elixir --strict`
 on a machine with Elixir 1.14+.
 
 ---

@@ -240,7 +240,8 @@ tracks `purchase` with the experiment key, tracks `page_view` without a key and 
 `trackBatch`. Fixtures: `backend/scripts/seed_sdk_contract.py`; repo-wide runner:
 `python tests/sdk-contract/live/run_live_contract.py --sdk ios --strict`.
 
-Verified against a live backend: yes (2026-09-11)
+CI does not run this SDK's contract smoke against a real API: `ios` is not in the
+`sdks:` list of the SDK Live Contract job in [pr-qa-gate.yml](https://github.com/getexperimently/experimently/blob/main/.github/workflows/pr-qa-gate.yml).
 
 ---
 

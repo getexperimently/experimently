@@ -330,9 +330,8 @@ Env: `EXPERIMENTLY_API_URL` (default `http://localhost:8000`), `EXPERIMENTLY_API
 `sdk_contract_flag`), `CONTRACT_USER_ID` (default random `smoke-<uuid>`). No `composer install`
 is needed — the script `require`s `src/` directly when `vendor/` is absent.
 
-Verified against a live backend: **not yet (toolchain unavailable — no `php` on the development
-machine)**. Run `python tests/sdk-contract/live/run_live_contract.py --sdk php --strict` on a
-machine with PHP 8.1+.
+CI runs this SDK's contract smoke against a real API: `php` is in the `sdks:` list of the
+SDK Live Contract job in [pr-qa-gate.yml](https://github.com/getexperimently/experimently/blob/main/.github/workflows/pr-qa-gate.yml).
 
 ---
 

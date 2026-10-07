@@ -440,7 +440,7 @@ def self_test(
         problems.append(
             f"OCR self-test: no engine read the faint canary "
             f"({templates.FAINT_CANARY_PX} px {templates.FAINT_CANARY_COLOUR}: {readings}; "
-            f"needs {NEEDLE_THRESHOLD:.2f}), so the faintest dashboard text would go unread; "
+            f"needs {NEEDLE_THRESHOLD:.2f}), so the scan could miss the dashboard's faintest text; "
             "scan not run"
         )
     work.remove(canary_dir)

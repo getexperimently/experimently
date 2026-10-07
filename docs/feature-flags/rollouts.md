@@ -150,7 +150,8 @@ The API answers `201 Created`. A new schedule is a `draft`, and every stage is `
 
 The response also carries the schedule's `id`, `feature_flag_id`, `owner_id`, dates and
 settings, and each stage's `id`. A schedule is refused with `422` when its target
-percentages decrease, or when its stage orders aren't 1, 2, 3 and so on without gaps.
+percentages decrease, when its stage orders aren't 1, 2, 3 and so on without gaps, or
+when a stage order is above 1000.
 
 ### Step 4: Activate the schedule
 
@@ -354,7 +355,7 @@ everyone. Change the flag's targeting rules between the stages:
 
 - Rollout percentages must not decrease across stages.
 - You cannot delete stages from an active schedule: cancel the schedule first.
-- Stage orders must be sequential (1, 2, 3, with no gaps).
+- Stage orders must be sequential (1, 2, 3, with no gaps), and no higher than 1000.
 - Time-based `start_date` values are in UTC.
 - Manual stages must be advanced explicitly: they never start by themselves, even after the
   schedule's `end_date`.
