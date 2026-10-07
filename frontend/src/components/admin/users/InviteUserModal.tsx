@@ -151,8 +151,8 @@ export function InviteUserModal({ isOpen, onClose, onSuccess }: InviteUserModalP
               <span className="font-medium text-slate-800">{created.user.email}</span> can sign in
               as <span className="font-mono">{created.user.username}</span> with this temporary
               password. It is shown <strong>once</strong> — share it now. After signing in,
-              they change it with <strong>Change password</strong>, next to Log out at the top of
-              the dashboard.
+              they change it with <strong>Change password</strong>, under More at the top of the
+              dashboard.
             </p>
             <div className="flex items-center gap-2">
               <code

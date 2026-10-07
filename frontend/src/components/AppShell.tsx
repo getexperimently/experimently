@@ -43,6 +43,20 @@ export const NAV_ITEMS: NavItem[] = [
 /** The page where a local-sign-in user changes their own password. */
 export const CHANGE_PASSWORD_PATH = '/account/password';
 
+/**
+ * "Change password", offered inside "More" rather than in the header row
+ * (#1069). In the row, beside a superuser's nav, the name, the role chip and
+ * Log out, it took the header past the row's 1216 px (the row is capped at
+ * 1280 px, so every wider window is the same): measured in Chromium with the
+ * name "Platform Admin", 1221 px in macOS's system font and 1288 px in DejaVu
+ * Sans, so "Feature Flags" and "Audit Log" wrapped and the name was cut.
+ */
+export const CHANGE_PASSWORD_ITEM: NavItem = {
+  label: 'Change password',
+  href: CHANGE_PASSWORD_PATH,
+  testId: 'change-password-link',
+};
+
 export function isNavActive(pathname: string, href: string): boolean {
   return pathname === href || pathname.startsWith(`${href}/`);
 }
@@ -102,18 +116,22 @@ export function installedModuleNav(
 /**
  * Collapsed "More" disclosure. Closed by default and never opened for the
  * viewer. It carries the installed modules' routes, which otherwise have no
- * navigation at all, and in the core profile a "Modules" link to the guide
- * that says what the modules are and how to run the full profile.
+ * navigation at all, in the core profile a "Modules" link to the guide
+ * that says what the modules are and how to run the full profile, and, for a
+ * local sign-in user, "Change password".
  */
 function MoreNavGroup({
   items,
   showModulesGuide,
+  accountItems,
   id,
   onNavigate,
 }: {
   items: NavItem[];
   /** Add the "Modules" documentation link (the core profile). */
   showModulesGuide: boolean;
+  /** The signed-in user's own pages, listed last ("Change password"). */
+  accountItems: NavItem[];
   id: string;
   /** Called when a link inside the group is followed (closes the mobile menu). */
   onNavigate?: () => void;
@@ -200,6 +218,20 @@ function MoreNavGroup({
             Modules
           </a>
         )}
+        {accountItems.length > 0 && (items.length > 0 || showModulesGuide) && (
+          <div role="separator" className="my-1 border-t border-slate-200" />
+        )}
+        {accountItems.map((item) => (
+          <Link
+            key={item.href}
+            href={item.href}
+            data-testid={item.testId}
+            onClick={follow}
+            className="block px-3 py-2 rounded-md text-sm text-slate-700 hover:bg-slate-50"
+          >
+            {item.label}
+          </Link>
+        ))}
       </div>
     </details>
   );
@@ -222,8 +254,9 @@ interface AppShellProps {
 
 /**
  * Application chrome: top navigation (Experiments · Feature Flags · Segments ·
- * Audit Log · Admin · Docs · More) and the user area with a visible "Log out" button. Mounted by
- * `_app.tsx` for every route except `/login`.
+ * Audit Log · Admin · Docs · More, which holds "Change password") and the user
+ * area with a visible "Log out" button. Mounted by `_app.tsx` for every route
+ * except `/login`.
  */
 export function AppShell({ children }: AppShellProps) {
   const router = useRouter();
@@ -257,7 +290,11 @@ export function AppShell({ children }: AppShellProps) {
   // Also a dashboard concern: the marketing build probes no API, so the
   // profile it reports is meaningless there.
   const showModulesGuide = !marketing && !modulesLoading && modulesError === null && profile === 'core';
-  const showMore = !modulesLoading && (moduleNav.length > 0 || showModulesGuide);
+  // Only local sign-in has a password the API can change; under any other
+  // provider the route answers 404. It does not wait for the modules probe.
+  const accountNav = !marketing && user?.auth_provider === 'local' ? [CHANGE_PASSWORD_ITEM] : [];
+  const moreRoutes = modulesLoading ? [] : moduleNav;
+  const showMore = accountNav.length > 0 || moreRoutes.length > 0 || showModulesGuide;
 
   const handleLogout = async () => {
     if (loggingOut) return;
@@ -289,7 +326,10 @@ export function AppShell({ children }: AppShellProps) {
 
       <header className="bg-white border-b border-slate-200 sticky top-0 z-40">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-14 flex items-center justify-between gap-4">
-          <div className="flex items-center gap-6 min-w-0">
+          {/* The wordmark and the nav keep their width; when the row is short,
+              only the user's name gives way (it truncates, with the email as
+              its title). */}
+          <div className="flex items-center gap-6 shrink-0">
             <Wordmark href={status === 'authenticated' ? '/experiments' : '/'} />
 
             <nav aria-label="Primary" className="hidden xl:flex items-center gap-1">
@@ -302,7 +342,7 @@ export function AppShell({ children }: AppShellProps) {
                     data-testid={item.testId}
                     aria-current={active ? 'page' : undefined}
                     className={[
-                      'px-3 py-1.5 rounded-md text-sm font-medium transition-colors',
+                      'px-3 py-1.5 rounded-md text-sm font-medium whitespace-nowrap transition-colors',
                       active
                         ? 'bg-blue-50 text-blue-700'
                         : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50',
@@ -314,15 +354,16 @@ export function AppShell({ children }: AppShellProps) {
               })}
               {showMore && (
                 <MoreNavGroup
-                  items={moduleNav}
+                  items={moreRoutes}
                   showModulesGuide={showModulesGuide}
+                  accountItems={accountNav}
                   id="more-nav-desktop"
                 />
               )}
             </nav>
           </div>
 
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-3 min-w-0">
             {status === 'loading' && (
               <div data-testid="user-menu-loading" className="h-8 w-24 rounded-md bg-slate-100 animate-pulse" />
             )}
@@ -348,11 +389,11 @@ export function AppShell({ children }: AppShellProps) {
             )}
 
             {status === 'authenticated' && user && (
-              <div data-testid="user-menu" className="flex items-center gap-3">
+              <div data-testid="user-menu" className="flex items-center gap-3 min-w-0">
                 <div className="hidden sm:flex items-center gap-2 min-w-0">
                   <span
                     aria-hidden="true"
-                    className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-slate-200 text-xs font-semibold text-slate-700"
+                    className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-slate-200 text-xs font-semibold text-slate-700"
                   >
                     {initials(user)}
                   </span>
@@ -365,28 +406,17 @@ export function AppShell({ children }: AppShellProps) {
                   </span>
                   <span
                     data-testid="user-menu-role"
-                    className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold ${ROLE_COLORS[user.role]}`}
+                    className={`inline-flex shrink-0 items-center px-2 py-0.5 rounded-full text-[11px] font-semibold whitespace-nowrap ${ROLE_COLORS[user.role]}`}
                   >
                     {USER_ROLE_LABELS[user.role]}
                   </span>
                 </div>
-                {/* Only local sign-in has a password the API can change; under
-                    any other provider the route answers 404. */}
-                {user.auth_provider === 'local' && (
-                  <Link
-                    href={CHANGE_PASSWORD_PATH}
-                    data-testid="change-password-link"
-                    className="px-3 py-1.5 rounded-md text-sm font-medium text-slate-600 hover:bg-slate-50 hover:text-slate-900"
-                  >
-                    Change password
-                  </Link>
-                )}
                 <button
                   type="button"
                   data-testid="logout-button"
                   onClick={() => void handleLogout()}
                   disabled={loggingOut}
-                  className="px-3 py-1.5 rounded-md text-sm font-medium text-slate-600 border border-slate-300 hover:bg-slate-50 hover:text-slate-900 disabled:opacity-60"
+                  className="shrink-0 whitespace-nowrap px-3 py-1.5 rounded-md text-sm font-medium text-slate-600 border border-slate-300 hover:bg-slate-50 hover:text-slate-900 disabled:opacity-60"
                 >
                   {loggingOut ? 'Logging out…' : 'Log out'}
                 </button>
@@ -395,7 +425,7 @@ export function AppShell({ children }: AppShellProps) {
 
             <button
               type="button"
-              className="xl:hidden inline-flex items-center justify-center h-8 w-8 rounded-md text-slate-600 hover:bg-slate-100"
+              className="xl:hidden inline-flex shrink-0 items-center justify-center h-8 w-8 rounded-md text-slate-600 hover:bg-slate-100"
               aria-label={menuOpen ? 'Close navigation' : 'Open navigation'}
               aria-expanded={menuOpen}
               aria-controls="mobile-nav"
@@ -436,8 +466,9 @@ export function AppShell({ children }: AppShellProps) {
             ))}
             {showMore && (
               <MoreNavGroup
-                items={moduleNav}
+                items={moreRoutes}
                 showModulesGuide={showModulesGuide}
+                accountItems={accountNav}
                 id="more-nav-mobile"
                 onNavigate={() => setMenuOpen(false)}
               />
