@@ -1952,9 +1952,12 @@ POST /api/v1/notifications/test                — Send test notification (DEVEL
 
 ---
 
-### AI Design & MCP
+### AI Endpoints and the MCP Manifest
 
-See [MCP Server Guide](../mcp-server.md) for full documentation.
+See [AI Endpoints and the MCP Manifest](../mcp-server.md) for full documentation. The
+manifest describes these operations as tools in the vocabulary of the Model Context
+Protocol, but the platform runs no MCP server: an MCP client cannot connect to it or call a
+tool through it. Call the endpoints over HTTP.
 
 ```text
 POST /api/v1/ai/design                    — AI experiment design suggestion
@@ -1962,7 +1965,7 @@ POST /api/v1/ai/interpret/{experiment_id} — AI results interpretation
 GET  /api/v1/ai/sample-size               — Sample size calculator
 GET  /api/v1/ai/templates                 — List experiment templates
 GET  /api/v1/ai/templates/{id}            — Get template
-GET  /api/v1/mcp/manifest                 — MCP tool manifest (public)
+GET  /api/v1/mcp/manifest                 — Tool manifest in MCP's vocabulary (no sign-in)
 ```
 
 ---
