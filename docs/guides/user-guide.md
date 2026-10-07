@@ -246,9 +246,9 @@ Shows at a glance:
 - **Total Users**: Participants across all variants
 - **Minimum sample**: *Reached* when every variant has at least the primary metric's
   minimum sample size (100 users unless the metric sets another), otherwise *Not reached*.
-  A variant is recommended for shipping only once this is reached: until then a significant
-  variant is shown as *Leading*, and the recommendation is CONTINUE TESTING, with the reason
-  "Not every variant has reached the minimum sample size yet". It is a floor, not the
+  A variant is recommended for shipping only once this is reached: until then a significantly
+  better variant is shown as *Leading*, and the recommendation is CONTINUE TESTING, with the
+  reason "Not every variant has reached the minimum sample size yet". It is a floor, not the
   planned sample size: the **Sample Size** tab shows that, and the card's "See the Sample
   Size tab for the planned sample." link opens it.
 - **Recommendation**: SHIP VARIANT / KEEP CONTROL / CONTINUE TESTING / INCONCLUSIVE
