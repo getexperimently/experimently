@@ -139,7 +139,6 @@ steps:
         - banner:
           - navigation "Primary":
             - link "Experiments"
-          - link "Change password"
           - button "Log out"
         - main:
           - heading "Experiments" [level=1]

@@ -244,6 +244,98 @@ describe('AppShell', () => {
     expect(link).toHaveAttribute('href', '/account/password');
   });
 
+  describe('a superuser\'s header fits on one line (#1069)', () => {
+    // jsdom lays nothing out, so these read the contract the layout rests on;
+    // tests/e2e/header-breakpoint.journey.spec.ts measures it at 1280, 1440
+    // and 1920 px.
+    const classesOf = (el: Element) => el.className.split(/\s+/);
+
+    it('keeps every primary link on one line and lets only the name give way', async () => {
+      signInAs(makeUser({ full_name: 'Platform Admin' }));
+      renderShell();
+      await waitFor(() => expect(screen.getByTestId('user-menu')).toBeInTheDocument());
+      const nav = screen.getByRole('navigation', { name: 'Primary' });
+      const links = Array.from(nav.querySelectorAll(':scope > a'));
+      expect(links.map((a) => a.textContent)).toEqual([
+        'Experiments',
+        'Feature Flags',
+        'Segments',
+        'Audit Log',
+        'Admin',
+        'Docs',
+      ]);
+      for (const link of links) expect(classesOf(link)).toContain('whitespace-nowrap');
+      // The wordmark-and-nav column does not shrink, so the nav cannot be
+      // squeezed into wrapping; the user area can, and in it only the name
+      // (truncated, the email as its title).
+      const column = nav.parentElement as Element;
+      expect(classesOf(column)).toContain('shrink-0');
+      expect(classesOf(column)).not.toContain('min-w-0');
+      const name = screen.getByTestId('user-menu-name');
+      expect(name).toHaveTextContent('Platform Admin');
+      expect(classesOf(name)).toContain('truncate');
+      expect(name).toHaveAttribute('title', 'admin@demo.com');
+      expect(classesOf(screen.getByTestId('user-menu'))).toContain('min-w-0');
+      expect(classesOf(screen.getByTestId('user-menu-role'))).toContain('shrink-0');
+      expect(classesOf(screen.getByTestId('logout-button'))).toContain('shrink-0');
+    });
+
+    it('puts Change password inside More, not in the header row', async () => {
+      signInAs(makeUser({ auth_provider: 'local' }));
+      renderShell();
+      await waitFor(() => expect(screen.getByTestId('user-menu')).toBeInTheDocument());
+      const link = screen.getByTestId('change-password-link');
+      expect(screen.getByTestId('user-menu')).not.toContainElement(link);
+      const group = screen.getAllByTestId('more-nav-group')[0] as HTMLDetailsElement;
+      expect(group).toContainElement(link);
+      // Last in the group, after the modules guide, with a rule between them.
+      const panelLinks = Array.from(group.querySelectorAll('a'));
+      expect(panelLinks.map((a) => a.textContent)).toEqual(['Modules', 'Change password']);
+      expect(group.querySelector('[role="separator"]')).not.toBeNull();
+
+      // Reachable: More opens, the link is followed, More closes.
+      fireEvent.click(group.querySelector('summary')!);
+      await waitFor(() => expect(group).toHaveAttribute('open'));
+      fireEvent.click(link);
+      await waitFor(() => expect(group).not.toHaveAttribute('open'));
+    });
+
+    it('offers Change password in the mobile menu\'s More too', async () => {
+      signInAs(makeUser({ auth_provider: 'local' }));
+      renderShell(full());
+      await waitFor(() => expect(screen.getByTestId('user-menu')).toBeInTheDocument());
+      fireEvent.click(screen.getByTestId('mobile-nav-toggle'));
+      const mobile = screen.getByTestId('mobile-nav');
+      const link = mobile.querySelector('[data-testid="change-password-link"]');
+      expect(link).toHaveAttribute('href', '/account/password');
+      expect(mobile.querySelector('[data-testid="more-nav-group"]')).toContainElement(link as HTMLElement);
+    });
+
+    it('shows More with only Change password while the modules are still being probed', async () => {
+      // The password page does not depend on the modules, so it does not wait
+      // for the probe; the module routes and the guide link still do.
+      mockFetch.mockImplementation((url: string) =>
+        url.endsWith('/api/v1/modules')
+          ? new Promise(() => {})
+          : Promise.resolve(jsonResponse(200, makeUser({ auth_provider: 'local' }))),
+      );
+      localStorage.setItem(TOKEN_STORAGE_KEY, 'tok');
+      render(
+        <ModulesProvider>
+          <AuthProvider>
+            <AppShell>
+              <div data-testid="page-content">page</div>
+            </AppShell>
+          </AuthProvider>
+        </ModulesProvider>,
+      );
+      await waitFor(() => expect(screen.getByTestId('user-menu')).toBeInTheDocument());
+      const group = screen.getAllByTestId('more-nav-group')[0];
+      expect(Array.from(group.querySelectorAll('a')).map((a) => a.textContent)).toEqual(['Change password']);
+      expect(group.querySelector('[role="separator"]')).toBeNull();
+    });
+  });
+
   it('hides Change password from a user who does not sign in locally', async () => {
     // Under any other provider the route answers 404, so the item would only
     // lead to an error.
@@ -444,7 +536,8 @@ describe('AppShell', () => {
     it('shows no More group at all in a full profile with no routed module installed', async () => {
       // A full instance whose installed modules carry no dashboard route has
       // nothing to put in the group, and an empty disclosure is noise.
-      signInAs(makeUser());
+      // An SSO user: a local one's group would still hold Change password.
+      signInAs(makeUser({ auth_provider: 'sso' }));
       renderShell(full({ modules: [MODULES.HIPAA] }));
       await waitFor(() => expect(screen.getByTestId('user-menu')).toBeInTheDocument());
       expect(screen.queryByTestId('more-nav-group')).not.toBeInTheDocument();
@@ -454,10 +547,11 @@ describe('AppShell', () => {
       // The provider's initial state is core, so an unseeded shell would
       // otherwise paint the "Modules" guide link on a full instance and swap
       // it for the routes when the probe resolved.
+      // An SSO user: a local one's group holds Change password from the start.
       mockFetch.mockImplementation((url: string) =>
         url.endsWith('/api/v1/modules')
           ? new Promise(() => {})
-          : Promise.resolve(jsonResponse(200, makeUser())),
+          : Promise.resolve(jsonResponse(200, makeUser({ auth_provider: 'sso' }))),
       );
       localStorage.setItem(TOKEN_STORAGE_KEY, 'tok');
       render(
@@ -478,10 +572,11 @@ describe('AppShell', () => {
       // A failed probe also resolves to core, and the guide link says "this
       // instance runs the core profile" -- which the dashboard cannot know
       // when all that happened is that /api/v1/modules did not answer.
+      // An SSO user: a local one's group holds Change password whatever the probe says.
       mockFetch.mockImplementation((url: string) =>
         url.endsWith('/api/v1/modules')
           ? Promise.reject(new TypeError('Failed to fetch'))
-          : Promise.resolve(jsonResponse(200, makeUser())),
+          : Promise.resolve(jsonResponse(200, makeUser({ auth_provider: 'sso' }))),
       );
       localStorage.setItem(TOKEN_STORAGE_KEY, 'tok');
       render(
