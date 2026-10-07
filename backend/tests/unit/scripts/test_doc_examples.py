@@ -20,6 +20,7 @@ import json
 import pathlib
 import re
 import socket
+import subprocess
 import sys
 import textwrap
 import threading
@@ -2800,23 +2801,53 @@ def _bare_page(monkeypatch, ports):
     return {"path": "p.md", "environment": "bare", "exec": 0}
 
 
+def _hold(seconds: float) -> tuple[int, subprocess.Popen]:
+    """A free port, and another process listening on it for *seconds*.
+
+    A process, not a thread of this one: when a pytest run also collects a
+    locustfile (a bare `pytest` does), gevent patches this process, and a
+    thread would not run while the runner sleeps in its wait.
+    """
+    probe = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    probe.bind(("127.0.0.1", 0))
+    port = probe.getsockname()[1]
+    probe.close()
+    code = (
+        "import socket, sys, time\n"
+        "s = socket.socket()\n"
+        "s.bind(('127.0.0.1', int(sys.argv[1])))\n"
+        "s.listen(1)\n"
+        "print('listening', flush=True)\n"
+        "time.sleep(float(sys.argv[2]))\n"
+    )
+    holder = subprocess.Popen(
+        [sys.executable, "-c", code, str(port), str(seconds)],
+        stdout=subprocess.PIPE,
+        text=True,
+    )
+    assert holder.stdout.readline().strip() == "listening"
+    return port, holder
+
+
 def test_the_teardown_waits_until_the_stack_s_ports_are_free(monkeypatch):
     """A port the stack published that is still held after `compose down`
     (a connection in TIME_WAIT on it, say) is waited for, so the next page's
     preflight finds it free, rather than refusing and ending the shard."""
-    server = _listener()
-    port = server.getsockname()[1]
-    threading.Timer(1.0, server.close).start()
-    doc = _bare_page(monkeypatch, [port])
-    out = io.StringIO()
-    problems, _ = dx.run_document(doc, [], 0, {}, None, out)
+    port, holder = _hold(1.0)
+    try:
+        doc = _bare_page(monkeypatch, [port])
+        out = io.StringIO()
+        problems, _ = dx.run_document(doc, [], 0, {}, None, out)
+        assert not dx._port_in_use(port), "run_document returned with the port held"
+    finally:
+        holder.kill()
+        holder.wait()
     assert problems == []
-    assert not dx._port_in_use(port), "run_document returned with the port held"
     printed = out.getvalue()
     assert f"p.md: port(s) [{port}] still in use after teardown ({port}: " in printed
     assert re.search(
         rf"p\.md: port\(s\) \[{port}\] free [0-9.]+s after teardown", printed
-    )
+    ), printed
 
 
 def test_a_port_held_past_the_wait_fails_the_page_naming_what_holds_it(monkeypatch):
