@@ -19,6 +19,13 @@ from backend.app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
+#: Each call to Claude gives up when Claude has not answered within
+#: ``CLAUDE_TIMEOUT_SECONDS`` and is tried at most ``CLAUDE_MAX_RETRIES`` more
+#: times; when every attempt fails, the caller answers with its template. The
+#: SDK's own defaults are a 600-second read timeout and 2 retries.
+CLAUDE_TIMEOUT_SECONDS = 30.0
+CLAUDE_MAX_RETRIES = 1
+
 
 # ---------------------------------------------------------------------------
 # Data classes
@@ -232,7 +239,9 @@ class AIDesignService:
         except ImportError:
             raise RuntimeError("anthropic package not installed")
 
-        client = anthropic.Anthropic()
+        client = anthropic.Anthropic(
+            timeout=CLAUDE_TIMEOUT_SECONDS, max_retries=CLAUDE_MAX_RETRIES
+        )
         prompt = (
             f"You are an expert in A/B testing and experimentation.\n"
             f'Given this experiment description: "{description}"\n'
@@ -262,7 +271,9 @@ class AIDesignService:
         except ImportError:
             raise RuntimeError("anthropic package not installed")
 
-        client = anthropic.Anthropic()
+        client = anthropic.Anthropic(
+            timeout=CLAUDE_TIMEOUT_SECONDS, max_retries=CLAUDE_MAX_RETRIES
+        )
         prompt = (
             f"Interpret these A/B test results in plain English:\n{results}\n\n"
             f"Provide:\n"

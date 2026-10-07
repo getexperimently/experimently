@@ -1098,9 +1098,14 @@ The API enforces the following rate limits:
     `/api/v1/feature-flags/user/*`): `SDK_RATE_LIMIT_PER_MINUTE` per client IP (default 6000/min)
 -   Authentication endpoints (`/api/v1/auth/login`, `/token`: 10/min; `/signup`,
     `/forgot-password`, `/reset-password`: 5/min)
+-   AI design (`POST /api/v1/ai/design`): 10/min per client IP; AI results
+    interpretation (`POST /api/v1/ai/interpret/{experiment_id}`): 10/min per client IP
+    for every experiment id together
 -   Everything else: 300 requests per minute per client IP
 
-The limits are the same in every profile; they are configuration, not a plan
+A few other routes have their own limits; the
+[API Documentation Guide](api-docs-guide.md#rate-limiting) lists every one. The limits
+are the same in every profile; they are configuration, not a plan
 (`backend/app/middleware/rate_limiter.py`).
 
 When a rate limit is exceeded, the API will respond with a 429 status code and the following headers:

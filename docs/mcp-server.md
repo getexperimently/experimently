@@ -85,6 +85,11 @@ curl -X POST "http://localhost:8000/api/v1/ai/design" \
 
 `source` is either `"claude_api"` (live AI suggestion) or `"template"` (fallback).
 
+The endpoint allows 10 requests a minute per client address; above that it answers
+`429 Too Many Requests` with a `Retry-After: 60` header. With `ANTHROPIC_API_KEY` set, each
+call to Claude waits at most 30 seconds for an answer and is tried at most twice; when it
+fails, the endpoint answers with the template-based suggestion.
+
 ---
 
 ## AI Results Interpretation (`/api/v1/ai/interpret/{experiment_id}`)
@@ -112,6 +117,12 @@ curl -X POST "http://localhost:8000/api/v1/ai/interpret/exp-uuid" \
   "source": "claude_api"
 }
 ```
+
+The endpoint allows 10 requests a minute per client address for every experiment id
+together: `/interpret/a` and `/interpret/b` draw on the same 10. Above that it answers
+`429 Too Many Requests` with a `Retry-After: 60` header. With `ANTHROPIC_API_KEY` set, each
+call to Claude waits at most 30 seconds for an answer and is tried at most twice; when it
+fails, the endpoint answers with the template-based interpretation.
 
 ---
 

@@ -160,15 +160,22 @@ flag's `targeting_rules` instead — see
 The API implements rate limiting to ensure fair usage and system stability:
 
 Limits are per IP, resolved in `backend/app/middleware/rate_limiter.py`:
-an exact path match wins, then the export prefix, then the SDK prefixes, then
-the default.
+an exact path match wins, then the export and AI interpretation prefixes, then
+the SDK prefixes, then the default.
 
 | paths | limit |
 |---|---|
 | `/api/v1/auth/token`, `/auth/login` | 10 / min |
 | `/api/v1/auth/signup`, `/auth/forgot-password`, `/auth/reset-password` | 5 / min |
+| `/api/v1/users/me/password` | 5 / min |
+| `/api/v1/auth/sso/exchange` (full image) | 10 / min |
+| `/api/v1/auth/sso/login` (full image) | 30 / min |
 | `/api/v1/export/` (all export endpoints share one count) | 10 / min |
-| `/api/v1/tracking/`, `/api/v1/feature-flags/evaluate/`, `/api/v1/feature-flags/user/` | `SDK_RATE_LIMIT_PER_MINUTE`, default **6000 / min** |
+| `/api/v1/audit-logs/export` (its own count) | 10 / min |
+| `/api/v1/ai/design` | 10 / min |
+| `/api/v1/ai/interpret/` (every experiment id shares one count) | 10 / min |
+| `/api/v1/tracking/assign/batch` (its own count) | 60 / min |
+| `/api/v1/tracking/`, `/api/v1/feature-flags/evaluate/`, `/api/v1/feature-flags/user/`, `/api/v1/sdk/` | `SDK_RATE_LIMIT_PER_MINUTE`, default **6000 / min** |
 | everything else | **300 / min** |
 
 The SDK ceiling is high on purpose: one server-side SDK, or one office behind
