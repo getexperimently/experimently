@@ -97,6 +97,27 @@ What a run makes up or keeps is never written to the run directory
 (``redaction.py``): a fill that types one takes ``snapshot: false``, a journey
 that has one is not recorded (``video: false``), and every text the runner
 writes has them taken out.
+
+What an API answers can be kept for later steps and checked against an oracle
+(``values.py``, ``traffic.py``, ``oracles.py``):
+
+* ``save: {<name>: {path: <dotted path>, secret: false}}`` on an ``api`` step
+  keeps the value at that path of its answer; a later api step's path or body,
+  or a ``goto``, uses it as ``{{<name>}}``. A value saved with ``secret: true``
+  (an API key) is a secret like a kept one: never written to the run directory,
+  and used only as an api or traffic step's ``key``, sent as ``X-API-Key``.
+  ``keep`` may also read the one element of a role whose text starts with
+  ``prefix`` (an API key's documented ``eptk_``) instead of one ``within`` a
+  named element.
+* ``traffic`` (compose-dev only) sends an experiment a population the journey
+  chooses: per variant, how many users are assigned and how many of them send
+  the metric's event, through the tracking API with an API key. Its check is
+  the action itself: every user assigned the variant the documented hash
+  gives, every event accepted.
+* ``expect.computed`` on an api step: the number at each JSON path equals an
+  oracle's within a relative tolerance ``rel``. ``expect.cells`` on a screen
+  step: the cell of a table's column, in the row that has a cell reading
+  ``row``, shows an oracle's number at the precision it is shown.
 """
 
 from __future__ import annotations
@@ -222,10 +243,10 @@ SCREEN_ACTIONS = ("goto", "open", "click", "fill", "select")
 #: The actions in the browser; each but ``keep`` keeps its screen as a screenshot.
 BROWSER_ACTIONS = (*SCREEN_ACTIONS, "search", "keep")
 #: What a step on a screen may expect, and what an ``api`` step may.
-BROWSER_EXPECTS = ("url", "status", "visible", "text", "number", "aria")
+BROWSER_EXPECTS = ("url", "status", "visible", "text", "number", "cells", "aria")
 #: A screen step's structural expectations: all but the ARIA snapshot.
 STRUCTURAL_EXPECTS = tuple(name for name in BROWSER_EXPECTS if name != "aria")
-API_EXPECTS = ("status", "json")
+API_EXPECTS = ("status", "json", "computed")
 SEARCH_EXPECTS = ("found",)
 #: The stacks that serve the documentation site and name its source.
 SITE_STACKS = ("docs-local", "docs-published")
@@ -309,20 +330,81 @@ class Select(_Quoted):
 
 
 class Keep(_Strict):
-    """Keep the text of the one ``role`` element inside ``within`` as ``secret``."""
+    """Keep the text of one ``role`` element as ``secret``.
+
+    The element is the one inside ``within``, or, where the page names no
+    element around it, the one whose text starts with ``prefix`` (the shape the
+    guide gives the value, such as an API key's ``eptk_``).
+    """
 
     secret: StrictStr = Field(pattern=SLUG_PATTERN)
     role: Role
-    within: Named
+    within: Optional[Named] = None
+    prefix: Optional[OneLine] = None
+
+    @model_validator(mode="after")
+    def _within_or_prefix(self) -> "Keep":
+        if (self.within is None) == (self.prefix is None):
+            raise ValueError(
+                "keep finds its element by exactly one of within or prefix"
+            )
+        return self
+
+
+#: A saved value's name, and a secret's: a slug, as a step's id is.
+Name = Annotated[StrictStr, Field(pattern=SLUG_PATTERN)]
 
 
 class Api(_Strict):
-    """One HTTP request to the stack's API, as one of its accounts."""
+    """One HTTP request to the stack's API, as one of its accounts.
+
+    ``key`` names a secret (an API key saved earlier) sent as ``X-API-Key``;
+    it is given with ``as: anonymous``, so the request carries the key alone,
+    as an SDK's does.
+    """
 
     method: Literal["GET", "POST", "PUT", "PATCH", "DELETE"]
     path: StrictStr = Field(pattern=r"^/\S*$")
     as_: Caller = Field(alias="as")
     body: Optional[Union[Dict[str, Any], List[Any]]] = None
+    key: Optional[Name] = None
+
+    @model_validator(mode="after")
+    def _key_alone(self) -> "Api":
+        if self.key is not None and self.as_ != "anonymous":
+            raise ValueError(
+                "an api step with a key sends the key alone: give as: anonymous"
+            )
+        return self
+
+
+class Population(_Strict):
+    """How many users one variant gets, and how many of them convert."""
+
+    assigned: StrictInt = Field(ge=1, le=10000)
+    converted: StrictInt = Field(ge=0)
+
+    @model_validator(mode="after")
+    def _converted_at_most_assigned(self) -> "Population":
+        if self.converted > self.assigned:
+            raise ValueError("converted cannot be more than assigned")
+        return self
+
+
+class Traffic(_Strict):
+    """A chosen population sent through the tracking API (``traffic.py``)."""
+
+    #: The saved value holding the experiment's id.
+    experiment: Name
+    #: The secret holding the API key the users are assigned and tracked with.
+    key: Name
+    #: Who reads the experiment's key and variants first.
+    as_: Caller = Field(alias="as")
+    #: The event a converting user sends: the primary metric's event name.
+    event: OneLine
+    #: The user ids are ``<users>-00001``, ``<users>-00002``, ...
+    users: StrictStr = Field(pattern=SLUG_PATTERN)
+    variants: Dict[OneLine, Population] = Field(min_length=1)
 
 
 class Do(_Strict):
@@ -335,6 +417,7 @@ class Do(_Strict):
     select: Optional[Select] = None
     keep: Optional[Keep] = None
     api: Optional[Api] = None
+    traffic: Optional[Traffic] = None
     ref: Optional[Literal["doc-examples"]] = None
     search: Optional[OneLine] = None
     crawl: Optional[Literal["nav", "links"]] = None
@@ -345,7 +428,7 @@ class Do(_Strict):
         if len(given) != 1:
             raise ValueError(
                 "do must be exactly one of goto, open, click, fill, select, keep,"
-                f" api, ref, search, crawl; got {given or 'none'}"
+                f" api, traffic, ref, search, crawl; got {given or 'none'}"
             )
         return self
 
@@ -391,6 +474,25 @@ class NumberExpect(_Strict):
     oracle: Oracle
 
 
+class Computed(_Strict):
+    """A number in an API answer equals an oracle's, within ``rel`` of it."""
+
+    oracle: Oracle
+    rel: StrictFloat = Field(gt=0, le=0.01)
+
+
+class Cell(_Quoted):
+    """A table cell shows an oracle's number, at the precision it shows.
+
+    The cell is the one under the column headed ``column``, in the one row
+    that has a cell reading exactly ``row`` (a variant's name, say).
+    """
+
+    row: OneLine
+    column: OneLine
+    oracle: Oracle
+
+
 class Expect(_Strict):
     """What must hold after the step; at least one entry."""
 
@@ -399,7 +501,9 @@ class Expect(_Strict):
     visible: Optional[List[Named]] = Field(default=None, min_length=1)
     text: Optional[OneLine] = None
     json_: Optional[Dict[str, Any]] = Field(default=None, alias="json", min_length=1)
+    computed: Optional[Dict[StrictStr, Computed]] = Field(default=None, min_length=1)
     number: Optional[NumberExpect] = None
+    cells: Optional[List[Cell]] = Field(default=None, min_length=1)
     found: Optional[StrictStr] = Field(default=None, pattern=r"^/\S*$")
     aria: Optional[StrictStr] = Field(default=None, min_length=1)
 
@@ -434,6 +538,13 @@ class Expect(_Strict):
         return names
 
 
+class Save(_Strict):
+    """Keep the value at ``path`` of an api step's answer; ``secret`` keeps it unwritten."""
+
+    path: StrictStr = Field(pattern=r"^[^.\s]+(?:\.[^.\s]+)*$")
+    secret: StrictBool = False
+
+
 class Step(_Strict):
     id: StrictStr = Field(pattern=SLUG_PATTERN)
     doc: StrictStr = Field(pattern=r"^[^#\s]+$")
@@ -443,6 +554,7 @@ class Step(_Strict):
     snapshot: Optional[StrictBool] = None
     snapshot_reason: Optional[StrictStr] = None
     not_run: Optional[StrictStr] = None
+    save: Optional[Dict[Name, Save]] = Field(default=None, min_length=1)
 
     @field_validator("fail")
     @classmethod
@@ -532,13 +644,16 @@ def _names_a_credential(node: Any) -> bool:
 
 
 def reveals_credential(step: Step) -> bool:
-    """True for an api step that asks for a credential, or expects one in its answer.
+    """True for an api step that asks for a credential, expects one in its answer,
+    or saves one (``save`` with ``secret: true``).
 
     Its journey then counts as having a secret: it is not recorded.
     """
     call = step.do.api
     if call is None:
         return False
+    if any(save.secret for save in (step.save or {}).values()):
+        return True
     path = call.path.split("?", 1)[0].rstrip("/")
     if call.method == "POST" and path in CREDENTIAL_ROUTES:
         return True

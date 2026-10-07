@@ -1,0 +1,382 @@
+# The dashboard's guided setup, as "Guided experiment builder" describes it
+# (#939; QA plan D3b): five steps to a draft, then started, by a DEVELOPER
+# (the guide: only ADMIN and DEVELOPER users create experiments).
+#
+# What the guide says and the journey holds it to: the step is in the address
+# (?step=details); Next checks only the step you are on (an empty name, then a
+# split that adds up to 90%, are refused where they are); Back never checks
+# anything (it leaves the 90% split behind); the Estimate step starts with how
+# results will be judged, 95% and Benjamini-Hochberg by default; a 12% baseline
+# and a 5% relative change need 47,036 users per variant (the number the guide
+# gives; the calculation itself is the power-calculator journey's, against a
+# scipy oracle); the Review step's Analysis row; Create Experiment makes a
+# draft; Start makes it active.
+guide: guides/experiment-wizard.md
+stack: compose-dev
+profile: core
+video: true
+written: 2026-10-06
+steps:
+  - id: sign-in-page
+    doc: in-the-dashboard-guided-setup
+    do:
+      goto: /login
+    expect:
+      status: 200
+      aria: |
+        - main:
+          - heading "Sign in" [level=1]
+          - textbox "Email"
+          - textbox "Password"
+          - button "Sign in"
+    fail: the dashboard does not answer, or its sign-in page is not there
+  - id: email
+    doc: in-the-dashboard-guided-setup
+    do:
+      fill:
+        label: Email
+        value: dev@demo.com
+        quote: false
+        reason: the sign-in form's field; the guide says DEVELOPER users can create experiments
+    expect:
+      aria: |
+        - textbox "Email":
+          - text: dev@demo.com
+    fail: there is no Email field to fill
+  - id: password
+    doc: in-the-dashboard-guided-setup
+    do:
+      fill:
+        label: Password
+        value: Demo1234!
+        quote: false
+        reason: the sign-in form's field; the demo accounts' documented password
+    expect:
+      aria: |
+        - textbox "Password"
+    fail: there is no Password field to fill
+  - id: sign-in
+    doc: in-the-dashboard-guided-setup
+    do:
+      click:
+        role: button
+        name: Sign in
+        quote: false
+        reason: the sign-in form's button
+    expect:
+      url: /experiments
+      aria: |
+        - main:
+          - heading "Experiments" [level=1]
+          - link "+ New Experiment"
+    fail: the DEVELOPER account cannot sign in, or is not offered + New Experiment
+  - id: new-experiment
+    doc: in-the-dashboard-guided-setup
+    do:
+      click:
+        role: link
+        name: + New Experiment
+    expect:
+      url: /experiments/new
+      aria: |
+        - main:
+          - heading "New Experiment" [level=1]
+          - paragraph:
+            - link "Use the single-page form (advanced)"
+          - navigation "Guided setup steps":
+            - paragraph: Step 1 of 5
+            - list:
+              - listitem: Type (current step)
+              - listitem:
+                - button "Details (not started)"
+              - listitem: Variants (not started)
+              - listitem: Estimate (not started)
+              - listitem: Review (not started)
+          - region "What kind of experiment?":
+            - group "Choose the experiment type.":
+              - radio /^A\/B Test/ [checked]
+              - radio /^Multivariate/
+          - button "Next"
+    fail: Experiments → + New Experiment does not open guided setup at step 1 of 5, Type, with A/B Test and Multivariate
+  - id: type-next
+    doc: in-the-dashboard-guided-setup
+    do:
+      click:
+        role: button
+        name: Next
+    expect:
+      url: /experiments/new?step=details
+      aria: |
+        - main:
+          - navigation "Guided setup steps":
+            - paragraph: Step 2 of 5
+          - region "Name it and choose what to measure":
+            - textbox "Name *"
+            - textbox "Key"
+            - textbox "Description"
+            - textbox "Hypothesis"
+            - textbox "Metric 1 name"
+            - textbox "Metric 1 event name"
+            - radio "Primary metric" [checked]
+    fail: Next does not move to the Details step, or the step is not in the address
+  - id: details-refused
+    doc: in-the-dashboard-guided-setup
+    do:
+      click:
+        role: button
+        name: Next
+    expect:
+      url: /experiments/new?step=details
+      aria: |
+        - main:
+          - region "Name it and choose what to measure":
+            - alert:
+              - paragraph: Name is required.
+    fail: Next leaves the Details step with no name, or does not say what is missing
+  - id: name
+    doc: in-the-dashboard-guided-setup
+    do:
+      fill:
+        label: Name *
+        value: Docs journey wizard
+        quote: false
+        reason: the field is labelled "Name *" (required); the guide calls it the name
+    expect:
+      aria: |
+        - textbox "Name *":
+          - text: Docs journey wizard
+        - textbox "Key":
+          - text: docs_journey_wizard
+    fail: the name cannot be typed, or the key is not generated from it
+  - id: metric-event
+    doc: in-the-dashboard-guided-setup
+    do:
+      fill:
+        label: Metric 1 event name
+        value: checkout_completed
+        quote: false
+        reason: the first metric's event name field; the guide says each metric has its own name
+    expect:
+      aria: |
+        - textbox "Metric 1 event name":
+          - text: checkout_completed
+    fail: the metric's event name cannot be typed
+  - id: details-next
+    doc: in-the-dashboard-guided-setup
+    do:
+      click:
+        role: button
+        name: Next
+    expect:
+      url: /experiments/new?step=variants
+      aria: |
+        - main:
+          - navigation "Guided setup steps":
+            - paragraph: Step 3 of 5
+          - region "Set up the versions users will see":
+            - paragraph: Allocations must add up to 100%. Currently 100%
+            - textbox "Variant 1 name":
+              - text: Control
+            - spinbutton "Variant 1 allocation": "50"
+            - radio "Control" [checked]
+            - textbox "Variant 2 name":
+              - text: Treatment
+            - spinbutton "Variant 2 allocation": "50"
+    fail: the Variants step does not offer a control and a treatment at 50% each
+  - id: split-90
+    doc: in-the-dashboard-guided-setup
+    do:
+      fill:
+        label: Variant 2 allocation
+        value: "40"
+        quote: false
+        reason: the second variant's traffic field; the guide says the split must add up to exactly 100%
+    expect:
+      aria: |
+        - paragraph: Allocations must add up to 100%. Currently 90%
+    fail: the split cannot be changed, or its total is not shown
+  - id: split-refused
+    doc: in-the-dashboard-guided-setup
+    do:
+      click:
+        role: button
+        name: Next
+    expect:
+      url: /experiments/new?step=variants
+      aria: |
+        - main:
+          - region "Set up the versions users will see":
+            - alert:
+              - paragraph: Variant allocations must add up to 100% (currently 90%).
+    fail: Next leaves the Variants step with a split of 90%, or does not say why it stays
+  - id: back
+    doc: in-the-dashboard-guided-setup
+    do:
+      click:
+        role: button
+        name: Back
+    expect:
+      url: /experiments/new?step=details
+      aria: |
+        - main:
+          - navigation "Guided setup steps":
+            - paragraph: Step 2 of 5
+            - list:
+              - listitem:
+                - button "Type (completed)"
+              - listitem: Details (current step)
+              - listitem:
+                - button "Variants (needs attention)"
+    fail: Back checks the step it leaves (the 90% split), or does not go back to Details
+  - id: details-next-again
+    doc: in-the-dashboard-guided-setup
+    do:
+      click:
+        role: button
+        name: Next
+    expect:
+      url: /experiments/new?step=variants
+      aria: |
+        - paragraph: Allocations must add up to 100%. Currently 90%
+    fail: the answers on the Variants step are not kept after going back
+  - id: split-100
+    doc: in-the-dashboard-guided-setup
+    do:
+      fill:
+        label: Variant 2 allocation
+        value: "50"
+        quote: false
+        reason: the second variant's traffic field; the guide says the split must add up to exactly 100%
+    expect:
+      aria: |
+        - paragraph: Allocations must add up to 100%. Currently 100%
+    fail: the split cannot be set back to 100%
+  - id: variants-next
+    doc: in-the-dashboard-guided-setup
+    do:
+      click:
+        role: button
+        name: Next
+    expect:
+      url: /experiments/new?step=estimate
+      aria: |
+        - main:
+          - navigation "Guided setup steps":
+            - paragraph: Step 4 of 5
+          - region "How results will be judged, and how many users you need":
+            - group "How results will be judged":
+              - combobox "Confidence level":
+                - option "90%"
+                - option "95% (recommended)" [selected]
+                - option "99%"
+              - combobox "Correction for several variants":
+                - option "Benjamini-Hochberg (recommended)" [selected]
+                - option "Bonferroni (stricter)"
+                - option "None"
+            - region "Sample size estimate (optional, not saved)":
+              - button "Calculate estimate"
+    fail: the Estimate step does not start with how results will be judged (90, 95 or 99%, 95% chosen; Benjamini-Hochberg chosen, Bonferroni or None), then the optional estimate
+  - id: baseline
+    doc: in-the-dashboard-guided-setup
+    do:
+      fill:
+        label: Baseline conversion rate (%)
+        value: "12"
+        quote: false
+        reason: the estimate's baseline field; the guide's example is a 12% baseline
+    expect:
+      aria: |
+        - spinbutton "Baseline conversion rate (%)": "12"
+    fail: the baseline rate cannot be typed
+  - id: effect
+    doc: in-the-dashboard-guided-setup
+    do:
+      fill:
+        label: Minimum detectable effect (relative) (%)
+        value: "5"
+        quote: false
+        reason: the estimate's effect field; the guide's example is a 5% relative change
+    expect:
+      aria: |
+        - spinbutton "Minimum detectable effect (relative) (%)": "5"
+        - paragraph: 5% means 12% → 12.6%, not 17%.
+    fail: the effect cannot be typed, or it is not explained as a relative change
+  - id: calculate
+    doc: in-the-dashboard-guided-setup
+    do:
+      click:
+        role: button
+        name: Calculate estimate
+        quote: false
+        reason: the estimate's button; the guide says the step then shows how many users each variant needs
+    expect:
+      aria: |
+        - status:
+          - paragraph: 47,036 users per variant
+          - paragraph: 94,072 users in total across 2 variants, at 80% power and 5% significance.
+    fail: the estimate for a 12% baseline and a 5% relative change is not 47,036 users per variant
+  - id: estimate-next
+    doc: in-the-dashboard-guided-setup
+    do:
+      click:
+        role: button
+        name: Next
+    expect:
+      url: /experiments/new?step=review
+      aria: |
+        - main:
+          - navigation "Guided setup steps":
+            - paragraph: Step 5 of 5
+          - region "Check and create":
+            - term: Type
+            - definition:
+              - text: A/B Test
+            - definition:
+              - paragraph: "Name: Docs journey wizard"
+            - definition:
+              - list:
+                - listitem: "Control: 50% (control)"
+                - listitem: "Treatment: 50%"
+            - term: Analysis
+            - definition:
+              - paragraph: 95% confidence · Benjamini-Hochberg correction
+            - term: Estimate
+            - definition:
+              - paragraph: 47,036 users per variant (advisory; not saved)
+          - button "Create Experiment"
+    fail: the Review step does not show everything as it will be sent, with its Analysis row
+  - id: create
+    doc: in-the-dashboard-guided-setup
+    do:
+      click:
+        role: button
+        name: Create Experiment
+    expect:
+      aria: |
+        - main:
+          - heading "Docs journey wizard" [level=1]
+          - text: Draft
+          - term: Key
+          - definition:
+            - text: docs_journey_wizard
+          - term: Analysis
+          - definition: 95% confidence · Benjamini-Hochberg
+          - term: Owner
+          - definition: You (dev@demo.com)
+          - button "Start"
+    fail: Create Experiment does not create a draft owned by the DEVELOPER, with the analysis settings chosen
+  - id: start
+    doc: in-the-dashboard-guided-setup
+    do:
+      click:
+        role: button
+        name: Start
+    expect:
+      aria: |
+        - main:
+          - heading "Docs journey wizard" [level=1]
+          - text: Active
+          - button "Pause"
+          - button "Complete"
+          - link "View results"
+    fail: Start does not make the draft active

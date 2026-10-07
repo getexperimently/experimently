@@ -49,6 +49,11 @@ def describe_action(step: Step) -> str:
         return f'fill "{do.fill.label}"'
     if do.keep is not None:
         within = do.keep.within
+        if within is None:
+            return (
+                f"keep the text of the {do.keep.role} starting"
+                f' "{do.keep.prefix}" as {do.keep.secret}'
+            )
         return (
             f"keep the text of the {do.keep.role} in the {within.role}"
             f' "{within.name}" as {do.keep.secret}'
@@ -56,7 +61,20 @@ def describe_action(step: Step) -> str:
     if do.select is not None:
         return f'choose "{do.select.option}" in "{do.select.label}"'
     if do.api is not None:
+        if do.api.key is not None:
+            return f"{do.api.method} {do.api.path} with the API key {do.api.key}"
         return f"{do.api.method} {do.api.path} as {do.api.as_}"
+    if do.traffic is not None:
+        traffic = do.traffic
+        users = sum(p.assigned for p in traffic.variants.values())
+        split = "; ".join(
+            f"{name} {p.assigned}, {p.converted} sending {traffic.event}"
+            for name, p in traffic.variants.items()
+        )
+        return (
+            f"send {users} users through the tracking API with the API key"
+            f" {traffic.key} ({split})"
+        )
     if do.search is not None:
         return f'search the site for "{do.search}"'
     if do.crawl == "nav":
@@ -79,6 +97,18 @@ CRAWL_EXPECTS = {
 }
 
 
+#: What a traffic step expects; the action itself is the check.
+TRAFFIC_EXPECTS = (
+    "every user answered 200, assigned, with the variant the documented hash"
+    " gives it; every event answered 200"
+)
+
+
+def _oracle_call(oracle) -> str:
+    args = ", ".join(f"{k}={v}" for k, v in oracle.args.items())
+    return f"{oracle.name}({args})"
+
+
 def describe_expect(step: Step) -> str:
     if step.do.crawl is not None:
         return CRAWL_EXPECTS[step.do.crawl]
@@ -87,6 +117,9 @@ def describe_expect(step: Step) -> str:
             f"exactly one {step.do.keep.role} there, holding at least"
             f" {MIN_LENGTH} characters (kept, never written)"
         )
+
+    if step.do.traffic is not None:
+        return TRAFFIC_EXPECTS
     expect_ = step.expect
     if expect_ is None:
         return "Doc Examples runs this section's blocks"
@@ -101,12 +134,21 @@ def describe_expect(step: Step) -> str:
         parts.append(f'text "{expect_.text}"')
     for path, value in (expect_.json_ or {}).items():
         parts.append(f"json {path} = {json.dumps(value)}")
+    for path, computed in (expect_.computed or {}).items():
+        parts.append(
+            f"json {path} = {_oracle_call(computed.oracle)} within"
+            f" {computed.rel:g} of it"
+        )
     if expect_.number is not None:
         number = expect_.number
-        args = ", ".join(f"{k}={v}" for k, v in number.oracle.args.items())
         parts.append(
             f'the number in {number.locator.role} "{number.locator.name}" equals'
-            f" {number.oracle.name}({args})"
+            f" {_oracle_call(number.oracle)}"
+        )
+    for cell in expect_.cells or []:
+        parts.append(
+            f'the {cell.column} of the row "{cell.row}" shows'
+            f" {_oracle_call(cell.oracle)}"
         )
     if expect_.found is not None:
         parts.append(f"{expect_.found} among the first {SEARCH_TOP} results")
@@ -142,3 +184,31 @@ def parse_number(text: str) -> float:
     if match is None:
         raise StepFailed(f"no number in {one_line(text, 80)!r}")
     return float(match.group(0).replace(",", ""))
+
+
+def shown_places(text: str) -> int:
+    """How many decimal places the first number in *text* is shown with."""
+    match = NUMBER.search(text)
+    if match is None:
+        raise StepFailed(f"no number in {one_line(text, 80)!r}")
+    whole, _, fraction = match.group(0).partition(".")
+    return len(fraction)
+
+
+def agrees(text: str, value: float) -> bool:
+    """True when the number shown in *text* is *value* at the precision shown.
+
+    ``0.0153`` agrees with 0.0152993 (four places) and not with 0.0156; an
+    integer shown agrees only with that integer. The bound is half a unit of
+    the last place shown, so a value rounded either way at the boundary agrees.
+    """
+    places = shown_places(text)
+    shown = parse_number(text)
+    return abs(shown - value) <= 0.5 * 10.0 ** (-places) + 1e-12
+
+
+def within(seen: Any, wanted: float, rel: float) -> bool:
+    """True when *seen* is a number (not a boolean) within *rel* of *wanted*."""
+    if isinstance(seen, bool) or not isinstance(seen, (int, float)):
+        return False
+    return abs(seen - wanted) <= rel * abs(wanted)
