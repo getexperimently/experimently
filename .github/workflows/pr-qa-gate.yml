@@ -123,15 +123,17 @@ jobs:
           POSTGRES_DB: experimentation
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
-        run: python -m pytest backend/tests/unit/ -p no:cov -q --tb=short -x --junitxml=unit-junit.xml
+        run: python -m pytest backend/tests/unit/ backend/tests/realistic/ -p no:cov -q --tb=short -x --junitxml=unit-junit.xml
 
       # The workflow tests skip when the file they read is absent, so a
       # renamed workflow used to turn 19 of them into green skips (QA 4d).
       # The statistical gates (stats_validation) must all run: a skipped gate
-      # looks exactly like a passing one. On this full checkout nothing under
-      # either directory skips.
-      - name: No workflow or statistical-gate test was skipped
-        run: python3 scripts/check_junit_skips.py unit-junit.xml backend/tests/unit/infrastructure backend/tests/unit/stats_validation
+      # looks exactly like a passing one. So must the seeded realistic
+      # scenarios (backend/tests/realistic): they need no running platform,
+      # and until they joined this job no workflow ran them. On this full
+      # checkout nothing under any of the three directories skips.
+      - name: No workflow, statistical-gate or realistic-scenario test was skipped
+        run: python3 scripts/check_junit_skips.py unit-junit.xml backend/tests/unit/infrastructure backend/tests/unit/stats_validation backend/tests/realistic
 
       # The Lambda functions (event processor, flag evaluation) and their
       # shared package carry tests of their own (240 collected) that ran
