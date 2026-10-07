@@ -169,8 +169,8 @@ Env: `EXPERIMENTLY_API_URL` (default `http://localhost:8000`), `EXPERIMENTLY_API
 `sdk_contract_flag`), `CONTRACT_USER_ID` (default random `smoke-<uuid>`). Set `MIX_QUIET=1` to keep
 Mix's compile messages off stdout.
 
-Verified against a live backend: **not yet (toolchain unavailable — no elixir/mix on the
-development machine)**.
+CI does not run this SDK's contract smoke against a real API: `elixir` is not in the
+`sdks:` list of the SDK Live Contract job in [pr-qa-gate.yml](https://github.com/getexperimently/experimently/blob/main/.github/workflows/pr-qa-gate.yml).
 
 ## Testing
 

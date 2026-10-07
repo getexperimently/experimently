@@ -414,7 +414,10 @@ reason = "AWS Secrets Manager and its rotation"
 
 [pages."monitoring/monitoring-guide.md"]
 class = "aws"
-exercised_by = ["force a circuit breaker and an alarm rollback"]
+exercised_by = [
+    "run the first stack deploy",
+    "force a circuit breaker and an alarm rollback",
+]
 reason = "CloudWatch monitoring of a deployment on AWS"
 
 [pages."monitoring/setup-guide.md"]
@@ -535,10 +538,7 @@ reason = "the CDK database stack"
 
 [pages."infrastructure/dynamodb-readme.md"]
 class = "aws"
-exercised_by = [
-    "run the first stack deploy",
-    "605",
-]
+exercised_by = ["run the first stack deploy"]
 reason = "the CDK DynamoDB tables"
 
 [pages."infrastructure/redis-summary.md"]
