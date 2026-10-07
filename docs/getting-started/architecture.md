@@ -266,4 +266,3 @@ The API service uses **blue/green deployment** via AWS CodeDeploy:
 | CloudWatch Dashboards | API latency, Lambda invocations, error rates, queue depth |
 | CloudWatch Alarms | p99 latency > 1s, error rate > 1%, DLQ messages > 0 |
 | Structlog JSON logs | Structured logs with `request_id`, `user_id`, `action`, `duration_ms` |
-| AWS X-Ray | Distributed tracing across API, Lambda, and DynamoDB calls |

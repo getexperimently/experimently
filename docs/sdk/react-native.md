@@ -19,8 +19,8 @@ the SDK caches the answer per user + key. Nothing is bucketed locally.
 
 Source: `sdk/react-native`. Example app: `sdk/react-native/example/App.tsx`.
 
-Verified against a live backend: **unit tests only (no device runtime)** — 127 Jest tests with a
-mocked `fetch`; there is no contract smoke for React Native.
+CI runs this SDK's contract smoke against a real API: `react-native` is in the `sdks:` list of the
+SDK Live Contract job in [pr-qa-gate.yml](https://github.com/getexperimently/experimently/blob/main/.github/workflows/pr-qa-gate.yml).
 
 ---
 
@@ -361,9 +361,8 @@ npx tsc --noEmit
 npm run typecheck:tests
 ```
 
-No contract smoke exists for React Native (it needs a device runtime); the endpoint contract is
-covered by the `js`, `openfeature` and `edge` live runs
-(`python tests/sdk-contract/live/run_live_contract.py --sdk js --sdk openfeature --sdk edge --strict`).
+The contract smoke, `examples/contract_smoke.test.ts`, runs under Jest in Node, with no device
+runtime; the live runner runs it with `python tests/sdk-contract/live/run_live_contract.py --sdk react-native --strict`.
 
 ---
 
