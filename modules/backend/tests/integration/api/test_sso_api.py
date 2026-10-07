@@ -332,6 +332,74 @@ class TestGetSSOConfig:
 # ---------------------------------------------------------------------------
 
 
+HTTPS_DETAIL = (
+    "OIDC provider endpoints must use https; check this SSO configuration's sso_url"
+)
+
+
+def _okta_config_payload(**overrides) -> Dict[str, Any]:
+    base = {
+        "org_name": "Acme Okta",
+        "org_domain": f"acme-okta-{uuid.uuid4().hex[:6]}.com",
+        "provider_type": "okta",
+        "entity_id": "okta-client-id",
+        "client_secret": "okta-client-pw",
+        "sso_url": "https://acme.okta.example/oauth2/default",
+    }
+    base.update(overrides)
+    return base
+
+
+@pytest.fixture
+def outside_test(monkeypatch):
+    from backend.app.core.config import settings as core_settings
+
+    monkeypatch.setattr(core_settings, "ENVIRONMENT", "development")
+    assert not core_settings.is_test
+
+
+@pytest.mark.integration
+@pytest.mark.requires_db
+@pytest.mark.regression
+class TestAnOktaSsoUrlMustBeHttps:
+    """Refused when the configuration is saved, as it is at sign-in."""
+
+    def test_create_with_an_http_sso_url_is_refused(
+        self, admin_client: TestClient, outside_test
+    ):
+        payload = _okta_config_payload(sso_url="http://acme.okta.example/oauth2")
+        resp = admin_client.post(f"{BASE}/configs", json=payload)
+        assert resp.status_code == 400, resp.text
+        assert resp.json()["detail"] == HTTPS_DETAIL
+        listed = admin_client.get(f"{BASE}/configs").json()
+        assert payload["org_domain"] not in [c["org_domain"] for c in listed]
+
+    def test_update_to_an_http_sso_url_is_refused(
+        self, admin_client: TestClient, outside_test
+    ):
+        created = _create_config(admin_client, _okta_config_payload())
+        resp = admin_client.put(
+            f"{BASE}/configs/{created['id']}",
+            json={"sso_url": "http://acme.okta.example/oauth2"},
+        )
+        assert resp.status_code == 400, resp.text
+        assert resp.json()["detail"] == HTTPS_DETAIL
+        stored = admin_client.get(f"{BASE}/configs/{created['id']}").json()
+        assert stored["sso_url"] == "https://acme.okta.example/oauth2/default"
+
+    def test_a_google_config_with_an_http_sso_url_is_saved(
+        self, admin_client: TestClient, outside_test
+    ):
+        """Google's endpoints are fixed; its ``sso_url`` is not used, so not checked."""
+        payload = _google_config_payload(sso_url="http://ignored.example")
+        resp = admin_client.post(f"{BASE}/configs", json=payload)
+        assert resp.status_code == 201, resp.text
+        resp = admin_client.put(
+            f"{BASE}/configs/{resp.json()['id']}", json={"sso_url": "ignored.example"}
+        )
+        assert resp.status_code == 200, resp.text
+
+
 @pytest.mark.integration
 @pytest.mark.requires_db
 class TestUpdateSSOConfig:
