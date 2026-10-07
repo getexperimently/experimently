@@ -522,6 +522,11 @@ The following environment variables must be set before running any Alembic comma
 
 On macOS, always use `localhost` (not `127.0.0.1`) for the database host when connecting to a Docker-hosted PostgreSQL instance.
 
+The database server's `TimeZone` must be `UTC`, as it is in the bundled PostgreSQL of both
+compose files and the Helm chart. On another time zone, some times the API stores move by the
+zone's offset: an experiment's `updated_at`, for example. Its start and end dates are stored in
+UTC whatever the zone.
+
 ---
 
 ## Migration Guidelines

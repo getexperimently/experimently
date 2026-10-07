@@ -2546,12 +2546,12 @@ variant, and the decision.
 
 See [Split URL API Reference](split-url.md) for full documentation.
 
-Split URL experiments use `experiment_type: SPLIT_URL` and require a `split_url_config` in the request body. Variant assignment and URL redirection are meant to happen in the split-URL module's Lambda@Edge router, on a CloudFront distribution. The CDK app creates no CloudFront distribution, so the router runs only if you add the module's construct to a stack yourself.
+Split URL experiments use `experiment_type: split_url` and carry a `split_url_config` in the request body. Variant assignment and URL redirection are meant to happen in the split-URL module's Lambda@Edge router, on a CloudFront distribution. The CDK app creates no CloudFront distribution, and the router has no configuration source in this release, so it does not split traffic even on a distribution you add yourself ([#393](https://github.com/getexperimently/experimently/issues/393)).
 
-**Experiment management** uses the existing experiment CRUD endpoints with `experiment_type=SPLIT_URL`:
+**Experiment management** uses the existing experiment CRUD endpoints with `experiment_type=split_url`:
 
 ```
-POST /api/v1/experiments/              — Create split URL experiment (set experiment_type=SPLIT_URL)
+POST /api/v1/experiments/              — Create split URL experiment (set experiment_type=split_url)
 PUT  /api/v1/experiments/{id}          — Update split URL config
 GET  /api/v1/experiments/{id}          — Returns split_url_config in response
 ```
@@ -2562,22 +2562,29 @@ GET  /api/v1/experiments/{id}          — Returns split_url_config in response
 GET /api/v1/experiments/{experiment_id}/split-url/preview  — Preview variant assignment for a user (dev/QA)
 ```
 
-Query parameters for preview: `user_id` (required), `attributes` (optional JSON object).
+Query parameters for preview: `user_id` (required). The preview hashes `{user_id}:{experiment_id}`;
+it does not predict the edge router.
 
 **`SplitUrlConfig` schema** (`split_url_config` field):
 
 ```json
 {
   "variants": [
-    { "url": "https://example.com/page-v1", "weight": 50 },
-    { "url": "https://example.com/page-v2", "weight": 50 }
+    { "name": "Control",   "url": "https://example.com/page-v1", "traffic_allocation": 50 },
+    { "name": "Treatment", "url": "https://example.com/page-v2", "traffic_allocation": 50 }
   ]
 }
 ```
 
-All weights must be integers (0-100) and must sum to exactly 100.
+At least two URL variants, with `traffic_allocation` values (0-100) that sum to 100.
+`cookie_name` and `cookie_ttl_days` (default 30) are optional.
 
-**Lambda@Edge behaviour**: On each request the edge function reads the cookie `exp_{experiment_key}`. If absent, it hashes `user_id` to assign a variant, then returns a `302 Found` redirect to the variant URL and sets a 1-year `Set-Cookie` header for persistence.
+**Lambda@Edge behaviour**: the router reads its configuration only from an `X-Split-URL-Config`
+request header, which nothing sets in this release, so it passes every request through
+([#393](https://github.com/getexperimently/experimently/issues/393)). Given that header, it
+hashes the viewer's IP address and User-Agent, answers `302 Found` to the variant URL and sets a
+`split_url_{experiment_key}` cookie holding that URL for 30 days unless `cookie_ttl_days` says
+otherwise. See [Split URL Testing](split-url.md).
 
 ---
 

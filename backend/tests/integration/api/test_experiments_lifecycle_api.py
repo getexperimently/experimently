@@ -58,6 +58,7 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import text
 
 from backend.app.main import app as fastapi_app
 from backend.tests.integration.conftest import make_client_for_user
@@ -482,6 +483,68 @@ class TestCompleteExperiment:
         viewer_client = make_client_for_user(db_session, viewer_user)
         response = viewer_client.post(f"/api/v1/experiments/{exp['id']}/complete")
         assert response.status_code == 403, response.text
+
+    @pytest.mark.regression
+    @pytest.mark.parametrize("zone", ["America/Los_Angeles", "Asia/Kolkata"])
+    def test_complete_passes_whatever_the_database_time_zone(
+        self, admin_client, db_session, monkeypatch, zone
+    ):
+        """#704: completing stores UTC dates whatever the session's time zone.
+
+        A developer's own PostgreSQL takes its time zone from the machine.
+        libpq sends ``PGTZ`` as a new session's time zone, so setting it gives
+        every request below the session such a server would. The end date
+        used to be bound with a zone, and PostgreSQL converted it to the
+        session's zone for the ``timestamp without time zone`` column: west
+        of UTC it landed before the start date and completing answered 500,
+        east of it the end date was stored ahead by the offset.
+        """
+        monkeypatch.setenv("PGTZ", zone)
+        # Not vacuous: the API's sessions in this test are in the zone.
+        with db_session.get_bind().connect() as conn:
+            assert conn.execute(text("SHOW TIME ZONE")).scalar() == zone
+
+        before = datetime.now(timezone.utc).replace(tzinfo=None)
+        exp = _create_and_start(admin_client, f"Complete In {zone}")
+        response = admin_client.post(f"/api/v1/experiments/{exp['id']}/complete")
+        after = datetime.now(timezone.utc).replace(tzinfo=None)
+        assert response.status_code == 200, response.text
+
+        start_date, end_date = db_session.execute(
+            text("SELECT start_date, end_date FROM experiments WHERE id = :id"),
+            {"id": exp["id"]},
+        ).one()
+        assert before <= start_date < end_date <= after, (start_date, end_date)
+
+    @pytest.mark.regression
+    @pytest.mark.parametrize("zone", ["America/Los_Angeles", "Asia/Kolkata"])
+    def test_scheduled_dates_are_stored_in_utc_whatever_the_database_time_zone(
+        self, admin_client, db_session, monkeypatch, zone
+    ):
+        """#704: a request's dates are stored as the UTC times they name.
+
+        ``PUT /schedule`` binds the request's aware datetimes; in a session
+        whose zone is not UTC they used to be stored as that zone's local
+        time, off by its offset.
+        """
+        monkeypatch.setenv("PGTZ", zone)
+        with db_session.get_bind().connect() as conn:
+            assert conn.execute(text("SHOW TIME ZONE")).scalar() == zone
+
+        exp = _create_experiment(admin_client, f"Schedule In {zone}")
+        start = (datetime.now(timezone.utc) + timedelta(days=1)).replace(microsecond=0)
+        end = start + timedelta(days=7)
+        response = admin_client.put(
+            f"/api/v1/experiments/{exp['id']}/schedule",
+            json={"start_date": start.isoformat(), "end_date": end.isoformat()},
+        )
+        assert response.status_code == 200, response.text
+
+        stored = db_session.execute(
+            text("SELECT start_date, end_date FROM experiments WHERE id = :id"),
+            {"id": exp["id"]},
+        ).one()
+        assert tuple(stored) == (start.replace(tzinfo=None), end.replace(tzinfo=None))
 
 
 # ---------------------------------------------------------------------------

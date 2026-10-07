@@ -61,7 +61,7 @@ the dashboard checks:
 | Third-party integrations | `integrations` | Jira, Salesforce and GitHub |
 | Real-time counters | `counters` | DynamoDB-backed live assignment and conversion counters |
 | ETL | `etl` | Glue crawlers, Athena partitions and scheduled jobs |
-| Split URL testing | `split_url` | Server-side URL splitting at the edge |
+| Split URL testing | `split_url` | Server-side URL splitting at the edge. The edge router has no configuration source in this release, so it does not split traffic yet; experiments, their URL configuration and the preview work ([#393](https://github.com/getexperimently/experimently/issues/393)) |
 
 Nothing in the core profile moves into a module. The split is along "one team
 running the product" versus "an organisation administering it".

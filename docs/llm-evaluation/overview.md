@@ -28,8 +28,6 @@ The platform handles all of this automatically: it tracks latency, estimates cos
 | **Anthropic** | claude-opus-5, claude-sonnet-5, claude-haiku-4-5, claude-fable-5-1, and the 4.5/4.6 and Claude 3 generations | Recommended judge model. The priced set is `COST_PER_1K_TOKENS` in `backend/app/core/llm_pricing.py`; a model missing from it records $0.00 and logs a warning. |
 | **OpenAI** | gpt-4o, gpt-4o-mini, gpt-3.5-turbo | Cost-efficient options available |
 | **Google** | gemini-1.5-pro, gemini-1.5-flash | Flash: lowest cost per token |
-| **Cohere** | command-r-plus, command-r | Enterprise RAG use cases |
-| **Mistral** | mistral-large-latest, mistral-small-latest | EU-hosted option |
 | **Local** | Any Ollama-compatible model | Privacy / cost-free option |
 
 Configure API keys in the API's environment. The provider SDKs read their own
@@ -48,8 +46,8 @@ OPENAI_API_KEY=sk-...
   the judge records its fallback score of 0.5, and the AI features use their templates.
 
 `ANTHROPIC_BASE_URL` and `OPENAI_BASE_URL` point the SDKs at a proxy or gateway.
-The `LLM_ANTHROPIC_API_KEY`, `LLM_OPENAI_API_KEY` and `LLM_GOOGLE_API_KEY` settings
-that earlier versions of this page listed are not read by any provider call.
+`LLM_ANTHROPIC_API_KEY`, `LLM_OPENAI_API_KEY` and `LLM_GOOGLE_API_KEY`, which earlier
+versions of this page listed, are not settings: nothing reads them.
 
 The Google provider needs no extra package: a `google` variant calls the Gemini REST
 API with the key in `GEMINI_API_KEY`, and `GEMINI_BASE_URL` (default
