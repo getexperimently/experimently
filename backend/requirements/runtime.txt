@@ -7,7 +7,7 @@
 
 # API framework
 fastapi==0.141.1
-uvicorn==0.53.0
+uvicorn==0.54.0
 websockets==15.0.1     # uvicorn WebSocket support (/api/v1/ws/...); uvicorn alone serves 404 for upgrades
 pydantic==2.13.5
 pydantic-settings==2.15.0
@@ -23,7 +23,7 @@ psycopg2-binary==2.9.13
 redis==8.1.0
 
 # AWS (Cognito auth provider, SSM secrets, DynamoDB counters, CloudWatch logs)
-boto3==1.43.99
+boto3==1.43.108
 watchtower==3.4.0
 
 # HTTP clients (notifications, integrations)
@@ -34,7 +34,7 @@ watchtower==3.4.0
 # backend/requirements.txt (the test list) and modules/requirements.txt (the
 # full image), not here.
 httpx==0.28.1
-slack-sdk==3.44.1
+slack-sdk==3.45.0
 sendgrid==6.12.5
 
 # LLM provider SDKs (#196). Imported lazily -- inside a function, not at the
@@ -45,8 +45,8 @@ sendgrid==6.12.5
 # ANTHROPIC_API_KEY / OPENAI_API_KEY themselves; with no key set, nothing calls
 # a provider. Google (google.generativeai) is not here: that provider is
 # tracked separately in #196.
-anthropic==1.8.0
-openai==3.19.2
+anthropic==1.11.0
+openai==3.24.0
 
 # Statistics
 numpy==1.26.4
@@ -56,11 +56,11 @@ statsmodels==0.15.0
 
 # Utilities
 python-dateutil==2.9.0.post0
-pytz==2026.3.post1
+pytz==2026.4
 semver==3.1.0
 google-re2==1.1.20251105   # core/pattern_match.py: regex conditions (RE2)
 loguru==0.7.3
-cryptography==50.0.1
+cryptography==50.0.2
 # No `defusedxml`: its only importer is
 # modules/backend/app/services/sso_service.py (SAML metadata parsing), so it is
 # pinned in modules/requirements.txt and installed by the full image only.

@@ -214,7 +214,7 @@ if [ "$1" = "uvicorn" ]; then
         set -- "$@" --workers "$WEB_CONCURRENCY"
     fi
     # --forwarded-allow-ips decides WHOSE X-Forwarded-* uvicorn believes, and
-    # `*` meant everybody's. Measured against the pinned uvicorn 0.53.0, with a
+    # `*` meant everybody's. Measured against the pinned uvicorn 0.54.0, with a
     # client that forged a hop and an ALB that appended the real one:
     #
     #   X-Forwarded-For: 9.9.9.9, 203.0.113.9, 10.0.3.10
