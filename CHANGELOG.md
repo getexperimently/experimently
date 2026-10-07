@@ -10,6 +10,14 @@ longer applies and release-please can generate this file directly. Until it
 does, entries below 0.2.2 are hand-written and the links in them are the
 reason why.
 
+## [0.26.2](https://github.com/getexperimently/experimently/compare/v0.26.1...v0.26.2) (2026-10-07)
+
+
+### Bug Fixes
+
+* **ai:** AI design and results interpretation stop after 30 seconds and have their own rate limit ([#1043](https://github.com/getexperimently/experimently/issues/1043)) ([5460961](https://github.com/getexperimently/experimently/commit/5460961b619820fc20ec568943ca5493c9757350))
+* **api:** apply one request body size limit (5 MiB, 413) to every route ([#1052](https://github.com/getexperimently/experimently/issues/1052)) ([9ff5466](https://github.com/getexperimently/experimently/commit/9ff546619bf3ab09aaf90fc986f2177346e446c7))
+
 ## [0.26.1](https://github.com/getexperimently/experimently/compare/v0.26.0...v0.26.1) (2026-10-07)
 
 
