@@ -15,6 +15,8 @@ from typing import Any, Dict, List, Optional
 
 from showcase import contract
 
+REPO_ROOT = Path(__file__).resolve().parents[4]
+
 NEEDLES = ["ZEBRA-VALUE-987-ALPHA", "QUOKKA-VALUE-123-BRAVO"]
 
 #: Ten captions, each up long enough to read, 0.2 s apart, covering 50 s.

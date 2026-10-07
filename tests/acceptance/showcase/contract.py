@@ -25,8 +25,8 @@ A capture directory ``<work>/<slug>/capture/`` holds:
 ``needles.txt``
     Every value the capture registered as one the video must never show, one
     per line, file mode 0600. The render reads it for its OCR scan of the
-    finished video and deletes it once it has read it. It is never copied,
-    printed or written anywhere else.
+    finished video and deletes it on every way out, pass or refuse. It is
+    never copied, printed or written anywhere else.
 ``manifest.json``
     ``{"ref", "commit", "next_version", "lock_next_version", "profile",
     "viewport", "zoom", "page_h", "band_h", "gates"}``. ``gates`` maps each
