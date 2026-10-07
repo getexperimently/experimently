@@ -5,6 +5,17 @@ Generates statistically realistic experimentation scenarios — not just valid
 shapes but data that behaves like the real world: baseline conversion rates,
 novelty effects, outliers, day-of-week patterns, and intentional edge cases.
 
+Reproducible: a scenario's seed decides every draw (the users, their ids, dates
+and conversions) and the key of the experiment it is seeded into, and its dates
+start on a fixed day, so one scenario and seed give the same data on every run.
+
+The platform picks each user's variant. The seeder converts a user by the
+variant ``POST /api/v1/tracking/assign`` answered, so each variant's configured
+rate is the rate of the users the platform counts in it. The dry run plans the
+split with the hash the server assigns by, on the same experiment key, so the
+counts and the p-value it prints are the ones the platform computes when every
+user is assigned (no global holdout).
+
 Usage, from the repository root (standalone dry-run):
     python -m backend.tests.realistic.data_generator --scenario ab_test_lifecycle --dry-run
 
@@ -17,17 +28,39 @@ the token and the API key):
 from __future__ import annotations
 
 import argparse
-import hashlib
-import json
 import math
 import random
 import sys
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 import requests
+
+from backend.app.core.consistent_hash import bucket_of
+
+#: Day 0 of a scenario unless it is given another: Monday 2026-01-05, 00:00
+#: UTC. A fixed date rather than one counted back from the moment of the run:
+#: the day-of-week effect reads each user's weekday, so with a start that moved
+#: with the run date one seed gave each user another weekday, and other
+#: conversions, on another day. A Monday start puts a 14- or 21-day scenario on
+#: whole calendar weeks. The platform does not filter conversions by date, so
+#: dates in the past are counted like any other.
+DEFAULT_START_DATE = datetime(2026, 1, 5, tzinfo=timezone.utc)
+
+#: The event the seeded experiment's primary metric counts.
+CONVERSION_EVENT = "purchase"
+
+#: The share of late control users the ``metric_drift`` edge case gives an
+#: extra conversion.
+DRIFT_RATE = 0.10
+
+#: The significance level of the platform's default analysis (confidence 0.95).
+ALPHA = 0.05
+
+#: The two-sided normal critical value at ``ALPHA``.
+Z_CRITICAL = 1.959963984540054
 
 # ---------------------------------------------------------------------------
 # Data structures
@@ -45,12 +78,35 @@ class UserEvent:
     properties: dict[str, Any] = field(default_factory=dict)
 
 
+@dataclass(frozen=True)
+class UserDraws:
+    """One user's random draws, made once from the scenario's seed.
+
+    Whichever variant the platform puts the user in, these decide their events
+    (``DataScenario.events_for``). The draws never depend on the platform's
+    answer, so the same seed gives the same draws, and a user's outcome in
+    each variant is fixed before the platform assigns them.
+    """
+
+    conversion: float  # converts when below the variant's effective rate
+    outlier: float  # an outlier when below the scenario's outlier_rate
+    outlier_value: float  # the purchase value of an outlier who converts
+    event_hours: float  # hours from assignment to the purchase
+    drift: float  # the metric_drift edge case's draw
+
+
 @dataclass
 class SimulatedUser:
     user_id: str
+    # The planned variant: the platform's assignment for a generated scenario
+    # (see DataScenario.planned_variant); the seeder uses the server's answer.
     variant_name: str
     assigned_at: datetime
     properties: dict[str, Any] = field(default_factory=dict)
+    # None for a row that fires no events of its own (the zero_events_user
+    # ghost; the multi_assignment repeat, which the seeder skips for the
+    # user's first row) and for a user built by hand.
+    draws: Optional[UserDraws] = None
 
 
 @dataclass
@@ -63,30 +119,107 @@ class ScenarioResult:
     expected_significant: bool
     edge_cases_injected: list[str]
     metadata: dict[str, Any] = field(default_factory=dict)
+    # The key of the experiment the seeder creates; None for a result built by
+    # hand, which the seeder gives a random one.
+    experiment_key: Optional[str] = None
+    seed: Optional[int] = None
+    # The events a user fires in a given variant. The seeder calls it with the
+    # variant the platform assigned. None for a result built by hand: the
+    # seeder then sends the listed events as they are.
+    events_for: Optional[Callable[[SimulatedUser, str], list[UserEvent]]] = field(
+        default=None, repr=False, compare=False
+    )
+
+    def split(self) -> dict[str, dict[str, int]]:
+        """Users and converting users per planned variant, as the platform counts.
+
+        Each user counts once, in the variant of their first row (the platform's
+        assignment is sticky); a converting user has at least one
+        ``CONVERSION_EVENT``.
+        """
+        converting = {
+            e.user_id for e in self.events if e.event_name == CONVERSION_EVENT
+        }
+        counts: dict[str, dict[str, int]] = {}
+        seen: set[str] = set()
+        for user in self.users:
+            if user.user_id in seen:
+                continue
+            seen.add(user.user_id)
+            arm = counts.setdefault(
+                user.variant_name, {"users": 0, "converting_users": 0}
+            )
+            arm["users"] += 1
+            if user.user_id in converting:
+                arm["converting_users"] += 1
+        return counts
 
     def summary(self) -> str:
-        control_events = [e for e in self.events if e.variant_name == "control"]
-        treatment_events = [e for e in self.events if e.variant_name == "treatment"]
-        control_users = [u for u in self.users if u.variant_name == "control"]
-        treatment_users = [u for u in self.users if u.variant_name == "treatment"]
+        split = self.split()
+        control = split.get("control", {"users": 0, "converting_users": 0})
+        treatment = split.get("treatment", {"users": 0, "converting_users": 0})
+        n_users = sum(arm["users"] for arm in split.values())
+        repeated = len(self.users) - n_users
 
-        actual_control_cvr = (
-            len(control_events) / len(control_users) if control_users else 0
-        )
-        actual_treatment_cvr = (
-            len(treatment_events) / len(treatment_users) if treatment_users else 0
-        )
+        def rate(arm: dict[str, int]) -> float:
+            return arm["converting_users"] / arm["users"] if arm["users"] else 0.0
 
-        return (
-            f"Scenario: {self.scenario_name}\n"
-            f"  Users: {len(self.users)} total "
-            f"({len(control_users)} control, {len(treatment_users)} treatment)\n"
-            f"  Events: {len(self.events)} total\n"
-            f"  Control CVR: {actual_control_cvr:.3f} (target: {self.control_cvr:.3f})\n"
-            f"  Treatment CVR: {actual_treatment_cvr:.3f} (target: {self.treatment_cvr:.3f})\n"
-            f"  Expected significant: {self.expected_significant}\n"
-            f"  Edge cases: {self.edge_cases_injected or 'none'}\n"
-        )
+        header = f"Scenario: {self.scenario_name}"
+        if self.seed is not None or self.experiment_key:
+            header += f" (seed {self.seed}, experiment key {self.experiment_key})"
+        lines = [
+            header,
+            f"  Users: {n_users} total "
+            f"({control['users']} control, {treatment['users']} treatment)"
+            + (f"; {repeated} listed again in the other variant" if repeated else ""),
+            f"  Events: {len(self.events)} total",
+            f"  Control CVR: {rate(control):.3f} "
+            f"({control['converting_users']} converting; base rate {self.control_cvr:.3f})",
+            f"  Treatment CVR: {rate(treatment):.3f} "
+            f"({treatment['converting_users']} converting; base rate {self.treatment_cvr:.3f})",
+        ]
+        predicted = self.metadata.get("predicted_p_value")
+        if predicted is not None:
+            lines.append(
+                f"  Predicted p-value: {predicted:.4g} "
+                "(Fisher's exact, two-sided, on these counts: the platform's test)"
+            )
+        lines.append(f"  Expected significant: {self.expected_significant}")
+        power = self.metadata.get("power")
+        if power is not None:
+            lines.append(
+                f"  Power at the generated rates: {power:.2f} "
+                "(normal approximation, a 50/50 split, alpha 0.05)"
+            )
+        lines.append(f"  Edge cases: {self.edge_cases_injected or 'none'}")
+        return "\n".join(lines) + "\n"
+
+
+def fisher_p_value(split: dict[str, dict[str, int]]) -> Optional[float]:
+    """Fisher's exact two-sided p-value of treatment against control.
+
+    The test the platform's results API reports for a conversion metric
+    (``binomial_variant_results``), on converting users out of assigned users.
+    None unless both variants have users.
+    """
+    control = split.get("control")
+    treatment = split.get("treatment")
+    if not control or not treatment or not control["users"] or not treatment["users"]:
+        return None
+    from scipy import stats
+
+    table = [
+        [
+            treatment["converting_users"],
+            treatment["users"] - treatment["converting_users"],
+        ],
+        [control["converting_users"], control["users"] - control["converting_users"]],
+    ]
+    return float(stats.fisher_exact(table)[1])
+
+
+def _normal_cdf(x: float) -> float:
+    return 0.5 * (1.0 + math.erf(x / math.sqrt(2.0)))
 
 
 # ---------------------------------------------------------------------------
@@ -103,9 +236,11 @@ class DataScenario:
     name : str
         Scenario identifier used for seeding and reporting.
     users : int
-        Total simulated user population (split 50/50 control/treatment).
+        Total simulated user population. The platform splits it 50/50 by its
+        assignment hash, so each variant gets about half.
     control_cvr : float
-        Baseline conversion rate for the control group (0.0–1.0).
+        Baseline conversion rate for the control group (0.0–1.0), before the
+        modifiers below.
     treatment_cvr : float
         Conversion rate for the treatment group.  If > control_cvr, the
         experiment should show a positive lift.
@@ -125,8 +260,18 @@ class DataScenario:
     session_decay : bool
         If True, engagement drops 15% per week into the experiment.
     seed : int | None
-        Random seed for reproducibility.
+        Seed for every random draw, and part of the default experiment key.
+        None draws from the operating system: a different population each run.
+    start_date : datetime | None
+        Day 0 of the experiment; ``DEFAULT_START_DATE`` when None.
     """
+
+    EDGE_CASES = (
+        "zero_events_user",
+        "multi_assignment",
+        "metric_drift",
+        "simpsons_paradox",
+    )
 
     def __init__(
         self,
@@ -141,6 +286,7 @@ class DataScenario:
         session_decay: bool = False,
         experiment_duration_days: int = 14,
         seed: Optional[int] = None,
+        start_date: Optional[datetime] = None,
     ):
         self.name = name
         self.users = users
@@ -152,80 +298,221 @@ class DataScenario:
         self.day_of_week_effect = day_of_week_effect
         self.session_decay = session_decay
         self.experiment_duration_days = experiment_duration_days
-        self._rng = random.Random(seed)
-        self._start_date = datetime.now(timezone.utc) - timedelta(
-            days=experiment_duration_days
-        )
+        self.seed = seed
+        self.start_date = start_date or DEFAULT_START_DATE
 
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
 
-    def generate(self) -> ScenarioResult:
-        """Run the full simulation and return a ScenarioResult."""
-        users = self._assign_users()
-        events = self._generate_events(users)
+    def generate(self, experiment_key: Optional[str] = None) -> ScenarioResult:
+        """Run the full simulation and return a ScenarioResult.
 
-        # Inject edge cases
+        Every call starts a fresh random stream from ``seed``, so a scenario
+        generates the same result each time it is asked. ``experiment_key`` is
+        the key the seeder creates the experiment under (default
+        ``realistic-<name>-seed<seed>``); the planned split depends on it.
+        """
+        rng = random.Random(self.seed)
+        if experiment_key is None:
+            suffix = (
+                f"seed{self.seed}"
+                if self.seed is not None
+                else f"{rng.getrandbits(24):06x}"
+            )
+            experiment_key = f"realistic-{self.name}-{suffix}"
+
+        users = self._make_users(rng, experiment_key)
+        events = [e for user in users for e in self.events_for(user, user.variant_name)]
+
         injected: list[str] = []
         for ec in self.inject_edge_cases:
-            fn = getattr(self, f"_inject_{ec}", None)
-            if fn:
-                fn(users, events)
-                injected.append(ec)
+            if ec == "zero_events_user":
+                self._inject_zero_events_user(rng, users, experiment_key)
+            elif ec == "multi_assignment":
+                self._inject_multi_assignment(rng, users)
+            elif ec not in self.EDGE_CASES:
+                continue
+            # metric_drift and simpsons_paradox are rules of events_for, so
+            # they follow whichever variant the platform assigns.
+            injected.append(ec)
 
-        # Statistical significance check (rough power calculation)
-        n_per_arm = self.users // 2
-        delta = abs(self.treatment_cvr - self.control_cvr)
-        pooled = (self.control_cvr + self.treatment_cvr) / 2
-        se = math.sqrt(2 * pooled * (1 - pooled) / n_per_arm) if n_per_arm > 0 else 1
-        z = delta / se if se > 0 else 0
-        expected_significant = z >= 1.96  # two-tailed α=0.05
-
-        return ScenarioResult(
+        result = ScenarioResult(
             scenario_name=self.name,
             users=users,
             events=events,
             control_cvr=self.control_cvr,
             treatment_cvr=self.treatment_cvr,
-            expected_significant=expected_significant,
+            expected_significant=False,
             edge_cases_injected=injected,
-            metadata={
-                "experiment_duration_days": self.experiment_duration_days,
-                "novelty_decay_days": self.novelty_decay_days,
-                "day_of_week_effect": self.day_of_week_effect,
-                "session_decay": self.session_decay,
-                "z_score": round(z, 3),
-            },
+            experiment_key=experiment_key,
+            seed=self.seed,
+            events_for=self.events_for,
         )
+
+        # The prediction: the platform's test on the planned split, which is
+        # the platform's own split for this experiment key.
+        predicted_p = fisher_p_value(result.split())
+        result.expected_significant = predicted_p is not None and predicted_p < ALPHA
+
+        # How much rides on this seed: the power of the platform's test at the
+        # rates these users generate, for a 50/50 split of them.
+        rate_control, rate_treatment = self._generated_rates(users)
+        n_per_arm = len({u.user_id for u in users}) / 2
+        pooled = (rate_control + rate_treatment) / 2
+        se = (
+            math.sqrt(pooled * (1 - pooled) * 2 / n_per_arm)
+            if n_per_arm > 0 and 0 < pooled < 1
+            else 0.0
+        )
+        z = abs(rate_treatment - rate_control) / se if se > 0 else 0.0
+        power = _normal_cdf(z - Z_CRITICAL) + _normal_cdf(-z - Z_CRITICAL)
+
+        result.metadata = {
+            "experiment_duration_days": self.experiment_duration_days,
+            "novelty_decay_days": self.novelty_decay_days,
+            "day_of_week_effect": self.day_of_week_effect,
+            "session_decay": self.session_decay,
+            "start_date": self.start_date.isoformat(),
+            "generated_control_rate": round(rate_control, 4),
+            "generated_treatment_rate": round(rate_treatment, 4),
+            "z_score": round(z, 3),
+            "power": round(power, 3),
+            "predicted_p_value": predicted_p,
+        }
+        return result
+
+    def events_for(self, user: SimulatedUser, variant: str) -> list[UserEvent]:
+        """The events *user* fires in *variant*: a function of their draws.
+
+        The seeder calls this with the variant the platform assigned, so each
+        variant's configured rate applies to the users the platform counts in
+        it. It draws nothing: the same user in the same variant fires the
+        same events every time.
+        """
+        draws = user.draws
+        if draws is None:
+            return []
+        events: list[UserEvent] = []
+        is_outlier = draws.outlier < self.outlier_rate
+
+        if (
+            variant == "treatment"
+            and "simpsons_paradox" in self.inject_edge_cases
+            and user.properties.get("device") == "mobile"
+        ):
+            # The subgroup that reverses the aggregate: mobile treatment users
+            # convert at half the control base rate.
+            if draws.conversion < self.control_cvr * 0.5:
+                events.append(
+                    UserEvent(
+                        user_id=user.user_id,
+                        variant_name=variant,
+                        event_name=CONVERSION_EVENT,
+                        value=1.0,
+                        timestamp=user.assigned_at + timedelta(hours=1),
+                        properties={"injected": "simpsons_paradox", "device": "mobile"},
+                    )
+                )
+        else:
+            base_cvr = self.control_cvr if variant == "control" else self.treatment_cvr
+            effective = self._effective_cvr(user, variant, base_cvr)
+            # Outlier: rare users produce very high-value events
+            if is_outlier:
+                effective = min(effective * 5, 1.0)
+            if draws.conversion < effective:
+                value = draws.outlier_value if is_outlier else 1.0
+                events.append(
+                    UserEvent(
+                        user_id=user.user_id,
+                        variant_name=variant,
+                        event_name=CONVERSION_EVENT,
+                        value=round(value, 2),
+                        timestamp=user.assigned_at + timedelta(hours=draws.event_hours),
+                        properties={"outlier": is_outlier},
+                    )
+                )
+
+        if (
+            variant == "control"
+            and "metric_drift" in self.inject_edge_cases
+            and user.assigned_at > self._midpoint()
+            and draws.drift < DRIFT_RATE
+        ):
+            # Baseline drift: extra conversions for late control users.
+            events.append(
+                UserEvent(
+                    user_id=user.user_id,
+                    variant_name=variant,
+                    event_name=CONVERSION_EVENT,
+                    value=1.0,
+                    timestamp=user.assigned_at + timedelta(hours=2),
+                    properties={"injected": "metric_drift"},
+                )
+            )
+        return events
+
+    @staticmethod
+    def planned_variant(user_id: str, experiment_key: str) -> str:
+        """The variant the platform assigns *user_id* in the seeded experiment.
+
+        The seeder creates control, then treatment, at 50% each, and the server
+        assigns by ``bucket_of(user_id, experiment_key)`` over the variants in
+        that order (``AssignmentService._hash_user_to_variant``): buckets 0-49
+        are control. This is the dry run's plan only. The seeder converts each
+        user by the server's answer and counts disagreements as
+        ``variant_mismatches``.
+        """
+        return "control" if bucket_of(user_id, experiment_key) < 50 else "treatment"
 
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
 
-    def _assign_users(self) -> list[SimulatedUser]:
+    def _make_users(
+        self, rng: random.Random, experiment_key: str
+    ) -> list[SimulatedUser]:
         users: list[SimulatedUser] = []
-        half = self.users // 2
-        for i in range(self.users):
-            user_id = f"user-{uuid.uuid4().hex[:12]}"
-            variant = "control" if i < half else "treatment"
-            day_offset = self._rng.uniform(0, self.experiment_duration_days)
-            assigned_at = self._start_date + timedelta(days=day_offset)
+        for _ in range(self.users):
+            user_id = f"user-{rng.getrandbits(48):012x}"
+            day_offset = rng.uniform(0, self.experiment_duration_days)
             props: dict[str, Any] = {
-                "country": self._rng.choice(["US", "UK", "CA", "AU", "DE"]),
-                "device": self._rng.choice(["desktop", "mobile", "tablet"]),
-                "segment": self._rng.choice(["new", "returning"]),
+                "country": rng.choice(["US", "UK", "CA", "AU", "DE"]),
+                "device": rng.choice(["desktop", "mobile", "tablet"]),
+                "segment": rng.choice(["new", "returning"]),
             }
-            users.append(SimulatedUser(user_id, variant, assigned_at, props))
+            # Drawn for every user, converting or not, so that one user's
+            # outcome never shifts the stream for the users after them.
+            draws = UserDraws(
+                conversion=rng.random(),
+                outlier=rng.random(),
+                outlier_value=rng.lognormvariate(0, 0.5),
+                event_hours=rng.uniform(0.1, 48),
+                drift=rng.random(),
+            )
+            users.append(
+                SimulatedUser(
+                    user_id=user_id,
+                    variant_name=self.planned_variant(user_id, experiment_key),
+                    assigned_at=self.start_date + timedelta(days=day_offset),
+                    properties=props,
+                    draws=draws,
+                )
+            )
         return users
 
-    def _effective_cvr(self, user: SimulatedUser, base_cvr: float) -> float:
+    def _midpoint(self) -> datetime:
+        return self.start_date + timedelta(days=self.experiment_duration_days / 2)
+
+    def _effective_cvr(
+        self, user: SimulatedUser, variant: str, base_cvr: float
+    ) -> float:
         """Compute per-user effective CVR applying all modifiers."""
         cvr = base_cvr
-        days_since_start = (user.assigned_at - self._start_date).total_seconds() / 86400
+        days_since_start = (user.assigned_at - self.start_date).total_seconds() / 86400
 
         # Novelty spike: treatment gets a burst on day 1 that decays
-        if self.novelty_decay_days > 0 and user.variant_name == "treatment":
+        if self.novelty_decay_days > 0 and variant == "treatment":
             decay_factor = max(
                 0,
                 1 - days_since_start / self.novelty_decay_days,
@@ -246,127 +533,69 @@ class DataScenario:
 
         return min(max(cvr, 0.0), 1.0)
 
-    def _generate_events(self, users: list[SimulatedUser]) -> list[UserEvent]:
-        events: list[UserEvent] = []
+    def _generated_rates(self, users: list[SimulatedUser]) -> tuple[float, float]:
+        """The share of users who convert in control, and in treatment.
+
+        Every user's outcome in both variants is fixed by their draws, so these
+        are the rates a 50/50 split of them estimates, whichever users the
+        platform puts where.
+        """
+        seen: set[str] = set()
+        in_control = in_treatment = 0
         for user in users:
-            base_cvr = (
-                self.control_cvr
-                if user.variant_name == "control"
-                else self.treatment_cvr
+            if user.user_id in seen:
+                continue
+            seen.add(user.user_id)
+            in_control += any(
+                e.event_name == CONVERSION_EVENT
+                for e in self.events_for(user, "control")
             )
-            effective = self._effective_cvr(user, base_cvr)
-
-            # Outlier: rare users produce very high-value events
-            is_outlier = self._rng.random() < self.outlier_rate
-            if is_outlier:
-                effective = min(effective * 5, 1.0)
-
-            if self._rng.random() < effective:
-                value = self._rng.lognormvariate(0, 0.5) if is_outlier else 1.0
-                event_time = user.assigned_at + timedelta(
-                    hours=self._rng.uniform(0.1, 48)
-                )
-                events.append(
-                    UserEvent(
-                        user_id=user.user_id,
-                        variant_name=user.variant_name,
-                        event_name="purchase",
-                        value=round(value, 2),
-                        timestamp=event_time,
-                        properties={"outlier": is_outlier},
-                    )
-                )
-        return events
+            in_treatment += any(
+                e.event_name == CONVERSION_EVENT
+                for e in self.events_for(user, "treatment")
+            )
+        n = len(seen)
+        return (in_control / n, in_treatment / n) if n else (0.0, 0.0)
 
     # ------------------------------------------------------------------
     # Edge case injectors
     # ------------------------------------------------------------------
 
     def _inject_zero_events_user(
-        self, users: list[SimulatedUser], events: list[UserEvent]
+        self, rng: random.Random, users: list[SimulatedUser], experiment_key: str
     ) -> None:
         """Add a user who is assigned but never fires any event."""
-        ghost_id = f"ghost-{uuid.uuid4().hex[:8]}"
+        ghost_id = f"ghost-{rng.getrandbits(32):08x}"
         users.append(
             SimulatedUser(
                 user_id=ghost_id,
-                variant_name="control",
-                assigned_at=self._start_date + timedelta(hours=1),
+                variant_name=self.planned_variant(ghost_id, experiment_key),
+                assigned_at=self.start_date + timedelta(hours=1),
                 properties={"segment": "ghost"},
             )
         )
 
     def _inject_multi_assignment(
-        self, users: list[SimulatedUser], events: list[UserEvent]
+        self, rng: random.Random, users: list[SimulatedUser]
     ) -> None:
-        """Inject a user who appears in both variants (assignment bug)."""
+        """List one user again in the other variant (an assignment bug).
+
+        The platform's assignment is sticky, so the seeder assigns the user
+        once and the second row changes nothing there.
+        """
         if not users:
             return
-        victim = self._rng.choice(users)
-        duplicate = SimulatedUser(
-            user_id=victim.user_id,
-            variant_name="treatment" if victim.variant_name == "control" else "control",
-            assigned_at=victim.assigned_at + timedelta(minutes=5),
-            properties={**victim.properties, "duplicate_assignment": True},
-        )
-        users.append(duplicate)
-
-    def _inject_metric_drift(
-        self, users: list[SimulatedUser], events: list[UserEvent]
-    ) -> None:
-        """Add extra conversion events in the second half of the experiment to simulate drift."""
-        midpoint = self._start_date + timedelta(days=self.experiment_duration_days / 2)
-        late_users = [
-            u for u in users if u.assigned_at > midpoint and u.variant_name == "control"
-        ]
-        # Inject conversions for 10% of late control users (baseline drift)
-        for user in self._rng.sample(
-            late_users, min(len(late_users) // 10, len(late_users))
-        ):
-            events.append(
-                UserEvent(
-                    user_id=user.user_id,
-                    variant_name="control",
-                    event_name="purchase",
-                    value=1.0,
-                    timestamp=user.assigned_at + timedelta(hours=2),
-                    properties={"injected": "metric_drift"},
-                )
+        victim = rng.choice(users)
+        users.append(
+            SimulatedUser(
+                user_id=victim.user_id,
+                variant_name=(
+                    "treatment" if victim.variant_name == "control" else "control"
+                ),
+                assigned_at=victim.assigned_at + timedelta(minutes=5),
+                properties={**victim.properties, "duplicate_assignment": True},
             )
-
-    def _inject_simpsons_paradox(
-        self, users: list[SimulatedUser], events: list[UserEvent]
-    ) -> None:
-        """
-        Create a subgroup where treatment does worse than control, even though
-        the aggregate shows treatment winning.  Uses device = 'mobile' as the
-        subgroup.
-        """
-        mobile_treatment = [
-            u
-            for u in users
-            if u.variant_name == "treatment" and u.properties.get("device") == "mobile"
-        ]
-        # Remove any existing conversions for this subgroup
-        mobile_ids = {u.user_id for u in mobile_treatment}
-        events[:] = [
-            e
-            for e in events
-            if e.user_id not in mobile_ids or e.properties.get("injected")
-        ]
-        # Give mobile treatment users a lower CVR than control
-        for user in mobile_treatment:
-            if self._rng.random() < self.control_cvr * 0.5:  # half the control rate
-                events.append(
-                    UserEvent(
-                        user_id=user.user_id,
-                        variant_name="treatment",
-                        event_name="purchase",
-                        value=1.0,
-                        timestamp=user.assigned_at + timedelta(hours=1),
-                        properties={"injected": "simpsons_paradox", "device": "mobile"},
-                    )
-                )
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -386,14 +615,17 @@ class PlatformSeeder:
     run instead of reporting events that were never stored.
 
     For each user the seeder first calls ``POST /api/v1/tracking/assign`` and
-    only then sends that user's events, under the variant the *server*
-    assigned (the variant the results engine counts the user in). Events carry
-    their generated ``timestamp`` when it is set, so pre-period events can be
-    seeded.
+    only then sends that user's events: the events the user fires in the
+    variant the *server* assigned (``ScenarioResult.events_for``), so each
+    variant's configured rate holds among the users the results engine counts
+    in it. Events carry their generated ``timestamp`` when it is set, so
+    pre-period events can be seeded.
 
     The counts returned are what the platform confirmed -- an assignment
     answered with ``assigned: true``, an event answered with a stored ``id`` --
-    never the number of attempts.
+    never the number of attempts. ``by_variant`` and ``expected_p_value`` are
+    computed from the server's answers: the users and converting users the
+    results API should count in each variant, and the p-value it should report.
     """
 
     def __init__(self, api_url: str, token: str, api_key: Optional[str] = None):
@@ -404,59 +636,81 @@ class PlatformSeeder:
             {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
         )
 
-    def seed_scenario(self, result: ScenarioResult) -> dict[str, Any]:
+    def seed_scenario(
+        self, result: ScenarioResult, experiment_key: Optional[str] = None
+    ) -> dict[str, Any]:
         """Create and start an experiment, assign every user, then seed events."""
-        exp_key = f"realistic-{result.scenario_name}-{uuid.uuid4().hex[:6]}"
+        exp_key = (
+            experiment_key
+            or result.experiment_key
+            or f"realistic-{result.scenario_name}-{uuid.uuid4().hex[:6]}"
+        )
         experiment = self._create_experiment(result, exp_key)
         exp_id = experiment["id"]
         self._start_experiment(exp_id)
 
-        events_by_user: dict[str, list[UserEvent]] = {}
+        listed_events: dict[str, list[UserEvent]] = {}
         for event in result.events:
-            events_by_user.setdefault(event.user_id, []).append(event)
+            listed_events.setdefault(event.user_id, []).append(event)
 
-        generated_variant: dict[str, str] = {}
+        first_row: dict[str, SimulatedUser] = {}
         for user in result.users:
             # A user listed twice (the multi_assignment edge case) is assigned
             # once: assignment is sticky, so a second call would only return
             # the first.
-            generated_variant.setdefault(user.user_id, user.variant_name)
+            first_row.setdefault(user.user_id, user)
 
         users_assigned = 0
         users_not_assigned = 0
         variant_mismatches = 0
         events_seeded = 0
         events_skipped_unassigned = 0
-        for user_id, intended in generated_variant.items():
+        by_variant: dict[str, dict[str, int]] = {}
+        for user_id, user in first_row.items():
             assignment = self._assign_user(exp_key, user_id)
-            user_events = events_by_user.pop(user_id, [])
+            planned_events = listed_events.pop(user_id, [])
             if not assignment.get("assigned", False):
                 # Holdout / exclusion / targeting: the platform records no
                 # assignment, so their events would be conversions with no
                 # assigned user behind them. They are not sent.
                 users_not_assigned += 1
-                events_skipped_unassigned += len(user_events)
+                events_skipped_unassigned += len(planned_events)
                 continue
             users_assigned += 1
-            if assignment.get("variant_name") != intended:
+            variant = assignment.get("variant_name")
+            if variant != user.variant_name:
                 variant_mismatches += 1
+            # The user converts (or not) as a member of the server's variant.
+            user_events = (
+                result.events_for(user, variant)
+                if result.events_for is not None and isinstance(variant, str)
+                else planned_events
+            )
             for event in user_events:
                 self._track_event(event, exp_id, assignment["variant_id"])
                 events_seeded += 1
+            arm = by_variant.setdefault(
+                str(variant), {"users": 0, "converting_users": 0}
+            )
+            arm["users"] += 1
+            if any(e.event_name == CONVERSION_EVENT for e in user_events):
+                arm["converting_users"] += 1
 
         # Events for a user the scenario never listed have no assignment.
-        events_skipped_unassigned += sum(len(v) for v in events_by_user.values())
+        events_skipped_unassigned += sum(len(v) for v in listed_events.values())
 
         return {
             "experiment_id": exp_id,
             "experiment_key": exp_key,
-            "users_generated": len(generated_variant),
+            "users_generated": len(first_row),
             "users_seeded": users_assigned,
             "users_not_assigned": users_not_assigned,
             "variant_mismatches": variant_mismatches,
             "events_generated": len(result.events),
             "events_seeded": events_seeded,
             "events_skipped_unassigned": events_skipped_unassigned,
+            "by_variant": by_variant,
+            "expected_p_value": fisher_p_value(by_variant),
         }
 
     # -- HTTP -----------------------------------------------------------------
@@ -473,12 +727,14 @@ class PlatformSeeder:
             f"{self.api_url}{path}", json=payload, headers=headers or {}
         )
         if not 200 <= resp.status_code < 300:
-            hint = (
-                " -- the tracking endpoints need --api-key (X-API-Key header)"
-                if resp.status_code in (401, 403)
-                and path.startswith("/api/v1/tracking")
-                else ""
-            )
+            hint = ""
+            if resp.status_code in (401, 403) and path.startswith("/api/v1/tracking"):
+                hint = " -- the tracking endpoints need --api-key (X-API-Key header)"
+            elif resp.status_code == 409 and path == "/api/v1/experiments":
+                hint = (
+                    " -- the key comes from the scenario and the seed; pass "
+                    "--experiment-key to seed this scenario again on this platform"
+                )
             raise SeedingError(
                 f"{what} failed: POST {path} returned HTTP {resp.status_code}"
                 f"{hint}: {resp.text[:500]}"
@@ -497,6 +753,8 @@ class PlatformSeeder:
             "description": f"Auto-generated scenario: {result.scenario_name}",
             "hypothesis": "Treatment will outperform control",
             "experiment_type": "a_b",
+            # In this order, at these allocations: DataScenario.planned_variant
+            # relies on it.
             "variants": [
                 {"name": "control", "is_control": True, "traffic_allocation": 50},
                 {"name": "treatment", "is_control": False, "traffic_allocation": 50},
@@ -504,7 +762,7 @@ class PlatformSeeder:
             "metrics": [
                 {
                     "name": "Conversion Rate",
-                    "event_name": "purchase",
+                    "event_name": CONVERSION_EVENT,
                     "metric_type": "conversion",
                     "is_primary": True,
                 }
@@ -563,13 +821,16 @@ def make_ab_test_scenario(seed: int = 42) -> DataScenario:
     """
     Standard A/B test: detectable 18.75% relative lift over 14 days.
 
-    Sample size rationale: detecting 8% → 9.5% CVR (delta=1.5pp) at α=0.05,
-    80% power requires ~2,700 users per arm (5,400 total).  We use 6,000 to
-    ensure robust detection even with natural variance.
+    Sample size rationale: detecting 8% → 9.5% CVR (delta=1.5pp) at α=0.05
+    with 80% power takes about 5,570 users per arm. The day-of-week effect and
+    the outliers raise both rates (to about 9.1% and 10.8%), which brings that
+    down to about 4,800 per arm, so 12,000 users (about 6,000 per arm) give a
+    power of about 0.88. At 6,000 users it was about 0.6: half the seeds were
+    not significant. The dry run prints the exact p-value for a seed.
     """
     return DataScenario(
         name="ab_test_lifecycle",
-        users=6_000,
+        users=12_000,
         control_cvr=0.08,
         treatment_cvr=0.095,
         day_of_week_effect=True,
@@ -601,8 +862,10 @@ def make_novelty_scenario(seed: int = 7) -> DataScenario:
     """
     Novelty effect: day-1 spike that fades to a detectable steady-state lift.
 
-    Uses 6,000 users to detect the 10% → 12% steady-state lift (delta=2pp)
-    while also demonstrating the early inflated-CVR pattern.
+    6,000 users. The novelty boost (up to +30 points for the first users,
+    gone by day 3) makes the aggregate lift large (about 11% → 19%), so the
+    experiment as a whole is significant whatever the seed. The steady-state
+    lift alone (10% → 12%) would take about 3,850 users per arm at 80% power.
     """
     return DataScenario(
         name="novelty_effect",
@@ -620,8 +883,10 @@ def make_edge_case_scenario(seed: int = 13) -> DataScenario:
     """
     Stress scenario: outliers, drift, multi-assignment bugs, Simpson's paradox.
 
-    Uses 8,000 users so the underlying 6% → 7.2% lift (20% relative) remains
-    detectable despite the noise injected by the edge cases.
+    8,000 users at a base 6% → 7.2%, with all four edge cases, which dominate
+    the aggregate: metric_drift gives about 10% of the late control users an
+    extra conversion and simpsons_paradox halves the mobile treatment users'
+    rate, so control comes out well ahead (about 11% against 5%).
     """
     return DataScenario(
         name="statistical_edge_cases",
@@ -646,8 +911,11 @@ def make_concurrent_scenario(seed: int = 21) -> DataScenario:
     """
     Concurrent experiments: overlapping audiences for interaction testing.
 
-    8,000 users; detecting 7% → 8.2% lift (delta=1.2pp) at α=0.05 requires
-    ~3,750 per arm (7,500 total).  We use 8,000 for comfortable margin.
+    8,000 users; detecting 7% → 8.2% (delta=1.2pp) at α=0.05 with 80% power
+    takes about 7,650 users per arm (about 6,600 once the day-of-week effect
+    and the outliers raise both rates), so at about 4,000 per arm the power is
+    about 0.6: significant on some seeds and not on others. The dry run says
+    which.
     """
     return DataScenario(
         name="concurrent_experiments",
@@ -659,12 +927,14 @@ def make_concurrent_scenario(seed: int = 21) -> DataScenario:
     )
 
 
-SCENARIOS: dict[str, DataScenario] = {
-    "ab_test_lifecycle": make_ab_test_scenario(),
-    "feature_flag_rollout": make_rollout_scenario(),
-    "novelty_effect": make_novelty_scenario(),
-    "statistical_edge_cases": make_edge_case_scenario(),
-    "concurrent_experiments": make_concurrent_scenario(),
+#: Each scenario's factory; it takes ``seed`` and defaults to the scenario's
+#: own. "all" runs every scenario, one after another.
+SCENARIOS: dict[str, Optional[Callable[..., DataScenario]]] = {
+    "ab_test_lifecycle": make_ab_test_scenario,
+    "feature_flag_rollout": make_rollout_scenario,
+    "novelty_effect": make_novelty_scenario,
+    "statistical_edge_cases": make_edge_case_scenario,
+    "concurrent_experiments": make_concurrent_scenario,
     "all": None,  # special keyword
 }
 
@@ -674,7 +944,7 @@ SCENARIOS: dict[str, DataScenario] = {
 # ---------------------------------------------------------------------------
 
 
-def main() -> None:
+def main(argv: Optional[list[str]] = None) -> None:
     parser = argparse.ArgumentParser(
         description="Generate realistic experiment data for the Experimently platform."
     )
@@ -711,24 +981,40 @@ def main() -> None:
     parser.add_argument(
         "--seed",
         type=int,
-        default=42,
-        help="Random seed for reproducibility",
+        default=None,
+        help=(
+            "Seed for every random draw (the users, their ids, dates and "
+            "conversions) and for the default experiment key. Default: the "
+            "scenario's own seed. The same scenario and seed give the same data."
+        ),
     )
-    args = parser.parse_args()
+    parser.add_argument(
+        "--experiment-key",
+        default=None,
+        help=(
+            "Key of the experiment to create (default: realistic-<scenario>-seed"
+            "<seed>). Keys are unique on a platform: give another one to seed a "
+            "scenario and seed again. The platform's split depends on the key, so "
+            "pass the same one to the dry run to see the counts it will show."
+        ),
+    )
+    args = parser.parse_args(argv)
+    if args.scenario == "all" and args.experiment_key:
+        parser.error("--experiment-key names one experiment: give one --scenario")
 
-    to_run: list[DataScenario]
-    if args.scenario == "all":
-        to_run = [s for k, s in SCENARIOS.items() if k != "all" and s is not None]
-    else:
-        scenario = SCENARIOS[args.scenario]
-        if scenario is None:
+    names = (
+        [k for k, f in SCENARIOS.items() if f is not None]
+        if args.scenario == "all"
+        else [args.scenario]
+    )
+    for name in names:
+        factory = SCENARIOS[name]
+        if factory is None:
             print("Error: unexpected None scenario", file=sys.stderr)
             sys.exit(1)
-        to_run = [scenario]
-
-    for scenario in to_run:
+        scenario = factory() if args.seed is None else factory(seed=args.seed)
         print(f"\nGenerating scenario: {scenario.name} ...")
-        result = scenario.generate()
+        result = scenario.generate(experiment_key=args.experiment_key)
         print(result.summary())
 
         if not args.dry_run:

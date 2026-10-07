@@ -195,7 +195,7 @@ marker warns rather than fails.
 | `@pytest.mark.security` | Security header tests |
 | `@pytest.mark.dependency` | Dependency-injection tests |
 | `@pytest.mark.validation` | Validation tests |
-| `@pytest.mark.realistic` | Realistic scenarios (require a running platform) |
+| `@pytest.mark.realistic` | Scenarios under `backend/tests/realistic`: offline (no running platform), run by the PR QA Gate's Unit Tests job, which selects them by directory, not by this marker |
 | `@pytest.mark.requires_db` | Explicit database requirement |
 | `@pytest.mark.requires_aws` | Needs LocalStack or AWS |
 | `@pytest.mark.cognito_integration` | Cognito tests (require moto) |

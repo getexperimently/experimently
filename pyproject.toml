@@ -193,7 +193,7 @@ markers = [
     "security: security header tests",
     "dependency: dependency-injection tests",
     "validation: validation tests",
-    "realistic: realistic scenario tests (require a running platform)",
+    "realistic: backend/tests/realistic scenario tests; offline (no running platform), run by the PR QA Gate's Unit Tests job (selected by directory, not by this marker)",
     "requires_db: tests requiring a database connection",
     "requires_aws: tests requiring AWS services (LocalStack)",
     "cognito_integration: Cognito authentication tests (require moto)",

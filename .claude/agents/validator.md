@@ -12,9 +12,15 @@ given data with known statistical properties.
 ## What You Validate
 
 ### 1. Basic Significance (A/B Test)
-After seeding data with a known CVR difference:
-- `p_value < 0.05` when z-score ≥ 1.96 (α=0.05, two-tailed)
-- `p_value ≥ 0.05` when effect size is below detection threshold
+After seeding a scenario with the data generator (its `Seeded: {...}` line has
+`by_variant` and `expected_p_value`):
+- Each variant's `sample_size` and `conversions` equal its `users` and
+  `converting_users` in `by_variant`
+- The treatment's `p_value` equals `expected_p_value` (relative tolerance 1e-9):
+  the same test (Fisher's exact, two-sided) on the same counts
+- `p_value < 0.05` when the dry run said `Expected significant: True`
+  (`ab_test_lifecycle` at its default seed), `p_value ≥ 0.05` when it said False
+  (`feature_flag_rollout`, the null scenario, at its default seed)
 - `confidence_interval` direction matches the observed lift
 
 ### 2. CUPED Variance Reduction
@@ -43,7 +49,8 @@ After a concurrent experiments scenario:
 ## API Endpoints to Query
 
 ```bash
-BASE="http://localhost:8000/api/v1"
+API_URL="${API_URL:-http://localhost:8000}"   # the documented local default; the task may give another
+BASE="$API_URL/api/v1"
 AUTH="Authorization: Bearer <TOKEN>"
 
 # Basic results
@@ -73,35 +80,37 @@ Read the task description to determine:
 ### Step 2: Query the Results API
 Fetch the results for each experiment and extract key metrics:
 ```bash
-curl -s "http://localhost:8000/api/v1/results/<exp_id>" \
-  -H "Authorization: Bearer <TOKEN>" | python -m json.tool
+curl -s "$BASE/results/<exp_id>?use_cache=false" -H "$AUTH" > results.json
 ```
 
 ### Step 3: Apply Validation Rules
 
 For each metric, check the appropriate rule from the table above.
-Use Python for precise numerical comparisons:
+Use Python for precise numerical comparisons. The p-value is per variant: the
+primary metric is `metrics[0]`, and the control's `p_value` is null.
 ```bash
 python3 -c "
 import json, sys
 data = json.load(sys.stdin)
-p = data['metrics'][0].get('p_value', 1.0)
-print(f'p-value: {p:.4f}')
-print(f'Significant: {p < 0.05}')
+for v in data['metrics'][0]['variants']:
+    if not v['is_control']:
+        print(v['variant_name'], v['sample_size'], v['conversions'],
+              f\"p-value: {v['p_value']}\", f\"significant: {v['p_value'] < 0.05}\")
 " < results.json
 ```
 
 ### Step 4: Validate Without a Running Platform
 If the platform is not running, validate the data generator's statistical
-properties directly:
+properties directly. The prediction is for the platform's own split of the
+users (the generator plans it with the server's assignment hash):
 ```bash
 source venv/bin/activate
-python3 -c "
+python -c "
 from backend.tests.realistic.data_generator import make_ab_test_scenario
 result = make_ab_test_scenario(seed=42).generate()
 print(result.summary())
-print(f'Expected significant: {result.expected_significant}')
-print(f'Z-score: {result.metadata[\"z_score\"]}')
+print(f'Predicted p-value: {result.metadata[\"predicted_p_value\"]}')
+print(f'Power at the generated rates: {result.metadata[\"power\"]}')
 "
 ```
 
@@ -135,22 +144,27 @@ OVERALL: PASS (4/4 checks passed)
 ## Statistical Reference
 
 ### Sample Size for 80% Power, α=0.05 (two-tailed)
+Two-proportion normal approximation:
+n = (1.96·√(2p̄(1−p̄)) + 0.8416·√(p₁(1−p₁) + p₂(1−p₂)))² / (p₂ − p₁)².
 | Baseline CVR | Relative Lift | Min Sample Per Arm |
 |---|---|---|
-| 5% | 20% | 3,842 |
-| 8% | 18.75% | 2,532 |
-| 10% | 15% | 3,148 |
-| 20% | 10% | 3,940 |
+| 5% | 20% | 8,158 |
+| 8% | 18.75% | 5,570 |
+| 10% | 15% | 6,693 |
+| 20% | 10% | 6,510 |
 
 ### What "Correct" Looks Like
-- Z ≥ 1.96 → p < 0.05 → statistically significant
+- An observed Z ≥ 1.96 → p < 0.05 → statistically significant (the platform's
+  Fisher's exact test is slightly more conservative near the boundary)
 - Z ≥ 2.576 → p < 0.01 → highly significant
 - CUPED: variance reduction 0% = no covariate correlation, 60%+ = very strong
 - MAB: after 1000+ assignments, dominant variant should have ≥ 2× the traffic
 
 ## Important Notes
 
-- P-values are stochastic — ±0.01 tolerance on borderline cases is acceptable
+- A seeded run's p-value is not stochastic: the same scenario, seed and
+  experiment key give the same counts and p-value every time, and the platform's
+  must equal the seeder's `expected_p_value`
 - CUPED theta can be negative (that's correct if covariate is negatively correlated)
 - MAB exploration/exploitation balance means a "losing" variant still gets some traffic
 - Sequential testing stops EARLY — not at the pre-planned sample size
