@@ -1095,13 +1095,18 @@ Revokes an API key.
 The API enforces the following rate limits:
 
 -   SDK paths (`/api/v1/tracking/*`, `/api/v1/feature-flags/evaluate/*`,
-    `/api/v1/feature-flags/user/*`): `SDK_RATE_LIMIT_PER_MINUTE` per client IP (default 6000/min)
+    `/api/v1/feature-flags/user/*`, `/api/v1/sdk/*`): `SDK_RATE_LIMIT_PER_MINUTE` per client IP
+    (default 6000/min)
 -   Authentication endpoints (`/api/v1/auth/login`, `/token`: 10/min; `/signup`,
     `/forgot-password`, `/reset-password`: 5/min)
 -   AI design (`POST /api/v1/ai/design`): 10/min per client IP; AI results
     interpretation (`POST /api/v1/ai/interpret/{experiment_id}`): 10/min per client IP
     for every experiment id together
 -   Everything else: 300 requests per minute per client IP
+
+Each limit is counted per client IP and per path, so `/api/v1/experiments/{id}` counts
+separately for each id. The exceptions share one count per client IP across their paths:
+every `/api/v1/export/*` path, and every AI interpretation id.
 
 A few other routes have their own limits; the
 [API Documentation Guide](api-docs-guide.md#rate-limiting) lists every one. The limits
@@ -1110,9 +1115,13 @@ are the same in every profile; they are configuration, not a plan
 
 When a rate limit is exceeded, the API will respond with a 429 status code and the following headers:
 
+-   `Retry-After`: The length of the time window in seconds (`60` for every limit today)
 -   `X-RateLimit-Limit`: The maximum number of requests allowed per time window
--   `X-RateLimit-Remaining`: The number of requests remaining in the current time window
--   `X-RateLimit-Reset`: The time at which the current rate limit window resets in UTC epoch seconds
+-   `X-RateLimit-Remaining`: `0`
+-   `X-RateLimit-Window`: The length of the time window in seconds
+
+Other responses carry `X-RateLimit-Limit`, `X-RateLimit-Remaining` (the requests left in the
+current window) and `X-RateLimit-Window` too. No response carries an `X-RateLimit-Reset` header.
 
 ## Versioning
 

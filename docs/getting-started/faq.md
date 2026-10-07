@@ -48,7 +48,7 @@ For local development, Docker Compose provides PostgreSQL and Redis, and LocalSt
 
 User-to-variant assignment uses a **deterministic consistent hash** of `experiment_key + user_id`. Because the hash is deterministic, the same user always receives the same variant for a given experiment — regardless of which server processes the request, whether the cache is warm, or whether the SDK has been restarted.
 
-No database lookup is required to retrieve an assignment that has already been computed. The assignment is computed on the fly from the hash and the experiment's traffic weights.
+The hash decides a new user's variant from the experiment's traffic weights. The API then stores the assignment, and a user who already has one gets it back unchanged, even if the weights have changed since.
 
 ---
 
@@ -58,7 +58,7 @@ The platform supports a range of statistical approaches:
 
 | Method | Description |
 |--------|-------------|
-| Frequentist (z-test) | Standard two-sample proportion and mean comparison |
+| Frequentist (Fisher's exact test) | Each treatment against the control: a two-sided Fisher's exact test on the users who converted and the users who did not. Every metric in the results is analysed as a conversion today; warehouse analysis (beta) compares a mean metric with Welch's t-test |
 | Sequential testing (mSPRT) | Continuous monitoring with valid p-values at any sample size |
 | Always-valid confidence intervals | Confidence sequences that are valid at every look |
 | Alpha spending (O'Brien-Fleming, Pocock) | Not computed yet: the response's `alpha_spending` is empty; use the mSPRT, which is valid under continuous monitoring |

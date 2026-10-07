@@ -17,7 +17,7 @@ An experimentation platform that enables teams to make data-driven decisions thr
 - **Advanced Feature Flags**: Targeting, gradual rollouts, and automated safety monitoring
 - **Enhanced Rules Engine**: 20+ operators including semantic versioning, geo-distance, time windows
 - **Real-time Analytics**: High-throughput event collection and comprehensive metrics
-- **RBAC**: Role-based access control with local or AWS Cognito authentication; custom roles with the `rbac` module
+- **RBAC**: Role-based access control with local or AWS Cognito authentication; custom roles with the `rbac` module (recorded, but they do not change access yet: [#891](https://github.com/getexperimently/experimently/issues/891))
 - **Audit Trail**: creating, changing and deleting flags and experiments, and flag toggles, are
   recorded in every profile; the full profile adds warehouse changes, HMAC-SHA256 signing, SOC 2 /
   ISO 27001 reports and a JSON or CSV export for your compliance program
@@ -263,11 +263,11 @@ the core through the registration hooks in `backend/app/core/`:
 | Module | What it adds |
 |---|---|
 | `workspaces` | Group users into teams, with workspace roles and email invites. Grouping only: access to experiments and flags is by platform role |
-| `rbac` | Roles beyond the built-in four, and permissions granted directly to a user |
+| `rbac` | Roles beyond the built-in four, and permissions granted directly to a user. Both are recorded, but they do not change what anyone can do yet: each user's built-in role decides ([#891](https://github.com/getexperimently/experimently/issues/891)) |
 | `sso` | OIDC identity providers with just-in-time provisioning and role mapping. SAML 2.0 sign-in is not available yet; use OIDC |
 | `hipaa` | PHI encryption, six-year PHI audit retention, BAA records |
 | `compliance` | SOC 2 / ISO 27001 reports, signed audit exports |
-| `warehouse` | Warehouse analysis (beta): run an experiment's analysis on tables in your own warehouse, under `/api/v1/warehouse/analysis` (connections, sources, runs). No connector is enabled yet; `GET /api/v1/warehouse/analysis/connectors` lists which are. See [docs/api/warehouse-analytics.md](docs/api/warehouse-analytics.md) |
+| `warehouse` | Warehouse analysis (beta): run an experiment's analysis on tables in your own warehouse, under `/api/v1/warehouse/analysis` (connections, sources, runs). Snowflake and BigQuery are available; `GET /api/v1/warehouse/analysis/connectors` lists which connectors are. See [docs/api/warehouse-analytics.md](docs/api/warehouse-analytics.md) |
 | `integrations` | Jira, Salesforce and GitHub |
 | `counters` | DynamoDB-backed live assignment and conversion counters |
 | `etl` | Glue crawlers, Athena partitions and scheduled jobs |

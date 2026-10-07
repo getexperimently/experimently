@@ -260,7 +260,9 @@ curl -X POST "http://localhost:8000/api/v1/users/" \
 ## Rate Limiting and API Constraints
 
 ### Rate Limits
-Limits are counted per client address. Most routes allow 300 requests a minute.
+Limits are counted per client address and per path: most routes allow 300 requests a
+minute to each path from one address, and a path with an id in it, such as
+`/api/v1/experiments/{experiment_id}`, counts separately for each id.
 AI design (`POST /api/v1/ai/design`) allows 10 a minute, and AI results
 interpretation (`POST /api/v1/ai/interpret/{experiment_id}`) 10 a minute for every
 experiment id together. The [API Documentation Guide](api-docs-guide.md#rate-limiting)
@@ -269,12 +271,12 @@ lists every route with its own limit. Over a limit the API answers `429` with a
 
 ### Request Size Limits
 - Maximum request body size: 5 MiB (5,242,880 bytes); a larger body is answered `413`, with or without a `Content-Length` header
-- Maximum response size: 10MB
 
 ### Pagination
-- Default page size: 100 items
-- Maximum page size: 500 items
-- All list endpoints support pagination using `skip` and `limit` parameters
+- List endpoints that page take `skip` and `limit` parameters
+- The default and the largest `limit` differ by route (the experiments list: 100, at most
+  500; the feature flags list: 100, with no maximum). The API's OpenAPI document,
+  `GET /api/v1/openapi.json`, gives each route's
 
 ### Caching
 - Experiment data is cached for 1 hour when `CACHE_ENABLED` is on (it is off by default)
@@ -679,26 +681,40 @@ response.
 
 ### List Feature Flags
 - **Endpoint**: `GET /api/v1/feature-flags/`
-- **Description**: List feature flags with filtering and pagination
+- **Description**: List feature flags with filtering and pagination. Every role can list
+  every flag.
 - **Headers**: Authorization: Bearer {token}
 - **Query Parameters**:
-  - status_filter: string (optional)
+  - status: string (optional): `ACTIVE`, `INACTIVE` or `ARCHIVED`, in upper case (each
+    item's own `status` is lower case)
   - skip: int (default: 0)
-  - limit: int (default: 100, max: 500)
-  - search: string (optional)
-- **Response**: 200 OK
+  - limit: int (default: 100; the route sets no maximum)
+  - search: string (optional): matches part of the name or the key, in any case
+- **Response**: 200 OK. `total` counts every flag that matches `status` and `search`, not
+  only the ones on this page.
   ```json
-  [
-    {
-      "id": "string",
-      "key": "string",
-      "name": "string",
-      "description": "string",
-      "status": "string",
-      "created_at": "datetime",
-      "updated_at": "datetime"
-    }
-  ]
+  {
+    "items": [
+      {
+        "id": "string (UUID)",
+        "key": "string",
+        "name": "string",
+        "description": "string or null",
+        "status": "active",
+        "is_active": true,
+        "rollout_percentage": 0,
+        "targeting_rules": null,
+        "default_value": false,
+        "tags": null,
+        "owner_id": "string (UUID) or null",
+        "created_at": "datetime",
+        "updated_at": "datetime"
+      }
+    ],
+    "total": 1,
+    "skip": 0,
+    "limit": 100
+  }
   ```
 
 ### Get User Feature Flags

@@ -78,6 +78,12 @@ await client.track('user-123', 'purchase', { value: 49.99, experimentKey: 'check
 await client.track('user-123', 'page_view', { properties: { page: '/checkout' } });
 ```
 
+The block is TypeScript and uses top-level `await`, so it runs as an ES module. To run it as it
+is, save it as `quick-start.mts` in the project where you installed the package, set
+`EXPERIMENTLY_API_KEY`, and run `node --experimental-strip-types quick-start.mts` (Node 22.6 or
+later; checked with Node 22.14, which prints an `ExperimentalWarning`). As plain JavaScript, delete the `!` after
+`process.env.EXPERIMENTLY_API_KEY`, save it as `quick-start.mjs` and run `node quick-start.mjs`.
+
 ---
 
 ## Configuration (`ClientConfig`)

@@ -65,74 +65,93 @@ curl -X POST "http://localhost:8000/api/v1/ai/design" \
   }'
 ```
 
-**Response**
+**Response** (without `ANTHROPIC_API_KEY`, the template for `onboarding`)
 
 ```json
 {
-  "name": "Simplified Onboarding Checklist",
-  "hypothesis": "Reducing the onboarding checklist from 8 steps to 4 will increase 7-day activation by removing friction for new users who feel overwhelmed",
-  "suggested_metrics": ["7_day_activation", "checklist_completion_rate", "time_to_first_value"],
-  "suggested_variants": [
-    {"name": "control", "description": "Current 8-step checklist"},
-    {"name": "simplified", "description": "4-step checklist focusing on core actions only"}
-  ],
+  "hypothesis": "Changing the onboarding flow will improve user outcomes",
+  "primary_metric": "activation_rate",
+  "guardrail_metrics": ["day7_retention", "time_to_first_action"],
+  "recommended_sample_size": 1000,
   "recommended_duration_days": 14,
-  "recommended_traffic_pct": 50,
-  "confidence": "high",
-  "source": "claude_api"
+  "variant_descriptions": ["Control: current experience", "Variant A: proposed change"],
+  "confidence": "template_based",
+  "reasoning": "Template-based suggestion (AI not available)"
 }
 ```
 
-`source` is either `"claude_api"` (live AI suggestion) or `"template"` (fallback).
+`confidence` says where the suggestion came from: `"ai_generated"` when Claude answered,
+`"template_based"` otherwise. When Claude answered, `reasoning` is its whole answer and
+`hypothesis` its first 200 characters; the metrics, sample size, duration and variants come
+from the experiment type's template either way.
 
 The endpoint allows 10 requests a minute per client address; above that it answers
 `429 Too Many Requests` with a `Retry-After: 60` header. With `ANTHROPIC_API_KEY` set, each
-call to Claude waits at most 30 seconds for an answer and is tried at most twice; when it
-fails, the endpoint answers with the template-based suggestion.
+call to Claude gives up when Claude has not answered in 30 seconds, and is tried at most
+twice; when it fails, the endpoint answers with the template-based suggestion.
 
 ---
 
 ## AI Results Interpretation (`/api/v1/ai/interpret/{experiment_id}`)
 
-Returns a plain-English interpretation of experiment results with a ship/no-ship recommendation.
+Returns a plain-English interpretation of one variant's result with a recommendation:
+`ship`, `continue_testing` or `stop_futility`. It interprets the numbers in the request body;
+it does not read the experiment's stored results, and it does not look up the experiment id.
+All four body fields are required (an empty body answers 422).
 
 ### POST /api/v1/ai/interpret/{experiment_id}
 
 ```bash
-curl -X POST "http://localhost:8000/api/v1/ai/interpret/exp-uuid" \
+curl -X POST "http://localhost:8000/api/v1/ai/interpret/checkout-v2" \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
-  -d '{}'
+  -d '{"experiment_id": "checkout-v2", "variant_name": "simplified", "p_value": 0.03, "relative_improvement_pct": 3.2}'
+```
+
+**Response** (without `ANTHROPIC_API_KEY`)
+
+```json
+{
+  "summary": "simplified showed a 3.2% improvement (p=0.030). Recommend shipping.",
+  "recommendation": "ship",
+  "confidence_statement": "Statistical confidence: 97.0%",
+  "key_findings": ["simplified showed a 3.2% improvement (p=0.030). Recommend shipping."],
+  "generated_by": "template"
+}
+```
+
+`generated_by` is `"ai"` when Claude answered (the summary is then the first 300 characters
+of Claude's answer) and `"template"` otherwise.
+
+The endpoint allows 10 requests a minute per client address for every experiment id
+together: `/interpret/a` and `/interpret/b` draw on the same 10. Above that it answers
+`429 Too Many Requests` with a `Retry-After: 60` header. With `ANTHROPIC_API_KEY` set, each
+call to Claude gives up when Claude has not answered in 30 seconds, and is tried at most
+twice; when it fails, the endpoint answers with the template-based interpretation.
+
+---
+
+## Sample Size Calculator (`/api/v1/ai/sample-size`)
+
+Calculate the required sample size per variant from a baseline rate (`baseline_rate`), a
+minimum detectable effect (`mde`), a confidence level (`confidence`, default 0.95) and power
+(`power`, default 0.80). `mde` is an absolute change in the rate: 0.004 on a baseline of 0.08
+plans for 8% against 8.4%, a 5% relative lift.
+
+```bash
+curl -X GET "http://localhost:8000/api/v1/ai/sample-size?baseline_rate=0.08&mde=0.004&power=0.80" \
+  -H "Authorization: Bearer $TOKEN"
 ```
 
 **Response**
 
 ```json
 {
-  "experiment_id": "exp-uuid",
-  "summary": "The simplified checkout treatment increased conversion rate by 3.2% (from 8.1% to 8.4%) with 97% statistical confidence. The improvement is consistent across mobile and desktop segments.",
-  "recommendation": "ship",
-  "confidence": "high",
-  "caveats": ["Sample size is at the lower end of the target; monitor post-launch for regression"],
-  "source": "claude_api"
+  "required_per_variant": 73855,
+  "total_required": 147710,
+  "days_to_significance": null,
+  "assumptions": {"baseline_rate": 0.08, "mde": 0.004, "confidence": 0.95, "power": 0.8}
 }
-```
-
-The endpoint allows 10 requests a minute per client address for every experiment id
-together: `/interpret/a` and `/interpret/b` draw on the same 10. Above that it answers
-`429 Too Many Requests` with a `Retry-After: 60` header. With `ANTHROPIC_API_KEY` set, each
-call to Claude waits at most 30 seconds for an answer and is tried at most twice; when it
-fails, the endpoint answers with the template-based interpretation.
-
----
-
-## Sample Size Calculator (`/api/v1/ai/sample-size`)
-
-Calculate the required sample size per variant given baseline rate, MDE, significance level, and statistical power.
-
-```bash
-curl -X GET "http://localhost:8000/api/v1/ai/sample-size?baseline=0.08&mde=0.05&alpha=0.05&power=0.80" \
-  -H "Authorization: Bearer $TOKEN"
 ```
 
 ---
@@ -167,7 +186,7 @@ Set the following in your environment to enable live AI suggestions:
 ANTHROPIC_API_KEY=sk-ant-your-api-key
 ```
 
-If `ANTHROPIC_API_KEY` is not set, all AI endpoints return template-based responses with `"source": "template"`. The platform degrades gracefully — no errors are raised.
+If `ANTHROPIC_API_KEY` is not set, the design and interpretation endpoints answer with their templates (`"confidence": "template_based"` and `"generated_by": "template"`). The platform degrades gracefully — no errors are raised.
 
 ---
 
