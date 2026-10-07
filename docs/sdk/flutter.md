@@ -394,8 +394,9 @@ random `smoke-<uuid>`). The smoke imports only `experimently_core.dart`, so no
 resolution needs Flutter's bundled `dart` (run `flutter pub get` first so `dart run` prints
 nothing but the JSON line).
 
-Verified against a live backend: **not yet (toolchain unavailable — no dart/flutter on the
-development machine)**. Run `python tests/sdk-contract/live/run_live_contract.py --sdk flutter --strict`
+CI does not run this SDK's contract smoke against a real API: `flutter` is not in the
+`sdks:` list of the SDK Live Contract job in [pr-qa-gate.yml](https://github.com/getexperimently/experimently/blob/main/.github/workflows/pr-qa-gate.yml).
+Run `python tests/sdk-contract/live/run_live_contract.py --sdk flutter --strict`
 on a machine with the Flutter SDK.
 
 ---

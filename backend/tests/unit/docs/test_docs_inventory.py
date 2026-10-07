@@ -17,7 +17,15 @@ what verifies it. The file's header is the contract; this test holds it:
   request that writes it (one of ``PLANNED``; only on a pending journey, so
   the run summary can say where each journey not yet written comes from);
 * an ``exec`` page is enrolled in ``scripts/doc_examples.toml`` with at least
-  one exec block, and a ``workflow`` page names a workflow that exists;
+  one exec block;
+* a ``workflow`` page names a workflow whose ``on.<event>.paths`` lists the
+  page's own path, ``docs/<page>``, as a literal entry. The workflow file is
+  parsed, not searched: a comment or a step name that mentions the page does
+  not count, and neither does a glob such as ``docs/**`` (#1075);
+* an ``aws`` page says which step exercises it in ``exercised_by``: a list of
+  values from ``EXERCISED_BY`` -- the ten steps of #295 word for word, ``605``
+  or ``production-deploy`` -- or ``["none"]`` when no step does (#1075). It
+  records which step exercises the page, never whether that step has run;
 * every flow of #939 (``FLOWS_939``, copied from the issue) is mapped, to
   declared journeys, to classified pages or to a class some page has.
 
@@ -61,11 +69,34 @@ SLUG = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*")
 FIELDS: Dict[str, Set[str]] = {
     "journey": {"class", "reason", "journey", "pending", "planned"},
     "workflow": {"class", "reason", "workflow"},
+    "aws": {"class", "reason", "exercised_by"},
 }
 PLAIN_FIELDS = {"class", "reason"}
 #: The pull requests of the QA plan (#897, #939) a pending journey may name.
 PLANNED: Tuple[str, ...] = ("D2", "D3a", "D3b", "unassigned")
 FLOW_FIELDS = {"text", "note", "journeys", "pages", "classes"}
+
+#: The steps of #295 (the first deploy to a real staging account, and a
+#: rollback rehearsal), verbatim but for each line's closing punctuation. When
+#: the issue's list changes, change this and the mapping.
+STEPS_295: Tuple[str, ...] = (
+    "bootstrap the account",
+    "create the image repositories and a bootstrap image",
+    "set up GitHub OIDC access for the deploy workflow",
+    "run the first stack deploy",
+    "migrate",
+    "smoke through the load balancer on a non-probe path",
+    "deploy a second release and roll back",
+    "force a circuit breaker and an alarm rollback",
+    "replace the invented test fixtures with captured output",
+    "tear down, with the residue measured",
+)
+#: Everything an aws page's ``exercised_by`` may name, and nothing else: the
+#: steps of #295, ``605`` (#605, which removes two DynamoDB tables after an
+#: on-demand backup of each), ``production-deploy`` (the first deploy to
+#: production) and ``none``, which stands alone.
+NONE = "none"
+EXERCISED_BY: Tuple[str, ...] = STEPS_295 + ("605", "production-deploy", NONE)
 
 #: The "Flows, at least" list of #939, verbatim but for each line's closing
 #: punctuation. When the issue's list changes, change this and the mapping.
@@ -170,6 +201,27 @@ def enrolled_exec_counts(text: str) -> Dict[str, int]:
     return counts
 
 
+def workflow_paths(text: str) -> Set[str]:
+    """Every literal entry of the workflow's ``on.<event>.paths`` lists.
+
+    Read from the parsed YAML, so a comment, a step name or a script line that
+    names a page is not an entry. A YAML 1.1 loader reads the bare key ``on``
+    as the boolean ``True``; both spellings are looked up. ``paths-ignore`` is
+    not ``paths``.
+    """
+    config = yaml.safe_load(text)
+    if not isinstance(config, dict):
+        return set()
+    triggers = config["on"] if "on" in config else config.get(True)
+    if not isinstance(triggers, dict):
+        return set()
+    entries: Set[str] = set()
+    for event in triggers.values():
+        if isinstance(event, dict) and isinstance(event.get("paths"), list):
+            entries.update(p for p in event["paths"] if isinstance(p, str))
+    return entries
+
+
 # ---------------------------------------------------------------------------
 # The check
 # ---------------------------------------------------------------------------
@@ -202,14 +254,15 @@ def problems(
     nav: Set[str],
     *,
     enrolled: Mapping[str, int],
-    workflows: Set[str],
+    workflows: Mapping[str, Set[str]],
     written: Set[str],
 ) -> List[str]:
     """Every way the inventory breaks its contract; empty when it holds.
 
-    ``enrolled`` is doc_examples.toml's exec count per page, ``workflows`` the
-    workflow file stems that exist, ``written`` the journey ids with an
-    expectations file.
+    ``enrolled`` is doc_examples.toml's exec count per page, ``workflows``
+    each workflow file's stem with its literal ``on.<event>.paths`` entries
+    (``workflow_paths``), ``written`` the journey ids with an expectations
+    file.
     """
     found: List[str] = []
     unknown_top = set(inventory) - {"pages", "flow"}
@@ -290,6 +343,14 @@ def problems(
                 found.append(
                     f"{key}: workflow {workflow!r} is not a file in .github/workflows/"
                 )
+            elif f"docs/{key}" not in workflows[workflow]:
+                found.append(
+                    f"{key}: workflow {workflow!r} does not run this page:"
+                    f" 'docs/{key}' is not a literal on.<event>.paths entry of"
+                    f" .github/workflows/{workflow}.yml"
+                )
+        elif family == "aws":
+            found.extend(_exercised_by_problems(key, entry))
 
     found.extend(
         _flow_problems(
@@ -301,6 +362,29 @@ def problems(
 
 def _strings(value: Any) -> bool:
     return isinstance(value, list) and all(isinstance(v, str) for v in value)
+
+
+def _exercised_by_problems(key: str, entry: Mapping[str, Any]) -> List[str]:
+    """An aws page's ``exercised_by``: values of ``EXERCISED_BY``, none twice."""
+    if "exercised_by" not in entry:
+        return [
+            f"{key}: class aws needs exercised_by, the steps that exercise the"
+            f' page (["{NONE}"] when no step does)'
+        ]
+    steps = entry["exercised_by"]
+    if not _strings(steps) or not steps:
+        return [f"{key}: exercised_by must be a non-empty list of strings"]
+    found = [
+        f"{key}: exercised_by {step!r} is not a step of #295 word for word,"
+        " '605', 'production-deploy' or 'none'"
+        for step in steps
+        if step not in EXERCISED_BY
+    ]
+    for step in sorted({s for s in steps if steps.count(s) > 1}):
+        found.append(f"{key}: exercised_by names {step!r} twice")
+    if NONE in steps and len(steps) > 1:
+        found.append(f"{key}: exercised_by {NONE!r} stands alone")
+    return found
 
 
 def _flow_problems(
@@ -360,17 +444,77 @@ def _real_nav() -> Tuple[Set[str], List[str]]:
     return nav_pages(load_mkdocs(MKDOCS.read_text(encoding="utf-8")))
 
 
+def _real_context() -> Dict[str, Any]:
+    return {
+        "enrolled": enrolled_exec_counts(DOC_EXAMPLES.read_text(encoding="utf-8")),
+        "workflows": {
+            p.stem: workflow_paths(p.read_text(encoding="utf-8"))
+            for p in WORKFLOWS.glob("*.yml")
+        },
+        "written": {p.stem for p in JOURNEYS.glob("*.yaml")},
+    }
+
+
 def test_every_nav_page_is_classified_and_every_flow_mapped():
     nav, found = _real_nav()
     inventory, parse_found = parse_inventory(INVENTORY.read_text(encoding="utf-8"))
-    found += parse_found or problems(
-        inventory,
-        nav,
-        enrolled=enrolled_exec_counts(DOC_EXAMPLES.read_text(encoding="utf-8")),
-        workflows={p.stem for p in WORKFLOWS.glob("*.yml")},
-        written={p.stem for p in JOURNEYS.glob("*.yaml")},
-    )
+    found += parse_found or problems(inventory, nav, **_real_context())
     assert not found, "\n".join(found) + "\n\n" + HOW_TO_FIX
+
+
+#: The workflow page of the real tree, and two workflows that exist but do not
+#: run it: `docs` lists `docs/**` in its paths (a glob, not the page), and
+#: `leak-guard` has no paths at all. Either one passed before #1075.
+WORKFLOW_PAGE = "self-hosting/kubernetes.md"
+
+
+@pytest.mark.regression
+@pytest.mark.parametrize("workflow", ["docs", "leak-guard"])
+def test_a_workflow_page_naming_a_workflow_that_does_not_list_it_is_refused(
+    workflow,
+):
+    nav, _found = _real_nav()
+    inventory, _parse = parse_inventory(INVENTORY.read_text(encoding="utf-8"))
+    context = _real_context()
+    entry = inventory["pages"][WORKFLOW_PAGE]
+    assert (entry["class"], entry["workflow"]) == ("workflow", "chart-kind")
+    assert f"docs/{WORKFLOW_PAGE}" in context["workflows"]["chart-kind"]
+    assert workflow in context["workflows"]
+
+    entry["workflow"] = workflow
+    found = problems(inventory, nav, **context)
+    assert found == [
+        f"{WORKFLOW_PAGE}: workflow {workflow!r} does not run this page:"
+        f" 'docs/{WORKFLOW_PAGE}' is not a literal on.<event>.paths entry of"
+        f" .github/workflows/{workflow}.yml"
+    ]
+
+
+def test_workflow_paths_reads_only_the_literal_on_paths_entries():
+    text = (
+        "# docs/a.md is run below, by name (a comment, not an entry)\n"
+        "name: A\n"
+        "on:\n"
+        "  pull_request:\n"
+        "    paths:\n"
+        "      - 'docs/a.md'\n"
+        "      - 'docs/**'\n"
+        "  push:\n"
+        "    branches: [main]\n"
+        "    paths-ignore: ['docs/b.md']\n"
+        "  schedule:\n"
+        "    - cron: '0 0 * * *'\n"
+        "jobs:\n"
+        "  run:\n"
+        "    runs-on: ubuntu-latest\n"
+        "    steps:\n"
+        "      - name: docs/c.md\n"
+        "        run: scripts/x.sh docs/c.md\n"
+    )
+    assert workflow_paths(text) == {"docs/a.md", "docs/**"}
+    assert workflow_paths("on: [push, pull_request]\n") == set()
+    assert workflow_paths("on: push\n") == set()
+    assert workflow_paths("'on':\n  push:\n    paths: [docs/a.md]\n") == {"docs/a.md"}
 
 
 def test_the_nav_parsed_to_real_pages():
@@ -410,6 +554,12 @@ reason = "nothing to walk"
 
 [pages."f.md"]
 class = "aws"
+exercised_by = ["none"]
+reason = "needs AWS"
+
+[pages."j.md"]
+class = "aws"
+exercised_by = ["run the first stack deploy", "605", "production-deploy"]
 reason = "needs AWS"
 
 [pages."g.md"]
@@ -417,12 +567,14 @@ class = "device"
 reason = "needs a simulator"
 """
 
-NAV = {"a.md", "b.md", "c.md", "d.md", "e.md", "f.md", "g.md"}
+NAV = {"a.md", "b.md", "c.md", "d.md", "e.md", "f.md", "g.md", "j.md"}
 CONTEXT: Dict[str, Any] = {
     "enrolled": {"b.md": 3},
-    "workflows": {"chart-kind"},
+    "workflows": {"chart-kind": {"docs/c.md", "charts/**"}},
     "written": set(),
 }
+#: j.md's mapping, which the exercised_by plants edit.
+J_STEPS = 'exercised_by = ["run the first stack deploy", "605", "production-deploy"]'
 
 
 def _flows(skip: Iterable[str] = ()) -> str:
@@ -570,9 +722,90 @@ PLANTS = [
     pytest.param(
         GOOD + _flows(),
         NAV,
-        {"workflows": set()},
+        {"workflows": {}},
         "c.md: workflow 'chart-kind' is not a file",
         id="workflow-missing",
+    ),
+    pytest.param(
+        GOOD + _flows(),
+        NAV,
+        {"workflows": {"chart-kind": set()}},
+        "c.md: workflow 'chart-kind' does not run this page",
+        id="workflow-without-paths",
+    ),
+    pytest.param(
+        GOOD + _flows(),
+        NAV,
+        {"workflows": {"chart-kind": {"docs/**", "docs/*.md", "c.md"}}},
+        "c.md: workflow 'chart-kind' does not run this page",
+        id="workflow-paths-glob-only",
+    ),
+    pytest.param(
+        GOOD.replace('exercised_by = ["none"]\n', "") + _flows(),
+        NAV,
+        {},
+        "f.md: class aws needs exercised_by",
+        id="aws-without-exercised-by",
+    ),
+    pytest.param(
+        GOOD.replace('exercised_by = ["none"]', "exercised_by = []") + _flows(),
+        NAV,
+        {},
+        "f.md: exercised_by must be a non-empty list of strings",
+        id="aws-exercised-by-empty",
+    ),
+    pytest.param(
+        GOOD.replace('exercised_by = ["none"]', 'exercised_by = "none"') + _flows(),
+        NAV,
+        {},
+        "f.md: exercised_by must be a non-empty list of strings",
+        id="aws-exercised-by-not-a-list",
+    ),
+    pytest.param(
+        GOOD.replace(J_STEPS, 'exercised_by = ["bootstrap the account;"]') + _flows(),
+        NAV,
+        {},
+        "j.md: exercised_by 'bootstrap the account;' is not a step of #295",
+        id="aws-step-not-verbatim",
+    ),
+    pytest.param(
+        GOOD.replace(J_STEPS, 'exercised_by = ["Run the first stack deploy"]')
+        + _flows(),
+        NAV,
+        {},
+        "j.md: exercised_by 'Run the first stack deploy' is not a step of #295",
+        id="aws-step-case-differs",
+    ),
+    pytest.param(
+        GOOD.replace(J_STEPS, 'exercised_by = ["a step of our own"]') + _flows(),
+        NAV,
+        {},
+        "j.md: exercised_by 'a step of our own' is not a step of #295",
+        id="aws-step-invented",
+    ),
+    pytest.param(
+        GOOD.replace(J_STEPS, 'exercised_by = ["605", "605"]') + _flows(),
+        NAV,
+        {},
+        "j.md: exercised_by names '605' twice",
+        id="aws-step-twice",
+    ),
+    pytest.param(
+        GOOD.replace(J_STEPS, 'exercised_by = ["605", "none"]') + _flows(),
+        NAV,
+        {},
+        "j.md: exercised_by 'none' stands alone",
+        id="aws-none-with-a-step",
+    ),
+    pytest.param(
+        GOOD.replace(
+            'class = "reference"', 'class = "reference"\nexercised_by = ["none"]'
+        )
+        + _flows(),
+        NAV,
+        {},
+        "e.md: fields not allowed on class 'reference': ['exercised_by']",
+        id="exercised-by-off-aws",
     ),
     pytest.param(
         GOOD.replace('reason = "needs AWS"', 'reason = ""') + _flows(),

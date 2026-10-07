@@ -10,6 +10,9 @@ the SDK caches the answer per user + key. Nothing is bucketed locally.
 Source: `sdk/react`. A complete working integration is the ShopLab demo storefront in
 `demo/shoplab`.
 
+CI runs this SDK's contract smoke against a real API: `react` is in the `sdks:` list of the
+SDK Live Contract job in [pr-qa-gate.yml](https://github.com/getexperimently/experimently/blob/main/.github/workflows/pr-qa-gate.yml).
+
 ---
 
 ## Installation

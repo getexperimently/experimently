@@ -24,7 +24,9 @@ This means you can:
 user + flag. Flags are decided **by the server**; nothing is bucketed locally and no flag
 definitions are downloaded. Requires Node >= 18 and `@openfeature/server-sdk >= 1.7`.
 
-Verified against a live backend: **yes (2026-09-11)** — via
+CI runs this SDK's contract smoke against a real API: `openfeature` is in the `sdks:` list of the
+SDK Live Contract job in [pr-qa-gate.yml](https://github.com/getexperimently/experimently/blob/main/.github/workflows/pr-qa-gate.yml).
+The live runner:
 `python tests/sdk-contract/live/run_live_contract.py --sdk openfeature --strict`.
 
 ### Installation
@@ -325,7 +327,9 @@ Env: `EXPERIMENTLY_API_URL` (default `http://localhost:8000`), `EXPERIMENTLY_API
 `sdk_contract_flag`), `CONTRACT_USER_ID` (default random `smoke-<uuid>`). The flag is resolved
 through the OpenFeature API; assignment and tracking go through `provider.client`.
 
-Verified against a live backend: **yes (2026-09-11)** — via
+CI runs this SDK's contract smoke against a real API: `openfeature-python` is in the `sdks:` list of the
+SDK Live Contract job in [pr-qa-gate.yml](https://github.com/getexperimently/experimently/blob/main/.github/workflows/pr-qa-gate.yml).
+The live runner:
 `python tests/sdk-contract/live/run_live_contract.py --sdk openfeature-python --strict`.
 
 ### Tests (Python)

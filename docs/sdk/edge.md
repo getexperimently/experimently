@@ -9,7 +9,10 @@ public API with your `X-API-Key`, the server buckets the user (sticky per user +
 SDK caches the answer per user + key — in memory and, optionally, in a shared KV store so other
 isolates can reuse it. Nothing is bucketed locally.
 
-Source: `sdk/edge`. Verified against a live backend: **yes (2026-09-11)** via the contract smoke below.
+Source: `sdk/edge`.
+
+CI runs this SDK's contract smoke against a real API: `edge` is in the `sdks:` list of the
+SDK Live Contract job in [pr-qa-gate.yml](https://github.com/getexperimently/experimently/blob/main/.github/workflows/pr-qa-gate.yml).
 
 ---
 
