@@ -8,6 +8,10 @@
 # no ARIA snapshot, the journey is not recorded, and the key is kept (keep)
 # without being written anywhere: the runner's redactor takes it out of every
 # file, and the end-of-run scan fails the run if it is found in one.
+#
+# Its last screen reads "No API keys found": no journey before it in the
+# session leaves the demo administrator a key (the session walks the files in
+# name order; test_no_journey_leaves_an_admin_key_before_the_api_key_journey).
 guide: security/api-keys.md
 stack: compose-dev
 profile: core
