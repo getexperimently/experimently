@@ -188,7 +188,7 @@ The `decode_token` stub returns hardcoded values and performs no signature verif
 
 | Priority | Item |
 |---|---|
-| Done | Redis-backed rate limiter, which returns to Redis within 30 s of an outage (#790). Follow-ups: #809 (fallback key eviction), #810 (retries in the other Redis clients), #811 (the ApiErrorLogs filter) |
+| Done | Redis-backed rate limiter, which returns to Redis within 30 s of an outage (#790). Open follow-up: #809 (fallback key eviction). Done since: #810 (retries in the other Redis clients, #1023) and #811 (the ApiErrorLogs filter, #1056) |
 | High | Audit all remaining schemas for missing length constraints (user.py, auth.py, metrics.py) |
 | Medium | Consider adding a WAF (AWS WAF) in front of the API for additional protection |
 | Medium | Evaluate whether `Access-Token-Expire-Minutes` (currently 8 days) is too long for the security posture |

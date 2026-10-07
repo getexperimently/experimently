@@ -84,6 +84,7 @@ ROLE_CLIENT_FIXTURES = frozenset(
         "superuser_results_client",  # test_results_correction_pins.py
         "harness",  # test_results_stored_settings.py
         "scan_client",  # test_interaction_scan_failures.py
+        "signed_in",  # test_flag_list_forbidden.py
     }
 )
 # Defined only under modules/backend/tests, which a core build does not have.

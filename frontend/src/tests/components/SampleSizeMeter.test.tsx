@@ -220,16 +220,17 @@ describe('SampleSizeMeter', () => {
   });
 
   describe('notes', () => {
-    it('labels a non-conversion metric and points to the Power Calculator', () => {
+    // The Power Calculator plans a conversion rate too, so the note must not
+    // send a non-conversion metric there as if it could plan one.
+    it('labels a non-conversion metric and says the Power Calculator plans conversion rates only', () => {
       render(<SampleSizeMeter data={{ ...observed, metric_name: 'Revenue', metric_type: 'revenue' }} />);
       const note = screen.getByTestId('sample-size-metric-type-note');
       expect(note).toHaveTextContent(
-        'Revenue is a revenue metric. Every metric is analysed as a conversion today, so this plan is for a conversion rate.'
+        'Revenue is a revenue metric. Every metric is analysed as a conversion today, so this plan is for a conversion rate. ' +
+          'The Power Calculator plans conversion rates only, so it cannot plan a revenue metric either.'
       );
-      expect(within(note).getByRole('link', { name: 'Power Calculator' })).toHaveAttribute(
-        'href',
-        '/power-calculator'
-      );
+      expect(note).not.toHaveTextContent(/use the Power Calculator/i);
+      expect(within(note).queryByRole('link')).not.toBeInTheDocument();
     });
 
     it('shows no metric-type note for a conversion metric', () => {

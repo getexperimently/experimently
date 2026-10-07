@@ -358,8 +358,8 @@ The tab also says when:
 - **no users have been assigned yet**, or there is no rate to plan from (no control conversions,
   or every control user converted): type the rate you expect;
 - **the metric is not a conversion**: every metric is analysed as a conversion today, so the
-  plan is for a conversion rate. The tab suggests the Power Calculator for other metrics, but
-  that page also plans only a conversion rate;
+  plan is for a conversion rate. The Power Calculator plans conversion rates only too, and the
+  tab says so;
 - **a fixed sample size is a guide only**: a bandit, an uneven split, sequential testing or
   Bayesian analysis.
 

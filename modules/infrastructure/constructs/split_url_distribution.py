@@ -26,8 +26,9 @@ class SplitUrlDistribution(Construct):
       their session via the cookie set by the Lambda@Edge function.
     - HTTPS-only viewer protocol policy: all HTTP requests are redirected to
       HTTPS to protect the assignment cookie.
-    - ALLOW_ALL origin request policy so the router function receives all
-      headers including cookies.
+    - ALL_VIEWER origin request policy, so a request the router function
+      lets through reaches the origin with every viewer header, cookie and
+      query string. (ALLOW_ALL is the allowed-methods setting.)
 
     Attributes:
         distribution: The created CloudFront Distribution.
