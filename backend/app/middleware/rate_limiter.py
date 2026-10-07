@@ -294,6 +294,12 @@ RATE_LIMIT_CONFIG: Dict[str, Tuple[int, int]] = {
     # database connection while it does. Its own counter, apart from the
     # ``/api/v1/export/`` budget below (#221).
     "/api/v1/audit-logs/export": (10, 60),
+    # AI experiment design: with ANTHROPIC_API_KEY set, each request calls
+    # Claude and waits for the answer, up to
+    # ``ai_design_service.CLAUDE_TIMEOUT_SECONDS`` an attempt, two attempts.
+    # The path is exact; a trailing slash is answered by FastAPI's 307
+    # redirect to it.
+    "/api/v1/ai/design": (10, 60),
 }
 
 # Default rate limit for all other endpoints
@@ -322,6 +328,13 @@ DEFAULT_SDK_RATE_LIMIT_PER_MINUTE = 6000
 EXPORT_PATH_PREFIX = "/api/v1/export/"
 EXPORT_RATE_LIMIT: Tuple[int, int] = (10, 60)  # 10 req/min, all exports together
 
+# AI results interpretation: a call to Claude, like ``/api/v1/ai/design``
+# above. The route does not use the experiment id in its path, so the counter
+# is keyed on the prefix (see ``rate_limit_key``): every id draws on the same
+# budget, and a new id is not a new one.
+AI_INTERPRET_PATH_PREFIX = "/api/v1/ai/interpret/"
+AI_INTERPRET_RATE_LIMIT: Tuple[int, int] = (10, 60)  # 10 req/min, every id together
+
 
 def resolve_rate_limit(
     path: str, sdk_limit_per_minute: int = DEFAULT_SDK_RATE_LIMIT_PER_MINUTE
@@ -330,13 +343,16 @@ def resolve_rate_limit(
     Return ``(max_requests, window_seconds)`` for a request path.
 
     Exact entries in ``RATE_LIMIT_CONFIG`` win, then the export prefix, then
-    SDK path prefixes, then ``DEFAULT_RATE_LIMIT``.
+    the AI interpretation prefix, then SDK path prefixes, then
+    ``DEFAULT_RATE_LIMIT``.
     """
     exact = RATE_LIMIT_CONFIG.get(path)
     if exact is not None:
         return exact
     if path.startswith(EXPORT_PATH_PREFIX):
         return EXPORT_RATE_LIMIT
+    if path.startswith(AI_INTERPRET_PATH_PREFIX):
+        return AI_INTERPRET_RATE_LIMIT
     if any(path.startswith(prefix) for prefix in SDK_PATH_PREFIXES):
         return (int(sdk_limit_per_minute), 60)
     return DEFAULT_RATE_LIMIT
@@ -348,10 +364,13 @@ def rate_limit_key(client_ip: str, path: str) -> str:
 
     ``client_ip:path`` for every route, except that all export paths share
     ``client_ip:/api/v1/export/`` -- one budget across the export routes and
-    across the experiment ids in their paths.
+    across the experiment ids in their paths -- and all AI interpretation
+    paths share ``client_ip:/api/v1/ai/interpret/``, whatever the id.
     """
     if path.startswith(EXPORT_PATH_PREFIX) and path not in RATE_LIMIT_CONFIG:
         return f"{client_ip}:{EXPORT_PATH_PREFIX}"
+    if path.startswith(AI_INTERPRET_PATH_PREFIX) and path not in RATE_LIMIT_CONFIG:
+        return f"{client_ip}:{AI_INTERPRET_PATH_PREFIX}"
     return f"{client_ip}:{path}"
 
 
@@ -399,8 +418,9 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
 
     Rate limits are defined in ``RATE_LIMIT_CONFIG`` for sensitive routes,
     ``EXPORT_RATE_LIMIT`` for the export routes (one counter shared by all of
-    them), the SDK limit for SDK routes, and ``DEFAULT_RATE_LIMIT`` for
-    everything else.
+    them), ``AI_INTERPRET_RATE_LIMIT`` for AI results interpretation (one
+    counter for every experiment id), the SDK limit for SDK routes, and
+    ``DEFAULT_RATE_LIMIT`` for everything else.
     Responses include standard ``X-RateLimit-*`` headers so clients can
     implement back-off without guessing.
     """
