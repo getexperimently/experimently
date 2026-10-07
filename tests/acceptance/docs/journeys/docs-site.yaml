@@ -20,9 +20,9 @@ guide: README.md
 stack: docs-published
 profile: core
 video: false
-recording:
-  name: R7-docs-site
-  end: api-page
+recordings:
+  - name: R7-docs-site
+    end: api-page
 written: 2026-10-06
 steps:
   - id: home

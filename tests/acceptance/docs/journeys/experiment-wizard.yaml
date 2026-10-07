@@ -17,8 +17,8 @@ guide: guides/experiment-wizard.md
 stack: compose-dev
 profile: core
 video: false
-recording:
-  name: R3-experiment-wizard
+recordings:
+  - name: R3-experiment-wizard
 written: 2026-10-06
 steps:
   - id: sign-in-page

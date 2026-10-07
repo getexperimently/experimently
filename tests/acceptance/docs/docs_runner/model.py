@@ -98,25 +98,28 @@ What a run makes up or keeps is never written to the run directory
 that has one is not recorded whole (``video: false``), and every text the runner
 writes has them taken out.
 
-A journey may record one launch walkthrough (``recordings.toml``)::
+A journey may record launch walkthroughs (``recordings.toml``), each a segment
+of its steps::
 
-    recording:
-      name: R8-onboarding        # a table of recordings.toml, from this guide
-      start: demo-admin-log-out  # the first step recorded; by default the first
-      end: viewer-new-accepted   # the last step recorded; by default the last
+    recordings:
+      - name: R8-onboarding        # a table of recordings.toml, from this guide
+        start: demo-admin-log-out  # the first step recorded; by default the first
+        end: viewer-new-accepted   # the last step recorded; by default the last
 
-The run keeps ``recordings/<name>.webm``: the journey's browser from ``start``
-to ``end`` at 1280x720 and real speed, a title card first and a caption bar
-naming each step's section, action and, for a step off the screen, its result.
-Unlike ``video: true`` (which it replaces: a journey has one or the other), it
-may be on a journey with secrets, as long as nothing in the segment can draw
-one: the loader refuses a segment holding a ``keep`` step or the screen step
-right before one, a segment starting right after one, and a ``fill`` of a
-secret into a field whose label does not say "password" (only a password
-field draws dots); an api step's key never reaches the browser. And the runner checks the page
-before the segment starts and after each of its steps: a value the run keeps,
-in the page's text or in any field but a password field, fails the step and
-drops the recording (``redaction.on_screen``).
+The run keeps ``recordings/<name>.webm`` for each: the journey's browser from
+``start`` to ``end`` at 1280x720 and real speed, a title card first and a
+caption bar naming each step's section, action and, for a step off the screen,
+its result. Two segments of one journey may not overlap, and no name is given
+twice. Unlike ``video: true`` (which they replace: a journey has one or the
+other), they may be on a journey with secrets, as long as nothing in any
+segment can draw one: the loader refuses, for each segment, one holding a
+``keep`` step or the screen step right before one, one starting right after
+one, and a ``fill`` of a secret into a field whose label does not say
+"password" (only a password field draws dots); an api step's key never
+reaches the browser. And the runner checks the page before each segment
+starts and after each of its steps: a value the run keeps, in the page's text
+or in any field but a password field, fails the step and drops that recording
+(``redaction.on_screen``).
 
 What an API answers can be kept for later steps and checked against an oracle
 (``values.py``, ``traffic.py``, ``oracles.py``):
@@ -706,7 +709,8 @@ class Journey(_Strict):
     passwords: List[Annotated[StrictStr, Field(pattern=SLUG_PATTERN)]] = Field(
         default_factory=list
     )
-    recording: Optional[Recording] = None
+    #: The launch walkthroughs this journey records, each a segment of its steps.
+    recordings: List[Recording] = Field(default_factory=list)
     steps: List[Step] = Field(min_length=1)
 
     @model_validator(mode="after")
@@ -730,17 +734,14 @@ class Journey(_Strict):
         return self
 
     @model_validator(mode="after")
-    def _recording_names_steps(self) -> "Journey":
-        if self.recording is not None:
-            segment_of(self.steps, self.recording)
+    def _recordings_apart(self) -> "Journey":
+        segments_of(self.steps, self.recordings)
         return self
 
     @property
-    def recorded(self) -> Optional[Tuple[int, int]]:
-        """The first and last step index (from 0) of the recording, if any."""
-        if self.recording is None:
-            return None
-        return segment_of(self.steps, self.recording)
+    def segments(self) -> List[Tuple[Recording, int, int]]:
+        """Each recording with its first and last step index (from 0), in step order."""
+        return segments_of(self.steps, self.recordings)
 
     @property
     def has_secrets(self) -> bool:
@@ -771,6 +772,28 @@ def segment_of(steps: Sequence[Step], recording: Recording) -> Tuple[int, int]:
             f" {ids[bounds[0]]!r}"
         )
     return bounds[0], bounds[1]
+
+
+def segments_of(
+    steps: Sequence[Step], recordings: Sequence[Recording]
+) -> List[Tuple[Recording, int, int]]:
+    """Each recording with its step indices, in step order; ValueError when a
+    bound names no step, a name is given twice, or two segments overlap."""
+    names = [recording.name for recording in recordings]
+    twice = sorted({name for name in names if names.count(name) > 1})
+    if twice:
+        raise ValueError(f"recording {twice[0]!r} is named twice")
+    found = sorted(
+        ((recording, *segment_of(steps, recording)) for recording in recordings),
+        key=lambda segment: segment[1],
+    )
+    for (before, _, last), (after, first, _) in zip(found, found[1:]):
+        if first <= last:
+            raise ValueError(
+                f"recordings {before.name!r} and {after.name!r} overlap: a step is"
+                " recorded by one walkthrough at most"
+            )
+    return found
 
 
 #: Routes that answer with a credential: a sign-in's token, a new API key.

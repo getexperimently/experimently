@@ -45,16 +45,23 @@
 # stale and the journey needs no invalidation.
 #
 # Not recorded whole (video): the journey makes an API key
-# (model.reveals_credential). The launch walkthrough R5's A/B-lift half
-# (recordings.toml) records it all the same: the key is made and sent through
-# the API, never in the browser, and the runner checks the page for it after
-# every step.
+# (model.reveals_credential). The launch walkthrough R5 (recordings.toml)
+# records two segments of it all the same: its A/B-lift half from the sign-in
+# to the results API, and its sample-ratio half on the sample-ratio
+# experiment's results page alone (its population arrives through the API,
+# which the screen does not show). The key is made and sent through the API,
+# never in the browser, and the runner checks the page for it before each
+# segment and after every recorded step.
 guide: guides/user-guide.md
 stack: compose-dev
 profile: core
 video: false
-recording:
-  name: R5-reading-results
+recordings:
+  - name: R5-reading-results
+    end: results-api
+  - name: R5-srm-warning
+    start: ratio-results-page
+    end: ratio-results-page
 written: 2026-10-06
 steps:
   - id: sign-in-page

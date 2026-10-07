@@ -42,8 +42,9 @@ JOURNEYS = RUNNER_ROOT / "journeys"
 TODAY = datetime.date(2026, 10, 7)
 
 #: QA plan UX D11.4: each walkthrough, its guide and its longest length. R5 is
-#: two halves of a minute each (its two minutes), the SRM half pending until
-#: the journey that seeds a sample-ratio mismatch lands (EM v1.3 condition 3).
+#: two halves of a minute each (its two minutes), two segments of the
+#: user-guide journey (the sample-ratio half on NEW-2's dataset, EM v1.3
+#: condition 3).
 EXPECTED = {
     "R1-quick-start": ("R1", "getting-started/quick-start.md", 180),
     "R2-docker-guide": ("R2", "getting-started/docker-guide.md", 90),
@@ -55,7 +56,7 @@ EXPECTED = {
     "R7-docs-site": ("R7", "README.md", 60),
     "R8-onboarding": ("R8", "auth/auth-user-guide.md", 90),
 }
-PENDING = {"R5-srm-warning"}
+PENDING: set = set()
 
 
 def registry() -> Dict[str, Dict[str, Any]]:
@@ -110,8 +111,8 @@ def test_each_walkthrough_is_recorded_by_exactly_one_journey_of_its_guide():
     declared: Dict[str, List[str]] = {}
     journeys = _real_journeys()
     for stem, journey in journeys.items():
-        if journey.recording is not None:
-            declared.setdefault(journey.recording.name, []).append(stem)
+        for recording in journey.recordings:
+            declared.setdefault(recording.name, []).append(stem)
     entries = registry()
     required = {name for name, e in entries.items() if not e.get("pending")}
     assert set(declared) == required, (
@@ -125,23 +126,36 @@ def test_each_walkthrough_is_recorded_by_exactly_one_journey_of_its_guide():
 def test_the_walkthrough_segments_are_the_ones_planned():
     journeys = _real_journeys()
     segments = {
-        j.recording.name: (j.steps[j.recorded[0]].id, j.steps[j.recorded[1]].id)
+        recording.name: (j.steps[first].id, j.steps[last].id)
         for j in journeys.values()
-        if j.recording is not None
+        for recording, first, last in j.segments
     }
-    # R7 stops before the crawls; R8 starts after the last one-time password.
+    whole = {
+        recording.name
+        for j in journeys.values()
+        for recording, first, last in j.segments
+        if (first, last) == (0, len(j.steps) - 1)
+    }
+    # R7 stops before the crawls; R8 starts after the last one-time password;
+    # R5's A/B-lift half ends at the results API, before the sample-ratio and
+    # minimum-sample experiments, and its sample-ratio half is that
+    # experiment's results page (its population arrives through the API).
     assert segments["R7-docs-site"] == ("home", "api-page")
     assert segments["R8-onboarding"] == ("demo-admin-log-out", "viewer-new-accepted")
-    for name in ("R1-quick-start", "R5-reading-results", "R6-feature-flag"):
-        journey = next(
-            j for j in journeys.values() if j.recording and j.recording.name == name
-        )
-        assert journey.recorded == (0, len(journey.steps) - 1), name
+    assert segments["R5-reading-results"] == ("sign-in-page", "results-api")
+    assert segments["R5-srm-warning"] == ("ratio-results-page", "ratio-results-page")
+    assert whole == {
+        "R1-quick-start",
+        "R2-docker-guide",
+        "R3-experiment-wizard",
+        "R4-power-analysis",
+        "R6-feature-flag",
+    }
 
 
 def test_no_journey_is_recorded_whole_and_for_a_walkthrough():
     for stem, journey in _real_journeys().items():
-        assert not (journey.video and journey.recording), stem
+        assert not (journey.video and journey.recordings), stem
 
 
 # ---------------------------------------------------------------------------
@@ -169,6 +183,11 @@ REGISTRY = {
         "guide": "guides/sample.md",
         "max_seconds": 60,
         "pending": "not yet",
+    },
+    "R2-sample-later": {
+        "walkthrough": "R2",
+        "guide": "guides/sample.md",
+        "max_seconds": 60,
     },
 }
 STEPS: List[Dict[str, Any]] = [
@@ -242,6 +261,7 @@ STEPS: List[Dict[str, Any]] = [
 
 
 def _journey(recording: Any, steps: List[Dict[str, Any]] = STEPS, **top: Any):
+    """A journey recording *recording* (one segment, or a list of them)."""
     data: Dict[str, Any] = {
         "guide": "guides/sample.md",
         "stack": "compose-dev",
@@ -252,7 +272,7 @@ def _journey(recording: Any, steps: List[Dict[str, Any]] = STEPS, **top: Any):
     }
     data.update(top)
     if recording is not None:
-        data["recording"] = recording
+        data["recordings"] = recording if isinstance(recording, list) else [recording]
     data["steps"] = [dict(step) for step in steps]
     return data
 
@@ -285,7 +305,7 @@ def _refused(tmp_path: Path, data: Dict[str, Any]) -> str:
 
 def test_a_walkthrough_after_the_last_kept_value_loads(tmp_path):
     journey = _load(tmp_path, _journey({"name": "R1-sample", "start": "key"}))
-    assert journey.recorded == (5, 6)
+    assert [(r.name, a, b) for r, a, b in journey.segments] == [("R1-sample", 5, 6)]
     # The api step that makes a key is in the segment: the key never reaches
     # the browser, and the runner checks the page after it all the same.
     assert journey.has_secrets
@@ -294,7 +314,21 @@ def test_a_walkthrough_after_the_last_kept_value_loads(tmp_path):
 def test_a_password_typed_into_a_password_field_may_be_recorded(tmp_path):
     steps = [STEPS[0], STEPS[1], STEPS[4]]
     journey = _load(tmp_path, _journey({"name": "R1-sample"}, steps))
-    assert journey.recorded == (0, 2)
+    assert [(r.name, a, b) for r, a, b in journey.segments] == [("R1-sample", 0, 2)]
+
+
+def test_two_segments_of_one_journey_load_in_step_order(tmp_path):
+    data = _journey(
+        [
+            {"name": "R2-sample-later", "start": "after"},
+            {"name": "R1-sample", "start": "open", "end": "password"},
+        ]
+    )
+    journey = _load(tmp_path, data)
+    assert [(r.name, a, b) for r, a, b in journey.segments] == [
+        ("R1-sample", 0, 1),
+        ("R2-sample-later", 6, 6),
+    ]
 
 
 PLANTS = [
@@ -316,7 +350,7 @@ PLANTS = [
     ),
     pytest.param(
         _journey({"name": "R1-sample", "start": "key"}, video=True),
-        "a journey is recorded whole (video) or for its walkthrough (recording)",
+        "a journey is recorded whole (video) or for its walkthroughs (recordings)",
         id="video-and-recording",
     ),
     pytest.param(
@@ -331,17 +365,17 @@ PLANTS = [
     ),
     pytest.param(
         _journey({"name": "R1-sample"}),
-        "step 4 (one-time): the recording holds a keep step",
+        "step 4 (one-time): recording 'R1-sample' holds a keep step",
         id="segment-holds-a-keep",
     ),
     pytest.param(
         _journey({"name": "R1-sample", "end": "invite"}),
-        "step 3 (invite): the recording holds the screen the next step keeps",
+        "step 3 (invite): recording 'R1-sample' holds the screen the next step keeps",
         id="segment-holds-the-screen-before-a-keep",
     ),
     pytest.param(
         _journey({"name": "R1-sample", "start": "close"}),
-        "step 5 (close): the recording starts right after a keep step",
+        "step 5 (close): recording 'R1-sample' starts right after a keep step",
         id="segment-starts-on-the-kept-screen",
     ),
     pytest.param(
@@ -355,14 +389,70 @@ PLANTS = [
                 },
             ],
         ),
-        "the recording types the secret 'new-password' into 'Email', which is"
+        "recording 'R1-sample' types the secret 'new-password' into 'Email', which is"
         " not a password field",
         id="secret-typed-where-it-is-drawn",
     ),
     pytest.param(
         _journey({"name": "r1-sample", "start": "key"}),
-        "recording.name: String should match pattern",
+        "recordings.0.name: String should match pattern",
         id="name-not-a-walkthrough-name",
+    ),
+]
+
+
+#: Two segments of one journey: each refusal holds for each, and they may not
+#: overlap or share a name.
+PLANTS += [
+    pytest.param(
+        _journey(
+            [
+                {"name": "R1-sample", "start": "key"},
+                {"name": "R2-sample-later", "start": "after"},
+            ]
+        ),
+        "recordings 'R1-sample' and 'R2-sample-later' overlap",
+        id="two-segments-overlap",
+    ),
+    pytest.param(
+        _journey(
+            [
+                {"name": "R1-sample", "start": "key", "end": "key"},
+                {"name": "R1-sample", "start": "after"},
+            ]
+        ),
+        "recording 'R1-sample' is named twice",
+        id="one-name-twice",
+    ),
+    pytest.param(
+        _journey(
+            [
+                {"name": "R1-sample", "start": "open", "end": "password"},
+                {"name": "R2-sample-later", "start": "one-time", "end": "close"},
+            ]
+        ),
+        "step 4 (one-time): recording 'R2-sample-later' holds a keep step",
+        id="the-second-segment-holds-a-keep",
+    ),
+    pytest.param(
+        _journey(
+            [
+                {"name": "R1-sample", "start": "open", "end": "open"},
+                {"name": "R2-sample-later", "start": "close", "end": "close"},
+            ]
+        ),
+        "step 5 (close): recording 'R2-sample-later' starts right after a keep step",
+        id="the-second-segment-starts-on-the-kept-screen",
+    ),
+    pytest.param(
+        _journey(
+            [
+                {"name": "R1-sample", "start": "key", "end": "key"},
+                {"name": "R9-nothing", "start": "after"},
+            ]
+        ),
+        "recording 'R9-nothing' is not a table of recordings.toml",
+        id="the-second-segment-is-unknown",
     ),
 ]
 
@@ -541,8 +631,16 @@ def test_a_walkthrough_reads_fail_when_its_guide_failed():
 
 
 def test_the_other_walkthrough_states_are_said():
-    rows = _rows(_guide_run("PASS"))
-    assert rows["R5-srm-warning"][1].startswith("pending: ")
+    run = _guide_run("PASS")
+    later = {
+        **registry(),
+        "R9-later": {"guide": "x.md", "max_seconds": 60, "pending": "a reason"},
+    }
+    pending = report.walkthrough_rows(
+        later, RECORDED, {run.journey: report.verdict(run)}, lambda name: True
+    )
+    assert [row[3] for row in pending if row[0] == "R9-later"] == ["pending: a reason"]
+    rows = _rows(run)
     assert rows["R1-quick-start"][1] == "not recorded in this run"
     gone = _rows(_guide_run("PASS"), present=False)
     assert gone["R4-power-analysis"][1].startswith("removed by the end-of-run scan")
@@ -733,7 +831,8 @@ class _Browser:
         return _Context(self.page)
 
 
-def _walk_journey(recording: Dict[str, Any], gotos: List[str]) -> Journey:
+def _walk_journey(recording: Any, gotos: List[str]) -> Journey:
+    """A journey of goto steps recording *recording* (one segment or a list)."""
     return Journey.model_validate(
         {
             "guide": "guides/sample.md",
@@ -741,7 +840,7 @@ def _walk_journey(recording: Dict[str, Any], gotos: List[str]) -> Journey:
             "profile": "core",
             "video": False,
             "written": TODAY,
-            "recording": recording,
+            "recordings": recording if isinstance(recording, list) else [recording],
             "steps": [
                 {
                     "id": f"step-{n}",
@@ -756,8 +855,9 @@ def _walk_journey(recording: Dict[str, Any], gotos: List[str]) -> Journey:
     )
 
 
-def _walk(execute_module, tmp_path, journey, screens, kept=(KEPT,)):
-    """Run *journey*; *screens* maps a step number to what the page then draws."""
+def _walk(execute_module, tmp_path, journey, screens, kept=(KEPT,), fails=()):
+    """Run *journey*; *screens* maps a step number to what the page then draws,
+    and a step numbered in *fails* fails."""
     from docs_runner import log as runlog
     from docs_runner.stacks import Running
 
@@ -777,6 +877,8 @@ def _walk(execute_module, tmp_path, journey, screens, kept=(KEPT,)):
         else:
             page_.text, page_.fields = screens.get(number, (page_.text, page_.fields))
             result, observed = "PASS", f"at {step.do.goto}"
+            if number in fails:
+                result, observed = "FAIL", "the page does not answer"
         return Record(
             run="r",
             sha="abc123",
@@ -904,6 +1006,7 @@ def test_a_recorded_screen_masks_only_a_field_holding_a_kept_value(
     walkthrough = execute_module.Walkthrough(
         journey,
         "sample",
+        journey.segments[0],
         type("Guide", (), {"title": "Sample guide", "anchors": {}})(),
         __import__("docs_runner.stacks", fromlist=["Running"]).Running(
             name="docs-local", base_url="http://site/"
@@ -925,3 +1028,69 @@ def test_a_recorded_screen_masks_only_a_field_holding_a_kept_value(
         ("css", "input, textarea, [contenteditable]"),
     ]
     assert page.screencast.hidden_at_screenshot[-1] is False
+
+
+# -- two segments of one journey ----------------------------------------------
+TWO = [
+    {"name": "R1-sample", "start": "step-1", "end": "step-2"},
+    {"name": "R2-sample-later", "start": "step-4", "end": "step-4"},
+]
+LATER = Path("recordings") / "R2-sample-later.webm"
+
+
+def test_two_segments_record_two_files(execute_module, tmp_path):
+    journey = _walk_journey(TWO, ["/a", "/b", "/c", "/d"])
+    runner, page, records = _walk(execute_module, tmp_path, journey, {})
+    assert [r.result for r in records] == ["PASS"] * 4
+    assert (tmp_path / RECORDING).is_file() and (tmp_path / LATER).is_file()
+    assert page.screencast.starts == 2
+    assert {name: o["file"] for name, o in runner.recorded.items()} == {
+        "R1-sample": RECORDING.as_posix(),
+        "R2-sample-later": LATER.as_posix(),
+    }
+    assert [title for title, _ in page.screencast.chapters] == [
+        "R1: Sample guide",
+        "R2: Sample guide",
+    ]
+
+
+def test_a_value_drawn_in_the_second_segment_drops_it_alone(execute_module, tmp_path):
+    journey = _walk_journey(TWO, ["/a", "/b", "/c", "/d"])
+    runner, page, records = _walk(
+        execute_module, tmp_path, journey, {4: (f"key {KEPT}", [])}
+    )
+    assert [r.result for r in records] == ["PASS", "PASS", "PASS", "FAIL"]
+    assert "recording R2-sample-later was dropped" in records[3].observed
+    assert (tmp_path / RECORDING).is_file()
+    assert not (tmp_path / LATER).exists()
+    assert runner.recorded["R2-sample-later"]["file"] == ""
+
+
+def test_a_value_drawn_between_two_segments_stops_the_second_before_it_starts(
+    execute_module, tmp_path
+):
+    """Step 3 is recorded by neither segment and is not checked; the page it
+    leaves draws the value when the second segment would start."""
+    journey = _walk_journey(TWO, ["/a", "/b", "/c", "/d"])
+    runner, page, records = _walk(
+        execute_module,
+        tmp_path,
+        journey,
+        {3: (f"one-time password {KEPT}", []), 4: ("Signed in", [])},
+    )
+    assert [r.result for r in records] == ["PASS", "PASS", "PASS", "FAIL"]
+    assert page.screencast.starts == 1
+    assert (tmp_path / RECORDING).is_file()
+    assert not (tmp_path / LATER).exists()
+
+
+def test_a_segment_after_a_failed_step_is_not_recorded(execute_module, tmp_path):
+    journey = _walk_journey(TWO, ["/a", "/b", "/c", "/d"])
+    runner, page, records = _walk(execute_module, tmp_path, journey, {}, fails=(2,))
+    assert [r.result for r in records] == ["PASS", "FAIL", "NOT RUN", "NOT RUN"]
+    assert page.screencast.starts == 1
+    assert (tmp_path / RECORDING).is_file()
+    assert not (tmp_path / LATER).exists()
+    assert runner.recorded["R2-sample-later"]["dropped"] == (
+        "an earlier step failed, so none of it ran"
+    )

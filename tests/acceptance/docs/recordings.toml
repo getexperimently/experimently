@@ -53,8 +53,8 @@ guide = "statistics/power-analysis.md"
 max_seconds = 60
 shows = "the calculator filled with the guide's worked examples, showing the sample sizes the guide prints"
 
-# R5 is two halves of at most a minute each: the A/B lift now, the sample-ratio
-# warning when its dataset lands.
+# R5 is two halves of at most a minute each, two segments of the user-guide
+# journey: the A/B lift, and the sample-ratio warning.
 [R5-reading-results]
 walkthrough = "R5"
 guide = "guides/user-guide.md"
@@ -65,8 +65,7 @@ shows = "a known population sent to a new experiment, and its results page recom
 walkthrough = "R5"
 guide = "guides/user-guide.md"
 max_seconds = 60
-shows = "the sample-ratio warning withholding a winner"
-pending = "no journey seeds a sample-ratio mismatch yet; the pull request that adds that dataset to the user-guide journey records this half and removes this line"
+shows = "the sample-ratio notice with each variant's users and the number expected, withholding a winner: the recommendation reads Inconclusive"
 
 [R6-feature-flag]
 walkthrough = "R6"

@@ -36,8 +36,8 @@ guide: getting-started/quick-start.md
 stack: compose-dev
 profile: core
 video: false
-recording:
-  name: R1-quick-start
+recordings:
+  - name: R1-quick-start
 written: 2026-10-06
 steps:
   - id: start-the-stack

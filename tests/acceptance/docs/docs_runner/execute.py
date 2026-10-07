@@ -30,10 +30,12 @@ failed: a ``keep`` step, or one with ``snapshot: false``). A ``video: true``
 journey is recorded to ``videos/<journey>.webm`` (1280x720) unless
 ``DOCS_JOURNEY_RECORD_VIDEO=0``.
 
-A journey with a ``recording`` records its launch walkthrough
+A journey with ``recordings`` records each of its launch walkthroughs
 (``recordings.toml``) to ``recordings/<name>.webm`` unless
-``DOCS_JOURNEY_RECORD_VIDEO=0``: ``page.screencast`` from its ``start`` step to
-its ``end`` step, 1280x720, real speed, opening on a title card (the
+``DOCS_JOURNEY_RECORD_VIDEO=0``: ``page.screencast`` from the segment's
+``start`` step to its ``end`` step (segments never overlap, so one screencast
+runs at a time; a segment whose first step comes after a failed one is not
+started, since none of its steps runs), 1280x720, real speed, opening on a title card (the
 walkthrough, the guide, the commit and, on the compose stack, how long the
 stack took to come up, which is not recorded) and with a caption bar (Playwright
 overlays, which no locator, ARIA snapshot or click sees, hidden for each
@@ -110,6 +112,7 @@ from docs_runner.model import (
     Journey,
     Named,
     Oracle,
+    Recording,
     Step,
     reveals_credential,
 )
@@ -225,14 +228,14 @@ class Walkthrough:
         self,
         journey: Journey,
         journey_id: str,
+        segment: Tuple[Recording, int, int],
         guide: Guide,
         running: Running,
         settings: "Settings",
     ):
-        assert journey.recording is not None and journey.recorded is not None
-        self.name = journey.recording.name
+        recording, self.first, self.last = segment
+        self.name = recording.name
         self.journey_id = journey_id
-        self.first, self.last = journey.recorded
         self.file = f"{redaction.RECORDINGS}/{self.name}.webm"
         self.path = settings.run_dir / self.file
         self.title = f"{self.name.split('-', 1)[0]}: {guide.title}"
@@ -1167,10 +1170,13 @@ class JourneyRunner:
             self.redactor.add(self.secrets[name])
         if journey.video and settings.record_video and not journey.has_secrets:
             options.update(record_video_dir=str(video_dir), record_video_size=VIEWPORT)
-        walkthrough = None
-        if journey.recording is not None and settings.record_video:
-            walkthrough = Walkthrough(journey, journey_id, guide, running, settings)
-        self.walkthrough = walkthrough
+        walkthroughs: List[Walkthrough] = []
+        if settings.record_video:
+            walkthroughs = [
+                Walkthrough(journey, journey_id, segment, guide, running, settings)
+                for segment in journey.segments
+            ]
+        self.walkthrough = None
         self.values = {}
         context = self.browser.new_context(**options)
         context.set_default_timeout(settings.timeout_ms)
@@ -1188,10 +1194,18 @@ class JourneyRunner:
         try:
             for number, step in enumerate(journey.steps, 1):
                 drawn = ""
+                # The segment this step is in, if any (segments never overlap).
+                walkthrough = next(
+                    (w for w in walkthroughs if w.first <= number - 1 <= w.last), None
+                )
+                self.walkthrough = walkthrough
                 if walkthrough is not None and number - 1 == walkthrough.first:
-                    drawn = self._drawn(page, walkthrough)
-                    if not drawn and not walkthrough.dropped:
-                        walkthrough.start(page)
+                    if failed:
+                        walkthrough.drop("an earlier step failed, so none of it ran")
+                    else:
+                        drawn = self._drawn(page, walkthrough)
+                        if not drawn and not walkthrough.dropped:
+                            walkthrough.start(page)
                 if walkthrough is not None and walkthrough.active and not failed:
                     walkthrough.show(page, self._caption(step, number, anchors))
                 record = self._step(
@@ -1228,10 +1242,10 @@ class JourneyRunner:
                 self.log.write(record)
                 records.append(record)
         finally:
-            if walkthrough is not None:
+            for walkthrough in walkthroughs:
                 walkthrough.stop(page)
                 self.recorded[walkthrough.name] = walkthrough.outcome()
-                self.walkthrough = None
+            self.walkthrough = None
             video = page.video
             context.close()
             if api is not None:
