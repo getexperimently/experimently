@@ -33,6 +33,21 @@ flow test is about:
 Usage: ``python fake_oidc_provider.py <client_id> <client_secret> <email>
 [--port N]``. Prints ``READY <port>`` once it is listening; without
 ``--port`` it listens on a free port.
+
+Where it listens and what it calls itself, all optional, so that it can stand
+in for a provider another container or a browser reaches over https:
+
+* ``FAKE_OIDC_BIND`` -- the IPv4 address it listens on (default ``127.0.0.1``).
+* ``FAKE_OIDC_TLS_CERT`` and ``FAKE_OIDC_TLS_KEY`` -- PEM files; with both set
+  it serves https and nothing else, with neither plain http (the default).
+  One without the other is refused at start.
+* ``FAKE_OIDC_ISSUER`` -- its issuer, the ``sso_url`` an SSO configuration
+  names, e.g. ``https://localhost:28443/oauth2/default``. The ID token's
+  ``iss`` is this value verbatim and the endpoints are under its path
+  (``/oauth2/default/v1/authorize`` and so on); ``/_mode`` stays at the root.
+  The default is ``<http or https>://<FAKE_OIDC_BIND>:<port>``, so with
+  nothing set it is ``http://127.0.0.1:<port>``. Set it when binding a
+  wildcard address such as ``0.0.0.0``.
 """
 
 from __future__ import annotations
@@ -44,6 +59,7 @@ import http.server
 import json
 import os
 import secrets
+import ssl
 import sys
 import threading
 import time
@@ -53,7 +69,12 @@ CLIENT_ID, CLIENT_SECRET, EMAIL = sys.argv[1], sys.argv[2], sys.argv[3]
 ID_TOKEN_MODE = os.environ.get("FAKE_OIDC_ID_TOKEN", "good")
 #: The user info's `groups`: FAKE_OIDC_GROUPS, comma-separated (default none).
 GROUPS = [g for g in os.environ.get("FAKE_OIDC_GROUPS", "").split(",") if g]
-ISSUER = ""  # set once the port is known
+BIND = os.environ.get("FAKE_OIDC_BIND", "127.0.0.1")
+TLS_CERT = os.environ.get("FAKE_OIDC_TLS_CERT", "")
+TLS_KEY = os.environ.get("FAKE_OIDC_TLS_KEY", "")
+ISSUER = os.environ.get("FAKE_OIDC_ISSUER", "")  # the default needs the port
+#: The issuer's path, under which every endpoint but /_mode is served.
+PREFIX = ""
 
 _codes: dict[str, dict[str, str]] = {}
 _tokens: set[str] = set()
@@ -129,6 +150,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
     def _refuse(self, error: str, description: str) -> None:
         self._send(400, {"error": error, "error_description": description})
 
+    def _endpoint(self, path: str) -> str:
+        """``path`` without the issuer's path; "" when it is not under it."""
+        if not PREFIX:
+            return path
+        return path[len(PREFIX) :] if path.startswith(PREFIX + "/") else ""
+
     def do_GET(self) -> None:
         global ID_TOKEN_MODE
         url = urlparse(self.path)
@@ -137,7 +164,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             if query.get("set"):
                 ID_TOKEN_MODE = query["set"]
             return self._send(200, {"mode": ID_TOKEN_MODE})
-        if url.path == "/v1/authorize":
+        endpoint = self._endpoint(url.path)
+        if endpoint == "/v1/authorize":
             if query.get("client_id") != CLIENT_ID:
                 return self._refuse("unauthorized_client", "unknown client")
             if query.get("response_type") != "code":
@@ -176,7 +204,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self.send_header("Content-Length", "0")
             self.end_headers()
             return None
-        if url.path == "/v1/userinfo":
+        if endpoint == "/v1/userinfo":
             auth = self.headers.get("Authorization", "")
             with _lock:
                 known = auth.startswith("Bearer ") and auth[7:] in _tokens
@@ -193,7 +221,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         return self._send(404, {"error": "not_found"})
 
     def do_POST(self) -> None:
-        if urlparse(self.path).path != "/v1/token":
+        if self._endpoint(urlparse(self.path).path) != "/v1/token":
             return self._send(404, {"error": "not_found"})
         length = int(self.headers.get("Content-Length") or 0)
         form = {k: v[0] for k, v in parse_qs(self.rfile.read(length).decode()).items()}
@@ -227,12 +255,29 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
 
 def main() -> None:
-    global ISSUER
+    global ISSUER, PREFIX
+    if bool(TLS_CERT) != bool(TLS_KEY):
+        sys.exit("FAKE_OIDC_TLS_CERT and FAKE_OIDC_TLS_KEY: set both or neither")
+    if ISSUER:
+        issuer = urlparse(ISSUER)
+        if issuer.scheme not in ("http", "https") or not issuer.netloc:
+            sys.exit(f"FAKE_OIDC_ISSUER must be an http(s) URL, not {ISSUER!r}")
+        PREFIX = issuer.path.rstrip("/")
     port = 0
     if "--port" in sys.argv:
         port = int(sys.argv[sys.argv.index("--port") + 1])
-    server = http.server.ThreadingHTTPServer(("127.0.0.1", port), Handler)
-    ISSUER = f"http://127.0.0.1:{server.server_port}"
+    server = http.server.ThreadingHTTPServer((BIND, port), Handler)
+    if TLS_CERT:
+        context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        context.load_cert_chain(TLS_CERT, TLS_KEY)
+        # The handshake happens on the connection's first read, in its own
+        # thread, so a client that connects and says nothing blocks no other.
+        server.socket = context.wrap_socket(
+            server.socket, server_side=True, do_handshake_on_connect=False
+        )
+    if not ISSUER:
+        scheme = "https" if TLS_CERT else "http"
+        ISSUER = f"{scheme}://{BIND}:{server.server_port}"
     print(f"READY {server.server_port}", flush=True)
     server.serve_forever()
 
