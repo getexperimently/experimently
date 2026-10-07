@@ -221,8 +221,10 @@ in this repository uses it:
    would be served another user's variant from the edge cache.
 2. **HTTPS-only** viewer protocol policy, so the assignment cookie is not sent
    in clear text.
-3. **`ALLOW_ALL` origin request policy**, so the router receives every header,
-   cookies included.
+3. **`ALL_VIEWER` origin request policy** (`OriginRequestPolicy.ALL_VIEWER`), so a
+   request the router lets through reaches the origin with every viewer header, cookie
+   and query string. (`ALLOW_ALL` is a different setting, the allowed methods: GET, HEAD,
+   OPTIONS, PUT, PATCH, POST and DELETE.)
 
 The CDK app is **Python** (`infrastructure/cdk/app.py`; `cdk.json` runs
 `python3 app.py`). There is no TypeScript in this repository's infrastructure.

@@ -231,7 +231,10 @@ async def list_feature_flags(
     db: Session = Depends(deps.get_db),
     skip: int = 0,
     limit: int = 100,
-    status: Optional[str] = None,
+    # `status` in the URL only: a Python parameter called `status` hid the
+    # `fastapi.status` module in this body, so reaching the 403 below raised
+    # AttributeError and answered 500.
+    status_filter: Optional[str] = Query(None, alias="status"),
     search: Optional[str] = None,
     current_user=Depends(deps.get_current_active_user),
 ) -> FeatureFlagListResponse:
@@ -262,9 +265,9 @@ async def list_feature_flags(
     # tenant (founder, 2026-09-21), and tenant isolation belongs to the
     # workspaces module rather than to row ownership. See #83.
     feature_flags_data = crud_feature_flag.get_multi(
-        db, skip=skip, limit=limit, status=status, search=search
+        db, skip=skip, limit=limit, status=status_filter, search=search
     )
-    total = crud_feature_flag.count(db, status=status, search=search)
+    total = crud_feature_flag.count(db, status=status_filter, search=search)
 
     # Create response with pagination
     response = FeatureFlagListResponse(

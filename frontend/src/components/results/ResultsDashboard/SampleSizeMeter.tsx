@@ -1,5 +1,4 @@
 import React, { useEffect, useId, useState } from 'react';
-import Link from 'next/link';
 import { ESTIMATE_PROBLEMS } from '@/components/experiments/new/estimate';
 import {
   CorrectionMethod,
@@ -387,11 +386,8 @@ export function SampleSizeMeter({
         {metric_type && metric_type !== 'conversion' && (
           <p className="text-xs text-amber-800" data-testid="sample-size-metric-type-note">
             {metric_name} is a {metric_type} metric. Every metric is analysed as a conversion today, so this
-            plan is for a conversion rate. For a {metric_type} metric, use the{' '}
-            <Link href="/power-calculator" className="text-blue-700 underline hover:text-blue-900">
-              Power Calculator
-            </Link>
-            .
+            plan is for a conversion rate. The Power Calculator plans conversion rates only, so it cannot
+            plan a {metric_type} metric either.
           </p>
         )}
 
