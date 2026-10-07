@@ -34,7 +34,9 @@ version: 2
 # ecosystems we rarely touch are monthly -- which reduces their frequency but
 # NOT their clustering, because Dependabot has no day-of-month option, so those
 # nine still share one morning once a month. That is nine PRs twelve times a
-# year instead of nine every week, and the limits below cap each at one.
+# year instead of nine every week, and the limits below cap each at one. The
+# API fuzzer's entry (`/tests/fuzz`) is monthly as well: each of its pull
+# requests is judged by hand with a fuzz run (see the entry).
 #
 # github-actions is the exception to the major rule; see the entry itself. The `lint` job's lock check
 # (scripts/check_requirements_lock.py) turns red on a pip bump in either
@@ -161,6 +163,41 @@ updates:
       - dependency-name: "*"
         update-types: ["version-update:semver-major"]
     labels: ["dependencies", "python", "modules"]
+    groups:
+      patch-and-minor:
+        update-types: ["patch", "minor"]
+
+  # The API fuzzer (tests/fuzz/requirements.txt: Schemathesis and Hypothesis;
+  # tests/fuzz/constraints.txt, which requirements.txt names with -c: what
+  # they pull in). A bump changes the requests the nightly fuzz run
+  # (fuzz.yml) sends at the same seed, so it can move tests/fuzz/known-5xx.toml
+  # and tests/fuzz/unreached.toml: a 5xx no longer found reads as a stale
+  # entry, a new one as unlisted, and the night turns red for a reason that is
+  # not the API. So these pull requests are NOT merged automatically
+  # (dependabot-automerge.yml leaves /tests/fuzz alone), and no check on the
+  # pull request runs the fuzzer. Judge one by dispatching fuzz.yml on its
+  # branch (`gh workflow run fuzz.yml --ref <branch>`): green on all three
+  # passes, merge it; a list moved, rebuild it with `make fuzz` in the same
+  # pull request; the install failed `pip check`, pin the new dependency in
+  # constraints.txt. pytest, PyYAML and requests are pinned in
+  # backend/requirements.txt as well and move with the `/backend` entry above
+  # (the lock check fails until constraints.txt follows), so they are ignored
+  # here.
+  - package-ecosystem: "pip"
+    directory: "/tests/fuzz"
+    commit-message:
+      prefix: "chore(deps)"
+    schedule:
+      interval: "monthly"
+    open-pull-requests-limit: 1
+    ignore:
+      # Majors are migrations, not bumps -- see the header.
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "pytest"
+      - dependency-name: "PyYAML"
+      - dependency-name: "requests"
+    labels: ["dependencies", "python"]
     groups:
       patch-and-minor:
         update-types: ["patch", "minor"]

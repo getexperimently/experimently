@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# One API fuzzing pass on this machine, the way fuzz.yml runs it in CI:
+# One API fuzzing pass on this machine, with fuzz.yml's flags, filters, lists
+# and verdict:
 #
 #   make fuzz FUZZ_SEED=<seed> SHA=<commit> PASS=<superuser|viewer|sdk>
 #
@@ -9,18 +10,37 @@
 #   * refuses unless SHA is the commit checked out (HEAD) and the tree is
 #     clean -- it never checks anything out itself, so the stack under test is
 #     built from exactly that commit;
-#   * builds and starts the API with Postgres and Redis as its own compose
-#     project, experimently-fuzz, on its own ports (API 18700) and its own
-#     image tag (experimently-api:fuzz), with the full profile and the data
-#     seed set here (SEED=demo, plus sdk-contract for the sdk pass) -- never
-#     the make variable -- and with tests/fuzz/compose.fuzz.yml pointing every
-#     AWS call at a closed local port;
+#   * removes whatever a killed run left of its compose project, then builds
+#     and starts the API with Postgres and Redis as that project,
+#     experimently-fuzz, on its own ports (API 18700) and its own image tag
+#     (experimently-api:fuzz), with the full profile and the data seed set
+#     here (SEED=demo, plus sdk-contract for the sdk pass) -- never the make
+#     variable -- and with tests/fuzz/compose.fuzz.yml giving the api the
+#     workflow's AWS variables (every AWS call to a closed local port) and the
+#     database and Redis the workflow's images;
 #   * runs Schemathesis with the workflow's flags (the same filters, from
 #     scripts/fuzz_check.py) in a new temporary directory outside the tree,
-#     which holds its report, its output and the operations behind each count
-#     (details.json), and prints that directory's path;
-#   * removes the compose project and its volumes on the way out, whatever
-#     the result, and exits with the pass's verdict (0 green, 1 red).
+#     which holds its report, its output and the operations and requests
+#     behind each count (details.json), and prints that directory's path;
+#   * resolves which route answered each 5xx inside the api container (the
+#     image and environment that answered it), as the workflow does on the
+#     runner;
+#   * removes the compose project, its volumes and the experimently-api:fuzz
+#     image on the way out, whatever the result, and exits with the pass's
+#     verdict (0 green, 1 red).
+#
+# How this stack differs from the workflow's: the API runs from the image,
+# which installs backend/requirements/runtime.lock and modules/requirements.lock
+# (the packages that ship), behind docker-compose.yml's entrypoint and
+# environment; the workflow runs uvicorn on the runner from
+# backend/requirements.txt and modules/requirements.txt, which leave some
+# packages unpinned. Measured on the pull request that gave both stacks the
+# same AWS variables and database image: on one runner, at one commit and seed
+# 20261006, this and the workflow's pass found the same set of routes
+# answering 5xx and the same set of unreached operations, in all three
+# passes. The known-5xx and unreached lists are judged against the workflow's
+# runs; a difference from them here is worth a look on the runner before it
+# is read as a defect.
 #
 # The API key and bearer token are read into variables and never printed.
 set -euo pipefail
@@ -60,6 +80,7 @@ python=${FUZZ_PYTHON:-python3}
   refuse "needs Python 3.11 or newer as python3 (or FUZZ_PYTHON)"
 
 project=experimently-fuzz
+image=experimently-api:fuzz
 api=http://127.0.0.1:18700
 compose=(docker compose -p "$project" --env-file /dev/null
   -f docker-compose.yml -f tests/fuzz/compose.fuzz.yml)
@@ -79,8 +100,16 @@ cleanup() {
   if ! "${compose[@]}" down -v --remove-orphans > "$work/compose-down.log" 2>&1; then
     echo "make fuzz: could not remove the $project project; run: docker compose -p $project down -v" >&2
   fi
+  if docker image inspect "$image" > /dev/null 2>&1 &&
+    ! docker image rm "$image" > "$work/image-rm.log" 2>&1; then
+    echo "make fuzz: could not remove the $image image; run: docker image rm $image" >&2
+  fi
 }
 trap cleanup EXIT
+
+# A run killed before its trap ran leaves the project (and its volumes)
+# behind; start from nothing.
+"${compose[@]}" down -v --remove-orphans > "$work/compose-preclean.log" 2>&1 || true
 
 echo "make fuzz: building and starting the $project stack (logs in $work)"
 "${compose[@]}" up -d --build --wait api > "$work/compose-up.log" 2>&1 || {
@@ -93,15 +122,18 @@ echo "make fuzz: building and starting the $project stack (logs in $work)"
   exit 1
 }
 
+# As the workflow installs it: exactly the pinned closure, then checked.
 "$python" -m venv "$work/venv"
-"$work/venv/bin/pip" install --quiet --disable-pip-version-check \
-  -r tests/fuzz/requirements.txt > "$work/pip.log" 2>&1 || {
+{
+  "$work/venv/bin/pip" install --quiet --disable-pip-version-check --no-deps -r tests/fuzz/requirements.txt -r tests/fuzz/constraints.txt &&
+    "$work/venv/bin/pip" check --disable-pip-version-check
+} > "$work/pip.log" 2>&1 || {
   echo "make fuzz: could not install tests/fuzz/requirements.txt; see $work/pip.log" >&2
   exit 1
 }
 
 if [ "$pass" = sdk ]; then
-  key=$("${compose[@]}" exec -T api cat /data/demo/sdk-contract/.api_key)
+  key=$("${compose[@]}" exec -T api cat /data/demo/sdk-contract/.api_key_local)
   auth=(-H "X-API-Key: $key")
 else
   case "$pass" in
@@ -136,9 +168,25 @@ set +e
 ) > "$work/schemathesis.out" 2>&1
 set -e
 
+# Which route answered each 5xx: resolved by the application in the api
+# container, from the image that served the run, with the database and Redis
+# pointed at a closed port. A failure leaves no routes file, and the
+# evaluation below is then red.
+{
+  "$python" scripts/fuzz_check.py requests --report-dir "$work/report" --out "$work/requests.json" &&
+    "${compose[@]}" cp scripts/fuzz_check.py api:/tmp/fuzz_check.py &&
+    "${compose[@]}" cp "$work/openapi.json" api:/tmp/fuzz_openapi.json &&
+    "${compose[@]}" cp "$work/requests.json" api:/tmp/fuzz_requests.json &&
+    "${compose[@]}" exec -T -w /app -e POSTGRES_PORT=1 -e REDIS_PORT=1 api \
+      python /tmp/fuzz_check.py routes --app-root /app \
+      --schema /tmp/fuzz_openapi.json --requests /tmp/fuzz_requests.json --out /tmp/fuzz_routes.json &&
+    "${compose[@]}" cp api:/tmp/fuzz_routes.json "$work/routes.json"
+} > "$work/routes.log" 2>&1 || true
+
 verdict=0
 "$python" scripts/fuzz_check.py evaluate --pass "$pass" \
   --schema "$work/openapi.json" --report-dir "$work/report" \
+  --routes "$work/routes.json" \
   --seed "$fuzz_seed" --sha "$head" --details "$work/details.json" || verdict=$?
 echo "make fuzz: the reproduction directory is $work"
 exit "$verdict"

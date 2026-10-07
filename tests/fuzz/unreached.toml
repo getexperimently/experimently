@@ -11,9 +11,12 @@
 # of the document's paths.
 #
 # The first lists come from the run on the pull request that added this file
-# (seed 20261006): 98 for superuser, 169 for viewer, 8 for sdk. Most are
-# requests that name no stored row (404), fail validation (422), or that the
-# pass's role or credential may not make (401, 403).
+# (seed 20261006): 98 for superuser, 169 for viewer, 8 for sdk. The next pull
+# request gave the stack an AWS region and one attempt per AWS call, and the
+# sdk pass the sdk-contract seed's sdk:ruleset key; at the same seed that made
+# them 100, 172 and 6. Most are requests that name no stored row (404), fail
+# validation (422), or that the pass's role or credential may not make (401,
+# 403).
 
 # --- superuser: the seeded demo administrator's bearer token ----------------
 
@@ -326,6 +329,16 @@ reason = "Generated ids never name a stored row (404); the other requests fail v
 pass = "superuser"
 operation = "POST /api/v1/rbac/roles/revoke"
 reason = "Generated ids never name a stored row (404); the other requests fail validation (422)."
+
+[[unreached]]
+pass = "superuser"
+operation = "POST /api/v1/counters/{experiment_id}/increment"
+reason = "The body's experiment id must equal the path's (400), and the other generated bodies fail validation (422)."
+
+[[unreached]]
+pass = "superuser"
+operation = "POST /api/v1/counters/{experiment_id}/reset"
+reason = "The body's experiment id must equal the path's (400), and the other generated bodies fail validation (422)."
 
 [[unreached]]
 pass = "superuser"
@@ -1081,6 +1094,21 @@ reason = "The VIEWER role may not use it, so the role check answers 403; request
 
 [[unreached]]
 pass = "viewer"
+operation = "POST /api/v1/counters/{experiment_id}/increment"
+reason = "A VIEWER may not change counters (403); the other requests fail validation (422)."
+
+[[unreached]]
+pass = "viewer"
+operation = "POST /api/v1/counters/bulk"
+reason = "A VIEWER may not change counters (403); the other requests fail validation (422)."
+
+[[unreached]]
+pass = "viewer"
+operation = "POST /api/v1/counters/{experiment_id}/reset"
+reason = "A VIEWER may not change counters (403); the other requests fail validation (422)."
+
+[[unreached]]
+pass = "viewer"
 operation = "POST /api/v1/etl/jobs/run"
 reason = "The VIEWER role may not use it, so the role check answers 403; requests that fail validation first answer 422."
 
@@ -1354,7 +1382,7 @@ pass = "viewer"
 operation = "GET /api/v1/hipaa/status"
 reason = "The VIEWER role may not use it, so the role check answers 403."
 
-# --- sdk: the sdk-contract API key on the SDK routes ------------------------
+# --- sdk: the sdk-contract seed's sdk:ruleset key on the SDK routes --------
 
 [[unreached]]
 pass = "sdk"
@@ -1368,28 +1396,18 @@ reason = "Generated flag keys never name a seeded flag (404); the other requests
 
 [[unreached]]
 pass = "sdk"
-operation = "GET /api/v1/sdk/ruleset"
-reason = "Takes a key with the sdk:ruleset scope; the pass's sdk-contract key has none, so every request answers 403."
-
-[[unreached]]
-pass = "sdk"
 operation = "POST /api/v1/tracking/assign"
 reason = "Generated experiment keys never name a seeded experiment (404); the other requests fail validation (422)."
 
 [[unreached]]
 pass = "sdk"
 operation = "POST /api/v1/tracking/assign/batch"
-reason = "Takes a key with the sdk:ruleset scope; the pass's sdk-contract key has none, so every request answers 403."
+reason = "Generated experiment keys never name a seeded experiment (404); the other requests fail validation (422) or exceed its own limit of 60 a minute (429)."
 
 [[unreached]]
 pass = "sdk"
 operation = "POST /api/v1/tracking/errors"
 reason = "Generated flag and experiment keys never name a seeded one (404); the other requests fail validation (422)."
-
-[[unreached]]
-pass = "sdk"
-operation = "POST /api/v1/tracking/evaluations"
-reason = "Takes a key with the sdk:ruleset scope; the pass's sdk-contract key has none, so every request answers 403."
 
 [[unreached]]
 pass = "sdk"

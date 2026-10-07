@@ -3,11 +3,26 @@
 # docker-compose.yml lists the api service's environment one variable at a
 # time, so AWS_ENDPOINT_URL set in the shell or in .env never reaches the
 # container; it has to be added here. Every AWS call then goes to a closed
-# port on the container's own loopback and fails there, as on the CI runner
-# (fuzz.yml's api_env), with throwaway keys so nothing looks for real ones.
+# port on the container's own loopback and fails there at once (one attempt,
+# no retries), as on the CI runner, with throwaway keys so nothing looks for
+# real ones. The AWS variables below are exactly fuzz.yml's api_env, and they
+# replace both region variables docker-compose.yml sets (us-west-2 by
+# default); backend/tests/unit/scripts/test_fuzz_check.py holds the two sets
+# equal.
+#
+# The database and Redis are the images the CI stack runs
+# (_platform.yml's services), not docker-compose.yml's Alpine ones.
 services:
   api:
     environment:
       AWS_ENDPOINT_URL: http://127.0.0.1:9
       AWS_ACCESS_KEY_ID: fuzz
       AWS_SECRET_ACCESS_KEY: fuzz
+      AWS_REGION: us-east-1
+      AWS_DEFAULT_REGION: us-east-1
+      AWS_MAX_ATTEMPTS: "1"
+      AWS_EC2_METADATA_DISABLED: "true"
+  postgres:
+    image: postgres:15
+  redis:
+    image: redis:7

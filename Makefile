@@ -87,9 +87,10 @@ logs: ## Follow the API and dashboard logs
 	$(COMPOSE) logs -f api frontend
 
 .PHONY: fuzz
-# One API fuzzing pass on this machine, as fuzz.yml runs it in CI: its own
-# compose project (experimently-fuzz) and ports, removed again on the way out;
-# see scripts/fuzz_local.sh. The seed is FUZZ_SEED, not SEED: SEED is
+# One API fuzzing pass on this machine, with fuzz.yml's flags, lists and
+# verdict, on a compose stack of its own (experimently-fuzz: its own ports,
+# removed again on the way out, image included); scripts/fuzz_local.sh says how
+# that stack differs from the workflow's. The seed is FUZZ_SEED, not SEED: SEED is
 # docker-compose.yml's data seed, and a variable given to make on the command
 # line reaches the recipe's environment.
 fuzz: ## Fuzz the API locally: make fuzz FUZZ_SEED=<seed> SHA=<commit> PASS=<superuser|viewer|sdk>
