@@ -148,28 +148,83 @@ attached to the GitHub release.
     against the multi-architecture index and the release notes say so;
     per-platform SBOMs would be needed first.
 
-```bash
-IMAGE=ghcr.io/<owner>/<repo>:core-X.Y.Z
+You need [cosign][cosign], Docker with Buildx (`docker buildx version` prints
+one) and `jq`. Nothing is pulled: every command below reads the registry, and
+none needs an account.
 
-cosign verify "$IMAGE" \
-  --certificate-identity-regexp '^https://github.com/<owner>/<repo>/' \
-  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+Set `IMAGE` to the image you run. `:core` is the newest final release; a
+versioned tag such as `:core-0.26.3` is one release, and `full` in place of
+`core` is the full profile:
 
-cosign verify-attestation --type spdxjson "$IMAGE" \
-  --certificate-identity-regexp '^https://github.com/<owner>/<repo>/' \
-  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+```{.bash exec}
+IMAGE=ghcr.io/getexperimently/experimently:core
+IDENTITY='^https://github\.com/getexperimently/experimently/\.github/workflows/release\.yml@refs/(heads/main|tags/v[0-9].*)$'
+NO_LOGIN=$(mktemp -d)
 ```
 
-The image also states its own version and profile, which is the quickest check
-that a deployment is running what you think:
+`IDENTITY` names one workflow, this repository's `release.yml`. It accepts
+`release.yml` run from `main`, which is how release-please cuts a release and
+how `gh workflow run release.yml -f tag=vX.Y.Z` runs one again, and run from a
+`v` tag, which is how a tag pushed by hand starts it. A signature made by any
+other workflow, repository or branch fails.
 
-```bash
-docker inspect --format '{{index .Config.Labels "org.opencontainers.image.version"}}' "$IMAGE"
-docker inspect --format '{{index .Config.Labels "io.experimently.profile"}}' "$IMAGE"
+`NO_LOGIN` is an empty directory. The two `cosign` commands run with
+`DOCKER_CONFIG` pointing at it, so they read no registry login and show that
+none is needed.
+
+Check the signature:
+
+```{.bash exec}
+DOCKER_CONFIG=$NO_LOGIN cosign verify "$IMAGE" \
+  --certificate-identity-regexp "$IDENTITY" \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  | jq -r '.[].optional.Subject'
+```
+<!-- expect: https://github.com/getexperimently/experimently/.github/workflows/release.yml@refs/ -->
+
+It prints the identity in the signing certificate, such as
+`https://github.com/getexperimently/experimently/.github/workflows/release.yml@refs/heads/main`.
+cosign writes the checks it made to stderr. When no signature matches, it
+fails with `no matching signatures`.
+
+Check the SBOM attestation the same way. It prints the attestation's predicate
+type, `https://spdx.dev/Document`:
+
+```{.bash exec}
+DOCKER_CONFIG=$NO_LOGIN cosign verify-attestation --type spdxjson "$IMAGE" \
+  --certificate-identity-regexp "$IDENTITY" \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  | jq -r '.payload | @base64d | fromjson | .predicateType'
+```
+<!-- expect: https://spdx.dev/Document -->
+
+Without the `jq`, it prints the whole attestation, SBOM included: several
+megabytes.
+
+The image also states its own version and profile in its labels, which
+`docker buildx imagetools inspect` reads from the registry without pulling the
+image:
+
+```{.bash exec}
+docker buildx imagetools inspect "$IMAGE" --format '{{json .Image.Config.Labels}}' \
+  | jq '{version: ."org.opencontainers.image.version", profile: ."io.experimently.profile"}'
+```
+<!-- expect: "version": " -->
+<!-- expect: "profile": "core" -->
+
+It prints the release's version, such as `"version": "0.26.3"`, and
+`"profile": "core"`.
+
+A running deployment reports the same two things, which is the quickest check
+that it is running what you think:
+
+```{.bash exec}
 curl -s localhost:8000/api/v1/modules
 ```
+<!-- expect: "profile":"core" -->
 
-The last command prints `{"profile": …, "modules": […], "version": …}`.
+It prints `{"profile":"core","modules":[],"version":…}` on the core profile;
+the full profile lists its modules.
 
 [cosign]: https://docs.sigstore.dev/cosign/overview/
 
@@ -180,7 +235,7 @@ should not force a release of the API images — so each is released by its own
 tag, in the form Go requires for a module in a subdirectory and reused for all
 of them:
 
-```
+```text
 sdk/js/v1.2.3
 sdk/python/v1.2.3
 sdk/go/v1.2.3

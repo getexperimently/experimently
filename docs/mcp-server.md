@@ -1,71 +1,111 @@
-# MCP Server Integration
+# AI Endpoints and the MCP Manifest
 
-The platform exposes a Model Context Protocol (MCP) server that allows AI coding assistants and agents (e.g. Claude, Cursor, GitHub Copilot) to interact with the experimentation platform directly from an IDE or chat interface.
+The platform serves two things for AI tooling:
 
----
+- a **manifest** at `GET /api/v1/mcp/manifest`, a JSON document that describes
+  five tools in the vocabulary of the Model Context Protocol (MCP);
+- **REST endpoints** under `/api/v1/ai/` that suggest an experiment design,
+  interpret a result, estimate a sample size and list experiment templates.
 
-## What is MCP?
+The platform does not run an MCP server. The manifest describes tools, but
+nothing on the platform answers MCP's own requests, so an MCP client such as
+Claude Code or Cursor cannot connect to the manifest's URL or call a tool
+through it. Call the REST endpoints with any HTTP client instead.
 
-MCP (Model Context Protocol) is an open standard for exposing structured tool manifests to AI systems. When an AI assistant discovers the platform's MCP manifest, it can invoke platform operations — creating experiments, fetching results, toggling feature flags — using natural language instructions.
-
----
-
-## Available Tools
-
-The MCP manifest is served at `GET /api/v1/mcp/manifest` (no authentication required for discovery).
-
-| Tool | Description |
-|------|-------------|
-| `create_experiment` | Create a new A/B experiment with a name, hypothesis, and metric list |
-| `get_results` | Retrieve statistical results for a specific experiment by ID or key |
-| `toggle_feature_flag` | Enable or disable a feature flag by key |
-| `suggest_experiment` | Get AI-powered experiment design suggestions from a natural language description |
-| `interpret_results` | Get a plain-English interpretation and ship/no-ship recommendation for experiment results |
+The examples run against the [Quick Start](getting-started/quick-start.md)
+stack, in one terminal, in order: later steps use the `$TOKEN` an earlier one
+sets.
 
 ---
 
-## Discovery Endpoint
+## The manifest
 
-```bash
-curl http://localhost:8000/api/v1/mcp/manifest
+The manifest needs no sign-in:
+
+```{.bash exec}
+curl -s localhost:8000/api/v1/mcp/manifest | jq -r '.tools[].name'
 ```
+<!-- expect: create_experiment -->
+<!-- expect: get_results -->
+<!-- expect: toggle_feature_flag -->
+<!-- expect: suggest_experiment -->
+<!-- expect: interpret_results -->
+
+It lists five tools: `create_experiment`, `get_results`,
+`toggle_feature_flag`, `suggest_experiment` and `interpret_results`. Each
+entry has a `name`, a `description` and its `parameters`:
+
+```{.bash exec}
+curl -s localhost:8000/api/v1/mcp/manifest \
+  | jq '.tools[] | select(.name == "suggest_experiment")'
+```
+<!-- expect: "name": "suggest_experiment" -->
+<!-- expect: "description": "Get AI-powered experiment design suggestions based on a natural language description" -->
+<!-- expect: "experiment_type" -->
 
 ```json
 {
-  "name": "experimently",
-  "version": "1.0.0",
-  "tools": [
-    {
-      "name": "suggest_experiment",
-      "description": "Get AI-powered experiment design suggestions based on a natural language description",
-      "parameters": {
-        "description": {"type": "string", "description": "Natural language description of the experiment goal"},
-        "experiment_type": {"type": "string", "description": "Type of experiment (checkout, onboarding, pricing, email, landing_page)"}
-      }
+  "name": "suggest_experiment",
+  "description": "Get AI-powered experiment design suggestions based on a natural language description",
+  "parameters": {
+    "description": {
+      "type": "string",
+      "description": "Natural language description of the experiment goal"
+    },
+    "experiment_type": {
+      "type": "string",
+      "description": "Type of experiment (checkout, onboarding, pricing, email, landing_page)"
     }
-  ]
+  }
 }
 ```
 
 ---
 
-## AI Experiment Design (`/api/v1/ai/design`)
+## Signing in
 
-The AI design endpoint accepts a natural language description and returns a structured experiment design suggestion, powered by the Claude API with a template-based fallback when the API is unavailable.
+The endpoints under `/api/v1/ai/` need a signed-in user. Without a token they
+answer `401`, as this one does:
 
-### POST /api/v1/ai/design
+```{.bash exec}
+curl -s -o /dev/null -w '%{http_code}\n' localhost:8000/api/v1/ai/templates
+```
+<!-- expect: 401 -->
 
-```bash
-curl -X POST "http://localhost:8000/api/v1/ai/design" \
+Sign in as the Quick Start's administrator. The second command prints
+`"ADMIN"`; if it prints `null`, the sign-in failed and `$TOKEN` holds no token:
+
+```{.bash exec}
+TOKEN=$(curl -s -X POST localhost:8000/api/v1/auth/login \
+  -H 'content-type: application/json' \
+  -d '{"email":"admin@demo.com","password":"Demo1234!"}' | jq -r .access_token)
+
+curl -s localhost:8000/api/v1/auth/me -H "Authorization: Bearer $TOKEN" | jq .role
+```
+<!-- expect: "ADMIN" -->
+
+---
+
+## Experiment design: `POST /api/v1/ai/design`
+
+Send a description of what you want to test and an experiment type
+(`checkout`, `onboarding`, `pricing`, `email` or `landing_page`):
+
+```{.bash exec}
+curl -s -X POST localhost:8000/api/v1/ai/design \
   -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
+  -H 'content-type: application/json' \
   -d '{
     "description": "We want to test whether simplifying the onboarding checklist increases activation",
     "experiment_type": "onboarding"
-  }'
+  }' | jq .
 ```
+<!-- expect: "primary_metric": "activation_rate" -->
+<!-- expect: "recommended_sample_size": 1000 -->
+<!-- expect: "confidence": "template_based" -->
 
-**Response** (without `ANTHROPIC_API_KEY`, the template for `onboarding`)
+On the Quick Start stack the suggestion is the template for the experiment
+type, and `confidence` says so (`"template_based"`):
 
 ```json
 {
@@ -80,37 +120,26 @@ curl -X POST "http://localhost:8000/api/v1/ai/design" \
 }
 ```
 
-`confidence` says where the suggestion came from: `"ai_generated"` when Claude answered,
-`"template_based"` otherwise. When Claude answered, `reasoning` is its whole answer and
-`hypothesis` its first 200 characters. Either way, the primary and guardrail metrics come from
-the experiment type's template, the recommended sample size (1,000) and duration (14 days)
-are fixed, and the second variant reads "Variant A: AI-suggested change" when Claude answered
-and "Variant A: proposed change" otherwise.
-
-The endpoint allows 10 requests a minute per client address; above that it answers
-`429 Too Many Requests` with a `Retry-After: 60` header. With `ANTHROPIC_API_KEY` set, each
-call to Claude gives up when Claude has not answered in 30 seconds, and is tried at most
-twice; when it fails, the endpoint answers with the template-based suggestion.
-
 ---
 
-## AI Results Interpretation (`/api/v1/ai/interpret/{experiment_id}`)
+## Results interpretation: `POST /api/v1/ai/interpret/{experiment_id}`
 
-Returns a plain-English interpretation of one variant's result with a recommendation:
-`ship`, `continue_testing` or `stop_futility`. It interprets the numbers in the request body;
-it does not read the experiment's stored results, and it does not look up the experiment id.
-All four body fields are required (an empty body answers 422).
+Send one variant's result. The endpoint interprets the numbers in the request
+body: it does not read the experiment's stored results or look the id up, so
+the `checkout-v2` below, which does not exist on the stack, is answered like
+any other:
 
-### POST /api/v1/ai/interpret/{experiment_id}
-
-```bash
-curl -X POST "http://localhost:8000/api/v1/ai/interpret/checkout-v2" \
+```{.bash exec}
+curl -s -X POST localhost:8000/api/v1/ai/interpret/checkout-v2 \
   -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"experiment_id": "checkout-v2", "variant_name": "simplified", "p_value": 0.03, "relative_improvement_pct": 3.2}'
+  -H 'content-type: application/json' \
+  -d '{"experiment_id": "checkout-v2", "variant_name": "simplified", "p_value": 0.03, "relative_improvement_pct": 3.2}' \
+  | jq .
 ```
-
-**Response** (without `ANTHROPIC_API_KEY`)
+<!-- expect: "summary": "simplified showed a 3.2% improvement (p=0.030). Recommend shipping." -->
+<!-- expect: "recommendation": "ship" -->
+<!-- expect: "confidence_statement": "Statistical confidence: 97.0%" -->
+<!-- expect: "generated_by": "template" -->
 
 ```json
 {
@@ -122,30 +151,57 @@ curl -X POST "http://localhost:8000/api/v1/ai/interpret/checkout-v2" \
 }
 ```
 
-`generated_by` is `"ai"` when Claude answered (the summary is then the first 300 characters
-of Claude's answer) and `"template"` otherwise.
+On the Quick Start stack the interpretation comes from a template
+(`"generated_by": "template"`), and `recommendation` is `ship` when `p_value`
+is below 0.05 and the improvement is positive, `stop_futility` when `p_value`
+is below 0.05 and the improvement is negative, and `continue_testing`
+otherwise. These two print `stop_futility`, then `continue_testing`:
 
-The endpoint allows 10 requests a minute per client address for every experiment id
-together: `/interpret/a` and `/interpret/b` draw on the same 10. Above that it answers
-`429 Too Many Requests` with a `Retry-After: 60` header. With `ANTHROPIC_API_KEY` set, each
-call to Claude gives up when Claude has not answered in 30 seconds, and is tried at most
-twice; when it fails, the endpoint answers with the template-based interpretation.
+```{.bash exec}
+curl -s -X POST localhost:8000/api/v1/ai/interpret/checkout-v2 \
+  -H "Authorization: Bearer $TOKEN" \
+  -H 'content-type: application/json' \
+  -d '{"experiment_id": "checkout-v2", "variant_name": "simplified", "p_value": 0.03, "relative_improvement_pct": -2.5}' \
+  | jq -r .recommendation
+
+curl -s -X POST localhost:8000/api/v1/ai/interpret/checkout-v2 \
+  -H "Authorization: Bearer $TOKEN" \
+  -H 'content-type: application/json' \
+  -d '{"experiment_id": "checkout-v2", "variant_name": "simplified", "p_value": 0.4, "relative_improvement_pct": 1.1}' \
+  | jq -r .recommendation
+```
+<!-- expect: stop_futility -->
+<!-- expect: continue_testing -->
+
+All four body fields are required. An empty body answers `422`, naming each
+missing field:
+
+```{.bash exec}
+curl -s -X POST localhost:8000/api/v1/ai/interpret/checkout-v2 \
+  -H "Authorization: Bearer $TOKEN" \
+  -H 'content-type: application/json' \
+  -d '{}' | jq -r '.detail[].loc[1]'
+```
+<!-- expect: experiment_id -->
+<!-- expect: variant_name -->
+<!-- expect: p_value -->
+<!-- expect: relative_improvement_pct -->
 
 ---
 
-## Sample Size Calculator (`/api/v1/ai/sample-size`)
+## Sample size: `GET /api/v1/ai/sample-size`
 
-Calculate the required sample size per variant from a baseline rate (`baseline_rate`), a
-minimum detectable effect (`mde`), a confidence level (`confidence`, default 0.95) and power
-(`power`, default 0.80). `mde` is an absolute change in the rate: 0.004 on a baseline of 0.08
-plans for 8% against 8.4%, a 5% relative lift.
+Give a baseline rate (`baseline_rate`) and a minimum detectable effect
+(`mde`); a confidence level (`confidence`) and power (`power`) are optional,
+0.95 and 0.80 by default. `mde` is an absolute change in the rate: 0.004 on a
+baseline of 0.08 plans for 8% against 8.4%, a 5% relative lift.
 
-```bash
-curl -X GET "http://localhost:8000/api/v1/ai/sample-size?baseline_rate=0.08&mde=0.004&power=0.80" \
-  -H "Authorization: Bearer $TOKEN"
+```{.bash exec}
+curl -s "localhost:8000/api/v1/ai/sample-size?baseline_rate=0.08&mde=0.004&power=0.80" \
+  -H "Authorization: Bearer $TOKEN" | jq .
 ```
-
-**Response**
+<!-- expect: "required_per_variant": 73855 -->
+<!-- expect: "total_required": 147710 -->
 
 ```json
 {
@@ -158,62 +214,34 @@ curl -X GET "http://localhost:8000/api/v1/ai/sample-size?baseline_rate=0.08&mde=
 
 ---
 
-## Experiment Templates (`/api/v1/ai/templates`)
+## Experiment templates: `GET /api/v1/ai/templates`
 
-Pre-built experiment templates for common use cases.
+Five templates, one for each experiment type. This prints each one's id and
+type:
 
-List all templates:
-
-```bash
-curl -X GET "http://localhost:8000/api/v1/ai/templates" \
-  -H "Authorization: Bearer $TOKEN"
+```{.bash exec}
+curl -s localhost:8000/api/v1/ai/templates \
+  -H "Authorization: Bearer $TOKEN" | jq -r '.[] | "\(.id) \(.experiment_type)"'
 ```
+<!-- expect: checkout-cta checkout -->
+<!-- expect: onboarding-flow onboarding -->
+<!-- expect: pricing-display pricing -->
+<!-- expect: email-subject email -->
+<!-- expect: landing-page-hero landing_page -->
 
-Get a specific template:
+`type` keeps the templates of one experiment type:
 
-```bash
-curl -X GET "http://localhost:8000/api/v1/ai/templates/checkout" \
-  -H "Authorization: Bearer $TOKEN"
+```{.bash exec}
+curl -s "localhost:8000/api/v1/ai/templates?type=pricing" \
+  -H "Authorization: Bearer $TOKEN" | jq -r '.[].id'
 ```
+<!-- expect: pricing-display -->
 
-Available template types: `checkout`, `onboarding`, `pricing`, `email`, `landing_page`
+One template, by its id:
 
----
-
-## Configuring the Claude API
-
-Set the following in your environment to enable live AI suggestions:
-
-```bash
-ANTHROPIC_API_KEY=sk-ant-your-api-key
+```{.bash exec}
+curl -s localhost:8000/api/v1/ai/templates/checkout-cta \
+  -H "Authorization: Bearer $TOKEN" | jq '{name, primary_metric, guardrail_metrics}'
 ```
-
-If `ANTHROPIC_API_KEY` is not set, the design and interpretation endpoints answer with their templates (`"confidence": "template_based"` and `"generated_by": "template"`). The platform degrades gracefully — no errors are raised.
-
----
-
-## Connecting from Claude Code (IDE)
-
-Add the MCP server to your `~/.claude/settings.json`:
-
-```json
-{
-  "mcpServers": {
-    "experimently": {
-      "url": "http://localhost:8000/api/v1/mcp/manifest"
-    }
-  }
-}
-```
-
-After connecting, you can issue natural language commands directly in Claude Code:
-- *"Suggest an experiment for improving email open rates"*
-- *"What are the results for experiment checkout-v2?"*
-- *"Toggle the dark-mode feature flag off"*
-
----
-
-## Permissions
-
-- MCP manifest discovery: No authentication required
-- All other AI/design endpoints: Any authenticated user (VIEWER and above)
+<!-- expect: "name": "Checkout CTA Button Test" -->
+<!-- expect: "primary_metric": "conversion_rate" -->

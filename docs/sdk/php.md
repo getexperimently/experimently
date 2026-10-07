@@ -348,7 +348,6 @@ composer install
 php test_standalone.php
 ```
 
-Unit tests: **not executed here** (no `php`/`composer` on the development machine). The suite
-(`ExperimentationClientTest` 43, `HttpClientTest` 17, `CacheTest` 18, `HashCompatibilityTest` 10 —
-88 tests) and `test_standalone.php` (36 checks) were reviewed by inspection for the rewire; run them on a machine
-with PHP 8.1+ before relying on the counts.
+CI runs `composer install` and `vendor/bin/phpunit` on PHP 8.2 in the SDK Unit Tests
+workflow ([sdk-unit-tests.yml](https://github.com/getexperimently/experimently/blob/main/.github/workflows/sdk-unit-tests.yml)), daily and on a pull request that changes `sdk/php/`. No workflow runs
+`php test_standalone.php`.
