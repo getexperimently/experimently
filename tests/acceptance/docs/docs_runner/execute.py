@@ -37,6 +37,13 @@ credential under any key at any depth), a screenshot masks any element whose
 text holds a value the journey keeps and, in a journey with secrets, every
 field, and a journey that has a secret is never recorded.
 
+An ``sdk`` step (``sdk.py``) writes ``NN-<step>.expected.json`` (the flag
+answer the documented rollout hash gives its user, written before it runs) and
+``NN-<step>.sdk.json``: the page's install command, the version installed, the
+program run (the page's block with its placeholders replaced; the API key is
+only in the environment of its process), each command's status and output,
+redacted and cut to its end, the answers and the oracle's.
+
 A ``traffic`` step writes ``NN-<step>.expected.json`` (the population chosen,
 written before it is sent) and ``NN-<step>.traffic.json`` (what was sent and
 answered, in counts). Values an api step saves (``values.py``) are the
@@ -59,14 +66,14 @@ import re
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, NoReturn, Optional, Tuple
 from urllib.parse import quote, urljoin, urlparse
 
 from playwright.sync_api import Browser, Page, Playwright, expect
 from playwright.sync_api import Error as PlaywrightError
 
 from docs_runner import pacer as pacing
-from docs_runner import redaction, registry, site, values, waiting
+from docs_runner import redaction, registry, sdk, site, values, waiting
 from docs_runner import traffic as population
 from docs_runner.checks import (
     OBSERVED_CHARS,
@@ -150,6 +157,8 @@ class JourneyRunner:
         self.secrets: Dict[str, str] = {}
         #: The current journey's saved values (``values.py``), by name.
         self.values: Dict[str, str] = {}
+        #: The current journey's guide: an sdk step reads its blocks from it.
+        self.guide: Optional[Guide] = None
         #: What the crawls saw, per site and source: (nav pages, visit per page).
         self.visits: Dict[
             Tuple[str, str], Tuple[List[site.NavPage], Dict[str, Any]]
@@ -537,6 +546,121 @@ class JourneyRunner:
         return (
             f"{counts['evaluated']} users: {counts['enabled']} get the flag, as"
             f" expected ({plan.reason})",
+            snapshot,
+        )
+
+    def _sdk_step(
+        self, step: Step, running: Running, api, journey_id: str, number: int
+    ) -> Tuple[str, str]:
+        """Install the SDK as its page says and run its block (``sdk.py``)."""
+        plan = step.do.sdk
+        name = self._name(journey_id, number, step, ".sdk.json")
+        record: Dict[str, Any] = {
+            "user": plan.user,
+            "flag": plan.flag,
+            "rollout": plan.rollout,
+        }
+
+        def written() -> str:
+            return self._write(
+                name, json.dumps(record, indent=2, ensure_ascii=False) + "\n"
+            )
+
+        def stop(problem: str) -> NoReturn:
+            record["problems"] = [problem]
+            raise _Failed(self._line(problem), written())
+
+        experiment_id = self.values.get(plan.experiment)
+        if experiment_id is None:
+            stop(f"no value saved as {plan.experiment!r}")
+        try:
+            key = self._secret(plan.key)
+            answer = api.get(
+                f"/api/v1/experiments/{experiment_id}",
+                headers=self._headers(running, plan.as_, api),
+            )
+        except StepFailed as error:
+            stop(str(error))
+        if answer.status != 200:
+            stop(f"reading the experiment answered {answer.status}")
+        try:
+            experiment = answer.json()
+            experiment_key = str(experiment["key"])
+            allocations = [
+                (str(v["name"]), int(v["traffic_allocation"]))
+                for v in experiment["variants"]
+            ]
+        except (KeyError, TypeError, ValueError, PlaywrightError):
+            stop("the experiment's key or variants could not be read")
+        try:
+            install = sdk.install_command(
+                self.guide.section(plan.install), plan.language
+            )
+            block = sdk.snippet(self.guide.section(plan.snippet), plan.language)
+            values_for = {
+                "{{api-url}}": running.api_url.rstrip("/"),
+                "{{experiment}}": experiment_key,
+                "{{flag}}": plan.flag,
+                "{{user}}": plan.user,
+            }
+            source = sdk.program(
+                plan.language,
+                sdk.substitute(
+                    block,
+                    {
+                        literal: values_for[value]
+                        for literal, value in plan.replace.items()
+                    },
+                ),
+                plan.stubs,
+                [e for _, expressions in plan.answers.items() for e in expressions],
+            )
+        except sdk.SdkError as error:
+            stop(str(error))
+        wanted = sdk.expected(
+            plan.user, experiment_key, allocations, plan.flag, plan.rollout
+        )
+        record.update(
+            {
+                "experiment_key": experiment_key,
+                "install": install.line,
+                "registry": sdk.NPM_REGISTRY
+                if install.tool == "npm"
+                else sdk.PYPI_INDEX,
+                "block": sdk.fingerprint(block),
+                "expected": wanted,
+            }
+        )
+        outcome = sdk.run(
+            language=plan.language,
+            install=install,
+            source=source,
+            secrets_env={
+                "EXPERIMENTLY_API_URL": running.api_url.rstrip("/"),
+                "EXPERIMENTLY_API_KEY": key,
+            },
+            redact=self.redactor.redact,
+        )
+        problems = list(outcome.problems)
+        if outcome.answers:
+            problems += sdk.compare(dict(plan.answers.items()), outcome.answers, wanted)
+        record.update(
+            {
+                "installed": outcome.installed,
+                "answers": outcome.answers,
+                "problems": problems,
+                "commands": outcome.commands,
+                "program": source,
+            }
+        )
+        snapshot = written()
+        if problems:
+            raise _Failed(self._line("; ".join(problems[:3])), snapshot)
+        return (
+            f"installed {install.package} {outcome.installed} from"
+            f" {record['registry']}; {plan.user}: {wanted['variant']}, flag"
+            f" {'on' if wanted['enabled'] else 'off'} ({wanted['reason']}), as the"
+            " documented hashes give",
             snapshot,
         )
 
@@ -959,6 +1083,7 @@ class JourneyRunner:
         if journey.video and settings.record_video and not journey.has_secrets:
             options.update(record_video_dir=str(video_dir), record_video_size=VIEWPORT)
         self.values = {}
+        self.guide = guide
         context = self.browser.new_context(**options)
         context.set_default_timeout(settings.timeout_ms)
         page = context.new_page()
@@ -1065,6 +1190,31 @@ class JourneyRunner:
                 )
                 + "\n",
             )
+        elif step.do.sdk is not None:
+            plan = step.do.sdk
+            enabled, why = population.expected_answer(
+                plan.user, plan.flag, "rollout", plan.rollout
+            )
+            expected_snapshot = self._write(
+                self._name(journey_id, number, step, ".expected.json"),
+                json.dumps(
+                    {
+                        "install": f"the first shell block of #{plan.install}, as written",
+                        "block": f"the first {plan.language} block of #{plan.snippet}",
+                        "replace": dict(plan.replace),
+                        "user": plan.user,
+                        "variant": "the documented assignment hash of the user under"
+                        " the experiment's key and allocations, read at the step",
+                        "flag": plan.flag,
+                        "rollout": plan.rollout,
+                        "enabled": enabled,
+                        "reason": why,
+                        "answers": {k: list(v) for k, v in plan.answers.items()},
+                    },
+                    indent=2,
+                )
+                + "\n",
+            )
         elif step.do.traffic is not None:
             chosen = {
                 variant: {"assigned": p.assigned, "converted": p.converted}
@@ -1117,6 +1267,10 @@ class JourneyRunner:
                 observed, snapshot = self._evaluations_step(
                     step, api, journey_id, number
                 )
+            elif step.do.kind == "sdk":
+                observed, snapshot = self._sdk_step(
+                    step, running, api, journey_id, number
+                )
             elif step.do.kind == "crawl":
                 observed, snapshot = self._crawl_step(
                     step, page, running, request, journey_id, number
@@ -1145,6 +1299,7 @@ class JourneyRunner:
                     "crawl": ".crawl.json",
                     "traffic": ".traffic.json",
                     "evaluations": ".evaluations.json",
+                    "sdk": ".sdk.json",
                 }.get(step.do.kind, ".api.json")
                 snapshot = self._write(
                     self._name(journey_id, number, step, suffix),

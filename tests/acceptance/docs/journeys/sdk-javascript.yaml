@@ -1,0 +1,210 @@
+# The JavaScript SDK's quick start, with the package published on npm (#939; QA
+# plan v1.3, D3c): "Installation" and "Quick start" followed as a developer
+# follows them, against the compose stack.
+#
+# Each sdk step makes a fresh project, runs the page's install command exactly
+# as it is written (`npm install @getexperimently/js-sdk@0.1.0`, read from the
+# page) against the public registry, checks the version it installed, and runs
+# the page's Quick start block, also read from the page, with only its
+# placeholders replaced: the API's address, the experiment's key, the flag's key
+# and the user. The key is given as EXPERIMENTLY_API_KEY, the variable the block
+# reads. The block is TypeScript; Node runs it with its own type stripping, so
+# nothing but the package is installed (docs_runner/sdk.py).
+#
+# The oracle does not use the SDK (docs_runner/traffic.py). The variant must be
+# the one the documented assignment hash gives the user under the experiment's
+# key, and the flag answer the one the documented rollout hash gives at 50%:
+# sdk-js-user-1 is bucket 26 of the flag (on) and treatment, sdk-js-user-2 is
+# bucket 70 (off) and control. The block tracks one purchase with the
+# experiment's key, so after each run the results count exactly one more
+# conversion, in that user's variant (read with use_cache=false: results are
+# cached for up to five minutes).
+#
+# Not recorded: the journey makes an API key.
+guide: sdk/javascript.md
+stack: compose-dev
+profile: core
+video: false
+written: 2026-10-07
+steps:
+  - id: log-in
+    doc: quick-start
+    do:
+      api:
+        method: GET
+        path: /api/v1/auth/me
+        as: admin
+    expect:
+      status: 200
+      json:
+        role: ADMIN
+    fail: the demo administrator cannot sign in through the API
+  - id: create-experiment
+    doc: quick-start
+    do:
+      api:
+        method: POST
+        path: /api/v1/experiments/
+        as: admin
+        body:
+          name: Docs journey SDK JavaScript
+          key: docs_journey_sdk_js
+          hypothesis: The JavaScript quick start assigns, evaluates and tracks
+          experiment_type: a_b
+          variants:
+            - {name: control, is_control: true, traffic_allocation: 50}
+            - {name: treatment, is_control: false, traffic_allocation: 50}
+          metrics:
+            - name: Purchase
+              event_name: purchase
+              metric_type: conversion
+              is_primary: true
+    expect:
+      status: 201
+      json:
+        key: docs_journey_sdk_js
+        status: draft
+    save:
+      experiment-id:
+        path: id
+    fail: the experiment the quick start assigns cannot be created
+  - id: start-experiment
+    doc: quick-start
+    do:
+      api:
+        method: POST
+        path: /api/v1/experiments/{{experiment-id}}/start
+        as: admin
+    expect:
+      status: 200
+      json:
+        status: active
+    fail: the experiment cannot be started
+  - id: create-flag
+    doc: quick-start
+    do:
+      api:
+        method: POST
+        path: /api/v1/feature-flags/
+        as: admin
+        body:
+          key: docs_journey_sdk_js_flag
+          name: Docs journey SDK JavaScript flag
+          rollout_percentage: 50
+          is_active: true
+    expect:
+      status: 201
+      json:
+        key: docs_journey_sdk_js_flag
+        status: active
+        rollout_percentage: 50
+    fail: the flag the quick start evaluates cannot be created on at 50%
+  - id: api-key
+    doc: configuration-clientconfig
+    do:
+      api:
+        method: POST
+        path: /api/v1/api-keys
+        as: admin
+        body:
+          name: Docs journey SDK JavaScript
+    expect:
+      status: 201
+    save:
+      sdk-key:
+        path: key
+        secret: true
+    fail: no API key can be made for the SDK
+  - id: no-conversions-yet
+    doc: tracking-and-the-fan-out-rule
+    do:
+      api:
+        method: GET
+        path: /api/v1/results/{{experiment-id}}?use_cache=false
+        as: admin
+    expect:
+      status: 200
+      json:
+        summary.total_users: 0
+        summary.total_conversions: 0
+    fail: the new experiment already has users or conversions
+  - id: quick-start-user-on
+    doc: quick-start
+    do:
+      sdk:
+        language: typescript
+        install: installation
+        snippet: quick-start
+        key: sdk-key
+        experiment: experiment-id
+        as: admin
+        flag: docs_journey_sdk_js_flag
+        rollout: 50
+        user: sdk-js-user-1
+        replace:
+          http://localhost:8000: "{{api-url}}"
+          checkout_button_color: "{{experiment}}"
+          dark_mode: "{{flag}}"
+          user-123: "{{user}}"
+        answers:
+          variant: [variant, assignment.variantName]
+          enabled: [enabled, isEnabled]
+          reason: [reason]
+    fail: the published package does not install as the page says, or its quick start fails, or answers other than the documented hashes for a user the flag is on for
+  - id: one-conversion
+    doc: tracking-and-the-fan-out-rule
+    do:
+      api:
+        method: GET
+        path: /api/v1/results/{{experiment-id}}?use_cache=false
+        as: admin
+    expect:
+      status: 200
+      json:
+        summary.total_users: 1
+        summary.total_conversions: 1
+        metrics.0.variants.0.variant_name: control
+        metrics.0.variants.0.conversions: 0
+        metrics.0.variants.1.variant_name: treatment
+        metrics.0.variants.1.conversions: 1
+    fail: the quick start's purchase is not counted exactly once, in sdk-js-user-1's variant
+  - id: quick-start-user-off
+    doc: quick-start
+    do:
+      sdk:
+        language: typescript
+        install: installation
+        snippet: quick-start
+        key: sdk-key
+        experiment: experiment-id
+        as: admin
+        flag: docs_journey_sdk_js_flag
+        rollout: 50
+        user: sdk-js-user-2
+        replace:
+          http://localhost:8000: "{{api-url}}"
+          checkout_button_color: "{{experiment}}"
+          dark_mode: "{{flag}}"
+          user-123: "{{user}}"
+        answers:
+          variant: [variant, assignment.variantName]
+          enabled: [enabled, isEnabled]
+          reason: [reason]
+    fail: the published package does not install as the page says, or its quick start fails, or answers other than the documented hashes for a user the flag is off for
+  - id: two-conversions
+    doc: tracking-and-the-fan-out-rule
+    do:
+      api:
+        method: GET
+        path: /api/v1/results/{{experiment-id}}?use_cache=false
+        as: admin
+    expect:
+      status: 200
+      json:
+        summary.total_users: 2
+        summary.total_conversions: 2
+        metrics.0.variants.0.variant_name: control
+        metrics.0.variants.0.conversions: 1
+        metrics.0.variants.1.variant_name: treatment
+        metrics.0.variants.1.conversions: 1
+    fail: the second run's purchase is not counted exactly once, in sdk-js-user-2's variant

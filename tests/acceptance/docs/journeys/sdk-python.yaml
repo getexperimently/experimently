@@ -1,0 +1,213 @@
+# The Python SDK's quick start, with the package published on PyPI (#939; QA
+# plan v1.3, D3c): "Installation" and "Quick start" followed as a developer
+# follows them, against the compose stack.
+#
+# Each sdk step makes a fresh virtual environment, runs the page's install
+# command exactly as it is written (`pip install experimently==0.1.0`, read
+# from the page) against PyPI, checks the version it installed, and runs the
+# page's Quick start block, also read from the page, with only its placeholders
+# replaced: the experiment's key, the flag's key and the user. The API's
+# address and the key are given as EXPERIMENTLY_API_URL and
+# EXPERIMENTLY_API_KEY, the variables the block reads (docs_runner/sdk.py).
+# The block calls two functions it leaves to the reader, render_new_checkout()
+# and use_new_search(); each is defined as a stub that records the call, so
+# use_new_search() is called exactly when is_feature_enabled() says the flag
+# is on.
+#
+# The oracle does not use the SDK (docs_runner/traffic.py). The variant must be
+# the one the documented assignment hash gives the user under the experiment's
+# key, and the flag answer the one the documented rollout hash gives at 50%:
+# sdk-py-reader-1 is bucket 18 of the flag (on) and control, sdk-py-reader-2 is
+# bucket 93 (off) and treatment. The block tracks one purchase with the
+# experiment's key, so after each run the results count exactly one more
+# conversion, in that user's variant (read with use_cache=false: results are
+# cached for up to five minutes).
+#
+# Not recorded: the journey makes an API key.
+guide: sdk/python.md
+stack: compose-dev
+profile: core
+video: false
+written: 2026-10-07
+steps:
+  - id: log-in
+    doc: quick-start
+    do:
+      api:
+        method: GET
+        path: /api/v1/auth/me
+        as: admin
+    expect:
+      status: 200
+      json:
+        role: ADMIN
+    fail: the demo administrator cannot sign in through the API
+  - id: create-experiment
+    doc: quick-start
+    do:
+      api:
+        method: POST
+        path: /api/v1/experiments/
+        as: admin
+        body:
+          name: Docs journey SDK Python
+          key: docs_journey_sdk_python
+          hypothesis: The Python quick start assigns, evaluates and tracks
+          experiment_type: a_b
+          variants:
+            - {name: control, is_control: true, traffic_allocation: 50}
+            - {name: treatment, is_control: false, traffic_allocation: 50}
+          metrics:
+            - name: Purchase
+              event_name: purchase
+              metric_type: conversion
+              is_primary: true
+    expect:
+      status: 201
+      json:
+        key: docs_journey_sdk_python
+        status: draft
+    save:
+      experiment-id:
+        path: id
+    fail: the experiment the quick start assigns cannot be created
+  - id: start-experiment
+    doc: quick-start
+    do:
+      api:
+        method: POST
+        path: /api/v1/experiments/{{experiment-id}}/start
+        as: admin
+    expect:
+      status: 200
+      json:
+        status: active
+    fail: the experiment cannot be started
+  - id: create-flag
+    doc: quick-start
+    do:
+      api:
+        method: POST
+        path: /api/v1/feature-flags/
+        as: admin
+        body:
+          key: docs_journey_sdk_python_flag
+          name: Docs journey SDK Python flag
+          rollout_percentage: 50
+          is_active: true
+    expect:
+      status: 201
+      json:
+        key: docs_journey_sdk_python_flag
+        status: active
+        rollout_percentage: 50
+    fail: the flag the quick start evaluates cannot be created on at 50%
+  - id: api-key
+    doc: constructor
+    do:
+      api:
+        method: POST
+        path: /api/v1/api-keys
+        as: admin
+        body:
+          name: Docs journey SDK Python
+    expect:
+      status: 201
+    save:
+      sdk-key:
+        path: key
+        secret: true
+    fail: no API key can be made for the SDK
+  - id: no-conversions-yet
+    doc: tracking-fan-out-rule
+    do:
+      api:
+        method: GET
+        path: /api/v1/results/{{experiment-id}}?use_cache=false
+        as: admin
+    expect:
+      status: 200
+      json:
+        summary.total_users: 0
+        summary.total_conversions: 0
+    fail: the new experiment already has users or conversions
+  - id: quick-start-user-on
+    doc: quick-start
+    do:
+      sdk:
+        language: python
+        install: installation
+        snippet: quick-start
+        key: sdk-key
+        experiment: experiment-id
+        as: admin
+        flag: docs_journey_sdk_python_flag
+        rollout: 50
+        user: sdk-py-reader-1
+        replace:
+          checkout_flow: "{{experiment}}"
+          new_search: "{{flag}}"
+          user-123: "{{user}}"
+        stubs: [render_new_checkout, use_new_search]
+        answers:
+          variant: [variant, assignment.variant_name]
+          enabled: [flag.enabled, called.use_new_search]
+          reason: [flag.reason]
+    fail: the published package does not install as the page says, or its quick start fails, or answers other than the documented hashes for a user the flag is on for
+  - id: one-conversion
+    doc: tracking-fan-out-rule
+    do:
+      api:
+        method: GET
+        path: /api/v1/results/{{experiment-id}}?use_cache=false
+        as: admin
+    expect:
+      status: 200
+      json:
+        summary.total_users: 1
+        summary.total_conversions: 1
+        metrics.0.variants.0.variant_name: control
+        metrics.0.variants.0.conversions: 1
+        metrics.0.variants.1.variant_name: treatment
+        metrics.0.variants.1.conversions: 0
+    fail: the quick start's purchase is not counted exactly once, in sdk-py-reader-1's variant
+  - id: quick-start-user-off
+    doc: quick-start
+    do:
+      sdk:
+        language: python
+        install: installation
+        snippet: quick-start
+        key: sdk-key
+        experiment: experiment-id
+        as: admin
+        flag: docs_journey_sdk_python_flag
+        rollout: 50
+        user: sdk-py-reader-2
+        replace:
+          checkout_flow: "{{experiment}}"
+          new_search: "{{flag}}"
+          user-123: "{{user}}"
+        stubs: [render_new_checkout, use_new_search]
+        answers:
+          variant: [variant, assignment.variant_name]
+          enabled: [flag.enabled, called.use_new_search]
+          reason: [flag.reason]
+    fail: the published package does not install as the page says, or its quick start fails, or answers other than the documented hashes for a user the flag is off for
+  - id: two-conversions
+    doc: tracking-fan-out-rule
+    do:
+      api:
+        method: GET
+        path: /api/v1/results/{{experiment-id}}?use_cache=false
+        as: admin
+    expect:
+      status: 200
+      json:
+        summary.total_users: 2
+        summary.total_conversions: 2
+        metrics.0.variants.0.variant_name: control
+        metrics.0.variants.0.conversions: 1
+        metrics.0.variants.1.variant_name: treatment
+        metrics.0.variants.1.conversions: 1
+    fail: the second run's purchase is not counted exactly once, in sdk-py-reader-2's variant

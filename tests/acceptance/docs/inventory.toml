@@ -144,16 +144,12 @@ reason = "steps 3-5 call a model and need an LLM provider key (OpenAI, Anthropic
 [pages."sdk/javascript.md"]
 class = "journey"
 journey = "sdk-javascript"
-pending = true
-planned = "unassigned"
-reason = "install the published package (0.1.0 on npm) as the page says and run its snippet against a stack"
+reason = "the page's npm install, run as written in a fresh project, and its Quick start block, run against the compose stack for two users: each variant and flag answer is the documented hashes', and each run adds exactly one conversion"
 
 [pages."sdk/python.md"]
 class = "journey"
 journey = "sdk-python"
-pending = true
-planned = "unassigned"
-reason = "install the published package (0.1.0 on PyPI) as the page says and run its snippet against a stack"
+reason = "the page's pip install, run as written in a fresh virtual environment, and its Quick start block, run against the compose stack for two users: each variant and flag answer is the documented hashes', and each run adds exactly one conversion"
 
 [pages."sdk/java.md"]
 class = "reference"
@@ -164,11 +160,8 @@ class = "reference"
 reason = "not walked: the page says the package is not yet on npm; the SDK live contract (tests/sdk-contract/live/run_live_contract.py) runs the SDK against a live API in the PR QA Gate"
 
 [pages."sdk/go.md"]
-class = "journey"
-journey = "sdk-go"
-pending = true
-planned = "unassigned"
-reason = "go get the module as the page says and run its snippet against a stack"
+class = "reference"
+reason = "not walked: go get resolves to the head of main (a pseudo-version; the module has no tags; measured 2026-10-07: v0.0.0-20261007045802-d4853547fb9f), which is the source the SDK live contract (tests/sdk-contract/live/run_live_contract.py) runs against a live API in the PR QA Gate"
 
 [pages."sdk/ios.md"]
 class = "device"
@@ -592,8 +585,9 @@ note = "the table is held to the dashboard's source by a unit test; every exec p
 
 [[flow]]
 text = "the SDK quick starts"
-journeys = ["sdk-javascript", "sdk-python", "sdk-go"]
+journeys = ["sdk-javascript", "sdk-python"]
 pages = [
+    "sdk/go.md",
     "sdk/java.md",
     "sdk/react.md",
     "sdk/ios.md",
@@ -608,7 +602,7 @@ pages = [
     "sdk/elixir.md",
     "sdk/local-evaluation.md",
 ]
-note = "the JavaScript, Python and Go quick starts are journeys, installed as each page says; every other SDK page's class and reason say what verifies it"
+note = "the JavaScript and Python quick starts are journeys, each package installed from its public registry as its page says; every other SDK page's class and reason say what verifies it"
 
 [[flow]]
 text = "self-hosting guides where they can be rehearsed without AWS"

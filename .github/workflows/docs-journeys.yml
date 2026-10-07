@@ -27,6 +27,11 @@ name: Docs journeys
 # polls, how long it waited and how many seconds later each time it checks
 # was); what each step saw is only in the run directory.
 #
+# The sdk-javascript and sdk-python journeys install the published SDKs from
+# npm and PyPI, as their pages say, into temporary directories outside the
+# checkout, and run each page's quick start against the compose stack
+# (tests/acceptance/docs/docs_runner/sdk.py).
+#
 # The compose journeys sign in, make up passwords and read a one-time password
 # off the screen. None of those values may reach the artifact: the runner
 # writes none of them, and at the end of the run reads every file of the run
@@ -83,6 +88,13 @@ jobs:
       - uses: actions/setup-python@v7
         with:
           python-version: '3.11'
+
+      # Node and npm for the sdk-javascript journey, which installs the
+      # published JavaScript SDK with npm and runs its TypeScript quick start
+      # with Node's type stripping (docs_runner/sdk.py).
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
 
       - name: Install the runner and Chromium
         run: |

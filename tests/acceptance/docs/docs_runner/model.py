@@ -137,6 +137,21 @@ What an API answers can be kept for later steps and checked against an oracle
   passed, for what a background job of the stack does on its own timer
   (``waiting.py``). A poll that never holds FAILs at the bound with the last
   answer.
+
+An SDK page is followed as its reader follows it (``sdk.py``; compose-dev
+only): ``sdk`` installs the package with the page's own install command (the
+first shell block under the ``install`` anchor) from the public registry, in a
+fresh project or virtual environment, and runs the page's code block (the first
+block under the ``snippet`` anchor) with only its placeholders replaced: each
+``replace`` key is a whole quoted string of the block, and each value one of
+``{{api-url}}``, ``{{experiment}}`` (the key of the experiment saved as
+``experiment``), ``{{flag}}`` and ``{{user}}``. The API key saved as ``key`` is
+given as ``EXPERIMENTLY_API_KEY``. ``stubs`` are functions the block calls and
+the page leaves to the reader; ``answers`` name the block's variables (or
+``called.<stub>``) whose values must be the oracle's: the variant the
+documented assignment hash gives ``user``, and the flag answer the documented
+rollout hash gives at ``rollout`` percent. Its check is the action itself; an
+install that fails is FAIL, never NOT RUN.
 """
 
 from __future__ import annotations
@@ -456,6 +471,87 @@ class Evaluations(_Strict):
         return self
 
 
+#: A variable of an SDK page's block, or a path of attributes or keys under one
+#: (``assignment.variantName``), or ``called.<stub>``.
+Expression = Annotated[
+    StrictStr,
+    Field(pattern=r"^[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*$"),
+]
+#: A function the block calls and the page leaves to the reader.
+Identifier = Annotated[StrictStr, Field(pattern=r"^[A-Za-z_][A-Za-z0-9_]*$")]
+#: What a placeholder of an SDK page's block is replaced with (``sdk.py``).
+SdkPlaceholder = Literal["{{api-url}}", "{{experiment}}", "{{flag}}", "{{user}}"]
+
+
+class Answers(_Strict):
+    """The block's values held to the oracle: each must be what it gives."""
+
+    variant: List[Expression] = Field(min_length=1)
+    enabled: List[Expression] = Field(min_length=1)
+    reason: List[Expression] = Field(default_factory=list)
+
+    def items(self):
+        """(kind, expressions) for each kind of answer the step names."""
+        named = {"variant": self.variant, "enabled": self.enabled}
+        if self.reason:
+            named["reason"] = self.reason
+        return named.items()
+
+
+class Sdk(_Strict):
+    """Install an SDK as its page says and run its block (``sdk.py``)."""
+
+    language: Literal["typescript", "python"]
+    #: The anchor of the section whose first shell block installs the package.
+    install: StrictStr = Field(pattern=r"^[^#\s]+$")
+    #: The anchor of the section whose first code block is run.
+    snippet: StrictStr = Field(pattern=r"^[^#\s]+$")
+    #: The secret holding the API key, given as ``EXPERIMENTLY_API_KEY``.
+    key: Name
+    #: The saved value holding the id of the experiment the block assigns.
+    experiment: Name
+    #: Who reads the experiment's key and variants.
+    as_: Caller = Field(alias="as")
+    flag: StrictStr = Field(pattern=r"^[A-Za-z0-9_.:-]{1,100}$")
+    rollout: StrictInt = Field(ge=0, le=100)
+    user: StrictStr = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$")
+    replace: Dict[OneLine, SdkPlaceholder] = Field(min_length=1)
+    stubs: List[Identifier] = Field(default_factory=list)
+    answers: Answers
+
+    @model_validator(mode="after")
+    def _replaces_what_the_oracle_answers_for(self) -> "Sdk":
+        used = set(self.replace.values())
+        missing = [
+            p for p in ("{{experiment}}", "{{flag}}", "{{user}}") if p not in used
+        ]
+        if missing:
+            raise ValueError(
+                f"replace puts nothing in place of {', '.join(missing)}: the block"
+                " must use the step's experiment, flag and user"
+            )
+        values = list(self.replace.values())
+        twice = sorted({value for value in values if values.count(value) > 1})
+        if twice:
+            raise ValueError(f"replace puts {twice[0]} in place of two strings")
+        return self
+
+    @model_validator(mode="after")
+    def _called_names_a_stub(self) -> "Sdk":
+        if len(set(self.stubs)) != len(self.stubs):
+            raise ValueError("a stub is named twice")
+        for _, expressions in self.answers.items():
+            for expression in expressions:
+                root, _, rest = expression.partition(".")
+                if root != "called":
+                    continue
+                if not rest or "." in rest or rest not in self.stubs:
+                    raise ValueError(
+                        f"{expression}: called.<name> names one of the stubs"
+                    )
+        return self
+
+
 class Do(_Strict):
     """Exactly one action."""
 
@@ -468,6 +564,7 @@ class Do(_Strict):
     api: Optional[Api] = None
     traffic: Optional[Traffic] = None
     evaluations: Optional[Evaluations] = None
+    sdk: Optional[Sdk] = None
     ref: Optional[Literal["doc-examples"]] = None
     search: Optional[OneLine] = None
     crawl: Optional[Literal["nav", "links"]] = None
@@ -478,7 +575,8 @@ class Do(_Strict):
         if len(given) != 1:
             raise ValueError(
                 "do must be exactly one of goto, open, click, fill, select, keep,"
-                f" api, traffic, evaluations, ref, search, crawl; got {given or 'none'}"
+                f" api, traffic, evaluations, sdk, ref, search, crawl; got"
+                f" {given or 'none'}"
             )
         return self
 
