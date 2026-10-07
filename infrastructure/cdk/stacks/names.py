@@ -160,7 +160,7 @@ def api_no_healthy_task_alarm_name(env_name: str) -> str:
 
 
 def api_error_logs_alarm_name(env_name: str) -> str:
-    """The alarm on ERROR lines in the API tasks' log group."""
+    """The alarm on error- and critical-level lines in the API's log group."""
     return f"experimentation-api-error-logs-{env_name}"
 
 

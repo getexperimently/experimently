@@ -9,7 +9,12 @@ Covers:
 - Context is independent per logical thread (contextvar isolation)
 """
 
+import contextlib
 import contextvars
+import io
+import json
+import logging
+from unittest.mock import patch
 
 import pytest
 
@@ -190,3 +195,139 @@ def test_failure_detail_ends_the_sentence_without_a_bound_id():
         )
     finally:
         _mod._log_context.reset(token)
+
+
+# ---------------------------------------------------------------------------
+# The level a rendered line carries: what the error-log alarm counts (#811)
+# ---------------------------------------------------------------------------
+
+# The ApiErrorLogs metric filter counts the lines matching
+#     { ($.level = "error") || ($.level = "critical") }
+# (infrastructure/cdk/stacks/fargate_service_stack.py, pinned in
+# infrastructure/tests/test_standing_alarms.py). CloudWatch compares the
+# values case-sensitively, so a line whose level is "ERROR" is not counted.
+
+
+@contextlib.contextmanager
+def _json_lines():
+    """Every record rendered as the production JSON line, into a buffer.
+
+    The unit conftest replaces ``logging.getLogger`` with a mock, which
+    ``configure_logging`` and structlog's stdlib logger factory both call, so
+    the real one is put back for the duration; the root handlers and the
+    structlog configuration are restored afterwards.
+    """
+    import structlog
+
+    from backend.app.core.logger import configure_logging
+
+    def real_get_logger(name=None):
+        return logging.Logger.manager.getLogger(name) if name else logging.root
+
+    root = logging.root
+    handlers, root_level = list(root.handlers), root.level
+    saved = structlog.get_config()
+    buffer = io.StringIO()
+    with patch("logging.getLogger", real_get_logger):
+        configure_logging(log_level="INFO", json_logs=True, stream=buffer)
+        try:
+            yield buffer
+        finally:
+            for handler in list(root.handlers):
+                root.removeHandler(handler)
+            for handler in handlers:
+                root.addHandler(handler)
+            root.setLevel(root_level)
+            structlog.configure(**saved)
+
+
+def _stdlib(name, method):
+    def emit():
+        logger = logging.Logger.manager.getLogger(name)
+        if method == "exception":
+            try:
+                raise ValueError("probe")
+            except ValueError:
+                logger.exception("probe line")
+        else:
+            getattr(logger, method)("probe line")
+
+    return emit
+
+
+def _structlog(method):
+    def emit():
+        from backend.app.core.logger import get_logger
+
+        logger = get_logger("probe.structlog")
+        if method == "exception":
+            try:
+                raise ValueError("probe")
+            except ValueError:
+                logger.exception("probe line")
+        else:
+            getattr(logger, method)("probe line")
+
+    return emit
+
+
+def _unexpected_failure():
+    from backend.app.core.logger import unexpected_failure
+
+    unexpected_failure(
+        ValueError("probe"),
+        "Probe",
+        "Could not probe",
+        logger=logging.Logger.manager.getLogger("probe.failure"),
+    )
+
+
+@pytest.mark.regression
+@pytest.mark.parametrize(
+    "emit,expected",
+    [
+        (_stdlib("probe.stdlib", "error"), "error"),
+        (_stdlib("probe.stdlib", "critical"), "critical"),
+        (_stdlib("probe.stdlib", "exception"), "error"),
+        # An exception in a request handler that nothing caught.
+        (_stdlib("uvicorn.error", "error"), "error"),
+        (_structlog("error"), "error"),
+        (_structlog("critical"), "critical"),
+        (_structlog("exception"), "error"),
+        # A handler's 500 through unexpected_failure is one error line.
+        (_unexpected_failure, "error"),
+        # Not counted.
+        (_stdlib("probe.stdlib", "warning"), "warning"),
+        (_structlog("warning"), "warning"),
+        (_stdlib("probe.stdlib", "info"), "info"),
+    ],
+    ids=[
+        "stdlib-error",
+        "stdlib-critical",
+        "stdlib-exception",
+        "uvicorn-error",
+        "structlog-error",
+        "structlog-critical",
+        "structlog-exception",
+        "unexpected_failure",
+        "stdlib-warning",
+        "structlog-warning",
+        "stdlib-info",
+    ],
+)
+def test_a_rendered_line_carries_the_level_the_error_log_alarm_counts(emit, expected):
+    """The logger's half of the error-log alarm (#811).
+
+    The metric filter matches the JSON ``level`` field against the lower-case
+    values ``"error"`` and ``"critical"``. A line rendered by
+    ``configure_logging(json_logs=True)`` -- what the API writes in staging and
+    production -- must carry exactly those values for error and critical
+    records, and a value outside them for every lower level. A logger that
+    wrote ``"ERROR"`` would make the alarm count nothing, as it did while the
+    filter matched the term ``ERROR`` against lines whose level is ``"error"``.
+    """
+    with _json_lines() as buffer:
+        emit()
+
+    (line,) = [json.loads(text) for text in buffer.getvalue().splitlines() if text]
+    assert line["level"] == expected, line

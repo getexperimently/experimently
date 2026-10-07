@@ -240,7 +240,7 @@ group; the rest are in `experimentation-monitoring-<env>`.
 | `experimentation-api-5xx-blue` / `-green` | At least 5 target 5xx and at least 5% of that target group's requests in a minute, for 2 of 3 minutes. Also rolls a deployment back. | Yes |
 | `experimentation-api-healthy-blue` / `-green` | That target group has had no healthy target for 3 minutes (missing data counts). The idle colour's is in ALARM between deployments, by design. | No |
 | `experimentation-api-no-healthy-task` | Composite: both healthy alarms above are in ALARM, so no API task is healthy. | Yes |
-| `experimentation-api-error-logs` | At least 10 lines containing `ERROR` in `/ecs/experimentation-backend-<env>` in 5 minutes | Yes |
+| `experimentation-api-error-logs` | At least 10 lines in `/ecs/experimentation-backend-<env>` in 5 minutes whose JSON `level` is `error` or `critical`. Matching is case-sensitive: a line that is not JSON, or whose level is upper case (`ERROR`), is not counted. | Yes |
 | `AuroraHighCPU` | The Aurora writer's CPU >= 80% for 3 five-minute periods, or no data | Yes |
 | `RedisHighCPU-001` (and `-002`, `-003` in prod) | That node's `EngineCPUUtilization` >= 80% for 3 five-minute periods, or no data | Yes |
 | `KinesisProcessingDelay` (full profile) | Iterator age > 5 min for 3 periods | Yes |

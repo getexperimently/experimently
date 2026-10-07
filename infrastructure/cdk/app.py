@@ -304,7 +304,7 @@ fargate_stack = FargateServiceStack(
     # announce it on the monitoring topic (DECISIONS D21). Monitoring depends
     # only on vpc, database and (with the etl module) analytics, none of which
     # depends on this stack, so there is no cycle. The no-healthy-task
-    # composite and the ERROR-log alarm (#390, #205) email through it too.
+    # composite and the error-log alarm (#390, #205) email through it too.
     alarm_topic=monitoring_stack.alerts_topic,
     env=env,
 )

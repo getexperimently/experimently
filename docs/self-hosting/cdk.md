@@ -432,7 +432,9 @@ dashboard is still on `:bootstrap`.
   email subscriber: `ALARM_EMAIL` (none in `dev` or `demo` without it). The
   fargate stack's alarms publish to it too: the two API 5xx alarms, which roll
   a deployment back, `experimentation-api-no-healthy-task-<env>`, which fires
-  when no API task is healthy, and `experimentation-api-error-logs-<env>`.
+  when no API task is healthy, and `experimentation-api-error-logs-<env>`,
+  which fires on 10 or more lines in 5 minutes whose JSON `level` is `error`
+  or `critical`.
   That is why `experimentation-fargate-<env>` depends on this stack. The
   [Monitoring Guide](../monitoring/monitoring-guide.md#6-setting-up-alerts)
   lists every alarm.
