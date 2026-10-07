@@ -34,8 +34,8 @@ def _no_env(monkeypatch):
 
 @pytest.fixture
 def logged(monkeypatch):
-    """What config.py logs, by level. (The unit conftest patches getLogger, so
-    caplog sees nothing; the existing CORS tests capture the same way.)"""
+    """What config.py logs, by level. (The existing CORS tests capture the
+    same way.)"""
     lines = {"error": [], "warning": []}
     for level in lines:
         monkeypatch.setattr(

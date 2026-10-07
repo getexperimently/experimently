@@ -376,8 +376,7 @@ def test_sign_in_with_challenge(
     """
     mock_boto3_client.initiate_auth.return_value = mock_cognito_challenge_response
 
-    # Not caplog.at_level: the autouse fixture in tests/unit/conftest.py patches
-    # logging.getLogger, which at_level calls. Set the service logger directly.
+    # The service logger's own level is lowered for the call and restored after.
     service_logger = auth_service_module.logger
     previous_level = service_logger.level
     service_logger.setLevel(logging.DEBUG)

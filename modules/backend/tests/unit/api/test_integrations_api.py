@@ -1169,9 +1169,7 @@ class TestTheUpgradePathIsAnnounced:
     def test_a_config_with_no_secret_is_named_in_the_log(
         self, integration_type, path, config_factory
     ):
-        # The logger is patched rather than read through `caplog`: this suite
-        # replaces `logging.getLogger` with a mock, and `caplog.at_level`
-        # restores `logging.disable` from it and raises on the way out.
+        # The logger is patched, and the logged line read from the call.
         client = self._client(config_factory(secret=""))
         with patch.object(integrations_endpoint.logger, "error") as error:
             response = client.post(

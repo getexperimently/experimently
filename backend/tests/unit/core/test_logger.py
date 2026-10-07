@@ -14,7 +14,6 @@ import contextvars
 import io
 import json
 import logging
-from unittest.mock import patch
 
 import pytest
 
@@ -212,33 +211,26 @@ def test_failure_detail_ends_the_sentence_without_a_bound_id():
 def _json_lines():
     """Every record rendered as the production JSON line, into a buffer.
 
-    The unit conftest replaces ``logging.getLogger`` with a mock, which
-    ``configure_logging`` and structlog's stdlib logger factory both call, so
-    the real one is put back for the duration; the root handlers and the
-    structlog configuration are restored afterwards.
+    The root handlers and the structlog configuration are restored afterwards.
     """
     import structlog
 
     from backend.app.core.logger import configure_logging
 
-    def real_get_logger(name=None):
-        return logging.Logger.manager.getLogger(name) if name else logging.root
-
     root = logging.root
     handlers, root_level = list(root.handlers), root.level
     saved = structlog.get_config()
     buffer = io.StringIO()
-    with patch("logging.getLogger", real_get_logger):
-        configure_logging(log_level="INFO", json_logs=True, stream=buffer)
-        try:
-            yield buffer
-        finally:
-            for handler in list(root.handlers):
-                root.removeHandler(handler)
-            for handler in handlers:
-                root.addHandler(handler)
-            root.setLevel(root_level)
-            structlog.configure(**saved)
+    configure_logging(log_level="INFO", json_logs=True, stream=buffer)
+    try:
+        yield buffer
+    finally:
+        for handler in list(root.handlers):
+            root.removeHandler(handler)
+        for handler in handlers:
+            root.addHandler(handler)
+        root.setLevel(root_level)
+        structlog.configure(**saved)
 
 
 def _stdlib(name, method):

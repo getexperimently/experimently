@@ -78,10 +78,13 @@ YAML, or not a mapping, stops at that. Refused, besides what ``model`` refuses:
 * an ``sdk`` step on any stack but compose-dev, or with an ``expect`` or a
   ``snapshot`` setting (its check is the action); whose ``install`` section's
   first block is not one ``npm install <package>@<version>`` or
-  ``pip install <package>==<version>``, or whose ``snippet`` section's first
-  block is not in its language (``sdk.py``); with a ``replace`` key that is not
-  a quoted string of that block, a stub the block does not call, or an answer
-  whose variable the block does not name; and a journey whose sdk steps give
+  ``pip install <package>==<version>`` (for Go: ``go mod init <path>`` at most
+  once and ``go get <module>`` once, and nothing else), or whose ``snippet``
+  section's first block is not in its language (``sdk.py``); with a ``replace``
+  key that is not a quoted string of that block, a stub the block does not
+  call, or an answer whose variable the block does not name (for Go, a key the
+  block does not print as ``<key>=``); a Go step on a page whose "Requires Go
+  X+" is not sdk/go/go.mod's ``go`` version; and a journey whose sdk steps give
   every user the same answer for a flag (the oracle could not tell an SDK that
   always answers on, or always off, from a right one).
 """
@@ -573,11 +576,13 @@ def _step_problems(
     if step.save is not None and step.do.kind != "api":
         found.append(f"{label}: save keeps values from an api step's answer only")
     if step.do.sdk is not None and guide is not None:
-        found.extend(_sdk_problems(label, step.do.sdk, guide))
+        found.extend(_sdk_problems(label, step.do.sdk, guide, context.docs_root.parent))
     return found
 
 
-def _sdk_problems(label: str, plan, guide: guides.Guide) -> List[str]:
+def _sdk_problems(
+    label: str, plan, guide: guides.Guide, repo_root: Optional[Path] = None
+) -> List[str]:
     """An sdk step against its page: the install command, the block, its names."""
     found: List[str] = []
     for what, anchor in (("install", plan.install), ("snippet", plan.snippet)):
@@ -607,10 +612,27 @@ def _sdk_problems(label: str, plan, guide: guides.Guide) -> List[str]:
     for _, expressions in plan.answers.items():
         for expression in expressions:
             root = expression.split(".", 1)[0]
+            if plan.language == "go":
+                if not re.search(rf"(?<![\w.]){re.escape(root)}=", block):
+                    found.append(
+                        f"{label}: sdk.answers: {expression}: the block prints no"
+                        f" {root}="
+                    )
+                continue
             if root != sdk.CALLED and not re.search(rf"\b{re.escape(root)}\b", block):
                 found.append(
                     f"{label}: sdk.answers: {expression}: the block names no {root}"
                 )
+    if plan.language == "go" and repo_root is not None:
+        go_mod = repo_root / sdk.GO_MODULE / "go.mod"
+        if not go_mod.is_file():
+            found.append(f"{label}: sdk: {sdk.GO_MODULE.as_posix()}/go.mod is missing")
+        else:
+            problem = sdk.go_requirement_problem(
+                guide.text, go_mod.read_text(encoding="utf-8")
+            )
+            if problem:
+                found.append(f"{label}: sdk: {problem}")
     return found
 
 

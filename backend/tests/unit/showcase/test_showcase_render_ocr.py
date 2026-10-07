@@ -15,13 +15,18 @@ from pathlib import Path
 
 import pytest
 from showcase import contract
-from showcase.render import encode, ocr
+from showcase.render import encode, ocr, probe, templates
 from showcase.render.gates import Refused
 from showcase.render.timeline import OutputCue
+from showcase.render.workdir import WorkDir
 
 pytestmark = [pytest.mark.unit]
 
 NEEDLE = "VALUE-3F9A1C07B2E4D586"
+
+
+def workdir(tmp_path: Path) -> WorkDir:
+    return WorkDir(tmp_path, needles=tmp_path / "capture" / "needles.txt")
 
 
 def brute_distance(pattern: str, text: str) -> int:
@@ -135,7 +140,8 @@ def test_forbidden_text_belongs_to_u4_and_credentials_to_7():
 def test_a_long_needle_is_matched_in_pieces():
     long_needle = "eyJ" + "A1b2C3d4E5f6G7h8I9j0" * 5
     pieces = ocr.chunks(ocr.normalise(long_needle))
-    assert len(pieces) > 1 and all(len(p) == ocr.CHUNK for p in pieces)
+    assert {len(p) for p in pieces} == {ocr.CHUNK, ocr.SHORT_CHUNK}
+    assert sum(len(p) == ocr.CHUNK for p in pieces) > 1
     # 30 characters of it on screen is enough
     assert (
         ocr.needle_similarity(
@@ -185,7 +191,9 @@ def test_the_self_test_refuses_an_engine_that_reads_nothing(tmp_path, monkeypatc
     blind = FakeEngine("tesseract", lambda paths: dict.fromkeys(paths, ""))
     with pytest.raises(Refused) as caught:
         ocr.self_test(
-            [blind], lambda needle, key, path: path.write_bytes(b"png"), tmp_path
+            [blind],
+            lambda needle, key, faint, path: path.write_bytes(b"png"),
+            workdir(tmp_path),
         )
     text = str(caught.value)
     assert (
@@ -199,22 +207,26 @@ def test_the_self_test_passes_an_engine_that_reads_the_canary(tmp_path, monkeypa
     monkeypatch.setattr(encode, "png_to_h264_and_back", lambda png, work: png)
     drawn = {}
 
-    def draw(needle, key, path):
-        drawn["text"] = f"Shown once: {needle}\nHeader {key}"
+    def draw(needle, key, faint, path):
+        drawn["text"] = f"Shown once: {needle}\nHeader {key}\nLast edited by {faint}"
         path.write_bytes(b"png")
 
     reader = FakeEngine("vision", lambda paths: dict.fromkeys(paths, drawn["text"]))
-    assert ocr.self_test([reader], draw, tmp_path) == {"vision": 1.0}
+    assert ocr.self_test([reader], draw, workdir(tmp_path)) == {
+        "canary": {"vision": 1.0},
+        "faint": {"vision": 1.0},
+    }
+    assert not (tmp_path / "canary").exists()
 
 
 def test_no_engine_at_all_is_a_refusal(tmp_path):
     with pytest.raises(Refused, match="no OCR engine"):
-        ocr.self_test([], lambda *a: None, tmp_path)
+        ocr.self_test([], lambda *a: None, workdir(tmp_path))
 
 
 def test_an_empty_needle_list_is_refused_before_decoding(tmp_path):
     with pytest.raises(Refused, match="0 needles: refusing to scan"):
-        ocr.scan(tmp_path / "v.mp4", 1710, [], [], tmp_path, lambda: None)
+        ocr.scan(tmp_path / "v.mp4", 1710, [], [], workdir(tmp_path), lambda: None)
 
 
 # --- Gate 5: the burned-in captions ---------------------------------------------------------------
@@ -285,3 +297,265 @@ def test_a_caption_that_stays_too_long_is_refused():
 
 def test_contract_fps_is_the_one_the_samples_assume():
     assert ocr.CAPTION_SAMPLE_FRAMES == round(0.3 * contract.FPS)
+
+
+# --- Review round 1 (#1077): what the scan finds, and what it refuses to start on -----------------
+
+#: Made-up text of the kind a dashboard frame holds, for the no-false-match checks.
+DASHBOARD_TEXT = (
+    "Experimently Experiments Feature Flags Segments Reports Admin Audit Log\n"
+    "Experiments 4 experiments in the demo data New experiment\n"
+    "Homepage hero copy test Active 2 variants 12,408 users Started 3 days ago\n"
+    "Checkout button colour Draft 3 variants 0 users\n"
+    "Pricing page layout Completed 2 variants 48,120 users p-value 0.031 lift +4.2%\n"
+    "API keys Name Prefix Scopes Created Last used eptk_ab12... Storefront demo key\n"
+    "Signed in as admin@demo.com Change password Log out Superuser\n"
+    "Rollout schedule Stage 2 of 3 25% Safety check passed Error rate 0.4%\n"
+)
+
+
+@pytest.mark.regression
+def test_a_short_needle_cut_off_at_the_edge_is_found():
+    """A 22-character needle with only its first 15 characters on screen.
+
+    It passed before short needles were cut into pieces: the whole needle was
+    7 edits from the text, 0.68.
+    """
+    needle = "QX7K-MPL2-ZRV9-WTN4-HJ6"
+    assert 13 < len(ocr.normalise(needle)) <= ocr.CHUNK
+    found = ocr.findings(f"Device code {needle[:15]}", [needle])
+    assert [gate for gate, _ in found] == ["7"], found
+
+
+@pytest.mark.regression
+@pytest.mark.parametrize("length", [13, 16, 20, 23, 24, 25, 31, 40, 52, 64])
+def test_any_12_characters_of_a_needle_in_a_row_are_found(length):
+    """The guarantee the docstring gives, for every place the 12 can start."""
+    rng = random.Random(length)
+    alphabet = "acdeghjkmnpqrvwxy34679"  # no character normalise folds or drops
+    needle = "".join(rng.choice(alphabet) for _ in range(length))
+    for start in range(length - 12 + 1):
+        shown = needle[start : start + 12]
+        found = ocr.findings(f"Created by the import {shown} yesterday", [needle])
+        assert [gate for gate, _ in found] == ["7"], (start, shown)
+
+
+def test_each_piece_step_keeps_the_guarantee():
+    for size, step in (
+        (ocr.SHORT_CHUNK, ocr.SHORT_CHUNK_STEP),
+        (ocr.CHUNK, ocr.CHUNK_STEP),
+    ):
+        assert step <= ocr.allowed_edits(size) + 1, (size, step)
+    assert ocr.allowed_edits(12) == 3 and ocr.allowed_edits(24) == 7
+    assert contract.MIN_NEEDLE_CHARS <= ocr.SHORT_CHUNK <= ocr.CHUNK
+
+
+def test_the_fast_match_gives_the_same_answer_as_the_full_one():
+    rng = random.Random(77)
+    for _ in range(600):
+        needle = "".join(rng.choice("abcdef") for _ in range(rng.randint(8, 40)))
+        text = "".join(rng.choice("abcdefgh") for _ in range(rng.randint(0, 120)))
+        if rng.random() < 0.5 and len(needle) > 3:
+            at = rng.randint(0, len(text))
+            cut = needle[rng.randint(0, 3) : len(needle) - rng.randint(0, 3)]
+            text = text[:at] + cut + text[at:]
+        full = ocr.needle_similarity(needle, text)
+        fast = ocr.needle_match(needle, text)
+        if full >= ocr.NEEDLE_THRESHOLD:
+            assert fast == pytest.approx(full), (needle, text)
+        else:
+            assert fast is None, (needle, text)
+
+
+def test_short_pieces_do_not_match_ordinary_dashboard_text():
+    rng = random.Random(1077)
+    alphabet = "ABCDEFGHJKMNPQRSTUVWXYZ0123456789abcdef"
+    needles = [
+        "".join(rng.choice(alphabet) for _ in range(rng.randint(8, 64)))
+        for _ in range(300)
+    ] + [
+        "Example-Pass-9921!",
+        "eptk_demo_teststore_" + "a1b2c3d4" * 4,
+        "local-only-sample-" + "f0e1d2c3" * 4,
+    ]
+    assert ocr.findings(DASHBOARD_TEXT, needles) == []
+
+
+@pytest.mark.regression
+def test_an_empty_needle_is_refused_not_divided_by():
+    with pytest.raises(ValueError, match="empty needle"):
+        ocr.chunks("")
+
+
+@pytest.mark.regression
+def test_the_scan_refuses_a_needle_too_short_once_normalised(tmp_path, monkeypatch):
+    """Before, ``--------`` reached the match and divided by zero."""
+    fake_video(monkeypatch, ["a" * 32])
+    with pytest.raises(Refused, match=r"needles \[2\] are under 8 characters"):
+        ocr.scan(
+            tmp_path / "v.mp4",
+            1,
+            [NEEDLE, "--------"],
+            [reader_by_frame({0: "Experiments"})],
+            workdir(tmp_path),
+            lambda: None,
+        )
+
+
+# --- The scan checks the frames it is given ---------------------------------------------------------
+
+
+def fake_video(monkeypatch, sums, extract=None):
+    """A video whose decoded checksums are ``sums``; frames extract as files named for their index."""
+    monkeypatch.setattr(probe, "framemd5", lambda video: list(sums))
+
+    def default_extract(video, indices, out_dir, **kwargs):
+        out_dir.mkdir(parents=True, exist_ok=True)
+        paths = []
+        for index in sorted(set(indices)):
+            path = out_dir / f"frame-{index:06d}.png"
+            path.write_bytes(b"png")
+            paths.append(path)
+        return paths
+
+    monkeypatch.setattr(encode, "extract_frames", extract or default_extract)
+
+
+def reader_by_frame(texts):
+    """An engine that reads each extracted frame's text from ``texts`` by frame index."""
+    return FakeEngine(
+        "vision",
+        lambda paths: {p: texts.get(int(p.stem.split("-")[1]), "") for p in paths},
+    )
+
+
+def test_the_scan_finds_a_needle_in_one_frame(tmp_path, monkeypatch):
+    fake_video(monkeypatch, ["a" * 32, "b" * 32, "b" * 32])
+    engine = reader_by_frame({1: f"One-time password {NEEDLE}"})
+    with pytest.raises(Refused) as caught:
+        ocr.scan(
+            tmp_path / "v.mp4", 3, [NEEDLE], [engine], workdir(tmp_path), lambda: None
+        )
+    assert "frame 1 (0.03 s): needle 1 of 1 at 1.00, read by vision" in str(
+        caught.value
+    )
+    assert not (tmp_path / "ocr" / "batch-000").exists()
+
+
+def test_a_decoded_frame_count_that_is_not_the_video_s_is_refused(
+    tmp_path, monkeypatch
+):
+    fake_video(monkeypatch, ["a" * 32] * 1709)
+    with pytest.raises(Refused, match="decoded 1709 frames, expected 1710"):
+        ocr.scan(
+            tmp_path / "v.mp4",
+            1710,
+            [NEEDLE],
+            [reader_by_frame({})],
+            workdir(tmp_path),
+            lambda: None,
+        )
+
+
+@pytest.mark.regression
+def test_zero_frames_is_never_a_clean_scan(tmp_path, monkeypatch):
+    fake_video(monkeypatch, [])
+    with pytest.raises(Refused, match="decoded 0 frames, expected 0"):
+        ocr.scan(
+            tmp_path / "v.mp4",
+            0,
+            [NEEDLE],
+            [reader_by_frame({})],
+            workdir(tmp_path),
+            lambda: None,
+        )
+
+
+@pytest.mark.regression
+def test_an_extraction_that_returns_the_wrong_frames_is_refused(tmp_path, monkeypatch):
+    """Frame 1 holds the needle, but the extraction hands back frame 0 twice.
+
+    Before the scan checked what it was given, frame 1 was never read and the
+    scan passed.
+    """
+
+    def duplicate(video, indices, out_dir, **kwargs):
+        out_dir.mkdir(parents=True, exist_ok=True)
+        path = out_dir / "frame-000000.png"
+        path.write_bytes(b"png")
+        return [path for _ in sorted(set(indices))]
+
+    fake_video(monkeypatch, ["a" * 32, "b" * 32], duplicate)
+    engine = reader_by_frame({1: f"One-time password {NEEDLE}"})
+    with pytest.raises(Refused, match="extracted 1 distinct frames of the 2 asked for"):
+        ocr.scan(
+            tmp_path / "v.mp4", 2, [NEEDLE], [engine], workdir(tmp_path), lambda: None
+        )
+
+
+# --- The faint canary ---------------------------------------------------------------------------------
+
+
+class Canary:
+    """Draws the canary page as text; ``reader(faint=...)`` reads it back with or without the faint line."""
+
+    def __init__(self):
+        self.lines = {}
+
+    def draw(self, needle, key, faint, path):
+        self.lines = {
+            "dark": f"One-time password {needle}\nX-API-Key {key}",
+            "faint": f"Last edited by {faint}",
+        }
+        path.write_bytes(b"png")
+
+    def reader(self, *, faint):
+        def read(paths):
+            text = self.lines["dark"] + ("\n" + self.lines["faint"] if faint else "")
+            return dict.fromkeys(paths, text)
+
+        return read
+
+
+def test_the_faint_canary_is_the_faintest_dashboard_style_or_fainter():
+    assert templates.FAINT_CANARY_PX == 13
+    assert templates.FAINT_CANARY_COLOUR == "#94A3B8"
+    page = templates.canary_html("CANARY-AAAA", "eptk_bbbb", "FAINT-CCCC")
+    assert (
+        ".faint{font-size:13px;color:#94A3B8;" in page
+        and '<div class="faint">Last edited by FAINT-CCCC</div>' in page
+    )
+
+
+@pytest.mark.regression
+def test_the_self_test_refuses_when_no_engine_reads_the_faint_canary(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setattr(encode, "png_to_h264_and_back", lambda png, work: png)
+    canary = Canary()
+    engines = [
+        FakeEngine("vision", canary.reader(faint=False)),
+        FakeEngine("tesseract", canary.reader(faint=False)),
+    ]
+    with pytest.raises(Refused) as caught:
+        ocr.self_test(engines, canary.draw, workdir(tmp_path))
+    text = str(caught.value)
+    assert (
+        "OCR self-test: no engine read the faint canary (13 px #94A3B8: vision 0."
+        in text
+    )
+    assert "scan not run" in text
+    assert not (tmp_path / "canary").exists()
+
+
+def test_one_engine_reading_the_faint_canary_is_enough(tmp_path, monkeypatch):
+    monkeypatch.setattr(encode, "png_to_h264_and_back", lambda png, work: png)
+    canary = Canary()
+    engines = [
+        FakeEngine("vision", canary.reader(faint=False)),
+        FakeEngine("tesseract", canary.reader(faint=True)),
+    ]
+    result = ocr.self_test(engines, canary.draw, workdir(tmp_path))
+    assert result["canary"] == {"vision": 1.0, "tesseract": 1.0}
+    assert result["faint"]["tesseract"] == 1.0
+    assert result["faint"]["vision"] < ocr.NEEDLE_THRESHOLD

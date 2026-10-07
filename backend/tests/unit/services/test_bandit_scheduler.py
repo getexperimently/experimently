@@ -574,9 +574,7 @@ class TestBanditSchedulerStatsFallback:
         message it was checking for came from the seam module's own logger,
         so it could not fail. The seam module no longer logs at all -- it is
         a registry lookup -- so the scheduler's logger is the only one on this
-        path, and patching it is the whole check. (``caplog`` cannot be used
-        here: ``backend/tests/unit/conftest.py`` replaces ``logging.getLogger``
-        for every unit test.)
+        path, and patching it is the whole check.
         """
         from backend.app.core import optional_modules
 

@@ -27,7 +27,7 @@ packaging==26.3
 pluggy==1.6.0
 Pygments==2.21.0
 pyrate-limiter==4.5.0
-pytest==9.0.3
+pytest==9.1.1
 PyYAML==6.0.3
 requests==2.34.2
 rich==15.0.0

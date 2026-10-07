@@ -220,11 +220,17 @@ def extract_frames(
     scale: Optional[str] = None,
     ext: str = "png",
 ) -> List[Path]:
-    """Decode the given output frames (0-based) to images, in the order given (sorted, unique)."""
+    """Decode the given output frames (0-based) to images, in the order given (sorted, unique).
+
+    ffmpeg numbers what it writes ``raw-NNNNNN``; each is then renamed for
+    the frame it is, so nothing is left to delete here.
+    """
     wanted = sorted(set(indices))
     if not wanted:
         return []
     out_dir.mkdir(parents=True, exist_ok=True)
+    if any(out_dir.glob(f"raw-*.{ext}")):
+        raise RuntimeError(f"{out_dir} already holds extracted frames")
     select = "+".join(f"eq(n,{i})" for i in wanted)
     filters = [f"select='{select}'"]
     if crop_band:
@@ -246,9 +252,7 @@ def extract_frames(
     ]
     if ext == "jpg":
         argv += ["-q:v", "3"]
-    raw = out_dir / "raw"
-    raw.mkdir()
-    argv.append(str(raw / f"%06d.{ext}"))
+    argv.append(str(out_dir / f"raw-%06d.{ext}"))
     result = subprocess.run(
         argv, capture_output=True, text=True, check=False, env=child_env()
     )
@@ -256,7 +260,7 @@ def extract_frames(
         raise RuntimeError(
             f"ffmpeg frame extraction exited {result.returncode}: {result.stderr.strip()[:300]}"
         )
-    written = sorted(raw.iterdir())
+    written = sorted(out_dir.glob(f"raw-*.{ext}"))
     if len(written) != len(wanted):
         raise RuntimeError(
             f"ffmpeg wrote {len(written)} frames for {len(wanted)} requested"
@@ -266,5 +270,4 @@ def extract_frames(
         target = out_dir / f"frame-{index:06d}.{ext}"
         path.rename(target)
         renamed.append(target)
-    raw.rmdir()
     return renamed

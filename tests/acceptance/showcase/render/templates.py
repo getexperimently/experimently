@@ -35,6 +35,14 @@ CARD_BACKGROUND = "#0F172A"
 CARD_COLOUR = "#FFFFFF"
 CARD_MUTED = "#CBD5E1"
 
+#: The OCR canary's faint line: smaller and fainter than any text the
+#: dashboard draws at the capture's zoom of 4/3. Measured in frontend/src: its
+#: faintest text is slate-400 (#94A3B8) or gray-400 (#9CA3AF), 2.56 and 2.54 to
+#: 1 on white, at 12 px (``text-xs``) at the smallest, so 16 px in the frame;
+#: its smallest text is 11 px, 14.7 px in the frame.
+FAINT_CANARY_PX = 13
+FAINT_CANARY_COLOUR = "#94A3B8"
+
 FONT_STACK = '-apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif'
 MONO_STACK = 'ui-monospace, Menlo, "SF Mono", Consolas, monospace'
 
@@ -130,17 +138,20 @@ def card_texts(title: str, version: str) -> Sequence[str]:
     )
 
 
-def canary_html(needle: str, key_like: str) -> str:
+def canary_html(needle: str, key_like: str, faint: str) -> str:
     """A page that draws an OCR canary in the sizes a dashboard uses.
 
-    The canary values are made up for each run; the self-test passes only if
-    every OCR engine reads them back through the same encode the video gets.
+    The canary values are made up for each run. The self-test passes only if
+    every OCR engine reads the dark value and key back through the same
+    encode the video gets, and at least one reads the faint value
+    (``FAINT_CANARY_PX`` px ``FAINT_CANARY_COLOUR``).
     """
     css = (
         ".wrap{padding:96px 120px;color:#0F172A}"
         "h1{font-size:30px;margin:0 0 32px}"
         f".mono{{font-family:{MONO_STACK};font-size:14px;margin:16px 0}}"
         ".small{font-size:16px;margin:16px 0}"
+        f".faint{{font-size:{FAINT_CANARY_PX}px;color:{FAINT_CANARY_COLOUR};margin:16px 0}}"
         "table{border-collapse:collapse;font-size:15px;margin-top:40px}"
         "td{border-bottom:1px solid #E2E8F0;padding:10px 24px 10px 0}"
     )
@@ -150,6 +161,7 @@ def canary_html(needle: str, key_like: str) -> str:
         f'<div class="small">One-time password: {html.escape(needle)}</div>'
         "<table><tr><td>Homepage hero copy test</td><td>Active</td><td>2 variants</td></tr>"
         "<tr><td>Checkout button colour</td><td>Draft</td><td>3 variants</td></tr></table>"
+        f'<div class="faint">Last edited by {html.escape(faint)}</div>'
         "</div>"
     )
     return _page(contract.OUT_W, contract.OUT_H, "#FFFFFF", body, css)
