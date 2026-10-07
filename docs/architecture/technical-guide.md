@@ -6,7 +6,7 @@ Detailed implementation reference for Experimently. Covers architecture, data mo
 
 ## System Architecture
 
-```
+```text
 ┌─────────────────────────────────────────────────────────────────┐
 │                        Client Layer                             │
 │  ┌─────────────┐  ┌──────────────┐  ┌──────────────────────┐  │
@@ -47,13 +47,13 @@ Detailed implementation reference for Experimently. Covers architecture, data mo
 
 ### Core Entities
 
-```
+```text
 Experiment
 ├── id (UUID PK)
 ├── key (unique string) ← used in tracking API
 ├── name, description, hypothesis
-├── status: DRAFT | ACTIVE | PAUSED | COMPLETED
-├── type: A_B | MULTIVARIATE | FEATURE_FLAG
+├── status: draft | active | paused | completed | archived
+├── experiment_type: a_b | mv | split_url | bandit
 ├── owner_id → User
 ├── start_date, end_date (for scheduling)
 ├── targeting_rules (JSON)
@@ -122,19 +122,26 @@ User
 - Validated against AWS Cognito (production) or local DB (development)
 - Expires per `ACCESS_TOKEN_EXPIRE_MINUTES`
 
-Get token:
+Get a token. The login takes the account's `email`, not a username; on the Quick Start
+stack the administrator is `admin@demo.com`:
 
-```bash
+```{.bash exec}
 TOKEN=$(curl -s -X POST http://localhost:8000/api/v1/auth/login \
-  -d '{"username":"admin","password":"admin"}' \
+  -d '{"email":"admin@demo.com","password":"Demo1234!"}' \
   -H "Content-Type: application/json" | jq -r '.access_token')
 ```
 
-Use token:
+Use the token. The experiments collection's URL ends with a slash: without it the API
+answers `307 Temporary Redirect`, which `curl` does not follow, so nothing is printed.
 
-```bash
-curl -H "Authorization: Bearer $TOKEN" http://localhost:8000/api/v1/experiments
+```{.bash exec}
+curl -s -H "Authorization: Bearer $TOKEN" http://localhost:8000/api/v1/experiments/ | jq -r '.items[].name'
 ```
+<!-- expect: Checkout Button Color -->
+
+On the Quick Start stack it prints the names of its three demo experiments, among them
+`Checkout Button Color`. If it prints an error from `jq` instead, the login failed and
+`$TOKEN` holds no token.
 
 **2. API Key**
 - Used by SDKs and server-to-server tracking calls
@@ -142,11 +149,34 @@ curl -H "Authorization: Bearer $TOKEN" http://localhost:8000/api/v1/experiments
 - Passed via `X-API-Key` header
 - Required for all `/api/v1/tracking/*` endpoints
 
-```bash
-curl -H "X-API-Key: your-key" \
-  -X POST http://localhost:8000/api/v1/tracking/assign \
-  -d '{"user_id":"u1","experiment_key":"my-exp","context":{}}'
+An administrator or developer creates a key with the token above (see
+[API Keys](../security/api-keys.md)); the full key is shown only in this response:
+
+```{.bash exec}
+KEY=$(curl -s -X POST http://localhost:8000/api/v1/api-keys \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"name": "Server-side tracking"}' | jq -r .key)
+
+printf '%s\n' "${KEY:0:5}"
 ```
+<!-- expect: eptk_ -->
+
+It prints `eptk_`, the start of every key. Then assign a user to the Quick Start stack's
+active `checkout_button_color` experiment with it. The body is JSON, so the request says so
+with `Content-Type`:
+
+```{.bash exec}
+curl -s -H "X-API-Key: $KEY" \
+  -H "Content-Type: application/json" \
+  -X POST http://localhost:8000/api/v1/tracking/assign \
+  -d '{"user_id":"u1","experiment_key":"checkout_button_color","context":{}}' | jq '{variant_name, assigned}'
+```
+<!-- expect: "variant_name": "green_button" -->
+<!-- expect: "assigned": true -->
+
+User `u1` is assigned the `green_button` variant (`"assigned": true`), and keeps it on
+every later call.
 
 ### Role-Based Access Control (RBAC)
 
@@ -274,7 +304,7 @@ When a user calls `/api/v1/tracking/assign`:
    bandit experiment routes a new user by its current weights instead
 5. **Persistence**: save the assignment to the `assignments` table
 
-```
+```text
 User "user-123" + Experiment key "homepage-test"
      ↓
 Hash → bucket 84
@@ -322,7 +352,7 @@ The analytics results engine (`backend/app/services/analysis_service.py`) comput
 
 ### REST Endpoints
 
-```
+```text
 GET  /api/v1/results/{id}             # Full results with p-values, CIs, effect sizes
 GET  /api/v1/results/{id}/daily       # Daily time-series per variant
 GET  /api/v1/results/{id}/sample-size # Sample size adequacy + power
@@ -333,7 +363,7 @@ POST /api/v1/results/{id}/invalidate-cache
 
 Required sample size per variant:
 
-```
+```text
 n = 2 * ((z_α/2 + z_β)² * p(1-p)) / δ²
 
 Where:
@@ -456,7 +486,7 @@ Recomputes variant weights for multi-armed bandit experiments and persists them 
 
 Invalidate results cache for an experiment:
 
-```bash
+```text
 POST /api/v1/results/{id}/invalidate-cache
 ```
 
@@ -500,26 +530,34 @@ experimentation.audit_logs       -- Change audit trail
 
 Step 1: Modify the model in `backend/app/models/`.
 
-Step 2: Generate the migration:
+Step 2: Generate the migration, from the repository root of a development checkout. A
+full checkout has two heads, the core chain and the `modules` branch, so first list them:
 
-```bash
-cd /path/to/project
+```{.bash skip reason="dev: runs alembic in a development checkout with its venv"}
 source venv/bin/activate
 export POSTGRES_DB=experimentation POSTGRES_SCHEMA=experimentation
-python -m alembic -c backend/app/db/alembic.ini revision --autogenerate -m "add feature column"
+python -m alembic -c backend/app/db/alembic.ini heads
+```
+
+Then name the head the new revision extends: the core head's id for a change to a model in
+`backend/app/models/`, or `modules@head` for a module's. Without `--head` the command fails
+with "Multiple heads are present".
+
+```{.bash skip reason="fragment: replace <core head id> with the core head that alembic heads printed"}
+python -m alembic -c backend/app/db/alembic.ini revision --autogenerate --head <core head id> -m "add feature column"
 ```
 
 Step 3: Review the generated file, `backend/app/db/migrations/versions/xxxx_add_feature_column.py`. Verify its `down_revision`, the column types and the schema prefix.
 
 Step 4: Apply:
 
-```bash
+```{.bash skip reason="dev: runs alembic in a development checkout with its venv"}
 python -m alembic -c backend/app/db/alembic.ini upgrade heads
 ```
 
 Step 5: Verify:
 
-```bash
+```{.bash skip reason="dev: runs alembic in a development checkout with its venv"}
 python -m alembic -c backend/app/db/alembic.ini current
 ```
 
@@ -661,7 +699,7 @@ POST /api/v1/rollout-schedules/SCHEDULE_ID/activate
 
 The background scheduler automatically advances stages at the specified times. Stage 3 requires manual advancement:
 
-```bash
+```text
 POST /api/v1/rollout-schedules/stages/STAGE3_ID/advance
 ```
 

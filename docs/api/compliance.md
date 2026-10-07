@@ -59,6 +59,45 @@ answers `401`.
 
 ---
 
+## Try it
+
+Run these in one terminal, in order, against the full profile
+([Modules and profiles](../getting-started/modules.md)), which serves the report and
+the export. Each step uses the shell variables set by the ones before it.
+
+Sign in as the stack's administrator, which saves a token in `$TOKEN`:
+
+```{.bash exec}
+TOKEN=$(curl -s -X POST localhost:8000/api/v1/auth/login \
+  -H 'content-type: application/json' \
+  -d '{"email":"admin@demo.com","password":"Demo1234!"}' | jq -r .access_token)
+
+curl -s localhost:8000/api/v1/auth/me -H "Authorization: Bearer $TOKEN" | jq .role
+```
+<!-- expect: "ADMIN" -->
+
+It prints `"ADMIN"`. If it prints `null`, the sign-in failed and `$TOKEN` holds no token.
+
+A new stack's trail is empty, so make a change for it to record. This changes the
+description of the Quick Start stack's **Checkout Button Color** experiment:
+
+```{.bash exec}
+EXP_ID=$(curl -s "localhost:8000/api/v1/experiments/?search=Checkout%20Button%20Color" \
+  -H "Authorization: Bearer $TOKEN" | jq -r '.items[0].id')
+
+curl -s -X PUT "localhost:8000/api/v1/experiments/$EXP_ID" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H 'content-type: application/json' \
+  -d '{"description": "Blue against green for the checkout button"}' | jq -r .name
+```
+<!-- expect: Checkout Button Color -->
+
+It prints `Checkout Button Color`, and the trail now holds one `UPDATE` of an experiment.
+The experiment is active, so only a superuser, such as this administrator, may change its
+description.
+
+---
+
 ## Endpoints
 
 ### List Audit Events
@@ -84,10 +123,14 @@ Events are listed most recent first.
 
 **Example Request**
 
-```bash
+```{.bash exec}
 curl -s "localhost:8000/api/v1/compliance/audit-events?action=UPDATE&resource_type=experiment&limit=20" \
-  -H "Authorization: Bearer $TOKEN"
+  -H "Authorization: Bearer $TOKEN" | jq .
 ```
+<!-- expect: "action": "UPDATE" -->
+<!-- expect: "resource_type": "experiment" -->
+<!-- expect: "outcome": "SUCCESS" -->
+<!-- expect: "total": 1 -->
 
 **Response: 200 OK**
 
@@ -113,13 +156,15 @@ curl -s "localhost:8000/api/v1/compliance/audit-events?action=UPDATE&resource_ty
       "retention_expires_at": "2027-10-02T07:59:23.446828Z"
     }
   ],
-  "total": 2,
+  "total": 1,
   "page": 1,
   "limit": 20
 }
 ```
 
-`hmac_signature` is `null` for an event written without the compliance module.
+It lists the one change made above: `"action": "UPDATE"`, `"resource_type": "experiment"`,
+`"outcome": "SUCCESS"` and `"total": 1`. `hmac_signature` is `null` for an event written
+without the compliance module.
 
 ---
 
@@ -134,10 +179,14 @@ any other value answers `400`. `start_time` and `end_time` (ISO 8601) set the pe
 default it ends now and starts `AUDIT_RETENTION_DAYS_SOC2` (365) or
 `AUDIT_RETENTION_DAYS_ISO27001` (730) days earlier.
 
-```bash
+```{.bash exec}
 curl -s localhost:8000/api/v1/compliance/reports/soc2 \
-  -H "Authorization: Bearer $TOKEN"
+  -H "Authorization: Bearer $TOKEN" | jq .
 ```
+<!-- expect: "standard": "soc2" -->
+<!-- expect: "total_events": 1 -->
+<!-- expect: "tampered_events": 0 -->
+<!-- expect: "signing_enabled": true -->
 
 **Response: 200 OK**
 
@@ -147,11 +196,11 @@ curl -s localhost:8000/api/v1/compliance/reports/soc2 \
   "period_start": "2025-10-02T07:59:24.089800Z",
   "period_end": "2026-10-02T07:59:24.089800Z",
   "generated_at": "2026-10-02T07:59:24.095773Z",
-  "total_events": 5,
-  "events_by_action": {"UPDATE": 3, "CREATE": 1, "DELETE": 1},
-  "events_by_outcome": {"SUCCESS": 5},
-  "events_by_resource_type": {"experiment": 2, "feature_flag": 3},
-  "integrity_checks": 5,
+  "total_events": 1,
+  "events_by_action": {"UPDATE": 1},
+  "events_by_outcome": {"SUCCESS": 1},
+  "events_by_resource_type": {"experiment": 1},
+  "integrity_checks": 1,
   "tampered_events": 0,
   "integrity_pass_rate": 1.0,
   "unsigned_events": 0,
@@ -160,6 +209,8 @@ curl -s localhost:8000/api/v1/compliance/reports/soc2 \
 }
 ```
 
+On the stack above it counts the one event (`"total_events": 1`), finds its signature
+intact (`"tampered_events": 0`) and says new events are signed (`"signing_enabled": true`).
 The report counts the events in the period and checks each signature:
 
 | Field | Meaning |
@@ -186,11 +237,18 @@ event, oldest first, with the fields `id`, `timestamp`, `action`, `resource_type
 `resource_id`, `actor_id`, `outcome` and `hmac_signature`. `old_value` and `new_value` are
 not included.
 
-```bash
+```{.bash exec}
 curl -s "localhost:8000/api/v1/compliance/export?format=csv&start_time=2026-09-01T00:00:00Z" \
   -H "Authorization: Bearer $TOKEN" \
   --output audit_export.csv
+
+cut -d, -f3,4 audit_export.csv
 ```
+<!-- expect: action,resource_type -->
+<!-- expect: UPDATE,experiment -->
+
+`curl` saves the download as `audit_export.csv`, and `cut` prints its `action` and
+`resource_type` columns: the header, then `UPDATE,experiment`.
 
 ---
 

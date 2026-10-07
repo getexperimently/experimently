@@ -156,9 +156,10 @@ Env: `EXPERIMENTLY_API_URL` (default `http://localhost:8000`), `EXPERIMENTLY_API
 still needs the Flutter SDK because the package depends on `flutter`/`shared_preferences`, so use
 Flutter's bundled `dart` and run `flutter pub get` first.
 
-Verified against a live backend: **not yet (toolchain unavailable — no dart/flutter on the
-development machine)**. Run `python tests/sdk-contract/live/run_live_contract.py --sdk flutter --strict`
-on a machine with the Flutter SDK.
+CI does not run this SDK's contract smoke against a real API: `flutter` is not in the
+`sdks:` list of the SDK Live Contract job in [pr-qa-gate.yml](https://github.com/getexperimently/experimently/blob/main/.github/workflows/pr-qa-gate.yml). Run
+`python tests/sdk-contract/live/run_live_contract.py --sdk flutter --strict` on a machine with the
+Flutter SDK.
 
 ## Running Tests
 

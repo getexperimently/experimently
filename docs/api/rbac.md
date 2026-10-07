@@ -24,7 +24,7 @@ The RBAC (Role-Based Access Control) module stores three layers of permissions f
 
 `GET /api/v1/rbac/users/{user_id}/permissions` merges all three layers to build the set it shows. No permission check uses this set (see the note above):
 
-```
+```text
 effective_permissions(user) =
     ROLE_PERMISSIONS[user.base_role]
     ∪ union(custom_role.permissions for each custom_role assigned to user)
@@ -47,9 +47,40 @@ These rules describe the set the endpoint shows:
 
 All RBAC endpoints require a valid bearer token in the `Authorization` header:
 
-```
+```text
 Authorization: Bearer <token>
 ```
+
+The examples on this page run in one terminal, in order, against the full profile
+([Modules and profiles](../getting-started/modules.md)). Each uses the shell variables set
+by the ones before it. Sign in as the stack's administrator, which saves a token in
+`$TOKEN`:
+
+```{.bash exec}
+TOKEN=$(curl -s -X POST http://localhost:8000/api/v1/auth/login \
+  -H 'content-type: application/json' \
+  -d '{"email":"admin@demo.com","password":"Demo1234!"}' | jq -r .access_token)
+
+curl -s http://localhost:8000/api/v1/auth/me -H "Authorization: Bearer $TOKEN" | jq .role
+```
+<!-- expect: "ADMIN" -->
+
+It prints `"ADMIN"`. If it prints `null`, the sign-in failed and `$TOKEN` holds no token.
+
+The examples give roles and grants to the stack's demo analyst, `analyst@demo.com`. This
+saves the analyst's user id in `$ANALYST_ID`:
+
+```{.bash exec}
+ANALYST=$(curl -s "http://localhost:8000/api/v1/admin/users?search=analyst@demo.com" \
+  -H "Authorization: Bearer $TOKEN" | jq '.items[0]')
+ANALYST_ID=$(jq -r .id <<<"$ANALYST")
+
+jq '{email, role}' <<<"$ANALYST"
+```
+<!-- expect: "email": "analyst@demo.com" -->
+<!-- expect: "role": "ANALYST" -->
+
+It prints the analyst's `email` and `"role": "ANALYST"`.
 
 ---
 
@@ -57,7 +88,7 @@ Authorization: Bearer <token>
 
 ### List Custom Roles
 
-```
+```text
 GET /api/v1/rbac/roles
 ```
 
@@ -67,7 +98,7 @@ Returns all custom roles. Any authenticated user can call this.
 
 | Parameter       | Type    | Default | Description                                          |
 |-----------------|---------|---------|------------------------------------------------------|
-| `include_system`| boolean | `true`  | When `false`, excludes the 4 built-in system roles. |
+| `include_system`| boolean | `true`  | When `false`, leaves out roles marked `is_system_role`. Nothing in this release creates one, so both forms list the custom roles you created. |
 
 **Response 200**
 
@@ -90,16 +121,19 @@ Returns all custom roles. Any authenticated user can call this.
 
 **Example**
 
-```bash
-curl -H "Authorization: Bearer $TOKEN" \
+```{.bash exec}
+curl -s -H "Authorization: Bearer $TOKEN" \
   "http://localhost:8000/api/v1/rbac/roles?include_system=false"
 ```
+<!-- expect: [] -->
+
+On a new deployment it prints `[]`: there are no custom roles until you create one.
 
 ---
 
 ### Create Custom Role
 
-```
+```text
 POST /api/v1/rbac/roles
 ```
 
@@ -152,23 +186,32 @@ Creates a new custom role. **ADMIN only.**
 
 **Example**
 
-```bash
-curl -X POST http://localhost:8000/api/v1/rbac/roles \
+This creates the `data-scientist` role that the examples below assign:
+
+```{.bash exec}
+curl -s -X POST http://localhost:8000/api/v1/rbac/roles \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
-    "name": "read-only-experiments",
+    "name": "data-scientist",
+    "description": "Read access to experiments plus export",
     "permissions": [
-      {"resource": "experiment", "actions": ["read", "list"]}
+      {"resource": "experiment", "actions": ["read", "list"]},
+      {"resource": "export", "actions": ["read"]}
     ]
-  }'
+  }' | jq '{name, is_system_role, user_count}'
 ```
+<!-- expect: "name": "data-scientist" -->
+<!-- expect: "is_system_role": false -->
+<!-- expect: "user_count": 0 -->
+
+It prints `"name": "data-scientist"`, `"is_system_role": false` and `"user_count": 0`.
 
 ---
 
 ### Get Custom Role
 
-```
+```text
 GET /api/v1/rbac/roles/{role_name}
 ```
 
@@ -201,7 +244,7 @@ Get details of a specific role. Any authenticated user can call this.
 
 ### Update Custom Role
 
-```
+```text
 PUT /api/v1/rbac/roles/{role_name}
 ```
 
@@ -229,7 +272,7 @@ Update a custom role's description or permission set. **ADMIN only.** System rol
 
 ### Delete Custom Role
 
-```
+```text
 DELETE /api/v1/rbac/roles/{role_name}
 ```
 
@@ -246,7 +289,7 @@ Delete a custom role. **ADMIN only.** System roles cannot be deleted.
 
 ### Assign Role to User
 
-```
+```text
 POST /api/v1/rbac/roles/assign
 ```
 
@@ -278,18 +321,25 @@ Assign a custom role to a user. **ADMIN only.** This operation is idempotent —
 
 **Example**
 
-```bash
-curl -X POST http://localhost:8000/api/v1/rbac/roles/assign \
+This assigns the `data-scientist` role created above to the analyst:
+
+```{.bash exec}
+curl -s -X POST http://localhost:8000/api/v1/rbac/roles/assign \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
-  -d '{"user_id": "abc123", "role_name": "data-scientist"}'
+  -d '{"user_id": "'"$ANALYST_ID"'", "role_name": "data-scientist", "reason": "Promoted to data science team"}' | jq .
 ```
+<!-- expect: "status": "assigned" -->
+<!-- expect: "role": "data-scientist" -->
+
+It prints `"status": "assigned"` and `"role": "data-scientist"`. The assignment is stored;
+the analyst can still do only what the `analyst` base role allows.
 
 ---
 
 ### Revoke Role from User
 
-```
+```text
 POST /api/v1/rbac/roles/revoke
 ```
 
@@ -319,7 +369,7 @@ Revoke a custom role from a user. **ADMIN only.**
 
 ### Get Effective Permissions
 
-```
+```text
 GET /api/v1/rbac/users/{user_id}/permissions
 ```
 
@@ -356,25 +406,41 @@ Note: actions within each resource are returned sorted alphabetically.
 
 **Example**
 
-View your own permissions:
+View your own permissions. `GET /api/v1/auth/me` gives your user id:
 
-```bash
-curl -H "Authorization: Bearer $TOKEN" \
-  "http://localhost:8000/api/v1/rbac/users/my-user-id/permissions"
+```{.bash exec}
+MY_ID=$(curl -s http://localhost:8000/api/v1/auth/me -H "Authorization: Bearer $TOKEN" | jq -r .id)
+
+curl -s -H "Authorization: Bearer $TOKEN" \
+  "http://localhost:8000/api/v1/rbac/users/$MY_ID/permissions" | jq '{base_role, custom_roles, is_superuser}'
 ```
+<!-- expect: "base_role": "admin" -->
+<!-- expect: "custom_roles": [] -->
+<!-- expect: "is_superuser": true -->
 
-Admin viewing another user's permissions:
+For the administrator it prints `"base_role": "admin"`, no custom roles and
+`"is_superuser": true`.
 
-```bash
-curl -H "Authorization: Bearer $ADMIN_TOKEN" \
-  "http://localhost:8000/api/v1/rbac/users/other-user-id/permissions"
+An admin viewing another user's permissions, here the analyst's:
+
+```{.bash exec}
+curl -s -H "Authorization: Bearer $TOKEN" \
+  "http://localhost:8000/api/v1/rbac/users/$ANALYST_ID/permissions" | jq '{base_role, custom_roles, export: .permissions.export}'
 ```
+<!-- expect: "base_role": "analyst" -->
+<!-- expect: "data-scientist" -->
+<!-- expect: "export": [ -->
+<!-- expect: "read" -->
+
+It prints `"base_role": "analyst"`, the stored `data-scientist` role, and `export: ["read"]`
+from that role in the set shown. The `analyst` base role holds no export permission, and
+it is still the only thing that decides what the analyst can do.
 
 ---
 
 ### Grant Direct Permission
 
-```
+```text
 POST /api/v1/rbac/users/{user_id}/grant
 ```
 
@@ -410,24 +476,35 @@ Grant a specific resource permission directly to a user, without assigning a rol
 
 **Example — Temporary permission with expiry**
 
-```bash
-curl -X POST "http://localhost:8000/api/v1/rbac/users/abc123/grant" \
-  -H "Authorization: Bearer $ADMIN_TOKEN" \
+`expires_at` must be in the future: a grant whose `expires_at` has already passed is
+stored, but Get Effective Permissions leaves it out from the start. This grants the
+analyst `report` access for a week from now:
+
+```{.bash exec}
+WEEK=$(jq -nr 'now + 7*86400 | todate')
+
+curl -s -X POST "http://localhost:8000/api/v1/rbac/users/$ANALYST_ID/grant" \
+  -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
-    "user_id": "abc123",
-    "resource": "export",
-    "actions": ["read"],
-    "reason": "One-week access for audit",
-    "expires_at": "2026-03-08T00:00:00Z"
-  }'
+    "user_id": "'"$ANALYST_ID"'",
+    "resource": "report",
+    "actions": ["create", "read"],
+    "reason": "One-week access for reporting",
+    "expires_at": "'"$WEEK"'"
+  }' | jq .
 ```
+<!-- expect: "status": "granted" -->
+<!-- expect: "resource": "report" -->
+
+It prints `"status": "granted"` and `"resource": "report"`. The grant is stored and shown;
+it changes nothing the analyst can do.
 
 ---
 
 ### Revoke Direct Permission
 
-```
+```text
 DELETE /api/v1/rbac/users/{user_id}/grant/{resource}
 ```
 
@@ -461,9 +538,9 @@ This defines and assigns a role for a user who should see experiments and result
 
 Step 1: Create the role:
 
-```bash
-curl -X POST http://localhost:8000/api/v1/rbac/roles \
-  -H "Authorization: Bearer $ADMIN_TOKEN" \
+```{.bash exec}
+curl -s -X POST http://localhost:8000/api/v1/rbac/roles \
+  -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
     "name": "read-only-experiments",
@@ -473,65 +550,86 @@ curl -X POST http://localhost:8000/api/v1/rbac/roles \
       {"resource": "report", "actions": ["read", "list"]},
       {"resource": "feature_flag", "actions": ["read", "list"]}
     ]
-  }'
+  }' | jq -r .name
 ```
+<!-- expect: read-only-experiments -->
 
-Step 2: Assign the role to a user:
+It prints `read-only-experiments`.
 
-```bash
-curl -X POST http://localhost:8000/api/v1/rbac/roles/assign \
-  -H "Authorization: Bearer $ADMIN_TOKEN" \
+Step 2: Assign the role to a user, here the analyst:
+
+```{.bash exec}
+curl -s -X POST http://localhost:8000/api/v1/rbac/roles/assign \
+  -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
-    "user_id": "the-user-uuid",
+    "user_id": "'"$ANALYST_ID"'",
     "role_name": "read-only-experiments",
     "reason": "Stakeholder who needs to monitor experiments"
-  }'
+  }' | jq -r .status
 ```
+<!-- expect: assigned -->
 
-Step 3: Verify the user's effective permissions:
+It prints `assigned`.
 
-```bash
-curl -H "Authorization: Bearer $ADMIN_TOKEN" \
-  "http://localhost:8000/api/v1/rbac/users/the-user-uuid/permissions"
+Step 3: Check that the assignment is stored, in the user's effective permissions:
+
+```{.bash exec}
+curl -s -H "Authorization: Bearer $TOKEN" \
+  "http://localhost:8000/api/v1/rbac/users/$ANALYST_ID/permissions" | jq -c .custom_roles
 ```
+<!-- expect: "read-only-experiments" -->
+
+It prints the analyst's stored custom roles, `["data-scientist","read-only-experiments"]`
+after the examples above. What the analyst can do is unchanged.
 
 ### Grant a Temporary Export Permission
 
 This records a week-long export grant for a data analyst without changing their role. The grant is stored and shown by Get Effective Permissions, but no permission check reads it: it does **not** let the analyst export anything their base role does not already allow ([#891](https://github.com/getexperimently/experimently/issues/891)). To let someone export today, give them a base role that holds the permission.
 
-```bash
-curl -X POST "http://localhost:8000/api/v1/rbac/users/analyst-uuid/grant" \
-  -H "Authorization: Bearer $ADMIN_TOKEN" \
+```{.bash exec}
+WEEK=$(jq -nr 'now + 7*86400 | todate')
+
+curl -s -X POST "http://localhost:8000/api/v1/rbac/users/$ANALYST_ID/grant" \
+  -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
-    "user_id": "analyst-uuid",
+    "user_id": "'"$ANALYST_ID"'",
     "resource": "export",
     "actions": ["read", "list"],
     "reason": "Q1 compliance audit access",
-    "expires_at": "2026-03-08T23:59:59Z"
-  }'
+    "expires_at": "'"$WEEK"'"
+  }' | jq -r .status
 ```
+<!-- expect: granted -->
 
-After `expires_at`, the direct grant is automatically excluded from the set Get Effective Permissions shows, without requiring manual cleanup.
+It prints `granted`. After `expires_at`, the direct grant is automatically excluded from the set Get Effective Permissions shows, without requiring manual cleanup.
 
 To revoke early:
 
-```bash
-curl -X DELETE \
-  "http://localhost:8000/api/v1/rbac/users/analyst-uuid/grant/export" \
-  -H "Authorization: Bearer $ADMIN_TOKEN"
+```{.bash exec}
+curl -s -X DELETE \
+  "http://localhost:8000/api/v1/rbac/users/$ANALYST_ID/grant/export" \
+  -H "Authorization: Bearer $TOKEN" | jq -c .
 ```
+<!-- expect: {"status":"revoked","count":1} -->
+
+It prints `{"status":"revoked","count":1}`: the one `export` grant is deleted.
 
 ### Show a User's Stored Permissions
 
 This shows the merged set. What the user can actually do is decided by their base role alone (see [Overview](#overview)).
 
-```bash
-curl -H "Authorization: Bearer $ADMIN_TOKEN" \
-  "http://localhost:8000/api/v1/rbac/users/some-user-uuid/permissions" | \
+```{.bash exec}
+curl -s -H "Authorization: Bearer $TOKEN" \
+  "http://localhost:8000/api/v1/rbac/users/$ANALYST_ID/permissions" | \
   python3 -m json.tool
 ```
+<!-- expect: "base_role": "analyst" -->
+<!-- expect: "custom_roles": [ -->
+
+It prints the whole set, beginning with the analyst's `user_id`, `username` and
+`"base_role": "analyst"`.
 
 ---
 

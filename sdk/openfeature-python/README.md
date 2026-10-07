@@ -104,8 +104,9 @@ Env: `EXPERIMENTLY_API_URL` (default `http://localhost:8000`), `EXPERIMENTLY_API
 `CONTRACT_USER_ID` (default random `smoke-<uuid>`). The flag is resolved through the OpenFeature
 API; assignment and tracking use `provider.client`.
 
-Verified against a live backend: **yes (2026-09-11)** — via
-`python tests/sdk-contract/live/run_live_contract.py --sdk openfeature-python --strict`.
+CI runs this SDK's contract smoke against a real API: `openfeature-python` is in the `sdks:` list of the
+SDK Live Contract job in [pr-qa-gate.yml](https://github.com/getexperimently/experimently/blob/main/.github/workflows/pr-qa-gate.yml). Run it
+with `python tests/sdk-contract/live/run_live_contract.py --sdk openfeature-python --strict`.
 
 ## Development
 
