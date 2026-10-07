@@ -1,0 +1,215 @@
+# The Go SDK's quick start (#1075): "Installation" and "Quick Start" followed as
+# a developer follows them, against the compose stack.
+#
+# Each sdk step makes a fresh directory and runs the page's own install
+# commands exactly as written and in the page's order, read from the page:
+# `go mod init example.com/quickstart`, then
+# `go get github.com/getexperimently/experimently/sdk/go`, from
+# proxy.golang.org. The runner never writes go.mod. `go version` must be the
+# line sdk/go/go.mod's `go` directive names (setup-go installs it from that
+# file), and the page's "Requires Go X+" must be that version. The module has
+# no tag yet, so go get resolves the head of main, a pseudo-version; the step
+# records it, refuses a `replace`, and compares the module it downloaded with
+# this checkout's sdk/go (a difference fails a branch run and is recorded on a
+# tag run, docs_runner/sdk.py). It then writes the page's Quick Start block, a
+# complete program, to main.go with only its placeholders replaced (the API's
+# address, the experiment's key, the flag's key and the user) and runs
+# `go run .`. The key is given as EXPERIMENTLY_API_KEY, the variable the block
+# reads. The program prints one line, `variant=<name> flag=<true|false>`.
+#
+# The oracle does not use the SDK (docs_runner/traffic.py). The variant must be
+# the one the documented assignment hash gives the user under the experiment's
+# key, and the flag answer the one the documented rollout hash gives at 50%:
+# sdk-go-reader-3 is bucket 25 of the flag (on) and treatment, sdk-go-reader-9
+# is bucket 70 (off) and control. The block tracks one purchase with the
+# experiment's key, so after each run the results count exactly one more
+# conversion, in that user's variant (read with use_cache=false: results are
+# cached for up to five minutes). Against an API that does not answer, the
+# block stops with an error, and the step fails.
+#
+# Not recorded: the journey makes an API key.
+guide: sdk/go.md
+stack: compose-dev
+profile: core
+video: false
+written: 2026-10-07
+steps:
+  - id: log-in
+    doc: quick-start
+    do:
+      api:
+        method: GET
+        path: /api/v1/auth/me
+        as: admin
+    expect:
+      status: 200
+      json:
+        role: ADMIN
+    fail: the demo administrator cannot sign in through the API
+  - id: create-experiment
+    doc: quick-start
+    do:
+      api:
+        method: POST
+        path: /api/v1/experiments/
+        as: admin
+        body:
+          name: Docs journey SDK Go
+          key: docs_journey_sdk_go
+          hypothesis: The Go quick start assigns, evaluates and tracks
+          experiment_type: a_b
+          variants:
+            - {name: control, is_control: true, traffic_allocation: 50}
+            - {name: treatment, is_control: false, traffic_allocation: 50}
+          metrics:
+            - name: Purchase
+              event_name: purchase
+              metric_type: conversion
+              is_primary: true
+    expect:
+      status: 201
+      json:
+        key: docs_journey_sdk_go
+        status: draft
+    save:
+      experiment-id:
+        path: id
+    fail: the experiment the quick start assigns cannot be created
+  - id: start-experiment
+    doc: quick-start
+    do:
+      api:
+        method: POST
+        path: /api/v1/experiments/{{experiment-id}}/start
+        as: admin
+    expect:
+      status: 200
+      json:
+        status: active
+    fail: the experiment cannot be started
+  - id: create-flag
+    doc: quick-start
+    do:
+      api:
+        method: POST
+        path: /api/v1/feature-flags/
+        as: admin
+        body:
+          key: docs_journey_sdk_go_flag
+          name: Docs journey SDK Go flag
+          rollout_percentage: 50
+          is_active: true
+    expect:
+      status: 201
+      json:
+        key: docs_journey_sdk_go_flag
+        status: active
+        rollout_percentage: 50
+    fail: the flag the quick start evaluates cannot be created on at 50%
+  - id: api-key
+    doc: configuration
+    do:
+      api:
+        method: POST
+        path: /api/v1/api-keys
+        as: admin
+        body:
+          name: Docs journey SDK Go
+    expect:
+      status: 201
+    save:
+      sdk-key:
+        path: key
+        secret: true
+    fail: no API key can be made for the SDK
+  - id: no-conversions-yet
+    doc: tracking-fan-out
+    do:
+      api:
+        method: GET
+        path: /api/v1/results/{{experiment-id}}?use_cache=false
+        as: admin
+    expect:
+      status: 200
+      json:
+        summary.total_users: 0
+        summary.total_conversions: 0
+    fail: the new experiment already has users or conversions
+  - id: quick-start-user-on
+    doc: quick-start
+    do:
+      sdk:
+        language: go
+        install: installation
+        snippet: quick-start
+        key: sdk-key
+        experiment: experiment-id
+        as: admin
+        flag: docs_journey_sdk_go_flag
+        rollout: 50
+        user: sdk-go-reader-3
+        replace:
+          http://localhost:8000: "{{api-url}}"
+          checkout_flow: "{{experiment}}"
+          new_search: "{{flag}}"
+          user-123: "{{user}}"
+        answers:
+          variant: [variant]
+          enabled: [flag]
+    fail: the module does not install as the page says, or is not this checkout's sdk/go, or the quick start fails, or answers other than the documented hashes for a user in treatment the flag is on for
+  - id: one-conversion
+    doc: tracking-fan-out
+    do:
+      api:
+        method: GET
+        path: /api/v1/results/{{experiment-id}}?use_cache=false
+        as: admin
+    expect:
+      status: 200
+      json:
+        summary.total_users: 1
+        summary.total_conversions: 1
+        metrics.0.variants.0.variant_name: control
+        metrics.0.variants.0.conversions: 0
+        metrics.0.variants.1.variant_name: treatment
+        metrics.0.variants.1.conversions: 1
+    fail: the quick start's purchase is not counted exactly once, in sdk-go-reader-3's variant
+  - id: quick-start-user-off
+    doc: quick-start
+    do:
+      sdk:
+        language: go
+        install: installation
+        snippet: quick-start
+        key: sdk-key
+        experiment: experiment-id
+        as: admin
+        flag: docs_journey_sdk_go_flag
+        rollout: 50
+        user: sdk-go-reader-9
+        replace:
+          http://localhost:8000: "{{api-url}}"
+          checkout_flow: "{{experiment}}"
+          new_search: "{{flag}}"
+          user-123: "{{user}}"
+        answers:
+          variant: [variant]
+          enabled: [flag]
+    fail: the module does not install as the page says, or is not this checkout's sdk/go, or the quick start fails, or answers other than the documented hashes for a user in control the flag is off for
+  - id: two-conversions
+    doc: tracking-fan-out
+    do:
+      api:
+        method: GET
+        path: /api/v1/results/{{experiment-id}}?use_cache=false
+        as: admin
+    expect:
+      status: 200
+      json:
+        summary.total_users: 2
+        summary.total_conversions: 2
+        metrics.0.variants.0.variant_name: control
+        metrics.0.variants.0.conversions: 1
+        metrics.0.variants.1.variant_name: treatment
+        metrics.0.variants.1.conversions: 1
+    fail: the second run's purchase is not counted exactly once, in sdk-go-reader-9's variant

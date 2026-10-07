@@ -10,59 +10,109 @@ the SDK caches the answer per user + key for a TTL. Nothing is bucketed locally.
 
 Source: `sdk/go`. Requires Go 1.21+.
 
+On macOS 26.2, Go 1.21 and 1.22 are not enough. Measured there on Apple silicon
+(arm64), 2026-10-07: the Quick Start below, built with go1.21.13, go1.22.0 or
+go1.22.12, does not start (`dyld: missing LC_UUID load command`); built with
+go1.23.0, it runs. On Linux, Go 1.21 works: this page's Installation and Quick
+Start are run as written with go1.21 against a running stack every night.
+
 ---
 
 ## Installation
 
+In a new directory, make a module for your program and add the SDK to it:
+
 ```bash
+go mod init example.com/quickstart
 go get github.com/getexperimently/experimently/sdk/go
 ```
 
-```go
-import exp "github.com/getexperimently/experimently/sdk/go"
-```
+Adding the SDK to a program that already has a `go.mod`? Run only the `go get`.
+
+The module has no tagged release yet, so `go get` resolves the head of the
+`main` branch and records it in your `go.mod` as a pseudo-version
+(`v0.0.0-<date>-<commit>`). Your builds stay on that version until you run
+`go get` again. To pin a particular commit, name it:
+`go get github.com/getexperimently/experimently/sdk/go@<commit>`, where
+`<commit>` is a commit hash from this repository.
 
 ---
 
 ## Quick Start
 
+Save this as `main.go` next to the `go.mod`, set `EXPERIMENTLY_API_KEY` to an
+API key, and run it with `go run .`. It needs an ACTIVE experiment with the key
+`checkout_flow` and a feature flag with the key `new_search`; put your own keys
+in their place.
+
 ```go
-client, err := exp.New(
-    exp.WithBaseURL("http://localhost:8000"),          // origin only; the SDK appends /api/v1/...
-    exp.WithAPIKey(os.Getenv("EXPERIMENTLY_API_KEY")), // sent as X-API-Key
-    exp.WithTimeout(5*time.Second),
+package main
+
+import (
+	"context"
+	"fmt"
+	"log"
+	"os"
+	"time"
+
+	exp "github.com/getexperimently/experimently/sdk/go"
 )
-if err != nil {
-    log.Fatal(err)
+
+func main() {
+	client, err := exp.New(
+		exp.WithBaseURL("http://localhost:8000"),          // origin only; the SDK appends /api/v1/...
+		exp.WithAPIKey(os.Getenv("EXPERIMENTLY_API_KEY")), // sent as X-API-Key
+		exp.WithTimeout(5*time.Second),
+	)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer client.Close()
+
+	ctx := context.Background()
+	user := &exp.User{ID: "user-123", Attributes: map[string]interface{}{"plan": "pro"}}
+
+	// 1. Assignment (POST /api/v1/tracking/assign: sticky per user and experiment).
+	// A nil assignment and an error: not ACTIVE (404), bad key (401), network error.
+	// A service would fall back to control here; the quick start stops.
+	a, err := client.GetAssignment(ctx, "checkout_flow", user)
+	if err != nil {
+		log.Fatalf("assignment: %v", err)
+	}
+
+	// 2. Feature flag (GET /api/v1/feature-flags/evaluate/new_search?user_id=user-123).
+	// On an error the result is disabled, so a service can use it as it is.
+	flag, err := client.EvaluateFlag(ctx, "new_search", user)
+	if err != nil {
+		log.Fatalf("flag: %v", err)
+	}
+
+	// 3. Track with a key: one POST /api/v1/tracking/track
+	err = client.Track(ctx, &exp.TrackEvent{
+		UserID: user.ID, EventName: "purchase", ExperimentKey: "checkout_flow",
+		Value: exp.Float64(49.99), Properties: map[string]interface{}{"sku": "pro-plan"},
+	})
+	if err != nil {
+		log.Fatalf("track: %v", err)
+	}
+
+	// 4. Track without a key: fanned out to every cached assignment and flag of this user
+	err = client.Track(ctx, &exp.TrackEvent{UserID: user.ID, EventName: "page_view"})
+	if err != nil {
+		log.Fatalf("track: %v", err)
+	}
+
+	fmt.Printf("variant=%s flag=%t\n", a.VariantName, flag.Enabled)
 }
-defer client.Close()
-
-ctx := context.Background()
-user := &exp.User{ID: "user-123", Attributes: map[string]interface{}{"plan": "pro"}}
-
-// 1. Assignment (POST /api/v1/tracking/assign — sticky, records the exposure)
-a, err := client.GetAssignment(ctx, "checkout_flow", user)
-if err != nil {
-    // nil assignment: not ACTIVE (404), bad key (401), network error ... fall back to control
-}
-headline := "Buy now"
-if a != nil && a.Configuration["headline"] != nil {
-    headline = a.Configuration["headline"].(string)
-}
-
-// 2. Feature flag (GET /api/v1/feature-flags/evaluate/new_search?user_id=user-123)
-flag, _ := client.EvaluateFlag(ctx, "new_search", user) // disabled result on failure
-if flag.Enabled { /* ... */ }
-
-// 3. Track with a key → one POST /api/v1/tracking/track
-_ = client.Track(ctx, &exp.TrackEvent{
-    UserID: user.ID, EventName: "purchase", ExperimentKey: "checkout_flow",
-    Value: exp.Float64(49.99), Properties: map[string]interface{}{"sku": "pro-plan"},
-})
-
-// 4. Track without a key → fanned out to every cached assignment + flag of this user
-_ = client.Track(ctx, &exp.TrackEvent{UserID: user.ID, EventName: "page_view"})
 ```
+
+It prints the user's variant and whether the flag is on for them, for example:
+
+```text
+variant=treatment flag=true
+```
+
+Errors go to stderr through `log`, and the program exits 1.
 
 ---
 

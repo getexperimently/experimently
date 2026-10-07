@@ -224,11 +224,11 @@ def _real_sdk_steps():
                 yield journey, page, step
 
 
-def test_both_sdk_journeys_exist_and_hold_two_users_each():
+def test_every_sdk_journey_exists_and_holds_two_users():
     seen = {}
     for journey, _, step in _real_sdk_steps():
         seen.setdefault(journey.guide, []).append(step.do.sdk.user)
-    assert sorted(seen) == ["sdk/javascript.md", "sdk/python.md"]
+    assert sorted(seen) == ["sdk/go.md", "sdk/javascript.md", "sdk/python.md"]
     assert all(len(users) == 2 for users in seen.values()), seen
 
 
@@ -237,6 +237,7 @@ def test_both_sdk_journeys_exist_and_hold_two_users_each():
     [
         ("sdk/javascript.md", "typescript", "npm", "@getexperimently/js-sdk", "0.1.0"),
         ("sdk/python.md", "python", "pip", "experimently", "0.1.0"),
+        ("sdk/go.md", "go", "go", "github.com/getexperimently/experimently/sdk/go", ""),
     ],
 )
 def test_the_pages_install_command_is_read_as_written(
