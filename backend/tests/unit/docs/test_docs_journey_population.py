@@ -25,8 +25,10 @@ from __future__ import annotations
 
 import copy
 import datetime
+import hashlib
 import json
 import math
+import re
 import sys
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
@@ -722,6 +724,207 @@ def test_a_planted_keep_is_refused(tmp_path, keep, expected):
     assert any(expected in p for p in refused.value.problems), refused.value.problems
 
 
+# ---------------------------------------------------------------------------
+# Flag evaluations
+# ---------------------------------------------------------------------------
+def test_the_flag_bucket_is_the_documented_md5_mod_100():
+    """docs/sdk/javascript.md: user-123 / my-flag is bucket 79 for a flag rollout."""
+    assert traffic.flag_bucket("user-123", "my-flag") == 79
+    # The whole digest, big-endian, mod 100; not the assignment hash's 69.
+    assert traffic.bucket("user-123", "my-flag") == 69
+    for n in range(1, 50):
+        user = traffic.user_id("u", n)
+        digest = hashlib.md5(f"{user}:f".encode(), usedforsecurity=False).digest()
+        assert traffic.flag_bucket(user, "f") == int.from_bytes(digest, "big") % 100
+
+
+class FakeFlags:
+    """The evaluate route, bucketing by the documented rollout hash."""
+
+    def __init__(self, rollout: int, *, state: str = "on", wrong: Optional[str] = None):
+        self.rollout = rollout
+        self.state = state
+        self.wrong = wrong
+        self.paths: List[str] = []
+
+    def __call__(self, method: str, path: str, body: Optional[Dict[str, Any]]):
+        assert method == "GET" and body is None
+        self.paths.append(path)
+        user = path.split("user_id=", 1)[1].split("&", 1)[0]
+        if self.state == "off":
+            return 200, {"enabled": False, "reason": "inactive"}
+        if self.state == "rule":
+            return 200, {"enabled": True, "reason": "targeting_rule"}
+        enabled = traffic.flag_bucket(user, "f") < self.rollout
+        if user == self.wrong:
+            enabled = not enabled
+        return 200, {"enabled": enabled, "reason": "rollout"}
+
+
+USERS = [traffic.user_id("u", n) for n in range(1, 201)]
+
+
+def test_evaluations_as_documented_have_no_problem():
+    api = FakeFlags(10)
+    outcome = traffic.evaluate(
+        api, flag_key="f", users=USERS, reason="rollout", rollout=10, query="&context=x"
+    )
+    counts = outcome.variants["f"]
+    assert outcome.problems == []
+    assert counts["evaluated"] == 200
+    assert counts["enabled"] == counts["expected_enabled"]
+    assert 0 < counts["enabled"] < 200
+    assert all(path.endswith("&context=x") for path in api.paths)
+    assert api.paths[0].startswith("/api/v1/feature-flags/evaluate/f?user_id=u-00001")
+
+
+def test_one_user_on_the_wrong_side_of_the_percentage_fails():
+    outcome = traffic.evaluate(
+        FakeFlags(10, wrong=USERS[7]),
+        flag_key="f",
+        users=USERS,
+        reason="rollout",
+        rollout=10,
+    )
+    assert len(outcome.problems) == 1
+    assert outcome.problems[0].startswith(f"{USERS[7]}: enabled")
+
+
+@pytest.mark.parametrize(
+    "state, reason, rollout, problems",
+    [
+        ("off", "inactive", None, 0),
+        ("rule", "targeting_rule", None, 0),
+        ("on", "inactive", None, traffic.PROBLEMS_KEPT),
+        ("off", "rollout", 0, traffic.PROBLEMS_KEPT),
+        ("on", "rollout", 50, traffic.PROBLEMS_KEPT),
+    ],
+)
+def test_every_answer_must_give_the_reason_named(state, reason, rollout, problems):
+    outcome = traffic.evaluate(
+        FakeFlags(10, state=state),
+        flag_key="f",
+        users=USERS,
+        reason=reason,
+        rollout=rollout,
+    )
+    assert len(outcome.problems) == problems
+
+
+def _evaluations_step(**changes: Any) -> Dict[str, Any]:
+    step = {
+        "id": "users",
+        "doc": "results",
+        "do": {
+            "evaluations": {
+                "flag": "f",
+                "key": "sdk-key",
+                "users": "flag-user",
+                "count": 200,
+                "context": {"plan": "free"},
+                "reason": "rollout",
+                "rollout": 10,
+            }
+        },
+        "fail": "a user gets the flag other than the rollout decides",
+    }
+    step["do"]["evaluations"].update(changes)
+    return step
+
+
+def test_a_journey_with_evaluations_loads(tmp_path):
+    data = _with(lambda d: d["steps"].insert(2, _evaluations_step()))
+    journey = _load(tmp_path, data)
+    step = journey.steps[2]
+    assert step.do.kind == "evaluations"
+    assert checks.describe_action(step) == (
+        'evaluate f for 200 users with context {"plan": "free"} with the API key sdk-key'
+    )
+    assert checks.describe_expect(step).startswith(
+        "exactly the users the documented rollout hash puts below 10%"
+    )
+
+
+@pytest.mark.parametrize(
+    "change, expected",
+    [
+        pytest.param(
+            lambda d: d["steps"].insert(2, _evaluations_step(rollout=None)),
+            "rollout is the percentage for reason: rollout, and only for it",
+            id="rollout-reason-without-a-percentage",
+        ),
+        pytest.param(
+            lambda d: d["steps"].insert(
+                2, _evaluations_step(reason="inactive", rollout=10)
+            ),
+            "rollout is the percentage for reason: rollout, and only for it",
+            id="a-percentage-for-another-reason",
+        ),
+        pytest.param(
+            lambda d: d["steps"].insert(0, _evaluations_step()),
+            "step 1 (users): 'sdk-key' is used before any step saves it",
+            id="evaluations-before-the-key-is-saved",
+        ),
+        pytest.param(
+            lambda d: (
+                d["steps"].insert(2, _evaluations_step()),
+                d.update(stack="docs-local"),
+            ),
+            "step 3 (users): an evaluations step needs the compose stack's API",
+            id="evaluations-on-a-stack-with-no-api",
+        ),
+        pytest.param(
+            lambda d: d["steps"].insert(
+                2, {**_evaluations_step(), "expect": {"status": 200}}
+            ),
+            "step 3 (users): evaluations checks what the action says",
+            id="evaluations-with-an-expect",
+        ),
+        pytest.param(
+            lambda d: _step(d, "results-api")["expect"].update(
+                json={"experiment_id": "{{not-saved}}"}
+            ),
+            "step 5 (results-api): 'not-saved' is used before any step saves it",
+            id="expected-json-names-an-unsaved-value",
+        ),
+    ],
+)
+def test_a_planted_evaluations_defect_is_refused(tmp_path, change, expected):
+    with pytest.raises(loader.Refused) as refused:
+        _load(tmp_path, _with(change))
+    assert any(expected in p for p in refused.value.problems), refused.value.problems
+
+
+def test_needs_scheduler_is_a_reason_a_journey_may_declare():
+    from docs_runner import registry
+
+    assert registry.is_declarable("needs-scheduler")
+    assert "needs-scheduler" in registry.DECLARED
+
+
+def test_a_stack_brought_up_again_is_signed_in_to_again():
+    """A token from the core stack is refused by the full one (new accounts, 401).
+
+    Measured: before this, the first full-profile journey's first api step
+    answered 401 on every run (docs-journeys.yml, tamper/d3b2-green). The
+    runner imports Playwright, which the unit job does not install, so its
+    source is read: ``run`` forgets the tokens when the stack is not the one
+    they were signed in on.
+    """
+    import ast
+
+    tree = ast.parse((RUNNER_ROOT / "docs_runner" / "execute.py").read_text())
+    run = next(
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.FunctionDef) and node.name == "run"
+    )
+    source = ast.unparse(run)
+    assert "if running is not self.stack:" in source
+    assert "self.tokens.clear()" in source
+    assert source.index("self.tokens.clear()") < source.index("self._step(")
+
+
 def test_a_recorded_journey_that_saves_a_secret_from_any_route_is_refused(tmp_path):
     """A secret saved from a route that is not a credential's still counts:
     the journey has a secret, so it is not recorded (model.reveals_credential)."""
@@ -787,3 +990,85 @@ def test_no_journey_leaves_an_admin_key_before_the_api_key_journey():
     assert makers, "no journey makes an administrator's key: the check reads nothing"
     planted = [makers[0]] + [path for path in order if path != makers[0]]
     assert _keys_made_before(planted, "api-key-first-assignment") == [makers[0].stem]
+
+
+# ---------------------------------------------------------------------------
+# The flag journey's evaluations tell its rule apart from a looser one
+# ---------------------------------------------------------------------------
+#: The rule builder's operator labels, as the journey picks them, and the
+#: operators the dashboard stores.
+BUILDER_OPERATORS = {"equals": "equals", "is one of": "in"}
+CONDITION_FIELD = re.compile(
+    r"^Group 1, condition (?P<n>[0-9]+) (?P<part>attribute|operator|value)$"
+)
+
+
+def _built_rule(steps: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """The rule the journey's fills and selects build in the dashboard."""
+    conditions: Dict[int, Dict[str, str]] = {}
+    for step in steps:
+        do = step.get("do") or {}
+        for kind, field in (("fill", "value"), ("select", "option")):
+            action = do.get(kind)
+            match = CONDITION_FIELD.match(action["label"]) if action else None
+            if match:
+                condition = conditions.setdefault(
+                    int(match["n"]), {"operator": "equals"}
+                )
+                condition[match["part"]] = action[field]
+    return {
+        "logical_operator": "AND",
+        "groups": [
+            {
+                "logical_operator": "AND",
+                "conditions": [
+                    {
+                        "attribute": c["attribute"],
+                        "operator": BUILDER_OPERATORS[c["operator"]],
+                        "value": c["value"],
+                    }
+                    for _, c in sorted(conditions.items())
+                ],
+            }
+        ],
+    }
+
+
+def _contradicted(rule: Dict[str, Any], steps: List[Dict[str, Any]]) -> List[str]:
+    """The evaluations steps whose expected reason the rule does not give."""
+    from backend.app.core.targeting_adapter import (
+        expand_context,
+        match_targeting_rule,
+        normalise_targeting_rules,
+    )
+
+    rules = normalise_targeting_rules(rule, owner="flag:docs-journey")
+    found = []
+    for step in steps:
+        plan = (step.get("do") or {}).get("evaluations")
+        if not plan or plan["reason"] == "inactive":
+            continue
+        matched = match_targeting_rule(rules, expand_context(plan["context"]))
+        if (matched is not None) != (plan["reason"] == "targeting_rule"):
+            found.append(step["id"])
+    return found
+
+
+def test_the_flag_journeys_evaluations_hold_both_conditions_of_its_rule():
+    """Every evaluations step of feature-flag-create gives the reason the rule
+    it builds decides; a rule without the country condition would let the
+    DE enterprise users in by the rule, and the plan-only step tells it apart."""
+    data = yaml.safe_load(
+        (RUNNER_ROOT / "journeys" / "feature-flag-create.yaml").read_text(
+            encoding="utf-8"
+        )
+    )
+    rule = _built_rule(data["steps"])
+    attributes = [c["attribute"] for c in rule["groups"][0]["conditions"]]
+    assert attributes == ["user.country", "user.plan"]
+    assert _contradicted(rule, data["steps"]) == []
+    looser = copy.deepcopy(rule)
+    looser["groups"][0]["conditions"] = [
+        c for c in looser["groups"][0]["conditions"] if c["attribute"] != "user.country"
+    ]
+    assert _contradicted(looser, data["steps"]) == ["plan-only-users"]

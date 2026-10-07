@@ -44,6 +44,9 @@ Content-Type: application/json
 
 The user who creates the workspace is automatically assigned the **OWNER** role.
 
+The dashboard's **Workspaces** page (`/workspaces`) then lists the workspace, with its name,
+slug and description.
+
 ---
 
 ## 2. Invite Team Members

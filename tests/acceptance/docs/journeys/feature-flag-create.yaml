@@ -1,0 +1,384 @@
+# A flag created in the dashboard, with the guide's targeting rule, then
+# evaluated as an application evaluates it (#939; QA plan D3b): "Creating
+# Feature Flags", Steps 1-5, then its REST example and "When a Flag Evaluates
+# to Off".
+#
+# Who gets the flag is checked user by user, not sampled: an evaluations step
+# asks the API about a numbered set of users with an API key, and each answer
+# must be the one the guide gives. Users who match the rule (US or CA, and
+# enterprise) get the flag with reason targeting_rule; users who match no rule
+# (US on the free plan, and DE on enterprise, which meets only one of the
+# group's two conditions) get it exactly when the documented rollout hash
+# (traffic.flag_bucket, the md5-mod100-v1 of docs/sdk/javascript.md) puts them
+# below the 10% the slider set, with reason rollout; once the flag is turned
+# off, nobody gets it, with reason inactive.
+#
+# Not recorded: the journey makes an API key (model.reveals_credential), so a
+# recording could show what the run keeps out of its files.
+guide: feature-flags/create.md
+stack: compose-dev
+profile: core
+video: false
+written: 2026-10-06
+steps:
+  - id: sign-in-page
+    doc: prerequisites
+    do:
+      goto: /login
+    expect:
+      status: 200
+      aria: |
+        - main:
+          - heading "Sign in" [level=1]
+          - textbox "Email"
+          - textbox "Password"
+          - button "Sign in"
+    fail: the dashboard does not answer, or its sign-in page is not there
+  - id: email
+    doc: prerequisites
+    do:
+      fill:
+        label: Email
+        value: admin@demo.com
+        quote: false
+        reason: the sign-in form's field; the guide's examples use the demo administrator
+    expect:
+      aria: |
+        - textbox "Email":
+          - text: admin@demo.com
+    fail: there is no Email field to fill
+  - id: password
+    doc: prerequisites
+    do:
+      fill:
+        label: Password
+        value: Demo1234!
+        quote: false
+        reason: the sign-in form's field; the demo administrator's documented password
+    expect:
+      aria: |
+        - textbox "Password"
+    fail: there is no Password field to fill
+  - id: sign-in
+    doc: prerequisites
+    do:
+      click:
+        role: button
+        name: Sign in
+        quote: false
+        reason: the sign-in form's button
+    expect:
+      url: /experiments
+      aria: |
+        - banner:
+          - navigation "Primary":
+            - link "Feature Flags"
+    fail: the demo administrator cannot sign in, or there is no Feature Flags in the top navigation
+  - id: flags
+    doc: step-1-open-the-form
+    do:
+      click:
+        role: link
+        name: Feature Flags
+    expect:
+      url: /feature-flags
+      aria: |
+        - main:
+          - heading "Feature Flags" [level=1]
+          - link "+ New Flag"
+    fail: Feature Flags does not open the flags list with + New Flag
+  - id: new-flag
+    doc: step-1-open-the-form
+    do:
+      click:
+        role: link
+        name: + New Flag
+    expect:
+      url: /feature-flags/new
+      aria: |
+        - main:
+          - heading "New Feature Flag" [level=1]
+          - textbox "Name *"
+          - textbox "Key *"
+          - textbox "Description"
+          - heading "Targeting Rules" [level=3]
+          - paragraph: No targeting rules — all users will match
+          - button "+ Add Group"
+          - slider "Rollout percentage": "0"
+          - button "Create Feature Flag"
+    fail: + New Flag does not open the form with a name, a key, a description, the rule builder, the slider at 0% and Create Feature Flag
+  - id: name
+    doc: step-2-name-the-flag
+    do:
+      fill:
+        label: Name *
+        value: Docs journey flag
+        quote: false
+        reason: the field is labelled "Name *" (required); the guide's table calls it Name (required)
+    expect:
+      aria: |
+        - textbox "Name *":
+          - text: Docs journey flag
+        - text: Key *
+        - textbox "Key *":
+          - text: docs_journey_flag
+    fail: the name cannot be typed, or the key is not filled in from it
+  - id: description
+    doc: step-2-name-the-flag
+    do:
+      fill:
+        label: Description
+        value: The docs journey's flag, removed when the journey is retired
+    expect:
+      aria: |
+        - textbox "Description":
+          - text: The docs journey's flag, removed when the journey is retired
+    fail: the description cannot be typed
+  - id: add-group
+    doc: step-3-add-targeting-rules-optional
+    do:
+      click:
+        role: button
+        name: + Add Group
+    expect:
+      aria: |
+        - main:
+          - group "How the groups combine":
+            - button "AND" [pressed]
+            - button "OR"
+          - text: Group 1
+          - group "How the conditions in group 1 combine":
+            - button "AND" [pressed]
+            - button "OR"
+          - button "Remove group"
+          - combobox "Group 1, condition 1 attribute"
+          - combobox "Group 1, condition 1 operator":
+            - option "equals" [selected]
+          - textbox "Group 1, condition 1 value"
+          - button "Remove condition"
+          - button "+ Add Condition"
+    fail: + Add Group does not add a group that starts with one condition, its AND/OR and the groups' AND/OR
+  - id: country-attribute
+    doc: step-3-add-targeting-rules-optional
+    do:
+      fill:
+        label: Group 1, condition 1 attribute
+        value: user.country
+        quote: false
+        reason: the first condition's attribute; the guide's example is user.country
+    expect:
+      aria: |
+        - combobox "Group 1, condition 1 attribute": user.country
+    fail: the attribute cannot be typed
+  - id: country-operator
+    doc: step-3-add-targeting-rules-optional
+    do:
+      select:
+        label: Group 1, condition 1 operator
+        option: is one of
+        quote: false
+        reason: the first condition's operator; the guide's example is in, which the builder shows as is one of
+    expect:
+      aria: |
+        - combobox "Group 1, condition 1 operator":
+          - option "is one of" [selected]
+    fail: the in operator cannot be chosen
+  - id: country-value
+    doc: step-3-add-targeting-rules-optional
+    do:
+      fill:
+        label: Group 1, condition 1 value
+        value: US, CA
+        quote: false
+        reason: the first condition's value; the guide's example is US, CA
+    expect:
+      aria: |
+        - textbox "Group 1, condition 1 value":
+          - text: US, CA
+    fail: the value cannot be typed
+  - id: add-condition
+    doc: step-3-add-targeting-rules-optional
+    do:
+      click:
+        role: button
+        name: + Add Condition
+    expect:
+      aria: |
+        - main:
+          - combobox "Group 1, condition 1 attribute": user.country
+          - combobox "Group 1, condition 1 operator"
+          - textbox "Group 1, condition 1 value"
+          - button "Remove condition"
+          - combobox "Group 1, condition 2 attribute"
+          - combobox "Group 1, condition 2 operator":
+            - option "equals" [selected]
+          - textbox "Group 1, condition 2 value"
+    fail: + Add Condition does not add a second condition to the group
+  - id: plan-attribute
+    doc: step-3-add-targeting-rules-optional
+    do:
+      fill:
+        label: Group 1, condition 2 attribute
+        value: user.plan
+        quote: false
+        reason: the second condition's attribute; the guide's example is user.plan
+    expect:
+      aria: |
+        - combobox "Group 1, condition 2 attribute": user.plan
+    fail: the attribute cannot be typed
+  - id: plan-value
+    doc: step-3-add-targeting-rules-optional
+    do:
+      fill:
+        label: Group 1, condition 2 value
+        value: enterprise
+        quote: false
+        reason: the second condition's value; the guide's example is enterprise
+    expect:
+      aria: |
+        - textbox "Group 1, condition 2 value":
+          - text: enterprise
+        - button "Remove condition"
+        - button "+ Add Condition"
+        - button "+ Add Group"
+        - text: 1 group, 2 conditions total
+    fail: the value cannot be typed, or the builder does not count one group of two conditions
+  - id: rollout
+    doc: step-4-set-the-rollout-percentage
+    do:
+      fill:
+        label: Rollout percentage
+        value: "10"
+    expect:
+      aria: |
+        - text: Rollout percentage 10%
+        - slider "Rollout percentage": "10"
+    fail: the slider cannot be set to 10%
+  - id: create
+    doc: step-5-create-the-flag-then-turn-it-on
+    do:
+      click:
+        role: button
+        name: Create Feature Flag
+    expect:
+      aria: |
+        - main:
+          - heading "Docs journey flag" [level=1]
+          - text: "Off"
+          - paragraph: docs_journey_flag
+          - text: Not serving
+          - switch "Turn docs_journey_flag on" [checked=false]
+    fail: Create Feature Flag does not create the flag off, its page reading Not serving
+  - id: turn-on
+    doc: step-5-create-the-flag-then-turn-it-on
+    do:
+      click:
+        role: switch
+        name: Turn docs_journey_flag on
+        quote: false
+        reason: the switch beside Not serving, named for the flag's key
+    expect:
+      aria: |
+        - main:
+          - heading "Docs journey flag" [level=1]
+          - text: "On"
+          - paragraph: docs_journey_flag
+          - text: Serving
+          - switch "Turn docs_journey_flag off" [checked]
+          - text: Rollout percentage 10%
+    fail: the switch does not turn the flag on, its page reading Serving at 10%
+  - id: api-key
+    doc: create-an-api-key
+    do:
+      api:
+        method: POST
+        path: /api/v1/api-keys
+        as: admin
+        body:
+          name: Docs journey flag
+    expect:
+      status: 201
+      json:
+        name: Docs journey flag
+    save:
+      sdk-key:
+        path: key
+        secret: true
+    fail: no API key can be created to evaluate the flag with
+  - id: evaluate
+    doc: rest-api-direct
+    do:
+      api:
+        method: GET
+        path: /api/v1/feature-flags/evaluate/docs_journey_flag?user_id=user-123&context=%7B%22plan%22%3A%22enterprise%22%2C%22country%22%3A%22US%22%7D
+        as: anonymous
+        key: sdk-key
+    expect:
+      status: 200
+      json:
+        key: docs_journey_flag
+        enabled: true
+        reason: targeting_rule
+    fail: the guide's REST evaluation of an enterprise user in the US does not get the flag by its rule
+  - id: rule-users
+    doc: step-3-add-targeting-rules-optional
+    do:
+      evaluations:
+        flag: docs_journey_flag
+        key: sdk-key
+        users: rule-user
+        count: 50
+        context: {country: CA, plan: enterprise}
+        reason: targeting_rule
+    fail: a user who matches the rule does not get the flag, or not by the rule
+  - id: rollout-users
+    doc: step-4-set-the-rollout-percentage
+    do:
+      evaluations:
+        flag: docs_journey_flag
+        key: sdk-key
+        users: rollout-user
+        count: 200
+        context: {country: US, plan: free}
+        reason: rollout
+        rollout: 10
+    fail: a user who matches no rule gets the flag other than the documented 10% rollout decides
+  - id: plan-only-users
+    doc: step-3-add-targeting-rules-optional
+    do:
+      evaluations:
+        flag: docs_journey_flag
+        key: sdk-key
+        users: plan-only-user
+        count: 200
+        context: {country: DE, plan: enterprise}
+        reason: rollout
+        rollout: 10
+    fail: a user who meets only the plan condition gets the flag by the rule, so the group's AND is not applied
+  - id: turn-off
+    doc: step-5-create-the-flag-then-turn-it-on
+    do:
+      click:
+        role: switch
+        name: Turn docs_journey_flag off
+        quote: false
+        reason: the same switch, which turns the flag off again
+    expect:
+      aria: |
+        - main:
+          - heading "Docs journey flag" [level=1]
+          - text: "Off"
+          - text: Not serving
+          - switch "Turn docs_journey_flag on" [checked=false]
+    fail: the switch does not turn the flag off
+  - id: off-users
+    doc: when-a-flag-evaluates-to-off
+    do:
+      evaluations:
+        flag: docs_journey_flag
+        key: sdk-key
+        users: rule-user
+        count: 50
+        context: {country: CA, plan: enterprise}
+        reason: inactive
+    fail: a user still gets the flag after it is turned off, rule or not

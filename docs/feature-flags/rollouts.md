@@ -281,6 +281,10 @@ curl -s localhost:8000/api/v1/rollout-schedules/$SCHEDULE_ID \
 {"status":"active","stages":[{"name":"Initial Canary","target_percentage":10,"status":"in_progress"},{"name":"Expanded Rollout","target_percentage":50,"status":"pending"},{"name":"Full Rollout","target_percentage":100,"status":"pending"}]}
 ```
 
+In the dashboard, the flag's page shows the schedule read-only under **Rollout schedule**: its
+status, its name, and each stage with its trigger, target percentage and status. The
+**Rollout percentage** below it is the flag's percentage now.
+
 To list every schedule for a flag, filter the collection by `feature_flag_id`:
 
 ```{.bash exec}

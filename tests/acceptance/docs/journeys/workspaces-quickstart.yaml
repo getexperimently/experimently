@@ -1,0 +1,234 @@
+# Team workspaces, as the quickstart makes one through the API, on the full
+# profile's stack (#939; QA plan D3b): create a workspace, invite a member by
+# email (refused for any other account), add an existing user directly, and
+# connect an SDK with a platform API key; then the workspace on the
+# dashboard's Workspaces page.
+#
+# The invite's token is used in the accept path, so it is saved as a value; it
+# is still never written: a value saved from a path ending in token goes to
+# the run's redactor.
+#
+# Not recorded: the journey makes an API key (model.reveals_credential), so a
+# recording could show what the run keeps out of its files.
+guide: workspaces/quickstart.md
+stack: compose-dev
+profile: full
+video: false
+written: 2026-10-06
+steps:
+  - id: create
+    doc: 1-create-a-workspace
+    do:
+      api:
+        method: POST
+        path: /api/v1/workspaces/
+        as: admin
+        body:
+          name: Docs Journey Team
+          slug: docs-journey-team
+          description: The docs journey's workspace
+    expect:
+      status: 201
+      json:
+        name: Docs Journey Team
+        slug: docs-journey-team
+        is_active: true
+    save:
+      workspace-id:
+        path: id
+    fail: an authenticated user cannot create a workspace
+  - id: owner
+    doc: 1-create-a-workspace
+    do:
+      api:
+        method: GET
+        path: /api/v1/workspaces/{{workspace-id}}/members
+        as: admin
+    expect:
+      status: 200
+      json:
+        0.email: admin@demo.com
+        0.role: OWNER
+    fail: the user who created the workspace is not its OWNER
+  - id: invite
+    doc: option-a-invite-by-email
+    do:
+      api:
+        method: POST
+        path: /api/v1/workspaces/{{workspace-id}}/invites
+        as: admin
+        body:
+          email: dev@demo.com
+          role: DEVELOPER
+    expect:
+      status: 201
+      json:
+        email: dev@demo.com
+        role: DEVELOPER
+    save:
+      invite-token:
+        path: token
+    fail: the workspace's owner cannot invite a member by email, or no token comes back
+  - id: other-account-refused
+    doc: option-a-invite-by-email
+    do:
+      api:
+        method: POST
+        path: /api/v1/workspaces/invites/{{invite-token}}/accept
+        as: analyst
+    expect:
+      status: 403
+      json:
+        detail.code: invite_email_mismatch
+    fail: an account the invite was not sent to can accept it
+  - id: accept
+    doc: option-a-invite-by-email
+    do:
+      api:
+        method: POST
+        path: /api/v1/workspaces/invites/{{invite-token}}/accept
+        as: developer
+    expect:
+      status: 201
+      json:
+        email: dev@demo.com
+        role: DEVELOPER
+    fail: the invited user cannot accept the invite
+  - id: analyst-id
+    doc: option-b-add-existing-user-directly
+    do:
+      api:
+        method: GET
+        path: /api/v1/auth/me
+        as: analyst
+    expect:
+      status: 200
+      json:
+        email: analyst@demo.com
+    save:
+      analyst-id:
+        path: id
+    fail: the user's platform id cannot be read
+  - id: add-member
+    doc: option-b-add-existing-user-directly
+    do:
+      api:
+        method: POST
+        path: /api/v1/workspaces/{{workspace-id}}/members
+        as: admin
+        body:
+          user_id: "{{analyst-id}}"
+          role: DEVELOPER
+    expect:
+      status: 201
+      json:
+        email: analyst@demo.com
+        role: DEVELOPER
+    fail: an existing user cannot be added to the workspace by id
+  - id: members
+    doc: option-b-add-existing-user-directly
+    do:
+      api:
+        method: GET
+        path: /api/v1/workspaces/{{workspace-id}}/members
+        as: admin
+    expect:
+      status: 200
+      json:
+        0.role: OWNER
+        1.email: dev@demo.com
+        1.role: DEVELOPER
+        2.email: analyst@demo.com
+        2.role: DEVELOPER
+    fail: the workspace does not list its owner and the two members it gained
+  - id: api-key
+    doc: 3-connect-an-sdk-with-a-platform-api-key
+    do:
+      api:
+        method: POST
+        path: /api/v1/api-keys
+        as: admin
+        body:
+          name: Docs journey team SDK
+    expect:
+      status: 201
+    save:
+      sdk-key:
+        path: key
+        secret: true
+    fail: no platform API key can be created for the SDK
+  - id: sdk-call
+    doc: 3-connect-an-sdk-with-a-platform-api-key
+    do:
+      api:
+        method: GET
+        path: /api/v1/feature-flags/evaluate/beta_features?user_id=user-123
+        as: anonymous
+        key: sdk-key
+    expect:
+      status: 200
+      json:
+        key: beta_features
+    fail: an SDK cannot call the platform with the platform API key
+  - id: sign-in-page
+    doc: 1-create-a-workspace
+    do:
+      goto: /login
+    expect:
+      status: 200
+      aria: |
+        - main:
+          - heading "Sign in" [level=1]
+    fail: the dashboard does not answer
+  - id: email
+    doc: 1-create-a-workspace
+    do:
+      fill:
+        label: Email
+        value: admin@demo.com
+        quote: false
+        reason: the sign-in form's field; the demo administrator created the workspace
+    expect:
+      aria: |
+        - textbox "Email":
+          - text: admin@demo.com
+    fail: there is no Email field to fill
+  - id: password
+    doc: 1-create-a-workspace
+    do:
+      fill:
+        label: Password
+        value: Demo1234!
+        quote: false
+        reason: the sign-in form's field; the demo administrator's documented password
+    expect:
+      aria: |
+        - textbox "Password"
+    fail: there is no Password field to fill
+  - id: sign-in
+    doc: 1-create-a-workspace
+    do:
+      click:
+        role: button
+        name: Sign in
+        quote: false
+        reason: the sign-in form's button
+    expect:
+      url: /experiments
+      aria: |
+        - main:
+          - heading "Experiments" [level=1]
+    fail: the demo administrator cannot sign in
+  - id: workspaces-page
+    doc: 1-create-a-workspace
+    do:
+      goto: /workspaces
+    expect:
+      status: 200
+      aria: |
+        - main:
+          - heading "Workspaces" [level=1]
+          - link /^Docs Journey Team docs-journey-team The docs journey's workspace/:
+            - heading "Docs Journey Team" [level=3]
+            - paragraph: docs-journey-team
+    fail: the dashboard's Workspaces page does not list the workspace

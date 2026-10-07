@@ -102,13 +102,18 @@ What an API answers can be kept for later steps and checked against an oracle
 (``values.py``, ``traffic.py``, ``oracles.py``):
 
 * ``save: {<name>: {path: <dotted path>, secret: false}}`` on an ``api`` step
-  keeps the value at that path of its answer; a later api step's path or body,
-  or a ``goto``, uses it as ``{{<name>}}``. A value saved with ``secret: true``
+  keeps the value at that path of its answer; a later api step's path, body
+  or expected JSON, or a ``goto``, uses it as ``{{<name>}}``. A value saved with ``secret: true``
   (an API key) is a secret like a kept one: never written to the run directory,
   and used only as an api or traffic step's ``key``, sent as ``X-API-Key``.
   ``keep`` may also read the one element of a role whose text starts with
   ``prefix`` (an API key's documented ``eptk_``) instead of one ``within`` a
   named element.
+* ``evaluations`` (compose-dev only) evaluates a flag for a numbered set of
+  users through ``GET /api/v1/feature-flags/evaluate/{key}`` with an API key:
+  every answer must give the ``reason`` the step names, and with ``reason:
+  rollout`` a user gets the flag exactly when the documented rollout hash puts
+  them below ``rollout`` percent. Its check is the action itself.
 * ``traffic`` (compose-dev only) sends an experiment a population the journey
   chooses: per variant, how many users are assigned and how many of them send
   the metric's event, through the tracking API with an API key. Its check is
@@ -407,6 +412,34 @@ class Traffic(_Strict):
     variants: Dict[OneLine, Population] = Field(min_length=1)
 
 
+class Evaluations(_Strict):
+    """Users evaluated for one flag through the SDK route (``traffic.py``).
+
+    ``reason`` is what every answer must give: ``rollout`` (then each user gets
+    the flag exactly when the documented rollout hash puts them below
+    ``rollout`` percent), ``targeting_rule`` (every user gets it) or
+    ``inactive`` (no user gets it).
+    """
+
+    flag: OneLine
+    key: Name
+    users: StrictStr = Field(pattern=SLUG_PATTERN)
+    count: StrictInt = Field(ge=1, le=2000)
+    context: Optional[
+        Dict[StrictStr, Union[StrictBool, StrictInt, StrictFloat, StrictStr]]
+    ] = None
+    reason: Literal["rollout", "targeting_rule", "inactive"]
+    rollout: Optional[StrictInt] = Field(default=None, ge=0, le=100)
+
+    @model_validator(mode="after")
+    def _rollout_iff_reason_rollout(self) -> "Evaluations":
+        if (self.reason == "rollout") != (self.rollout is not None):
+            raise ValueError(
+                "rollout is the percentage for reason: rollout, and only for it"
+            )
+        return self
+
+
 class Do(_Strict):
     """Exactly one action."""
 
@@ -418,6 +451,7 @@ class Do(_Strict):
     keep: Optional[Keep] = None
     api: Optional[Api] = None
     traffic: Optional[Traffic] = None
+    evaluations: Optional[Evaluations] = None
     ref: Optional[Literal["doc-examples"]] = None
     search: Optional[OneLine] = None
     crawl: Optional[Literal["nav", "links"]] = None
@@ -428,7 +462,7 @@ class Do(_Strict):
         if len(given) != 1:
             raise ValueError(
                 "do must be exactly one of goto, open, click, fill, select, keep,"
-                f" api, traffic, ref, search, crawl; got {given or 'none'}"
+                f" api, traffic, evaluations, ref, search, crawl; got {given or 'none'}"
             )
         return self
 

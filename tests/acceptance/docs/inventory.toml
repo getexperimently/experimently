@@ -76,8 +76,6 @@ reason = "its runnable blocks run on a full-profile stack in Doc Examples; the s
 [pages."feature-flags/create.md"]
 class = "journey"
 journey = "feature-flag-create"
-pending = true
-planned = "D3b"
 reason = "create a flag in the dashboard with a targeting rule, turn it on and see it evaluate; its API steps run in Doc Examples"
 
 [pages."Enhanced_Rules_Engine_Reference.md"]
@@ -91,16 +89,12 @@ reason = "its API steps run on a stack in Doc Examples"
 [pages."feature-flags/rollouts.md"]
 class = "journey"
 journey = "feature-flag-rollout"
-pending = true
-planned = "D3b"
 reason = "a rollout schedule made through the API, its stages seen in the dashboard as they advance; its API steps run in Doc Examples"
 
 [pages."feature-flags/safety.md"]
 class = "journey"
 journey = "feature-flag-safety"
-pending = true
-planned = "D3b"
-reason = "reported errors roll a flag back, seen on the dashboard's safety page; its API steps run in Doc Examples"
+reason = "the configuration, the check healthy and then unhealthy from reported errors, a manual rollback and the way back, seen on the dashboard's Safety page; the automatic rollback is NOT RUN (needs-scheduler); its API steps run in Doc Examples"
 
 [pages."guides/user-guide.md"]
 class = "journey"
@@ -354,8 +348,6 @@ reason = "what workspaces are; no steps to follow"
 [pages."workspaces/quickstart.md"]
 class = "journey"
 journey = "workspaces-quickstart"
-pending = true
-planned = "D3b"
 reason = "full profile: create a workspace, invite a member, connect an SDK with a platform API key"
 
 [pages."deployment/deployment-guide.md"]

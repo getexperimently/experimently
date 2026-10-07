@@ -54,7 +54,7 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
-from urllib.parse import urljoin, urlparse
+from urllib.parse import quote, urljoin, urlparse
 
 from playwright.sync_api import Browser, Page, Playwright, expect
 from playwright.sync_api import Error as PlaywrightError
@@ -114,6 +114,9 @@ class JourneyRunner:
         self.log = log
         self.settings = settings
         self.tokens: Dict[Tuple[str, str], str] = {}
+        #: The stack the tokens were signed in on: one brought up again (for a
+        #: journey of the other profile) has new accounts, which refuse them.
+        self.stack: Optional[Running] = None
         #: The run's sign-ins, paced to the stack's limit (``pacer.py``).
         self.pacer = pacing.SignInPacer()
         #: Seconds the current step waited for the sign-in limit.
@@ -373,6 +376,62 @@ class JourneyRunner:
             for variant, counts in outcome.variants.items()
         )
         return f"{outcome.requests} requests: {sent}", snapshot
+
+    def _evaluations_step(
+        self, step: Step, api, journey_id: str, number: int
+    ) -> Tuple[str, str]:
+        """Evaluate the flag for the numbered users (``traffic.evaluate``)."""
+        plan = step.do.evaluations
+        key = self._secret(plan.key)
+        users = [population.user_id(plan.users, n) for n in range(1, plan.count + 1)]
+        query = ""
+        if plan.context is not None:
+            query = "&context=" + quote(json.dumps(plan.context, separators=(",", ":")))
+
+        def fetch(method: str, path: str, body: Optional[Dict[str, Any]]):
+            sent = api.fetch(path, method=method, headers={"X-API-Key": key})
+            try:
+                document = sent.json()
+            except (PlaywrightError, ValueError):
+                document = None
+            return sent.status, document
+
+        outcome = population.evaluate(
+            fetch,
+            flag_key=plan.flag,
+            users=users,
+            reason=plan.reason,
+            rollout=plan.rollout,
+            query=query,
+        )
+        counts = outcome.variants[plan.flag]
+        record = {
+            "flag": plan.flag,
+            "users": f"{plan.users}-NNNNN",
+            "count": plan.count,
+            "reason": plan.reason,
+            "rollout": plan.rollout,
+            **counts,
+            "requests": outcome.requests,
+            "problems": outcome.problems,
+        }
+        snapshot = self._write(
+            self._name(journey_id, number, step, ".evaluations.json"),
+            json.dumps(record, indent=2, ensure_ascii=False) + "\n",
+        )
+        if outcome.problems:
+            raise _Failed(
+                one_line(
+                    f"{len(outcome.problems)} answer(s) not as expected in"
+                    f" {outcome.requests}: " + "; ".join(outcome.problems[:3])
+                ),
+                snapshot,
+            )
+        return (
+            f"{counts['evaluated']} users: {counts['enabled']} get the flag, as"
+            f" expected ({plan.reason})",
+            snapshot,
+        )
 
     # -- the browser -------------------------------------------------------
     @staticmethod
@@ -757,6 +816,9 @@ class JourneyRunner:
         self, journey: Journey, journey_id: str, running: Running, guide: Guide
     ) -> List[Record]:
         settings = self.settings
+        if running is not self.stack:
+            self.tokens.clear()
+            self.stack = running
         options: Dict[str, Any] = {"viewport": VIEWPORT}
         video_dir = settings.run_dir / "videos" / journey_id
         self.secrets = {}
@@ -847,6 +909,31 @@ class JourneyRunner:
             )
         elif step.do.crawl == "links" or step.do.kind == "keep":
             expected_snapshot = STRUCTURAL_ONLY
+        elif step.do.evaluations is not None:
+            plan = step.do.evaluations
+            expected_on = sum(
+                population.expected_answer(
+                    population.user_id(plan.users, n),
+                    plan.flag,
+                    plan.reason,
+                    plan.rollout,
+                )[0]
+                for n in range(1, plan.count + 1)
+            )
+            expected_snapshot = self._write(
+                self._name(journey_id, number, step, ".expected.json"),
+                json.dumps(
+                    {
+                        "flag": plan.flag,
+                        "count": plan.count,
+                        "reason": plan.reason,
+                        "rollout": plan.rollout,
+                        "expected_enabled": expected_on,
+                    },
+                    indent=2,
+                )
+                + "\n",
+            )
         elif step.do.traffic is not None:
             chosen = {
                 variant: {"assigned": p.assigned, "converted": p.converted}
@@ -895,6 +982,10 @@ class JourneyRunner:
                 observed, snapshot = self._traffic_step(
                     step, running, api, journey_id, number
                 )
+            elif step.do.kind == "evaluations":
+                observed, snapshot = self._evaluations_step(
+                    step, api, journey_id, number
+                )
             elif step.do.kind == "crawl":
                 observed, snapshot = self._crawl_step(
                     step, page, running, request, journey_id, number
@@ -919,9 +1010,11 @@ class JourneyRunner:
             elif step.in_browser:
                 snapshot = self._no_screen(journey_id, number, step, observed)
             else:
-                suffix = {"crawl": ".crawl.json", "traffic": ".traffic.json"}.get(
-                    step.do.kind, ".api.json"
-                )
+                suffix = {
+                    "crawl": ".crawl.json",
+                    "traffic": ".traffic.json",
+                    "evaluations": ".evaluations.json",
+                }.get(step.do.kind, ".api.json")
                 snapshot = self._write(
                     self._name(journey_id, number, step, suffix),
                     json.dumps({"error": observed}, indent=2) + "\n",
