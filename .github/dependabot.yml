@@ -135,6 +135,16 @@ updates:
       # added, so the same bump came back and failed 13 checks. They move when
       # aws-cdk-lib moves, which is a major migration someone does by hand.
       - dependency-name: "aws-cdk.*"
+      # SQLAlchemy 2.0 -> 2.1 and FastAPI 0.141 -> 0.142 are held until after
+      # launch (D58): each is the layer under every route, and neither minor
+      # is taken before the production deploy. Remove these two rules after
+      # it. A minor rule ignores >= 2.1 (and >= 0.142) only, so patch releases
+      # inside 2.0.x and 0.141.x still arrive in the group; the major is named
+      # as well so the hold outlives a change to the `*` rule above.
+      - dependency-name: "sqlalchemy"  # held until after launch (D58)
+        update-types: ["version-update:semver-minor", "version-update:semver-major"]
+      - dependency-name: "fastapi"  # held until after launch (D58)
+        update-types: ["version-update:semver-minor", "version-update:semver-major"]
     labels: ["dependencies", "python", "infrastructure"]
     groups:
       patch-and-minor:
@@ -253,6 +263,13 @@ updates:
     ignore:
       # Majors are migrations, not bumps -- see the header.
       - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
+      # tailwindcss 3 -> 4 is held until after launch (D58): Tailwind 4 changes
+      # how it is configured and loaded through PostCSS, so it is a migration
+      # of both demo apps' styles, not a bump (#937 and #1048 proposed it).
+      # The `*` rule above already covers it; it is named so the hold outlives
+      # a change to that rule. Remove it after the production deploy.
+      - dependency-name: "tailwindcss"  # held until after launch (D58)
         update-types: ["version-update:semver-major"]
     labels: ["dependencies", "javascript", "demo"]
     groups:
