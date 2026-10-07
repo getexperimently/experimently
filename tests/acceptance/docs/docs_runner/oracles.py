@@ -44,6 +44,34 @@ def fisher_exact_p(
     return float(stats.fisher_exact(table, alternative="two-sided")[1])
 
 
+def sample_ratio_p(
+    control_users: int,
+    treatment_users: int,
+    control_allocation: float = 50,
+    treatment_allocation: float = 50,
+) -> float:
+    """The p-value of the sample-ratio check on two variants' assignment counts.
+
+    ``guides/user-guide.md`` ("Sample Ratio Check"): the results compare how
+    many users each variant received with its traffic allocation by a
+    chi-square test of the assignment counts, and a mismatch is p < 0.001.
+    That is Pearson's chi-square goodness of fit, one degree of freedom for
+    two variants, the expected counts the total split by the allocations
+    (in any unit; they are normalised). ``GET /api/v1/results/{experiment_id}``
+    reports it as ``srm.p_value``. scipy's ``chisquare`` computes it,
+    independently of the product.
+    """
+    observed = [control_users, treatment_users]
+    if min(observed) < 0 or sum(observed) <= 0:
+        raise ValueError("the check needs at least one user and no negative count")
+    shares = [float(control_allocation), float(treatment_allocation)]
+    if min(shares) <= 0:
+        raise ValueError("each variant needs a positive allocation")
+    total = sum(observed)
+    expected = [total * share / sum(shares) for share in shares]
+    return float(stats.chisquare(observed, f_exp=expected).pvalue)
+
+
 def _per_comparison_alpha(alpha: float, n_variants: int) -> float:
     """Bonferroni over the ``n_variants - 1`` comparisons with the control."""
     if n_variants < 2:
@@ -138,6 +166,7 @@ def absolute_effect(
 
 ORACLES: Dict[str, Callable[..., float]] = {
     "fisher_exact_p": fisher_exact_p,
+    "sample_ratio_p": sample_ratio_p,
     "sample_size_proportions": sample_size_proportions,
     "sample_size_means": sample_size_means,
     "absolute_effect": absolute_effect,
