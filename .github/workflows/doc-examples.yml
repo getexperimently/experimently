@@ -230,7 +230,7 @@ jobs:
       # re-run of one shard uploads the same name again.
       - name: Keep the shard's report
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v6
         with:
           name: doc-examples-report-${{ matrix.profile }}-${{ matrix.shard }}
           path: docex-report/

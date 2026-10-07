@@ -171,7 +171,7 @@ jobs:
 
       - name: Hand the document to the publish job
         if: steps.regen.outputs.changed == 'true'
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v6
         with:
           name: licences-${{ matrix.pr }}
           path: THIRD_PARTY_LICENSES.md

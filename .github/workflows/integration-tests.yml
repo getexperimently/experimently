@@ -208,7 +208,7 @@ jobs:
       # Names unique to the shard, and `overwrite`, because artifacts are
       # immutable and a re-run of one shard uploads the same name again.
       - name: Upload test results
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v6
         if: always()
         with:
           name: test-results-${{ matrix.shard }}
@@ -218,7 +218,7 @@ jobs:
 
       # Even when the suite failed: the summary reads every shard's report.
       - name: Upload the shard report
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v6
         if: always()
         with:
           name: shard-report-integration-${{ matrix.shard }}

@@ -170,7 +170,7 @@ jobs:
 
       - name: Upload the verdicts
         if: always() && steps.verdicts.outputs.written == 'true'
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v6
         with:
           name: docs-journeys-verdicts
           path: ${{ runner.temp }}/docs-journeys-run/verdicts.json
@@ -179,7 +179,7 @@ jobs:
 
       - name: Upload the run directory
         if: always() && steps.scanned.outputs.clean == 'true'
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v6
         with:
           name: docs-journeys-${{ github.run_id }}
           path: ${{ runner.temp }}/docs-journeys-run

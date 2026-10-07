@@ -65,7 +65,7 @@ jobs:
       # so the fix is "download and commit" rather than "find a Linux box".
       - name: Upload the regenerated file
         if: failure() && steps.check.outcome == 'failure'
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v6
         with:
           name: THIRD_PARTY_LICENSES
           path: THIRD_PARTY_LICENSES.generated.md

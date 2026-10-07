@@ -80,7 +80,7 @@ jobs:
         run: python scripts/audit_dependencies.py
 
       - name: Upload Bandit report
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v6
         if: always()
         with:
           name: bandit-report
@@ -187,7 +187,7 @@ jobs:
             $targets
 
       - name: Upload Semgrep results
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v6
         if: always()
         with:
           name: semgrep-report
@@ -489,7 +489,7 @@ jobs:
           fi
 
       - name: Upload SBOM
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v6
         if: always()
         with:
           name: sbom-report

@@ -254,7 +254,7 @@ jobs:
           PY
 
       - name: Upload the checked distributions
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v6
         with:
           name: pypi-dist
           path: sdk/${{ needs.resolve.outputs.sdk }}/dist/
@@ -502,7 +502,7 @@ jobs:
           PY
 
       - name: Upload the checked tarball
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v6
         with:
           name: npm-tarball
           path: ${{ steps.pack.outputs.tgz }}

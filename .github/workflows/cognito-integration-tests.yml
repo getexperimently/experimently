@@ -61,7 +61,7 @@ jobs:
             --junit-xml=test-results/cognito-integration.xml
       - name: Upload test results
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v6
         with:
           name: cognito-test-results
           path: test-results/
