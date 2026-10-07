@@ -1,0 +1,125 @@
+# Video 1, Getting started: the Quick Start's stack, signing in, the seeded
+# experiments and a result, and a flag rolling out. The `demo` seed only, which
+# is what the Quick Start gives. The UX draft's V1 storyboard (#1066), with the
+# stack shown as a labelled card of the documented command rather than a
+# recording (plan ruling R5).
+#
+# A beat's click that leaves the page is in its `exit`, so the caption stays up
+# while the next page opens: the capture directory allows at most a second
+# without one.
+slug: 01-getting-started
+title: Get started
+seed: demo
+seed_counts: {experiments: 3, feature_flags: 2, users: 4}
+end_state:
+  signed_in_as: admin@demo.com
+  experiments_listed: 3
+
+scenes:
+  - id: stack-card
+    card:
+      label: "From the Quick Start: shown here, not recorded"
+      command: "docker compose up -d --wait"
+      note: >-
+        The first start builds two images, starts Postgres 16 and Redis 7, and
+        applies the demo seed: three experiments, two flags.
+    beats:
+      - cue: One command starts the whole stack on your machine.
+        focus: {css: "#command"}
+      - cue: Postgres, Redis, the API and the dashboard, with demo data.
+        focus: {css: "#card"}
+
+  - id: dashboard
+    open: /
+    warm_results: [Homepage Hero Copy Test]
+    beats:
+      - cue: Open the dashboard in your browser.
+        focus: {role: link, name: Sign in, exact: true}
+        steps:
+          - move: {role: link, name: Sign in, exact: true}
+        exit:
+          - click: {role: link, name: Sign in, exact: true}
+
+      - before:
+          - url: "**/login"
+          - wait_for: {role: button, name: Sign in, exact: true}
+        cue: Sign in with the demo admin account from the Quick Start.
+        focus: {css: form}
+        steps:
+          - type: {label: Email}
+            text: admin@demo.com
+          - type: {role: textbox, name: Password}
+            text: "Demo1234!"
+            secret: true
+          - move: {role: button, name: Sign in, exact: true}
+        exit:
+          - click: {role: button, name: Sign in, exact: true}
+
+      - before:
+          - url: "**/experiments"
+          - wait_for: {role: link, name: Homepage Hero Copy Test}
+        cue: Your experiments, each with its status at a glance.
+        focus: {css: table}
+        steps:
+          - look: {role: columnheader, name: Status}
+            ms: 2000
+          - move: {role: link, name: Homepage Hero Copy Test}
+        exit:
+          - click: {role: link, name: Homepage Hero Copy Test}
+
+      - before:
+          - wait_for: {role: link, name: View results}
+        cue: Each one has its variants, its metric and a hypothesis.
+        focus: {role: heading, name: Homepage Hero Copy Test}
+        steps:
+          - look: {text: Variants, exact: true}
+            ms: 1500
+          - look: {text: Hypothesis, exact: true}
+            ms: 1500
+          - move: {role: link, name: View results}
+        exit:
+          - click: {role: link, name: View results}
+
+      - before:
+          - wait_for: {text: Winner, exact: true}
+        cue: Results give the lift, the p-value and a recommended winner.
+        focus: {text: Winner, exact: true}
+        payoff: true
+        steps:
+          - look: {text: "improvement on Signup Conversion"}
+            ms: 2000
+          - look: {text: Winner, exact: true}
+            ms: 1500
+        exit:
+          - click: {testid: nav-feature-flags}
+
+      - before:
+          - wait_for: {role: link, name: New Dashboard UI}
+        cue: Feature flags turn a feature on for some users, or all.
+        focus: {role: link, name: New Dashboard UI}
+        steps:
+          - move: {role: link, name: New Dashboard UI}
+        exit:
+          - click: {role: link, name: New Dashboard UI}
+
+      - before:
+          - wait_for: {text: Rollout schedule, exact: true}
+        cue: Flags roll out in stages, with a safety check alongside.
+        focus: {text: Rollout schedule, exact: true}
+        steps:
+          - look: {text: Rollout schedule, exact: true}
+            ms: 1800
+          - look: {text: Safety check, exact: true}
+            ms: 1800
+
+      - cue: Each stage raises the share of users who get the flag.
+        focus: {text: Expand to 50%, exact: true}
+        steps:
+          - look: {text: Expand to 50%, exact: true}
+            ms: 2500
+
+      - cue: The safety check watches the error rate as it rolls out.
+        focus: {text: Error rate, exact: true}
+        steps:
+          - look: {text: Error rate, exact: true}
+            ms: 2000

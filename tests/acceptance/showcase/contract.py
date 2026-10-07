@@ -101,9 +101,11 @@ PROFILES = ("core", "full")
 
 #: The capture gates every video reports in its manifest. The names follow the
 #: approved plan (#1066): the QA gate numbers, C1 and C3 from the principal
-#: engineer's conditions, U1 and U4 from the UX checks, and the two machine
-#: checks (the child environment's allow-list and the disk floor readings).
+#: engineer's conditions, U1, U4 and U5 from the UX checks, and the machine
+#: checks (the child environment's allow-list, the disk floor readings, and
+#: the teardown that leaves no labelled container).
 REQUIRED_CAPTURE_GATES = (
+    "3",
     "6",
     "9",
     "10",
@@ -117,8 +119,10 @@ REQUIRED_CAPTURE_GATES = (
     "C3",
     "U1",
     "U4",
+    "U5",
     "env",
     "disk",
+    "teardown",
 )
 
 FRAME_NAME = re.compile(r"^[0-9]{6}\.jpg$")
