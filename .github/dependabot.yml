@@ -267,10 +267,15 @@ updates:
       # tailwindcss 3 -> 4 is held until after launch (D58): Tailwind 4 changes
       # how it is configured and loaded through PostCSS, so it is a migration
       # of both demo apps' styles, not a bump (#937 and #1048 proposed it).
-      # The `*` rule above already covers it; it is named so the hold outlives
-      # a change to that rule. Remove it after the production deploy.
+      # `update-types` (here and in the `*` rule above) do not apply to the
+      # alert-driven PRs Dependabot opens, which is how #937
+      # and #1048 arrived (a postcss-selector-parser fix through a Tailwind 4
+      # ancestor); only `versions` applies on that path, so it is named here
+      # too. The demo alerts stay open until the migration. Remove this rule
+      # after the production deploy.
       - dependency-name: "tailwindcss"  # held until after launch (D58)
         update-types: ["version-update:semver-major"]
+        versions: [">= 4"]
     labels: ["dependencies", "javascript", "demo"]
     groups:
       patch-and-minor:

@@ -46,7 +46,7 @@ watchtower==3.4.0  # CloudWatch logging
 
 # Testing
 pytest==9.0.3
-pytest-asyncio==1.4.0   # 1.x allows pytest>=8.2,<10; 0.2x capped pytest below 9 (#136)
+pytest-asyncio==1.4.0   # 1.4 needs pytest>=8.4,<10; 0.2x capped pytest below 9 (#136)
 pytest-cov==6.3.0
 pytest-mock==3.16.0
 httpx==0.28.1
