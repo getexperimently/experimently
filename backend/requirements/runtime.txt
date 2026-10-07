@@ -56,7 +56,7 @@ statsmodels==0.15.0
 
 # Utilities
 python-dateutil==2.9.0.post0
-pytz==2026.4
+pytz==2026.5
 semver==3.1.0
 google-re2==1.1.20251105   # core/pattern_match.py: regex conditions (RE2)
 loguru==0.7.3
