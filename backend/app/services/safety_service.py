@@ -17,6 +17,7 @@ underneath them and are also handy in tests.
 """
 
 from datetime import datetime, timedelta
+from decimal import Decimal
 from typing import Any, Dict, List, Literal, Optional, Tuple
 from uuid import UUID
 
@@ -151,6 +152,16 @@ def _breaches(value: float, limit: Optional[float], comparison: str) -> bool:
     if comparison == "equal_to":
         return value == limit
     return value > limit  # "greater_than" (default)
+
+
+def format_metric_value(value: float) -> str:
+    """A metric value as a person would write it in a rollback reason.
+
+    Four significant figures, never in exponent form: 1/14 reads ``0.07143``,
+    0.1 reads ``0.1``, a 30000.12 ms latency reads ``30000`` (``.4g`` alone
+    would print ``3e+04``). The raw value stays in the safety check response.
+    """
+    return format(Decimal(f"{value:.4g}"), "f")
 
 
 class SafetyService:
@@ -700,7 +711,11 @@ class SafetyService:
 
         failing = next((m for m in safety_check.metrics if not m.is_healthy), None)
         if failing:
-            reason = f"Metric '{failing.name}' exceeded threshold ({failing.current_value} vs {failing.threshold})"
+            reason = (
+                f"Metric '{failing.name}' exceeded threshold "
+                f"({format_metric_value(failing.current_value)} vs "
+                f"{format_metric_value(failing.threshold)})"
+            )
             trigger_type = _metric_to_trigger(failing.name)
             trigger_value, threshold_value = failing.current_value, failing.threshold
         else:

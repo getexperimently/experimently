@@ -114,10 +114,11 @@ these works:
 
 ### Changing Your Password
 
-With the default `local` provider, choose **Change password**, next to **Log out** at the top
-of the dashboard. The page (`/account/password`) asks for your current password and the new one
-twice. The link is not shown under `cognito`, where the password lives in the user pool. An
-account created through single sign-on has no password of its own, and the page says so.
+With the default `local` provider, open **More** in the dashboard's top navigation and choose
+**Change password** (in a window narrower than 1280 px, open the menu button first). The page
+(`/account/password`) asks for your current password and the new one twice. The link is not
+shown under `cognito`, where the password lives in the user pool. An account created through
+single sign-on has no password of its own, and the page says so.
 
 Through the API, send your current password and the new one to
 `POST /api/v1/users/me/password`; see

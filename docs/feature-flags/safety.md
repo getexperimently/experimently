@@ -293,7 +293,8 @@ When the monitor finds a flag unhealthy and `enable_automatic_rollbacks` is on, 
 3. Writes a `safety_rollback` entry to the flag's audit history
    (`GET /api/v1/audit-logs/entity/feature_flag/{flag_id}`), with `system:safety-monitor` as its
    `user_email` and no `user_id`. Its `reason` is the rollback's: the first breaching metric with
-   its value and threshold, such as
+   its value and threshold, each to four significant figures (1 error in 14 evaluations reads
+   `0.07143`), such as
    `Automatic rollback due to error_rate exceeding threshold (0.1 > 0.05)`. Its `new_value` holds
    `trigger_type` (`automatic`), `previous_percentage`, `new_percentage`, `deactivated` and
    `paused_schedules` (see [Audit Logging](../api/audit-logging.md#changes-the-platform-makes-on-its-own))

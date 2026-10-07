@@ -123,7 +123,6 @@ steps:
           - navigation "Primary":
             - link "Experiments"
             - link "Admin"
-          - link "Change password"
           - button "Log out"
         - main:
           - heading "Experiments" [level=1]
