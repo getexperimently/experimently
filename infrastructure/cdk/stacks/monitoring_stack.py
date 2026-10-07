@@ -345,7 +345,8 @@ class MonitoringStack(Stack):
         # to it), and an ERROR filter on `/experimentation/<env>/application`,
         # a log group nothing writes to -- the API's tasks log to
         # /ecs/experimentation-backend-<env>, where the fargate stack now
-        # filters ERROR lines. The dashboards are unchanged (#424).
+        # counts error- and critical-level lines. The dashboards are
+        # unchanged (#424).
         #
         # Aurora's writer CPU. CloudWatch publishes Aurora cluster metrics
         # under the cluster's identifier, which CloudFormation generates; the

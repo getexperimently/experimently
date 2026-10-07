@@ -30,8 +30,13 @@ values of ``api_live_target_group``, and asserts exact values:
 * **Redis.** One alarm per node, and the node ids are the replication group's
   id with ``-001`` .. ``-00N``, N the group's own node count.
 * **Namespaces.** No alarm or metric filter uses a namespace or log group
-  nothing publishes to, and the ERROR filter is on the log group the API's
-  task definition writes to.
+  nothing publishes to, and the error-log filter is on the log group the
+  API's task definition writes to.
+* **The error-log filter** counts the lines whose JSON ``level`` is
+  ``error`` or ``critical`` (#811): the API's lines are JSON with a lower-case
+  level, and CloudWatch matches case-sensitively, so the ``"ERROR"`` term it
+  used to match counted none of them. ``backend/tests/unit/core/test_logger.py``
+  pins the logger's half: the level a rendered line carries.
 """
 
 from __future__ import annotations
@@ -425,7 +430,12 @@ def test_the_error_filter_is_on_the_api_tasks_log_group(synths, case):
         fargate["Resources"]["BackendLogGroupDA10F1B2"]["Properties"]["LogGroupName"]
         == f"/ecs/experimentation-backend-{env}"
     )
-    assert props["FilterPattern"] == '"ERROR"'
+    # The API's JSON lines carry a lower-case level, and CloudWatch matches
+    # case-sensitively (#811). test_logger.py renders the logger's half.
+    assert (
+        props["FilterPattern"]
+        == '{ ($.level = "error") || ($.level = "critical") }'
+    )
     (transformation,) = props["MetricTransformations"]
     assert transformation["MetricNamespace"] == f"Experimently/{env}"
 
@@ -434,4 +444,9 @@ def test_the_error_filter_is_on_the_api_tasks_log_group(synths, case):
     assert (alarm["Namespace"], alarm["MetricName"]) == (
         transformation["MetricNamespace"],
         transformation["MetricName"],
+    )
+    # The description is what the alarm email says it counts.
+    assert alarm["AlarmDescription"] == (
+        "At least 10 log lines from the API's tasks in 5 minutes whose "
+        'JSON "level" is "error" or "critical"'
     )

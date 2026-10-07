@@ -945,13 +945,26 @@ class FargateServiceStack(Stack):
             cloudwatch_actions.SnsAction(alarm_topic)
         )
 
-        # --- ERROR lines in the API's logs (#205) ---
+        # --- error- and critical-level lines in the API's logs (#205, #811) ---
         # On the log group the task definition's awslogs driver writes to.
         # The monitoring stack's old filter watched
         # /experimentation/<env>/application, which nothing writes to.
+        #
+        # The API writes one JSON object per line (configure_logging with
+        # json_logs=True, backend/app/core/logger.py), and its "level" field
+        # is lower case: "error", "critical". CloudWatch filter patterns are
+        # case-sensitive, so the term "ERROR" this filter used to match
+        # counted none of those lines. Lines that are not JSON, or whose
+        # level is upper case (the bootstrap's and alembic's output, and
+        # anything logged before configure_logging runs), are not counted.
+        # backend/tests/unit/core/test_logger.py renders lines through
+        # configure_logging and checks the two values this pattern names.
         error_logs = log_group.add_metric_filter(
             "ApiErrorLogs",
-            filter_pattern=logs.FilterPattern.all_terms("ERROR"),
+            filter_pattern=logs.FilterPattern.any(
+                logs.FilterPattern.string_value("$.level", "=", "error"),
+                logs.FilterPattern.string_value("$.level", "=", "critical"),
+            ),
             metric_name="ApiErrorLogLines",
             metric_namespace=f"Experimently/{env_name}",
             default_value=0,
@@ -961,8 +974,8 @@ class FargateServiceStack(Stack):
             "ApiErrorLogsAlarm",
             alarm_name=api_error_logs_alarm_name(env_name),
             alarm_description=(
-                "At least 10 log lines containing ERROR from the API's tasks "
-                "in 5 minutes"
+                "At least 10 log lines from the API's tasks in 5 minutes whose "
+                'JSON "level" is "error" or "critical"'
             ),
             metric=error_logs.metric(statistic="Sum", period=Duration.minutes(5)),
             threshold=10,

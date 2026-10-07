@@ -207,7 +207,7 @@ def test_log_retention_and_no_export(prod, page):
     assert retention["/ecs/experimentation-migrate-prod"] == 30
     # #205: the monitoring stack's `/experimentation/<env>/application` group
     # was written to by nothing, and is gone with its ERROR filter; the API's
-    # ERROR filter is on its tasks' own group now.
+    # error-log filter is on its tasks' own group now.
     assert "/experimentation/prod/application" not in retention, sorted(retention)
     assert not _of_type(prod, "AWS::Logs::SubscriptionFilter")
     assert "CloudWatch Logs only, with no export to S3" in page
