@@ -9571,6 +9571,7 @@
           },
           "stage_order": {
             "description": "Order of the stage in the schedule",
+            "maximum": 1000,
             "minimum": 0,
             "title": "Stage Order",
             "type": "integer"
@@ -9792,6 +9793,7 @@
           "stage_order": {
             "anyOf": [
               {
+                "maximum": 1000,
                 "minimum": 0,
                 "type": "integer"
               },

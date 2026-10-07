@@ -18,6 +18,12 @@ from pydantic import (
     model_validator,
 )
 
+#: The largest ``stage_order`` a request may set. A schedule has a handful of
+#: stages (the documented example has three, and their target percentages run
+#: from 0 to 100), so this is well above any real schedule. A larger value
+#: answers 422 naming the field.
+MAX_STAGE_ORDER = 1000
+
 
 class TriggerType(str, Enum):
     """Types of triggers for rollout schedule stages."""
@@ -70,7 +76,10 @@ class RolloutStageBase(BaseModel):
     name: str = Field(..., min_length=1, max_length=100, description="Stage name")
     description: Optional[str] = Field(None, description="Stage description")
     stage_order: int = Field(
-        ..., ge=0, description="Order of the stage in the schedule"
+        ...,
+        ge=0,
+        le=MAX_STAGE_ORDER,
+        description="Order of the stage in the schedule",
     )
     target_percentage: int = Field(
         ..., ge=0, le=100, description="Target rollout percentage"
@@ -119,7 +128,10 @@ class RolloutStageUpdate(BaseModel):
     )
     description: Optional[str] = Field(None, description="Stage description")
     stage_order: Optional[int] = Field(
-        None, ge=0, description="Order of the stage in the schedule"
+        None,
+        ge=0,
+        le=MAX_STAGE_ORDER,
+        description="Order of the stage in the schedule",
     )
     target_percentage: Optional[int] = Field(
         None, ge=0, le=100, description="Target rollout percentage"
@@ -136,6 +148,12 @@ class RolloutStageUpdate(BaseModel):
 class RolloutStageResponse(RolloutStageBase):
     """Model for rollout stage response data."""
 
+    # Not bounded by MAX_STAGE_ORDER: that bound is on what a request sets. A
+    # stored order can be higher -- adding a stage in the middle moves every
+    # later stage up by one -- and a response must still describe it.
+    stage_order: int = Field(
+        ..., ge=0, description="Order of the stage in the schedule"
+    )
     id: UUID
     rollout_schedule_id: UUID
     status: RolloutStageStatus
@@ -218,10 +236,12 @@ class RolloutScheduleCreate(RolloutScheduleBase):
                 f"Stage percentages cannot exceed the maximum of {self.max_percentage}%"
             )
 
-        # Check that stage orders are correct
-        stage_orders = [stage.stage_order for stage in self.stages]
-        if sorted(stage_orders) != list(
-            range(min(stage_orders), max(stage_orders) + 1)
+        # Check that stage orders are sequential without gaps: n distinct
+        # orders whose highest is n - 1 above their lowest.
+        stage_orders = sorted(stage.stage_order for stage in self.stages)
+        if (
+            len(set(stage_orders)) != len(stage_orders)
+            or stage_orders[-1] - stage_orders[0] != len(stage_orders) - 1
         ):
             raise ValueError("Stage orders must be sequential without gaps")
 
