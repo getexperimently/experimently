@@ -10,6 +10,21 @@ longer applies and release-please can generate this file directly. Until it
 does, entries below 0.2.2 are hand-written and the links in them are the
 reason why.
 
+## [0.26.3](https://github.com/getexperimently/experimently/compare/v0.26.2...v0.26.3) (2026-10-07)
+
+
+### Bug Fixes
+
+* **dashboard:** roles pages say custom roles and grants do not yet change access, and the one-release results notice is gone ([#1058](https://github.com/getexperimently/experimently/issues/1058)) ([b504830](https://github.com/getexperimently/experimently/commit/b50483059c470eb4713d706cb264e6aabe6b0d3e))
+* **dashboard:** the admin summary, workspace member counts and the rollout stage label show the right values ([#1055](https://github.com/getexperimently/experimently/issues/1055)) ([7cabb65](https://github.com/getexperimently/experimently/commit/7cabb65156a2ca5c58a9554dbc927e1c2f4b62b7))
+* **infra:** the API error-log alarm counts lines whose JSON level is error or critical ([#1056](https://github.com/getexperimently/experimently/issues/1056)) ([4bcbeb7](https://github.com/getexperimently/experimently/commit/4bcbeb7b53f55e1052ad9c5926e2da47b8db1960))
+* the split-URL docs, the LLM key settings and time-zone-dependent experiment dates ([#1061](https://github.com/getexperimently/experimently/issues/1061)) ([a0eb8a5](https://github.com/getexperimently/experimently/commit/a0eb8a5de70fa79657bd508d60e14a32a6989e21))
+
+
+### Documentation
+
+* correct statements that do not match the product (claims pass) ([#1059](https://github.com/getexperimently/experimently/issues/1059)) ([05dfd2f](https://github.com/getexperimently/experimently/commit/05dfd2f96258a3447ad9e95f4af75422803ca035))
+
 ## [0.26.2](https://github.com/getexperimently/experimently/compare/v0.26.1...v0.26.2) (2026-10-07)
 
 
