@@ -61,7 +61,13 @@ YAML, or not a mapping, stops at that. Refused, besides what ``model`` refuses:
 * a ``traffic`` step on any stack but compose-dev, or with an ``expect`` or a
   ``snapshot`` setting (its check is the action);
 * ``computed`` on a step that is not an ``api`` step, and ``cells`` on one that
-  is not on a screen, or either naming an oracle not in ``ORACLES``.
+  is not on a screen, or either naming an oracle not in ``ORACLES``;
+* ``after`` on a step that is not an ``api`` step, or naming a value no earlier
+  step saves, or a secret;
+* ``poll`` on a step that is not an ``api`` step, or on one whose method is not
+  ``GET`` (sending a change again would repeat it). A poll is not a sleep: it
+  waits for what the step expects, up to a bound (``waiting.py``), and the
+  sleep keys above are refused wherever they appear, ``wait`` included.
 """
 
 from __future__ import annotations
@@ -90,6 +96,7 @@ from pydantic import ValidationError
 from docs_runner import guide as guides
 from docs_runner import registry, values
 from docs_runner.model import (
+    API_ANSWER_EXPECTS,
     API_EXPECTS,
     BROWSER_EXPECTS,
     LOCAL_URL,
@@ -355,7 +362,7 @@ def _expect_problems(label: str, step: Step, stack: Optional[str]) -> List[str]:
             found.append(
                 f"{label}: an api step expects only status or json, not {wrong}"
             )
-        if not [name for name in given if name in API_EXPECTS]:
+        if not [name for name in given if name in API_ANSWER_EXPECTS]:
             found.append(f"{label}: an api step needs status or json in expect")
         if step.snapshot:
             found.append(f"{label}: an api step has no screen to snapshot")
@@ -488,9 +495,19 @@ def _step_problems(
     if step.not_run is not None and not registry.is_declarable(step.not_run):
         found.append(
             f"{label}: not_run {step.not_run!r} is not a reason a journey may"
-            " give (needs-aws, needs-founder-account, needs-scheduler,"
-            " waived #<issue>)"
+            f" give ({', '.join(registry.DECLARED)}, waived #<issue>)"
         )
+    if step.poll is not None:
+        if step.do.kind != "api":
+            found.append(
+                f"{label}: poll sends an api step's request again until its"
+                f" expect holds; a {step.do.kind} step cannot poll"
+            )
+        elif step.do.api.method != "GET":
+            found.append(
+                f"{label}: poll sends a GET again; sending a"
+                f" {step.do.api.method} again would repeat its change"
+            )
     if step.do.kind == "ref" and guide_path is not None:
         if context.doc_examples.get(guide_path, 0) < 1:
             found.append(
@@ -533,6 +550,8 @@ def _uses(step: Step) -> List[Tuple[str, str]]:
             used.append(("key", do.api.key))
         if step.expect is not None:
             for name in values.placeholders_in(step.expect.json_):
+                used.append(("value", name))
+            for name in (step.expect.after or {}).values():
                 used.append(("value", name))
     if do.goto is not None:
         for name in values.placeholders(do.goto):

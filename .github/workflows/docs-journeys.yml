@@ -23,8 +23,9 @@ name: Docs journeys
 # screenshots, ARIA snapshots, videos) goes to one run directory outside the
 # checkout, uploaded as the artifact docs-journeys-<run id>: kept 14 days, 90
 # for a run on a release tag. Nothing outside that directory is uploaded.
-# The log carries journey names, step numbers and counts; what each step saw
-# is only in the run directory.
+# The log carries journey names, step numbers and counts (for a step that
+# polls, how long it waited and how many seconds later each time it checks
+# was); what each step saw is only in the run directory.
 #
 # The compose journeys sign in, make up passwords and read a one-time password
 # off the screen. None of those values may reach the artifact: the runner

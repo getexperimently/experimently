@@ -7,6 +7,7 @@ cut to one line, and how a JSON value and a shown number are compared.
 
 from __future__ import annotations
 
+import datetime
 import json
 import re
 from typing import Any, Callable, List
@@ -62,8 +63,15 @@ def describe_action(step: Step) -> str:
         return f'choose "{do.select.option}" in "{do.select.label}"'
     if do.api is not None:
         if do.api.key is not None:
-            return f"{do.api.method} {do.api.path} with the API key {do.api.key}"
-        return f"{do.api.method} {do.api.path} as {do.api.as_}"
+            sent = f"{do.api.method} {do.api.path} with the API key {do.api.key}"
+        else:
+            sent = f"{do.api.method} {do.api.path} as {do.api.as_}"
+        if step.poll is not None:
+            sent += (
+                f", again every {step.poll.every_seconds} s until the expectation"
+                f" holds, for up to {step.poll.up_to_seconds} s"
+            )
+        return sent
     if do.evaluations is not None:
         plan = do.evaluations
         context = f" with context {json.dumps(plan.context)}" if plan.context else ""
@@ -151,6 +159,8 @@ def describe_expect(step: Step) -> str:
         parts.append(f'text "{expect_.text}"')
     for path, value in (expect_.json_ or {}).items():
         parts.append(f"json {path} = {json.dumps(value)}")
+    for path, name in (expect_.after or {}).items():
+        parts.append(f"json {path} later than {name}")
     for path, computed in (expect_.computed or {}).items():
         if computed.rel == 0:
             parts.append(f"json {path} = {_oracle_call(computed.oracle)} exactly")
@@ -257,6 +267,43 @@ def settle(
             return text
         text = read()
     return text
+
+
+def parse_time(value: Any) -> datetime.datetime:
+    """An ISO 8601 time from an API answer, with its zone; one without a zone is UTC.
+
+    The API writes both kinds: ``2026-10-07T05:42:19.391716+00:00`` and
+    ``datetime.utcnow()``'s ``2026-10-07T05:42:27.348581``. StepFailed for
+    anything that is not such a time (a number, null, other text).
+    """
+    if not isinstance(value, str):
+        raise StepFailed(f"{json.dumps(value)} is not a time")
+    try:
+        parsed = datetime.datetime.fromisoformat(value)
+    except ValueError:
+        raise StepFailed(f"{one_line(value, 80)!r} is not a time") from None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=datetime.timezone.utc)
+    return parsed
+
+
+def seconds_after(value: Any, since: Any) -> float:
+    """How many seconds the time *value* is after the time *since* (negative: before).
+
+    StepFailed when either is not a time (``parse_time``).
+    """
+    return (parse_time(value) - parse_time(since)).total_seconds()
+
+
+def shown_seconds(seconds: float) -> str:
+    """A number of seconds for a log line: tenths from 1 s up, every digit below.
+
+    ``282.2``, ``0.035``, ``0.000001``: a gap under a second is never shown as
+    ``0.0``, which would read as no gap at all.
+    """
+    if abs(seconds) >= 1:
+        return f"{seconds:.1f}"
+    return f"{seconds:.6f}".rstrip("0").rstrip(".") or "0"
 
 
 def within(seen: Any, wanted: float, rel: float) -> bool:
