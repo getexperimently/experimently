@@ -80,6 +80,11 @@ INVENTORY: Dict[str, str] = {
     "backend/app/services/analysis_service.py::AnalysisService.calculate_metric_results": READS,
     "backend/app/services/analysis_service.py::AnalysisService.get_daily_results": READS,
     "backend/app/services/analysis_service.py::AnalysisService.get_segmented_results": READS,
+    # assign_user's helpers: the stored-row lookup, and the sticky answer
+    # (named here by its ``Assignment`` annotation; it reads through
+    # get_assignment).
+    "backend/app/services/assignment_service.py::AssignmentService._sticky_result": READS,
+    "backend/app/services/assignment_service.py::AssignmentService._stored_assignment": READS,
     "backend/app/services/assignment_service.py::AssignmentService.get_assignment": READS,
     "backend/app/services/assignment_service.py::AssignmentService.get_user_assignments": READS,
     "backend/app/services/audience_service.py::AudienceService.preview_audience_size": READS,

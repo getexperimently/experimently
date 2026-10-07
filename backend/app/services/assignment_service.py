@@ -9,6 +9,7 @@ from uuid import UUID
 
 from sqlalchemy import and_, desc, func
 from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, joinedload
 
 from backend.app.core.consistent_hash import bucket_of
@@ -42,6 +43,21 @@ REASON_ASSIGNED = "assigned"
 REASON_HOLDOUT = "holdout"
 REASON_MUTUAL_EXCLUSION = "mutual_exclusion"
 REASON_TARGETING = "targeting"
+
+#: Postgres SQLSTATE for a unique violation.
+_UNIQUE_VIOLATION = "23505"
+
+
+def _is_unique_violation(exc: IntegrityError) -> bool:
+    """True when the database refused *exc*'s write as a duplicate.
+
+    Decided from the driver's SQLSTATE, never from the message. Which index
+    refused it is settled by looking the row up afterwards, not by naming the
+    index: its name depends on how the schema was built.
+    """
+    orig = getattr(exc, "orig", None)
+    code = getattr(orig, "pgcode", None) or getattr(orig, "sqlstate", None)
+    return code == _UNIQUE_VIOLATION
 
 
 #: Keys of a native ``TargetingRules`` value that may be present while it
@@ -191,30 +207,13 @@ class AssignmentService:
             )
 
         # Check for existing assignment (sticky assignment)
-        existing_assignment = (
-            self.db.query(Assignment)
-            .filter(
-                Assignment.user_id == user_id, Assignment.experiment_id == experiment_id
-            )
-            .order_by(desc(Assignment.created_at))
-            .first()
-        )
+        existing_assignment = self._stored_assignment(user_id, experiment_id)
 
         if existing_assignment:
-            # Return existing assignment
             logger.debug(f"Using existing assignment in experiment {experiment_id}")
-            assignment_dict = self._assigned_result(user_id, experiment_id)
-
-            # Optionally track exposure event
-            if track_exposure:
-                self.event_service.track_exposure(
-                    user_id=user_id,
-                    experiment_id=str(experiment_id),
-                    variant_id=str(existing_assignment.variant_id),
-                    properties=context,
-                )
-
-            return assignment_dict
+            return self._sticky_result(
+                user_id, experiment_id, existing_assignment, track_exposure, context
+            )
 
         # A new user.  The active holdout is loaded once.  When it is
         # measurable the user is recorded in its population whatever the
@@ -266,7 +265,37 @@ class AssignmentService:
         )
 
         self.db.add(assignment)
-        self.db.commit()
+        try:
+            self.db.commit()
+        except IntegrityError as exc:
+            # The check above and this insert are two statements, and another
+            # API process can store this user's first assignment between them:
+            # the unique index on (experiment_id, user_id) then refuses this
+            # row (#1026). The user is assigned, so the answer is the stored
+            # row, given as a sticky hit gives it. Any other refusal, or a
+            # duplicate with no stored row to answer, is raised as before.
+            self.db.rollback()
+            stored = (
+                self._stored_assignment(user_id, experiment_id)
+                if _is_unique_violation(exc)
+                else None
+            )
+            if stored is None:
+                raise
+            logger.info(
+                "First assignment in experiment %s was stored by a concurrent "
+                "request; answering the stored row",
+                experiment_id,
+            )
+            if recorded:
+                # The rollback undid this request's population row. The write
+                # is idempotent, so the user is recorded once whichever
+                # request stored the assignment.
+                self._record_holdout_population(holdout, user_id, holdout_check[0])
+                self.db.commit()
+            return self._sticky_result(
+                user_id, experiment_id, stored, track_exposure, context
+            )
         self.db.refresh(assignment)
 
         logger.debug(f"Assigned variant {variant_id} in experiment {experiment_id}")
@@ -408,6 +437,43 @@ class AssignmentService:
         result["assigned"] = True
         result["reason"] = REASON_ASSIGNED
         return result
+
+    def _stored_assignment(
+        self, user_id: str, experiment_id: Union[str, UUID]
+    ) -> Optional[Assignment]:
+        """The user's stored assignment in the experiment, or None."""
+        return (
+            self.db.query(Assignment)
+            .filter(
+                Assignment.user_id == user_id, Assignment.experiment_id == experiment_id
+            )
+            .order_by(desc(Assignment.created_at))
+            .first()
+        )
+
+    def _sticky_result(
+        self,
+        user_id: str,
+        experiment_id: Union[str, UUID],
+        stored: Assignment,
+        track_exposure: bool,
+        context: Optional[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        """The answer for a user who already holds *stored*.
+
+        That row's variant, unchanged, with the user recorded as seen in it
+        on every call that asks for the record.
+        """
+        variant_id = str(stored.variant_id)
+        assignment_dict = self._assigned_result(user_id, experiment_id)
+        if track_exposure:
+            self.event_service.track_exposure(
+                user_id=user_id,
+                experiment_id=str(experiment_id),
+                variant_id=variant_id,
+                properties=context,
+            )
+        return assignment_dict
 
     @staticmethod
     def _control_variant(experiment: Experiment) -> Variant:
