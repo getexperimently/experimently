@@ -274,11 +274,12 @@ def refuse_out_beside_work(out: Path, work_root: Path) -> None:
     """
     out_path = Path(os.path.realpath(out))
     work_path = Path(os.path.realpath(work_root))
-    if (
-        out_path == work_path
-        or work_path in out_path.parents
-        or out_path in work_path.parents
-    ):
+    # Case-folded, as the render's paths gate compares: the default macOS
+    # filesystem is case-insensitive, so ``Videos`` and ``videos`` are one.
+    out_key = tuple(part.casefold() for part in out_path.parts)
+    work_key = tuple(part.casefold() for part in work_path.parts)
+    shorter = min(len(out_key), len(work_key))
+    if out_key[:shorter] == work_key[:shorter]:
         raise Refused(
             f"--out {out_path} and --work-dir {work_path} overlap; the render deletes"
             " its work directory under --work-dir when it ends, so keep the videos"

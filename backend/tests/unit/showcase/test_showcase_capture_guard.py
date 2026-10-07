@@ -204,9 +204,12 @@ def test_a_work_root_inside_a_git_checkout_is_refused(tmp_path):
 
 
 def test_a_path_in_the_repository_is_never_deleted(tmp_path):
+    """Planted in a made-up checkout: a broken guard must not cost a real file."""
+    checkout = tmp_path / "checkout"
+    (checkout / ".git").mkdir(parents=True)
+    planted = checkout / "Makefile"
+    planted.write_text("all:\n", encoding="utf-8")
     work = guard.WorkRoot(tmp_path / "work")
-    planted = REPO_ROOT / "Makefile"
-    assert planted.is_file()
     with pytest.raises(guard.Refused, match="not under"):
         work.remove(planted)
     with pytest.raises(guard.Refused, match="not under"):
@@ -242,6 +245,16 @@ def test_a_link_in_the_work_root_is_removed_as_a_link(tmp_path):
 )
 def test_videos_and_the_work_root_never_overlap(tmp_path, out, work):
     """The render deletes its work directory under --work-dir when it ends (#1077)."""
+    with pytest.raises(guard.Refused, match="overlap; the render deletes"):
+        guard.refuse_out_beside_work(tmp_path / out, tmp_path / work)
+
+
+@pytest.mark.parametrize(
+    "out, work",
+    [("Videos", "videos"), ("Work/videos", "work"), ("videos", "Videos/work")],
+)
+def test_videos_and_the_work_root_are_compared_without_case(tmp_path, out, work):
+    """The default macOS filesystem is case-insensitive, as the render's gate assumes."""
     with pytest.raises(guard.Refused, match="overlap; the render deletes"):
         guard.refuse_out_beside_work(tmp_path / out, tmp_path / work)
 

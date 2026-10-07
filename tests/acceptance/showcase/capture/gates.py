@@ -130,6 +130,28 @@ def payoff_still(
     return True, numbers, ""
 
 
+#: How far the computed zoom may be from ``config.ZOOM`` (CSS keeps 7 digits).
+ZOOM_TOLERANCE = 1e-4
+
+
+def zoom(measured: Mapping[str, Any]) -> Verdict:
+    """C1: <body> has ``config.ZOOM`` as Chromium computed it, and <html> has none."""
+    body, html = measured.get("body"), measured.get("html")
+    numbers = {"body": body, "html": html, "wanted_body": round(config.ZOOM, 6)}
+    if not all(isinstance(v, (int, float)) for v in (body, html)):
+        return False, numbers, f"the page's zoom could not be read ({dict(measured)})"
+    if abs(html - 1) > ZOOM_TOLERANCE:
+        return False, numbers, f"<html> is zoomed {html:g}; the zoom belongs on <body>"
+    if abs(body - config.ZOOM) > ZOOM_TOLERANCE:
+        return (
+            False,
+            numbers,
+            f"<body> is zoomed {body:g}, not {config.ZOOM:.6f}: the frames would not"
+            " be the layout the storyboard was written for",
+        )
+    return True, numbers, ""
+
+
 def needle_count(static: Sequence[str], kept: Iterable[str]) -> Verdict:
     """Gate 6's count: every static needle, plus each kept value, exactly."""
     static_set = set(static)

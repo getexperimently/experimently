@@ -1,12 +1,15 @@
 """Drives the browser through a storyboard and records what it draws.
 
-The only module here that imports Playwright. What it does, in order:
+The only module here that uses Playwright. It imports it only where it runs
+(and its types only for type checking), so its checks are unit tested with
+stand-in pages where Playwright is not installed. What it does, in order:
 
 * One headless Chromium context at ``config.VIEWPORT``, device scale factor 1.
   Before the first navigation: ``context.route`` and ``context.route_web_socket``
   abort any request to a reserved port, and any loopback request to a port
   that is not the tool's dashboard or API (gate 15c); an init script puts the
-  CSS zoom on <body> (``config.ZOOM``) as soon as <head> exists.
+  CSS zoom on <body> (``config.ZOOM``) as soon as <head> exists, and
+  ``measure_zoom`` reads back what Chromium computed before any scene (C1).
 * Every JSON response and every JSON request body the page sends or receives
   goes through ``redaction.register_credentials``: a token the page is handed
   is a needle from then on.
@@ -18,6 +21,8 @@ The only module here that imports Playwright. What it does, in order:
   ``start`` to ``stop``. Frames arrive only when the page changes; each is
   written to ``frames/`` with its time on the recording clock, which counts
   only recorded time, so off-camera work between scenes is not in the video.
+  A frame replaced at the same millisecond is deleted through
+  ``WorkRoot.remove``; a gate-6 refusal deletes them all (``run.drop_recording``).
 * The cursor and the highlight ring are the tool's own overlays, drawn from
   coordinates only; ``screencast.show_actions`` is never used (it draws a
   typed value, a password's included, as text).
@@ -42,21 +47,36 @@ import sys
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
 from urllib.parse import urlparse
 
 import numpy as np
-from playwright.sync_api import BrowserContext, Locator, Page, Route, WebSocketRoute
-from playwright.sync_api import Error as PlaywrightError
 
 from showcase.capture import config, guard, storyboard
+from showcase.capture import gates as judge
+
+if TYPE_CHECKING:
+    from playwright.sync_api import (
+        BrowserContext,
+        Locator,
+        Page,
+        Route,
+        WebSocketRoute,
+    )
+try:
+    from playwright.sync_api import Error as PlaywrightError
+except ImportError:  # the CI unit job, which drives no browser
+
+    class PlaywrightError(Exception):  # type: ignore[no-redef]
+        """Stands in for Playwright's error where Playwright is not installed."""
+
+
 from showcase.capture.storyboard import Beat, Scene
 
 _DOCS = Path(__file__).resolve().parents[2] / "docs"
 if str(_DOCS) not in sys.path:
     sys.path.insert(0, str(_DOCS))
 from docs_runner import redaction  # noqa: E402
-from docs_runner.execute import DRAWN_JS  # noqa: E402
 
 
 class CaptureFailed(RuntimeError):
@@ -84,6 +104,11 @@ ZOOM_INIT = """(() => {
   }
 })()"""
 ZOOM_TARGET = "body"
+#: What zoom Chromium computed for <html> and <body>.
+ZOOM_JS = """() => ({
+  html: parseFloat(getComputedStyle(document.documentElement).zoom),
+  body: parseFloat(getComputedStyle(document.body).zoom),
+})"""
 
 #: U1: each link and button in the page's <header> is one line, and no element
 #: of it is cut off (scrollWidth over clientWidth: the user chip's ellipsis).
@@ -279,9 +304,10 @@ def colour_box(
 class Recorder:
     """The recording clock and the frames on it."""
 
-    def __init__(self, page: Page, frames: Path, tally: Tally):
+    def __init__(self, page: Page, frames: Path, tally: Tally, work: guard.WorkRoot):
         self.page = page
         self.dir = frames
+        self.work = work
         self.dir.mkdir(parents=True, exist_ok=True)
         self.tally = tally
         self.offset_ms = 0.0
@@ -332,7 +358,7 @@ class Recorder:
         by_time: Dict[int, Path] = {}
         for t, path in sorted(self.frames, key=lambda item: item[0]):
             if t in by_time:
-                by_time[t].unlink()
+                self.work.remove(by_time[t])
             by_time[t] = path
         entries = []
         for index, t in enumerate(sorted(by_time), start=1):
@@ -354,6 +380,7 @@ class Director:
         dashboard_port: int,
         redactor: redaction.Redactor,
         forbidden: Tuple[str, ...],
+        work: guard.WorkRoot,
     ):
         self.context = context
         self.page = page
@@ -362,7 +389,7 @@ class Director:
         self.redactor = redactor
         self.forbidden = forbidden
         self.tally = Tally()
-        self.recorder = Recorder(page, frames, self.tally)
+        self.recorder = Recorder(page, frames, self.tally, work)
         self.cues: List[Dict[str, Any]] = []
         self.cursor = (
             config.VIEWPORT["width"] * 0.62,
@@ -566,7 +593,15 @@ class Director:
         self.page.wait_for_timeout(config.CLICK_RING_MS)
         self._dispose(handle)
 
-    # -- C1: the overlay alignment self-test --------------------------------------
+    # -- C1: the zoom, and the overlay alignment self-test ---------------------------
+
+    def measure_zoom(self) -> Dict[str, Any]:
+        """The zoom the page has, as Chromium computes it; refused unless it is ``config.ZOOM`` on <body>."""
+        measured = self.page.evaluate(ZOOM_JS)
+        ok, numbers, why = judge.zoom(measured)
+        if not ok:
+            raise CaptureFailed("C1 zoom", why)
+        return numbers
 
     def self_test_overlay(self, spec: storyboard.Locator) -> Dict[str, Any]:
         """Draw a ring of ``SELF_TEST_RGB`` exactly on an element; find it in a frame."""
@@ -628,16 +663,22 @@ class Director:
     # -- the checks ------------------------------------------------------------------
 
     def check_needles(self) -> None:
+        # Imported here: docs_runner.execute imports Playwright, and the rest
+        # of this module is unit tested where Playwright is not installed.
+        from docs_runner.execute import DRAWN_JS
+
         self.tally.needle_checks += 1
-        values = set(config.STATIC_NEEDLES) | set(self.redactor.values)
-        if not values:
-            raise CaptureFailed("gate 6", "0 needles: refusing to check the page")
         try:
             text, fields = self.page.evaluate(DRAWN_JS)
         except PlaywrightError as error:
             raise CaptureFailed(
                 "gate 6", f"{self.where}: the page could not be read ({error})"
             ) from None
+        # Read after the page: a token the page was handed while it was being
+        # read is a needle already, and must be looked for in that text.
+        values = set(config.STATIC_NEEDLES) | set(self.redactor.values)
+        if not values:
+            raise CaptureFailed("gate 6", "0 needles: refusing to check the page")
         where = redaction.on_screen(text, [tuple(f) for f in fields], values)
         if where:
             raise CaptureFailed(

@@ -25,6 +25,7 @@ from __future__ import annotations
 import json
 import os
 import secrets
+import signal
 import subprocess
 import sys
 import threading
@@ -32,7 +33,7 @@ import time
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Mapping, Optional
+from typing import Any, Callable, Dict, List, Mapping, Optional, Tuple
 
 from showcase import contract
 from showcase.capture import build, config, guard, storyboard
@@ -159,6 +160,21 @@ def frame_stats(frames: Path, entries: List[Dict[str, Any]]) -> List[float]:
 # ---------------------------------------------------------------------------
 
 
+def refuse_missing_ffmpeg(*, run: Callable[..., Any] = subprocess.run) -> None:
+    """``ffmpeg -version`` with the allow-listed environment; Refused if it fails."""
+    try:
+        done = run(
+            ["ffmpeg", "-hide_banner", "-version"],
+            capture_output=True,
+            text=True,
+            env=guard.tool_env(),
+        )
+    except FileNotFoundError:
+        raise guard.Refused("ffmpeg is not installed (brew install ffmpeg)") from None
+    if done.returncode != 0:
+        raise guard.Refused("ffmpeg is not installed (brew install ffmpeg)")
+
+
 def preflight(options: Options, environ: Mapping[str, str]) -> None:
     """Every refusal that needs no Docker, npm or uvicorn."""
     unknown = [v for v in options.videos if v not in config.VIDEOS]
@@ -186,11 +202,7 @@ def preflight(options: Options, environ: Mapping[str, str]) -> None:
             f"Playwright {found or 'is not installed'}; the tool needs"
             f" {config.PLAYWRIGHT_VERSION} (tests/acceptance/requirements.txt)"
         )
-    done = subprocess.run(
-        ["ffmpeg", "-hide_banner", "-version"], capture_output=True, text=True
-    )
-    if done.returncode != 0:
-        raise guard.Refused("ffmpeg is not installed (brew install ffmpeg)")
+    refuse_missing_ffmpeg()
     for board in options.videos:
         storyboard.load(HERE / config.VIDEOS[board])
 
@@ -198,6 +210,16 @@ def preflight(options: Options, environ: Mapping[str, str]) -> None:
 # ---------------------------------------------------------------------------
 # One video
 # ---------------------------------------------------------------------------
+
+
+def drop_recording(error: Exception, frames_dir: Path, work: guard.WorkRoot) -> None:
+    """After a gate-6 refusal (a kept value on screen), delete every frame.
+
+    Through ``WorkRoot.remove``, like every deletion the tool makes; the
+    refusal says "recording dropped", and this is what makes that true.
+    """
+    if getattr(error, "gate", None) == "gate 6" and frames_dir.exists():
+        work.remove(frames_dir)
 
 
 def capture_video(
@@ -267,7 +289,13 @@ def capture_video(
                     "gate 14",
                     f"the stack holds {counts}, the seed makes {wanted}: not a fresh stack",
                 )
-            facts = record(board, stack, options, token, frames_dir, gates, log)
+            try:
+                facts = record(
+                    board, stack, options, token, frames_dir, gates, log, work
+                )
+            except directing.CaptureFailed as error:
+                drop_recording(error, frames_dir, work)
+                raise
         finally:
             log(f"{slug}: stack down")
             stack.down()
@@ -314,6 +342,7 @@ def record(
     frames_dir: Path,
     gates: Dict[str, Dict[str, Any]],
     log: Callable[[str], None],
+    work: guard.WorkRoot,
 ) -> Dict[str, Any]:
     """The browser part of a capture: self-test, scenes, end state, recorded-data gates."""
     from docs_runner import redaction
@@ -329,7 +358,7 @@ def record(
         str(p) for p in (ports.api, ports.dashboard, ports.postgres)
     )
     with sync_playwright() as playwright:
-        browser = playwright.chromium.launch()
+        browser = playwright.chromium.launch(env=guard.tool_env())
         try:
             context = browser.new_context(
                 viewport=dict(config.VIEWPORT), device_scale_factor=1
@@ -344,6 +373,7 @@ def record(
                 dashboard_port=ports.dashboard,
                 redactor=redactor,
                 forbidden=forbidden,
+                work=work,
             )
             director.install()
             # Gate 3: the page is the frame's size at scale 1, before anything is recorded.
@@ -356,8 +386,11 @@ def record(
             # C1: the overlay lands where the page is, before any scene.
             page.goto(stack.dashboard_url + "/")
             director.settle()
+            # The zoom as Chromium computed it, not the constant that asked for it.
+            zoom = director.measure_zoom()
             gates["C1"] = gate(
                 True,
+                zoom=zoom,
                 **director.self_test_overlay(
                     # Left of centre, so a ring drawn 4/3 too far still lands
                     # in the frame and the refusal can say by how much.
@@ -463,6 +496,7 @@ def record(
         "duration_ms": duration,
         "cues": director.cues,
         "needles": sorted(set(config.STATIC_NEEDLES) | set(redactor.values)),
+        "zoom": zoom["body"],
     }
 
 
@@ -547,7 +581,8 @@ def write_capture(
         "lock_next_version": versions.get("next_lockfile"),
         "profile": options.profile,
         "viewport": dict(contract.VIEWPORT),
-        "zoom": round(config.ZOOM, 6),
+        # Measured on <body> at the capture's start (C1), not config.ZOOM.
+        "zoom": round(facts["zoom"], 6),
         "page_h": contract.PAGE_H,
         "band_h": contract.BAND_H,
         "gates": gates,
@@ -695,17 +730,28 @@ def run(
     return results
 
 
-#: What a SIGTERM or SIGHUP must undo before the process ends, newest first.
+#: What a stopping signal must undo before the process ends, newest first.
 TEARDOWN: List[Callable[[], None]] = []
+
+#: The signals that bring the stack down and exit with 128 + the signal:
+#: SIGTERM (143), SIGHUP (a closed terminal, 129) and SIGINT (Ctrl-C, 130).
+STOP_SIGNALS: Tuple[signal.Signals, ...] = (
+    signal.SIGTERM,
+    signal.SIGHUP,
+    signal.SIGINT,
+)
 
 
 def _stop_on_signal(signum: int, _frame: Any) -> None:
-    """SIGTERM and SIGHUP (a closed terminal): bring the stack down, then exit.
+    """A stopping signal: bring the stack down, then exit with 128 + *signum*.
 
     The teardown runs here rather than through ``finally``: an exception raised
-    while Playwright's sync API is waiting leaves it spinning (measured), so
-    the handler stops the children and removes the container itself. Only
-    SIGKILL leaves them behind, and the next run removes them first.
+    while Playwright's sync API is waiting leaves it spinning (measured, for
+    SIGTERM and for the KeyboardInterrupt a Ctrl-C raises while a screencast
+    runs), so the handler stops the children and removes the container
+    itself. A signal not in ``STOP_SIGNALS`` that ends the process (SIGKILL,
+    or SIGQUIT from Ctrl-\\) leaves them behind, and the next run removes
+    them first.
     """
     for undo in reversed(TEARDOWN):
         try:
@@ -715,12 +761,14 @@ def _stop_on_signal(signum: int, _frame: Any) -> None:
     os._exit(128 + signum)
 
 
-def main(argv: Optional[List[str]] = None) -> int:
-    import signal
-
-    environ = dict(os.environ)
-    for signum in (signal.SIGTERM, signal.SIGHUP):
+def install_stop_handlers() -> None:
+    for signum in STOP_SIGNALS:
         signal.signal(signum, _stop_on_signal)
+
+
+def main(argv: Optional[List[str]] = None) -> int:
+    environ = dict(os.environ)
+    install_stop_handlers()
 
     def log(line: str) -> None:
         sys.stdout.write(f"[showcase] {line}\n")
