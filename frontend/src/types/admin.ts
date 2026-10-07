@@ -183,12 +183,18 @@ export interface ApiKey {
   last_used_at?: string | null;
 }
 
+/**
+ * `GET /api/v1/admin/stats`: counts grouped by what they count, and the
+ * time they were counted.
+ * `frontend/src/tests/fixtures/admin-stats.json` is an example, kept to this
+ * shape by `backend/tests/unit/api/test_admin_stats_fixture.py`.
+ */
 export interface AdminStats {
-  total_experiments: number;
-  active_experiments: number;
-  total_feature_flags: number;
-  active_feature_flags: number;
-  total_users: number;
+  users: { total: number; active: number; superusers: number };
+  experiments: { total: number; active: number };
+  events: { total: number; daily_rate: number };
+  feature_flags: { total: number; active: number };
+  timestamp: string;
 }
 
 export interface UserListResponse {

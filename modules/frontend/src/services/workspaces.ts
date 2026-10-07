@@ -6,7 +6,8 @@ export interface Workspace {
   slug: string;
   description: string;
   is_active: boolean;
-  member_count: number;
+  /** From the list and a workspace's own read; a create does not answer it. */
+  member_count?: number;
   created_at: string;
   owner_username?: string;
 }

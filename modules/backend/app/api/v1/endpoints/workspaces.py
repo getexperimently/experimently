@@ -178,15 +178,16 @@ def create_workspace(
     )
 
 
-@router.get("/", response_model=List[WorkspaceResponse])
+@router.get("/", response_model=List[WorkspaceWithStatsResponse])
 def list_my_workspaces(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
 ):
-    """List all workspaces the current user belongs to."""
+    """List all workspaces the current user belongs to, each with its member count."""
     workspaces = workspace_service.list_user_workspaces(db, current_user.id)
+    counts = workspace_service.member_counts(db, [w.id for w in workspaces])
     return [
-        WorkspaceResponse(
+        WorkspaceWithStatsResponse(
             id=str(w.id),
             name=w.name,
             slug=w.slug,
@@ -194,6 +195,7 @@ def list_my_workspaces(
             is_active=w.is_active,
             created_at=w.created_at,
             updated_at=w.updated_at,
+            member_count=counts.get(w.id, 0),
         )
         for w in workspaces
     ]

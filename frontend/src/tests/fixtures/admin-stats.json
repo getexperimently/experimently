@@ -1,0 +1,20 @@
+{
+  "users": {
+    "total": 41,
+    "active": 37,
+    "superusers": 2
+  },
+  "experiments": {
+    "total": 25,
+    "active": 9
+  },
+  "events": {
+    "total": 120344,
+    "daily_rate": 5120
+  },
+  "feature_flags": {
+    "total": 52,
+    "active": 31
+  },
+  "timestamp": "2026-10-07T08:00:00.000000"
+}

@@ -34943,7 +34943,7 @@
     },
     "/api/v1/workspaces/": {
       "get": {
-        "description": "List all workspaces the current user belongs to.",
+        "description": "List all workspaces the current user belongs to, each with its member count.",
         "operationId": "list_my_workspaces_api_v1_workspaces__get",
         "responses": {
           "200": {
@@ -34951,7 +34951,7 @@
               "application/json": {
                 "schema": {
                   "items": {
-                    "$ref": "#/components/schemas/WorkspaceResponse"
+                    "$ref": "#/components/schemas/WorkspaceWithStatsResponse"
                   },
                   "title": "Response List My Workspaces Api V1 Workspaces  Get",
                   "type": "array"

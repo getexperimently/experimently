@@ -1,3 +1,5 @@
+import fs from 'fs';
+import path from 'path';
 import React from 'react';
 import { render, screen, waitFor } from '@testing-library/react';
 import { AdminDashboard } from '@/pages/admin/index';
@@ -25,13 +27,21 @@ jest.mock('next/router', () => ({
   }),
 }));
 
-const mockStats: AdminStats = {
-  total_experiments: 25,
-  active_experiments: 10,
-  total_feature_flags: 50,
-  active_feature_flags: 30,
-  total_users: 100,
-};
+// The shape `GET /api/v1/admin/stats` answers; the backend's
+// `test_admin_stats_fixture.py` fails when the route's shape and this file part.
+const mockStats: AdminStats = JSON.parse(
+  fs.readFileSync(path.join(__dirname, '..', 'fixtures', 'admin-stats.json'), 'utf8'),
+);
+
+/** Each tile's label and the number under it, as the page shows them. */
+function shownTiles(): Record<string, string> {
+  return Object.fromEntries(
+    screen.getAllByTestId('stat-tile').map((tile) => {
+      const [label, value] = Array.from(tile.querySelectorAll('p')).map((p) => p.textContent ?? '');
+      return [label, value];
+    }),
+  );
+}
 
 const mockGetStats = AdminService.getStats as jest.Mock;
 
@@ -62,11 +72,16 @@ describe('AdminDashboard', () => {
     });
   });
 
-  it('shows correct total_experiments value', async () => {
+  it('shows every number the stats route answers, under its label (#1007)', async () => {
     mockGetStats.mockResolvedValue(mockStats);
     render(<AdminDashboard />);
-    await waitFor(() => {
-      expect(screen.getByText('25')).toBeInTheDocument();
+    await screen.findAllByTestId('stat-tile');
+    expect(shownTiles()).toEqual({
+      'Total Experiments': '25',
+      'Active Experiments': '9',
+      'Total Feature Flags': '52',
+      'Active Feature Flags': '31',
+      'Total Users': '41',
     });
   });
 
@@ -94,17 +109,15 @@ describe('AdminDashboard', () => {
 
   it('handles zero values correctly', async () => {
     const zeroStats: AdminStats = {
-      total_experiments: 0,
-      active_experiments: 0,
-      total_feature_flags: 0,
-      active_feature_flags: 0,
-      total_users: 0,
+      users: { total: 0, active: 0, superusers: 0 },
+      experiments: { total: 0, active: 0 },
+      events: { total: 0, daily_rate: 0 },
+      feature_flags: { total: 0, active: 0 },
+      timestamp: '2026-10-07T08:00:00.000000',
     };
     mockGetStats.mockResolvedValue(zeroStats);
     render(<AdminDashboard />);
-    await waitFor(() => {
-      const zeros = screen.getAllByText('0');
-      expect(zeros.length).toBeGreaterThanOrEqual(5);
-    });
+    await screen.findAllByTestId('stat-tile');
+    expect(Object.values(shownTiles())).toEqual(['0', '0', '0', '0', '0']);
   });
 });

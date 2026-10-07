@@ -11,8 +11,9 @@ import secrets
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import List, Optional
+from typing import Dict, Iterable, List, Optional
 
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from modules.backend.app.models.workspace import (
@@ -536,6 +537,25 @@ class WorkspaceService:
             .count()
         )
         return WorkspaceStats(member_count=member_count)
+
+    def member_counts(
+        self, db: Session, workspace_ids: Iterable[uuid.UUID]
+    ) -> Dict[uuid.UUID, int]:
+        """Return each workspace's member count, in one grouped query.
+
+        A workspace with no members is absent from the result; callers read a
+        missing id as 0.
+        """
+        ids = list(workspace_ids)
+        if not ids:
+            return {}
+        rows = (
+            db.query(WorkspaceMember.workspace_id, func.count())
+            .filter(WorkspaceMember.workspace_id.in_(ids))
+            .group_by(WorkspaceMember.workspace_id)
+            .all()
+        )
+        return dict(rows)
 
     # ── Permissions ───────────────────────────────────────────────────────────
 

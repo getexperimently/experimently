@@ -74,11 +74,11 @@ describe('AdminService', () => {
   describe('getStats', () => {
     it('calls /admin/stats endpoint', async () => {
       mockOk({
-        total_experiments: 10,
-        active_experiments: 5,
-        total_feature_flags: 20,
-        active_feature_flags: 12,
-        total_users: 50,
+        users: { total: 50, active: 48, superusers: 1 },
+        experiments: { total: 10, active: 5 },
+        events: { total: 900, daily_rate: 30 },
+        feature_flags: { total: 20, active: 12 },
+        timestamp: '2026-10-07T08:00:00.000000',
       });
       await AdminService.getStats();
       expect(mockFetch).toHaveBeenCalledWith(`${BASE}/api/v1/admin/stats`, expect.any(Object));
