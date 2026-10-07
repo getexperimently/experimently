@@ -3,15 +3,15 @@
 # asks for "recordings R1-R8 in that run's artifacts").
 #
 # Each table is one file, recordings/<name>.webm in the run directory, recorded
-# by the one journey whose `recording.name` is the table's name, from that
-# journey's guide. A recording is the journey's own browser at 1280x720 and real
-# speed, with a caption bar naming each step's guide section and action, and is
-# never longer than `max_seconds`. What it must show is `shows`; the journey's
-# steps are what make it show that.
+# by the one journey with an entry of that `name` in its `recordings` list, from
+# that journey's guide. A recording is the journey's own browser at 1280x720 and
+# real speed, with a caption bar naming each step's guide section and action,
+# and is never longer than `max_seconds`. What it must show is `shows`; the
+# journey's steps are what make it show that.
 #
 # What a viewer sees, measured on the first runs (2026-10-07): the journeys run
 # at the browser's own speed, so a walkthrough is as short as its steps are
-# quick (R1 about 7 s, R2 about 4 s, R8 about 30 s), and the caption bar
+# quick (R1 about 7 s, R2 about 4 s, R8 15 to 29 s), and the caption bar
 # blinks once per screen step, when it is hidden for that step's screenshot.
 # Neither is cut or slowed: D11.4 asks for real speed and no cuts. Playwright
 # draws a screenshot's masks into the page, so while a walkthrough is recorded

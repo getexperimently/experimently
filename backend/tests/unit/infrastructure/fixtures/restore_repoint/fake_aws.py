@@ -39,6 +39,9 @@ plants one defect each:
                          (the pessimistic reading of RDS, which is unmeasured)
     api_does_not_start   scaling the API up starts no task
     no_endpoint          describing this cluster gives no Endpoint
+    restore_error_after_create  the point-in-time restore makes the cluster,
+                         then the call fails as the CLI does when the
+                         connection closes before the answer (exit 255)
 
 `"scaling": null` in the state is an API service with no scalable target.
 
@@ -358,6 +361,14 @@ if SVC == "rds" and OP == "restore-db-cluster-to-point-in-time":
         password="rotated" if FAULTS.get("password_rotated") else c["password"],
     )
     st["clusters"][new] = c
+    if FAULTS.get("restore_error_after_create"):
+        print(
+            "\nConnection was closed before we received a valid response from"
+            f' endpoint URL: "https://rds.{REGION}.amazonaws.com/".',
+            file=sys.stderr,
+        )
+        save()
+        sys.exit(255)
     emit({"DBCluster": {"DBClusterIdentifier": new, "Status": "creating"}})
 
 if SVC == "rds" and OP == "create-db-instance":

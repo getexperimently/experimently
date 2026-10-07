@@ -257,7 +257,8 @@ def agrees(text: str, value: float) -> bool:
 MAX_CHANGES = 20
 
 
-def _agrees_or_not(text: str, value: float) -> bool:
+def agrees_or_not(text: str, value: float) -> bool:
+    """``agrees``, with a text that shows no number (``--``, empty) as False."""
     try:
         return agrees(text, value)
     except StepFailed:
@@ -279,7 +280,7 @@ def settle(
     """
     text = read()
     for _ in range(MAX_CHANGES):
-        if _agrees_or_not(text, value) or not changed(text):
+        if agrees_or_not(text, value) or not changed(text):
             return text
         text = read()
     return text

@@ -28,7 +28,7 @@ What keeps them out, in the order it acts:
    one (the step whose screen shows what the keep reads); the loader refuses a
    journey that says otherwise. Any other screenshot masks every element whose
    text holds a kept value. A journey with a secret is never recorded whole
-   (``video``); its walkthrough (``recording``) is recorded only over steps
+   (``video``); its walkthrough (``recordings``) is recorded only over steps
    that cannot draw one (the loader's rules), and ``on_screen`` checks the page
    before the segment and after each of its steps: a value drawn anywhere but
    as a password field's dots fails the step and drops the recording.

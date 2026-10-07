@@ -532,7 +532,9 @@ def flow_rows(
     """Per flow of #939: (flow, journeys, other pages and classes, in this run).
 
     And the journeys not written yet, by where they are planned. A planned
-    journey is never counted as verified: the flow says it waits on it.
+    journey is never counted as verified: the flow says it waits on it. Nor is
+    a journey that ran with steps not run (PARTIAL): the flow is "partly
+    verified", which the summary's count of verified flows leaves out.
     """
     pages = inventory.get("pages", {})
     journey_entry = {
@@ -570,6 +572,7 @@ def flow_rows(
             others.append(
                 f"every {cls} page ({count}): {CLASS_MEANING.get(_family(cls), cls)}"
             )
+        partial = [j for j in ran if verdicts[j].word == "PARTIAL"]
         if failed:
             state = "FAIL: " + ", ".join(failed)
         elif planned:
@@ -578,6 +581,12 @@ def flow_rows(
                 state = f"partly: {', '.join(ran)} ran; " + state
         elif not_run:
             state = "not verified in this run: " + ", ".join(not_run) + " did not run"
+        elif partial:
+            verb = "has" if len(partial) == 1 else "have"
+            state = f"partly verified: {', '.join(partial)} {verb} steps not run"
+            verified = [journey for journey in ran if journey not in partial]
+            if verified:
+                state += "; verified by " + ", ".join(verified)
         elif ran:
             state = "verified by " + ", ".join(ran)
             if others:

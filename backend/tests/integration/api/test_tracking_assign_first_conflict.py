@@ -24,7 +24,9 @@ Covered:
 * ``/tracking/assign/batch``: the same answer for that user, the rest of the
   list assigned, and no view recorded by the batch;
 * the holdout population (#445): exactly one row for the user, whether the
-  other process recorded it or stored only the assignment;
+  other process recorded it or stored only the assignment; on the batch too,
+  with the user last, so no later commit stores the row this request wrote
+  again (the batch records no view, and the single route's view commits it);
 * any other refusal of the insert (a foreign key, a duplicate primary key)
   still answers the fixed 500 and stores nothing.
 """
@@ -364,6 +366,28 @@ def test_batch_answers_the_row_another_process_stored(
     assert _views(session_factory, experiment.id, later) == []
 
 
+def _outside_the_holdout(holdout, prefix: str) -> str:
+    """A new user the holdout does not hold out, so eligible and inserted."""
+    while True:
+        user_id = _new_user(prefix)
+        if holdout_bucket(user_id, holdout.hash_salt) >= HOLDOUT_PERCENTAGE:
+            return user_id
+
+
+def _population(session_factory, holdout_id, user_id) -> List[tuple]:
+    session = session_factory()
+    try:
+        return [
+            tuple(row)
+            for row in session.query(HoldoutPopulation.in_holdout).filter(
+                HoldoutPopulation.holdout_id == holdout_id,
+                HoldoutPopulation.user_id == user_id,
+            )
+        ]
+    finally:
+        session.close()
+
+
 @pytest.mark.parametrize("writer", ["full_assign", "assignment_only"])
 def test_holdout_population_is_recorded_once_under_the_conflict(
     writer,
@@ -377,10 +401,7 @@ def test_holdout_population_is_recorded_once_under_the_conflict(
 ):
     """The rollback drops this request's population row; the user is still
     recorded exactly once, whether or not the other writer recorded them."""
-    while True:
-        user_id = _new_user("pop")
-        if holdout_bucket(user_id, measurable_holdout.hash_salt) >= HOLDOUT_PERCENTAGE:
-            break  # outside the holdout, so eligible and inserted
+    user_id = _outside_the_holdout(measurable_holdout, "pop")
     stored = _variant_the_hash_does_not_pick(db_session, experiment, user_id)
     write = {"full_assign": _full_assign, "assignment_only": _assignment_only}[writer]
     fired = _another_request_stores_it_first(
@@ -397,19 +418,47 @@ def test_holdout_population_is_recorded_once_under_the_conflict(
     assert resp.status_code == 200, resp.text
     assert resp.json()["variant_id"] == str(stored)
     assert _rows(session_factory, experiment.id, user_id) == [str(stored)]
-    session = session_factory()
-    try:
-        population = (
-            session.query(HoldoutPopulation.in_holdout)
-            .filter(
-                HoldoutPopulation.holdout_id == measurable_holdout.id,
-                HoldoutPopulation.user_id == user_id,
-            )
-            .all()
-        )
-    finally:
-        session.close()
-    assert population == [(False,)]
+    assert _population(session_factory, measurable_holdout.id, user_id) == [(False,)]
+
+
+def test_batch_holdout_population_is_committed_under_the_conflict(
+    client,
+    headers,
+    experiment,
+    measurable_holdout,
+    db_session,
+    session_factory,
+    monkeypatch,
+):
+    """The batch, with the crossing user last and a writer that stores only
+    the assignment row: nothing after the conflict commits for this request
+    (no view, no later user), so the population row it writes again after
+    the rollback is stored only by its own commit."""
+    earlier = _outside_the_holdout(measurable_holdout, "pop-earlier")
+    user_id = _outside_the_holdout(measurable_holdout, "pop-last")
+    stored = _variant_the_hash_does_not_pick(db_session, experiment, user_id)
+    fired = _another_request_stores_it_first(
+        monkeypatch, session_factory, user_id, experiment.id, _assignment_only(stored)
+    )
+
+    resp = client.post(
+        BATCH_URL,
+        json={
+            "experiment_key": experiment.key,
+            "users": [{"user_id": earlier}, {"user_id": user_id}],
+        },
+        headers=headers,
+    )
+
+    assert fired == [user_id]
+    assert resp.status_code == 200, resp.text
+    answers = {a["user_id"]: a for a in resp.json()["assignments"]}
+    assert answers[user_id]["variant_id"] == str(stored)
+    assert answers[user_id]["assigned"] is True
+    assert _rows(session_factory, experiment.id, user_id) == [str(stored)]
+    assert _views(session_factory, experiment.id, user_id) == []
+    assert _population(session_factory, measurable_holdout.id, user_id) == [(False,)]
+    assert _population(session_factory, measurable_holdout.id, earlier) == [(False,)]
 
 
 # ---------------------------------------------------------------------------

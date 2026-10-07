@@ -79,6 +79,23 @@ def test_the_registry_is_the_eight_walkthroughs():
         assert name.startswith(entry["walkthrough"] + "-")
 
 
+def test_the_registry_and_the_redaction_notes_name_the_journey_field():
+    """Both say where a journey names its walkthroughs: the ``recordings``
+    list of the journey file (``Journey.recordings``), not ``recording``."""
+    assert "recordings" in Journey.model_fields
+    assert "recording" not in Journey.model_fields
+    header = "\n".join(
+        line
+        for line in REGISTRY_PATH.read_text(encoding="utf-8").splitlines()
+        if line.startswith("#")
+    )
+    assert "in its `recordings` list" in header
+    assert "`recording." not in header
+    notes = redaction.__doc__ or ""
+    assert "(``recordings``)" in notes
+    assert "(``recording``)" not in notes
+
+
 def test_every_walkthrough_guide_is_a_journey_in_the_inventory():
     pages = loader.read_inventory(RUNNER_ROOT / "inventory.toml")["pages"]
     for name, entry in registry().items():
@@ -1028,6 +1045,90 @@ def test_a_recorded_screen_masks_only_a_field_holding_a_kept_value(
         ("css", "input, textarea, [contenteditable]"),
     ]
     assert page.screencast.hidden_at_screenshot[-1] is False
+
+
+class _MarkingPage(_Page):
+    """``MARK_JS`` and ``UNMARK_JS`` as the page runs them, on ``fields``:
+    each screenshot records the value of every field its masks cover."""
+
+    def __init__(self, execute_module):
+        super().__init__(execute_module)
+        self.marked: List[int] = []
+        self.masked_values: List[List[str]] = []
+
+    def evaluate(self, script, arg=None):
+        result = super().evaluate(script, arg)
+        if script == self.module.MARK_JS:
+            values, _ = arg
+            self.marked = [
+                n
+                for n, (kind, typed) in enumerate(self.fields)
+                if kind != "password" and any(v and v in typed for v in values)
+            ]
+            return len(self.marked)
+        if script == self.module.UNMARK_JS:
+            self.marked = []
+        return result
+
+    def screenshot(self, path, mask):
+        super().screenshot(path, mask)
+        covered = []
+        if ("css", f"[{self.module.MASK_MARK}]") in self.masks[-1]:
+            covered = [self.fields[n][1] for n in self.marked]
+        self.masked_values.append(covered)
+
+
+@pytest.mark.regression
+def test_a_recorded_screen_masks_a_field_holding_any_value_the_run_keeps(
+    execute_module, tmp_path
+):
+    """The fields marked for a recorded step's screenshot are found by the
+    values the page check reads (the run's redactor), not only this journey's
+    secrets: a field holding a credential an api step was answered is masked
+    in the step's PNG too."""
+    from docs_runner.model import Step
+    from docs_runner.stacks import Running
+
+    other = "eptk_Answered0Key9ghijkl"
+    journey = _walk_journey({"name": "R1-sample"}, ["/a"])
+    runner, _, _ = _walk(execute_module, tmp_path, journey, {})
+    runner.secrets = {"new-password": KEPT}
+    runner.redactor.add(other)
+    page = _MarkingPage(execute_module)
+    page.fields = [("text", f"key {other}"), ("text", "hello"), ("password", KEPT)]
+    walkthrough = execute_module.Walkthrough(
+        journey,
+        "sample",
+        journey.segments[0],
+        type("Guide", (), {"title": "Sample guide", "anchors": {}})(),
+        Running(name="docs-local", base_url="http://site/"),
+        runner.settings,
+    )
+    walkthrough.active = True
+    runner.walkthrough = walkthrough
+    step = Step.model_validate(journey.steps[0].model_dump(by_alias=True))
+    runner._screen(page, "sample", 1, step)
+    assert page.masked_values == [[f"key {other}"]]
+    values, mark = page.evaluated[0][1]
+    assert set(values) == {KEPT, other} and mark == execute_module.MASK_MARK
+
+
+def _js_lines(script: str) -> List[str]:
+    return [" ".join(line.split()) for line in script.splitlines()]
+
+
+def test_the_page_check_reads_placeholders_and_open_shadow_roots(execute_module):
+    """The stand-in page answers ``DRAWN_JS`` with canned text, so no walk
+    above can see what the script itself reads; its lines are pinned instead
+    (no browser runs in the unit job). A value drawn as a field's placeholder,
+    or inside an open shadow root, must reach ``redaction.on_screen``."""
+    drawn = _js_lines(execute_module.DRAWN_JS)
+    assert "if (el.placeholder) texts.push(String(el.placeholder));" in drawn
+    assert "texts.push(String(el.shadowRoot.textContent || ''));" in drawn
+    assert "visit(el.shadowRoot);" in drawn
+    assert "const texts = [document.body ? document.body.innerText : ''];" in drawn
+    for script in (execute_module.MARK_JS, execute_module.UNMARK_JS):
+        assert "if (el.shadowRoot) visit(el.shadowRoot);" in _js_lines(script)
 
 
 # -- two segments of one journey ----------------------------------------------

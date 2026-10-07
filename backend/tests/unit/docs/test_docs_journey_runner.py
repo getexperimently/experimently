@@ -2073,6 +2073,44 @@ def test_the_real_inventory_maps_every_flow_and_names_where_each_journey_waits()
     assert not any(row[3].startswith("verified by") for row in rows)
 
 
+@pytest.mark.regression
+def test_a_partial_journey_does_not_verify_its_flow():
+    """A journey that ran with steps not run (PARTIAL) leaves its flow partly
+    verified, and the summary's count of verified flows leaves that flow out."""
+    inventory = copy.deepcopy(INVENTORY)
+    inventory["pages"]["guides/third.md"] = {
+        "class": "journey",
+        "journey": "third",
+        "reason": "walked",
+    }
+    inventory["flow"] = [
+        {"text": "Sample alone", "journeys": ["sample"]},
+        {"text": "Sample and third", "journeys": ["sample", "third"]},
+    ]
+
+    def ran(journey: str, *records: log.Record) -> report.GuideRun:
+        return report.GuideRun(
+            journey, f"guides/{journey}.md", journey, "compose-dev", records=records
+        )
+
+    partial = ran(
+        "sample", _record(), _record(step=2, result="NOT RUN", reason="needs-aws")
+    )
+    passed = ran("third", _record(guide="guides/third.md"))
+    verdicts = {run.journey: report.verdict(run) for run in (partial, passed)}
+    assert verdicts["sample"].word == "PARTIAL"
+    rows, _ = report.flow_rows(inventory, verdicts)
+    assert [row[3] for row in rows] == [
+        "partly verified: sample has steps not run",
+        "partly verified: sample has steps not run; verified by third",
+    ]
+    text = report.summary_markdown(
+        [partial, passed], inventory, date="2026-10-06", sha="abc"
+    )
+    assert "0 of 2 flows are verified by journeys that ran in this run." in text
+    assert "| verified by" not in text
+
+
 # ---------------------------------------------------------------------------
 # Carried over from #966's review: the session's edges
 # ---------------------------------------------------------------------------
