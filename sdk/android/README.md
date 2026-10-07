@@ -180,5 +180,6 @@ every error — so the smoke calls it *and* posts the same `TrackEvent.toJson()`
 `HttpClient`, which throws on a non-2xx response. A renamed field or a path the backend does not
 serve fails the smoke.
 
-Verified against a live backend: **yes** (JVM variant, 2026-09-11). The Gradle/AAR build itself has
-still not been executed here (no Gradle or Android SDK on the development machine).
+CI runs this SDK's contract smoke against a real API: `android` is in the `sdks:` list of the
+SDK Live Contract job in [pr-qa-gate.yml](https://github.com/getexperimently/experimently/blob/main/.github/workflows/pr-qa-gate.yml). The smoke
+compiles the SDK's Kotlin sources for a plain JVM; the Gradle/AAR build is not part of it.

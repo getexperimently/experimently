@@ -236,12 +236,12 @@ class = "exec"
 reason = "its blocks run on a stack in Doc Examples; the skipped one needs a Cognito user pool"
 
 [pages."api/endpoints.md"]
-class = "reference"
-reason = "an endpoint reference; its shell blocks are not yet enrolled in Doc Examples"
+class = "exec"
+reason = "its API steps run on a stack in Doc Examples; the skipped ones need a Cognito user pool"
 
 [pages."api/compliance.md"]
-class = "reference"
-reason = "an API reference; its shell blocks are not yet enrolled in Doc Examples"
+class = "exec"
+reason = "its API steps run on a full-profile stack in Doc Examples"
 
 [pages."api/integrations.md"]
 class = "external:jira-salesforce-github"
@@ -276,8 +276,8 @@ class = "exec"
 reason = "its API steps run on a stack in Doc Examples; the dashboard's audit-log screen is not walked"
 
 [pages."api/rbac.md"]
-class = "reference"
-reason = "an API reference for the rbac module; its shell blocks are not yet enrolled in Doc Examples"
+class = "exec"
+reason = "its API steps run on a full-profile stack in Doc Examples; they check what is stored and shown, not what a role allows"
 
 [pages."security/api-keys.md"]
 class = "journey"
@@ -415,7 +415,10 @@ reason = "AWS Secrets Manager and its rotation"
 
 [pages."monitoring/monitoring-guide.md"]
 class = "aws"
-exercised_by = ["force a circuit breaker and an alarm rollback"]
+exercised_by = [
+    "run the first stack deploy",
+    "force a circuit breaker and an alarm rollback",
+]
 reason = "CloudWatch monitoring of a deployment on AWS"
 
 [pages."monitoring/setup-guide.md"]
@@ -499,8 +502,8 @@ class = "reference"
 reason = "the high-level architecture; no steps to follow"
 
 [pages."architecture/technical-guide.md"]
-class = "reference"
-reason = "a technical overview; its shell blocks are not yet enrolled in Doc Examples"
+class = "exec"
+reason = "its API steps run on a stack in Doc Examples; the migration steps are a contributor's, in a development checkout"
 
 [pages."architecture/models.md"]
 class = "reference"
@@ -536,10 +539,7 @@ reason = "the CDK database stack"
 
 [pages."infrastructure/dynamodb-readme.md"]
 class = "aws"
-exercised_by = [
-    "run the first stack deploy",
-    "605",
-]
+exercised_by = ["run the first stack deploy"]
 reason = "the CDK DynamoDB tables"
 
 [pages."infrastructure/redis-summary.md"]

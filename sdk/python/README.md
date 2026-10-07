@@ -138,9 +138,10 @@ Env: `EXPERIMENTLY_API_URL` (default `http://localhost:8000`), `EXPERIMENTLY_API
 `CONTRACT_EXPERIMENT_KEY` (default `sdk_contract_ab`), `CONTRACT_FLAG_KEY` (default `sdk_contract_flag`),
 `CONTRACT_USER_ID` (default random `smoke-<uuid>`).
 
-Verified against a live backend: **yes (2026-09-11)** — `sdk_contract_ab` / `sdk_contract_flag`
-seeded with `backend/scripts/seed_sdk_contract.py`, run via
-`python tests/sdk-contract/live/run_live_contract.py --sdk python --strict`.
+CI runs this SDK's contract smoke against a real API: `python` is in the `sdks:` list of the
+SDK Live Contract job in [pr-qa-gate.yml](https://github.com/getexperimently/experimently/blob/main/.github/workflows/pr-qa-gate.yml). Its fixtures,
+`sdk_contract_ab` and `sdk_contract_flag`, are seeded with `backend/scripts/seed_sdk_contract.py`;
+run it with `python tests/sdk-contract/live/run_live_contract.py --sdk python --strict`.
 
 ## Testing your own code
 

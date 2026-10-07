@@ -187,7 +187,8 @@ com.getexperimently.sdk.examples.ContractSmoke`; `FORCE_BUILD=1` forces a rebuil
 `sdk_contract_flag`), `CONTRACT_USER_ID` (default random `smoke-<uuid>`). Repo-wide runner:
 `python tests/sdk-contract/live/run_live_contract.py --sdk java --strict`.
 
-Verified against a live backend: yes (2026-09-11)
+CI runs this SDK's contract smoke against a real API: `java` is in the `sdks:` list of the
+SDK Live Contract job in [pr-qa-gate.yml](https://github.com/getexperimently/experimently/blob/main/.github/workflows/pr-qa-gate.yml).
 
 ## Tests
 

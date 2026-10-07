@@ -42,7 +42,7 @@
 ### Developer & Integration Guides
 | Doc | Description |
 |-----|-------------|
-| [MCP Server](mcp-server.md) | AI coding assistant integration, experiment design tools |
+| [AI endpoints and the MCP manifest](mcp-server.md) | Experiment design suggestions, results interpretation, sample sizes and templates over REST, and a manifest that describes them as MCP tools (the platform runs no MCP server) |
 | [Guided experiment builder](guides/experiment-wizard.md) | Guided setup in the dashboard, and the separate 5-step wizard API |
 
 ---

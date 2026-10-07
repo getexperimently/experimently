@@ -93,7 +93,8 @@ cd sdk/openfeature && npm run build --silent && node examples/contract_smoke.mjs
 Env: `EXPERIMENTLY_API_URL` (default `http://localhost:8000`), `EXPERIMENTLY_API_KEY` (required),
 `CONTRACT_EXPERIMENT_KEY` (`sdk_contract_ab`), `CONTRACT_FLAG_KEY` (`sdk_contract_flag`), `CONTRACT_USER_ID`.
 
-Verified against a live backend: **yes (2026-09-11)**.
+CI runs this SDK's contract smoke against a real API: `openfeature` is in the `sdks:` list of the
+SDK Live Contract job in [pr-qa-gate.yml](https://github.com/getexperimently/experimently/blob/main/.github/workflows/pr-qa-gate.yml).
 
 ## Development
 

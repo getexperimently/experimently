@@ -96,6 +96,17 @@ logs: ## Follow the API and dashboard logs
 fuzz: ## Fuzz the API locally: make fuzz FUZZ_SEED=<seed> SHA=<commit> PASS=<superuser|viewer|sdk>
 	scripts/fuzz_local.sh "$(FUZZ_SEED)" "$(SHA)" "$(PASS)"
 
+.PHONY: showcase
+# A captioned product walkthrough, recorded on this machine and never in CI
+# (#1066): tests/acceptance/showcase. It builds the release REF from `git
+# archive`, runs its own stack on ports 28400-28402 (Postgres in a throwaway,
+# labelled container), captures the storyboard VIDEO and renders it into
+# ~/Downloads/experimently-showcase. REF is the release to record (required
+# until one has been checked against the storyboards; then it is the default).
+# The tool fetches nothing, so `git fetch --tags` first if it is not here.
+showcase: ## Record a product walkthrough video locally: make showcase VIDEO=<slug|all> REF=<tag>
+	cd tests/acceptance && ../../$(PY) -m showcase.capture "$(VIDEO)" $(if $(REF),--ref "$(REF)",)
+
 # ---------------------------------------------------------------------------
 # Test
 # ---------------------------------------------------------------------------

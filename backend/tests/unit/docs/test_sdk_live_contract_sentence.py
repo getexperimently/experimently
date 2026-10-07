@@ -22,6 +22,9 @@ YAML value, not lines a search could rely on):
 * a "runs" sentence names an SDK in the job's list, a "does not run" sentence
   one that is not, and every SDK in the list has a "runs" sentence.
 
+The SDK READMEs under ``sdk/`` carried the same dated line: none may carry it
+now, and a README's sentence is held to the same list.
+
 Line breaks inside a sentence do not matter: each page's whitespace is folded
 before matching. Reads only files; no git, so it runs the same in
 ``scripts/core_build.sh``'s copy. It is in the docs-only gate's "Docs content
@@ -292,3 +295,62 @@ def test_runner_sdks_reads_the_manifest_keys():
         "}\n"
     )
     assert runner_sdks(text) == {"python", "go"}
+
+
+# ---------------------------------------------------------------------------
+# The SDK READMEs under sdk/ carried the same hand-dated line. A README that
+# carries the sentence is held to the gate's list the same way; none may carry
+# the old form.
+# ---------------------------------------------------------------------------
+SDK_SOURCES = REPO_ROOT / "sdk"
+
+
+def readme_problems(readmes: Mapping[str, str], gate: Sequence[str]) -> List[str]:
+    """Every way the READMEs disagree with the gate's list; empty when they agree.
+
+    ``readmes`` maps an SDK directory under sdk/ to its README.md text.
+    """
+    found: List[str] = []
+    for name in sorted(readmes):
+        readme = f"sdk/{name}/README.md"
+        text = " ".join(readmes[name].split())
+        if OLD_FORM in text:
+            found.append(f"{readme}: still says {OLD_FORM!r}; use the sentence instead")
+        for match in SENTENCE.finditer(text):
+            says_runs = match["verb"] == "runs"
+            if says_runs != (match["listed"] == "is") or says_runs != (
+                match["sdk"] in gate
+            ):
+                found.append(
+                    f"{readme}: the sentence for {match['sdk']!r} disagrees with the"
+                    f" {JOB} job's sdks: list in pr-qa-gate.yml"
+                )
+    return found
+
+
+def _real_readmes() -> Dict[str, str]:
+    return {
+        p.parent.name: p.read_text(encoding="utf-8")
+        for p in SDK_SOURCES.glob("*/README.md")
+    }
+
+
+def test_every_sdk_readme_agrees_with_the_gate():
+    readmes = _real_readmes()
+    assert len(readmes) >= 10, sorted(readmes)
+    found = readme_problems(readmes, _real_gate())
+    assert not found, "\n".join(found)
+
+
+@pytest.mark.regression
+def test_a_readme_with_the_old_form_or_a_wrong_claim_is_refused():
+    readmes = _real_readmes()
+    readmes["ruby"] = "Verified against a live backend: yes (2026-09-11)"
+    assert readme_problems(readmes, _real_gate()) == [
+        "sdk/ruby/README.md: still says 'Verified against a live backend';"
+        " use the sentence instead"
+    ]
+    assert readme_problems(_real_readmes(), _real_gate() + ["ios"]) == [
+        "sdk/ios/README.md: the sentence for 'ios' disagrees with the"
+        " sdk-live-contract job's sdks: list in pr-qa-gate.yml"
+    ]

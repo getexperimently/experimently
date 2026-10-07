@@ -9,30 +9,65 @@ The API uses two types of authentication:
 1. OAuth2 Bearer tokens for user authentication
 2. API keys for client applications
 
-### OAuth2 Authentication
-1. **Obtain Access Token**:
-   ```bash
-   curl -X POST "http://localhost:8000/api/v1/auth/token" \
-     -H "Content-Type: application/x-www-form-urlencoded" \
-     -d "username=user@example.com&password=your_password"
-   ```
+The examples on this page run in one terminal, in order, against the
+[Quick Start](../getting-started/quick-start.md) stack. Each uses the shell variables set by
+the ones before it (`$TOKEN`, `$KEY`, `$EXP_ID`).
 
-2. **Using the Access Token**:
-   ```bash
-   curl -X GET "http://localhost:8000/api/v1/users/me" \
-     -H "Authorization: Bearer your_access_token"
-   ```
+### OAuth2 Authentication
+
+**1. Obtain an access token.** `POST /api/v1/auth/token` takes a form. With
+`AUTH_PROVIDER=local` (the default) its `username` is the account's email address. This
+signs in as the Quick Start stack's administrator and saves the token in `$TOKEN`:
+
+```{.bash exec}
+TOKEN=$(curl -s -X POST "http://localhost:8000/api/v1/auth/token" \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  -d 'username=admin@demo.com&password=Demo1234!' | jq -r .access_token)
+```
+
+**2. Use the access token:**
+
+```{.bash exec}
+curl -s -X GET "http://localhost:8000/api/v1/users/me" \
+  -H "Authorization: Bearer $TOKEN" | jq .email
+```
+<!-- expect: "admin@demo.com" -->
+
+It prints `"admin@demo.com"`. If it prints `null`, the sign-in failed and `$TOKEN` holds
+no token.
 
 ### API Key Authentication
-1. **Obtain API Key**:
-   - Contact your administrator to get an API key
-   - API keys are used for client applications to access tracking and feature flag endpoints
 
-2. **Using the API Key**:
-   ```bash
-   curl -X GET "http://localhost:8000/api/v1/feature-flags/user/123" \
-     -H "X-API-Key: your_api_key"
-   ```
+API keys are used by client applications for the tracking and feature flag evaluation
+endpoints.
+
+**1. Obtain an API key.** An ADMIN or a DEVELOPER creates one (see
+[API Keys](../security/api-keys.md)); the full key is shown only in this response. This
+creates one and saves it in `$KEY`:
+
+```{.bash exec}
+KEY=$(curl -s -X POST "http://localhost:8000/api/v1/api-keys" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"name": "My application"}' | jq -r .key)
+
+printf '%s\n' "${KEY:0:5}"
+```
+<!-- expect: eptk_ -->
+
+It prints `eptk_`, the start of every key.
+
+**2. Use the API key:**
+
+```{.bash exec}
+curl -s -X GET "http://localhost:8000/api/v1/feature-flags/user/123" \
+  -H "X-API-Key: $KEY" | jq .
+```
+<!-- expect: "new_dashboard_ui": true -->
+<!-- expect: "beta_features": true -->
+
+It prints each flag's answer for user `123`; on the Quick Start stack both of its flags are
+on for that user: `"new_dashboard_ui": true` and `"beta_features": true`.
 
 ### Authorization Levels
 1. **Regular Users**:
@@ -76,7 +111,7 @@ Step 1: Register a new user:
 
 Only with `COGNITO_SELF_SIGNUP_ENABLED=true` and a user pool that allows self sign-up; otherwise see [Adding a user](../cognito_integration.md#adding-a-user).
 
-```bash
+```{.bash skip reason="idp: needs a Cognito user pool that allows self sign-up"}
 curl -X POST "http://localhost:8000/api/v1/auth/signup" \
   -H "Content-Type: application/json" \
   -d '{
@@ -90,7 +125,7 @@ curl -X POST "http://localhost:8000/api/v1/auth/signup" \
 
 Step 2: Confirm registration:
 
-```bash
+```{.bash skip reason="idp: needs the code Cognito sent to the new user"}
 curl -X POST "http://localhost:8000/api/v1/auth/confirm" \
   -H "Content-Type: application/json" \
   -d '{
@@ -101,35 +136,48 @@ curl -X POST "http://localhost:8000/api/v1/auth/confirm" \
 
 Step 3: Login to get access token:
 
-```bash
+```{.bash skip reason="idp: signs in the Cognito user the two steps above create"}
 curl -X POST "http://localhost:8000/api/v1/auth/token" \
   -H "Content-Type: application/x-www-form-urlencoded" \
-  -d "username=john.doe&password=SecurePass123!"
+  -d 'username=john.doe&password=SecurePass123!'
 ```
+
+With the default `local` provider, sign in as in [OAuth2 Authentication](#oauth2-authentication)
+above.
 
 ### 2. Managing Experiments
 
 Step 1: List experiments:
 
-```bash
-curl -X GET "http://localhost:8000/api/v1/experiments/" \
-  -H "Authorization: Bearer your_access_token" \
-  -H "Content-Type: application/json"
+```{.bash exec}
+curl -s -X GET "http://localhost:8000/api/v1/experiments/" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" | jq -r '.items[].name'
 ```
+<!-- expect: Checkout Button Color -->
 
-Step 2: Create a new experiment:
+On the Quick Start stack it prints its three demo experiments, among them
+`Checkout Button Color`.
 
-```bash
-curl -X POST "http://localhost:8000/api/v1/experiments/" \
-  -H "Authorization: Bearer your_access_token" \
+Step 2: Create a new experiment. It needs at least one variant and one metric, and
+`experiment_type` is `a_b`, `mv`, `split_url` or `bandit`. `key` is what the tracking API
+and the SDKs call it by:
+
+```{.bash exec}
+EXP=$(curl -s -X POST "http://localhost:8000/api/v1/experiments/" \
+  -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
     "name": "Button Color Test",
+    "key": "button_color_test",
     "description": "Testing different button colors",
     "hypothesis": "Red buttons will have higher click rates",
-    "experiment_type": "AB_TEST",
-    "start_date": "2024-04-01T00:00:00Z",
-    "end_date": "2024-04-30T23:59:59Z",
+    "experiment_type": "a_b",
+    "variants": [
+      {"name": "control", "is_control": true, "traffic_allocation": 50, "configuration": {"color": "blue"}},
+      {"name": "red", "traffic_allocation": 50, "configuration": {"color": "red"}}
+    ],
+    "metrics": [{"name": "Purchase", "event_name": "purchase", "is_primary": true}],
     "targeting_rules": {
       "logical_operator": "AND",
       "groups": [
@@ -142,32 +190,59 @@ curl -X POST "http://localhost:8000/api/v1/experiments/" \
         }
       ]
     }
-  }'
-```
+  }')
+EXP_ID=$(jq -r .id <<<"$EXP")
 
-Step 3: Get experiment results:
-
-```bash
-curl -X GET "http://localhost:8000/api/v1/experiments/123/results" \
-  -H "Authorization: Bearer your_access_token" \
-  -H "Content-Type: application/json"
+jq '{key, status, experiment_type}' <<<"$EXP"
 ```
+<!-- expect: "key": "button_color_test" -->
+<!-- expect: "status": "draft" -->
+<!-- expect: "experiment_type": "a_b" -->
+
+A new experiment is a `draft`. Its dates are not part of the create request: schedule it
+with `PUT /api/v1/experiments/{experiment_id}/schedule`, or start it now:
+
+```{.bash exec}
+curl -s -X POST "http://localhost:8000/api/v1/experiments/$EXP_ID/start" \
+  -H "Authorization: Bearer $TOKEN" | jq -r .status
+```
+<!-- expect: active -->
+
+It prints `active`.
+
+Step 3: Get experiment results. The path takes the experiment's id, a UUID:
+
+```{.bash exec}
+curl -s -X GET "http://localhost:8000/api/v1/experiments/$EXP_ID/results" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" | jq '{experiment_name, status, variants: [.metrics[0].variants[] | {variant_name, sample_size}]}'
+```
+<!-- expect: "experiment_name": "Button Color Test" -->
+<!-- expect: "status": "active" -->
+<!-- expect: "variant_name": "control" -->
+<!-- expect: "variant_name": "red" -->
+
+Nobody is assigned yet, so each variant's `sample_size` is `0`.
 
 ### 3. Feature Flag Management
 
 Step 1: List feature flags:
 
-```bash
-curl -X GET "http://localhost:8000/api/v1/feature-flags/" \
-  -H "Authorization: Bearer your_access_token" \
-  -H "Content-Type: application/json"
+```{.bash exec}
+curl -s -X GET "http://localhost:8000/api/v1/feature-flags/" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" | jq -r '.items[].key'
 ```
+<!-- expect: beta_features -->
+
+On the Quick Start stack it prints its two demo flags, `new_dashboard_ui` and
+`beta_features`.
 
 Step 2: Create a feature flag:
 
-```bash
-curl -X POST "http://localhost:8000/api/v1/feature-flags/" \
-  -H "Authorization: Bearer your_access_token" \
+```{.bash exec}
+curl -s -X POST "http://localhost:8000/api/v1/feature-flags/" \
+  -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
     "key": "new_checkout_flow",
@@ -187,65 +262,94 @@ curl -X POST "http://localhost:8000/api/v1/feature-flags/" \
         }
       ]
     }
-  }'
+  }' | jq '{key, status, rollout_percentage}'
 ```
+<!-- expect: "key": "new_checkout_flow" -->
+<!-- expect: "status": "active" -->
+<!-- expect: "rollout_percentage": 50 -->
 
 Step 3: Get feature flags for a user (client-side):
 
-```bash
-curl -X GET "http://localhost:8000/api/v1/feature-flags/user/123" \
-  -H "X-API-Key: your_api_key" \
-  -H "Content-Type: application/json"
+```{.bash exec}
+curl -s -X GET "http://localhost:8000/api/v1/feature-flags/user/123" \
+  -H "X-API-Key: $KEY" \
+  -H "Content-Type: application/json" | jq .
 ```
+<!-- expect: "new_checkout_flow": true -->
+
+The answer now includes the new flag, `"new_checkout_flow": true`. User `123` sends no
+`country` or `plan`, so the flag's rule does not match and its 50% rollout decides, which
+turns it on for this user.
 
 ### 4. Tracking Events
 
 Step 1: Assign a user to an experiment (sticky; every call for an enrolled user records that the user saw the experiment):
 
-```bash
-curl -X POST "http://localhost:8000/api/v1/tracking/assign" \
-  -H "X-API-Key: your_api_key" \
+```{.bash exec}
+curl -s -X POST "http://localhost:8000/api/v1/tracking/assign" \
+  -H "X-API-Key: $KEY" \
   -H "Content-Type: application/json" \
-  -d '{"experiment_key": "hero_banner", "user_id": "123", "context": {"device": "mobile"}}'
+  -d '{"experiment_key": "button_color_test", "user_id": "123", "context": {"country": "US", "browser": "chrome"}}' \
+  | jq '{variant_name, assigned, reason}'
 ```
+<!-- expect: "variant_name": "control" -->
+<!-- expect: "assigned": true -->
+<!-- expect: "reason": "assigned" -->
+
+The experiment created above targets `country` US or CA and `browser` chrome or firefox,
+so the `context` says both. User `123` is enrolled in `control`. A user whose context does
+not match gets the control with `"assigned": false` and `"reason": "targeting"`, and
+nothing is recorded for them.
 
 Step 2: Track a conversion for that experiment (variant is resolved from the assignment):
 
-```bash
-curl -X POST "http://localhost:8000/api/v1/tracking/track" \
-  -H "X-API-Key: your_api_key" \
+```{.bash exec}
+curl -s -X POST "http://localhost:8000/api/v1/tracking/track" \
+  -H "X-API-Key: $KEY" \
   -H "Content-Type: application/json" \
   -d '{
     "event_type": "purchase",
     "user_id": "123",
-    "experiment_key": "hero_banner",
+    "experiment_key": "button_color_test",
     "value": 99.99,
     "metadata": {"product_id": "ABC123", "payment_method": "credit_card"}
-  }'
+  }' | jq '{event_name, user_id, value}'
 ```
+<!-- expect: "event_name": "purchase" -->
+<!-- expect: "value": 99.99 -->
+
+It prints the stored event: `"event_name": "purchase"`, user `123`, `"value": 99.99`.
 
 Step 3: Get user assignments:
 
-```bash
-curl -X GET "http://localhost:8000/api/v1/tracking/assignments/123" \
-  -H "X-API-Key: your_api_key"
+```{.bash exec}
+curl -s -X GET "http://localhost:8000/api/v1/tracking/assignments/123" \
+  -H "X-API-Key: $KEY" | jq '.[] | {experiment_name, variant_name}'
 ```
+<!-- expect: "experiment_name": "Button Color Test" -->
+<!-- expect: "variant_name": "control" -->
+
+It prints the one assignment made above: `Button Color Test`, `control`.
 
 ### 5. Admin Operations
 
 Step 1: List all users (superuser only):
 
-```bash
-curl -X GET "http://localhost:8000/api/v1/admin/users" \
-  -H "Authorization: Bearer your_access_token" \
-  -H "Content-Type: application/json"
+```{.bash exec}
+curl -s -X GET "http://localhost:8000/api/v1/admin/users" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" | jq -r '.items[].email'
 ```
+<!-- expect: admin@demo.com -->
+
+On the Quick Start stack it prints its four demo accounts, newest first, ending with
+`admin@demo.com`.
 
 Step 2: Create a new user (superuser only):
 
-```bash
-curl -X POST "http://localhost:8000/api/v1/users/" \
-  -H "Authorization: Bearer your_access_token" \
+```{.bash exec}
+curl -s -X POST "http://localhost:8000/api/v1/users/" \
+  -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
     "username": "jane.smith",
@@ -254,8 +358,13 @@ curl -X POST "http://localhost:8000/api/v1/users/" \
     "full_name": "Jane Smith",
     "is_active": true,
     "is_superuser": false
-  }'
+  }' | jq '{username, email, role}'
 ```
+<!-- expect: "username": "jane.smith" -->
+<!-- expect: "role": "VIEWER" -->
+
+It prints the new account. Its `role` is `VIEWER`; change it with
+`PATCH /api/v1/admin/users/{user_id}` ([below](#change-a-users-role-or-active-status-admin)).
 
 ## Rate Limiting and API Constraints
 
@@ -613,25 +722,24 @@ lists every route with its own limit. Over a limit the API answers `429` with a
 - **Headers**: Authorization: Bearer {token}
 - **Path Parameters**:
   - experiment_id: string (UUID)
-- **Response**: 200 OK
+- **Response**: 200 OK. The top-level fields are `experiment_id`, `experiment_name`,
+  `status`, `start_date`, `end_date`, `computed_at`, `correction_method`,
+  `confidence_level`, `metrics` (one entry per metric, each with a `variants` list),
+  `summary`, `sample_size_adequate`, `srm`, `sequential_testing`, `bayesian_results` and
+  `breakdown`. An excerpt:
   ```json
   {
-    "experiment_id": "string",
-    "status": "string",
+    "experiment_id": "string (UUID)",
+    "experiment_name": "string",
+    "status": "active",
     "metrics": [
       {
-        "name": "string",
-        "control_value": 0.0,
-        "treatment_value": 0.0,
-        "difference": 0.0,
-        "p_value": 0.0,
-        "is_significant": true
+        "metric_name": "string",
+        "variants": [
+          {"variant_name": "control", "sample_size": 0}
+        ]
       }
-    ],
-    "sample_size": {
-      "control": 100,
-      "treatment": 100
-    }
+    ]
   }
   ```
 
@@ -894,9 +1002,14 @@ A 422 names positions and fields, never the ids that were sent.
   ```json
   [
     {
-      "experiment_id": "string",
-      "variant_id": "string",
-      "assignment_date": "datetime"
+      "id": "string (UUID)",
+      "user_id": "string",
+      "experiment_id": "string (UUID)",
+      "experiment_name": "string",
+      "variant_id": "string (UUID)",
+      "variant_name": "string",
+      "is_control": true,
+      "created_at": "datetime"
     }
   ]
   ```
@@ -1126,32 +1239,36 @@ includes the error's details.
 
 Invalid credentials:
 
-```bash
-curl -X POST "http://localhost:8000/api/v1/auth/token" \
+```{.bash exec}
+curl -s -X POST "http://localhost:8000/api/v1/auth/token" \
   -H "Content-Type: application/x-www-form-urlencoded" \
-  -d "username=wrong@example.com&password=wrong_password"
+  -d "username=wrong@example.com&password=wrong_password" | jq .
 ```
+<!-- expect: "detail": "Invalid email or password" -->
 
 Response (401 Unauthorized):
 
 ```json
 {
-  "detail": "Incorrect username or password"
+  "detail": "Invalid email or password"
 }
 ```
 
-Expired token:
+The same message answers an unknown address, a wrong password and an inactive account.
 
-```bash
-curl -X GET "http://localhost:8000/api/v1/users/me" \
-  -H "Authorization: Bearer expired_token"
+An expired or invalid token:
+
+```{.bash exec}
+curl -s -X GET "http://localhost:8000/api/v1/users/me" \
+  -H "Authorization: Bearer expired_token" | jq .
 ```
+<!-- expect: "detail": "Could not validate credentials" -->
 
 Response (401 Unauthorized):
 
 ```json
 {
-  "detail": "Token has expired"
+  "detail": "Could not validate credentials"
 }
 ```
 
@@ -1159,32 +1276,40 @@ Response (401 Unauthorized):
 
 Invalid experiment creation:
 
-```bash
-curl -X POST "http://localhost:8000/api/v1/experiments/" \
-  -H "Authorization: Bearer your_access_token" \
+```{.bash exec}
+curl -s -X POST "http://localhost:8000/api/v1/experiments/" \
+  -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
     "name": "",
     "experiment_type": "INVALID_TYPE"
-  }'
+  }' | jq -c '.detail[] | {loc, msg}'
 ```
+<!-- expect: {"loc":["body","name"],"msg":"String should have at least 1 character"} -->
+<!-- expect: {"loc":["body","experiment_type"],"msg":"Input should be 'a_b', 'mv', 'split_url' or 'bandit'"} -->
+<!-- expect: {"loc":["body","variants"],"msg":"Field required"} -->
+<!-- expect: {"loc":["body","metrics"],"msg":"Field required"} -->
 
 Both fields are invalid on purpose: `name` is empty and `experiment_type` is not a type.
+The request also leaves out `variants` and `metrics`, which are required, so the response
+lists four errors, one per field.
 
-Response (422 Unprocessable Entity):
+Response (422 Unprocessable Entity), shortened to the first two errors:
 
 ```json
 {
   "detail": [
     {
+      "type": "string_too_short",
       "loc": ["body", "name"],
-      "msg": "name cannot be empty",
-      "type": "value_error"
+      "msg": "String should have at least 1 character",
+      "ctx": {"min_length": 1}
     },
     {
+      "type": "enum",
       "loc": ["body", "experiment_type"],
-      "msg": "invalid experiment type",
-      "type": "value_error"
+      "msg": "Input should be 'a_b', 'mv', 'split_url' or 'bandit'",
+      "ctx": {"expected": "'a_b', 'mv', 'split_url' or 'bandit'"}
     }
   ]
 }
@@ -1192,12 +1317,29 @@ Response (422 Unprocessable Entity):
 
 ### 3. Rate Limiting
 
-Too many requests:
+Too many requests. One experiment's URL, `/api/v1/experiments/{experiment_id}`, allows
+300 requests a minute from one address, so the 301st inside a minute is refused. `curl`'s
+`[1-301]` sends the request 301 times (the `n` parameter is ignored), and `uniq -c` counts
+each status:
 
-```bash
-curl -X GET "http://localhost:8000/api/v1/experiments/" \
-  -H "Authorization: Bearer your_access_token"
+```{.bash exec}
+curl -s -o /dev/null -w '%{http_code}\n' \
+  -H "Authorization: Bearer $TOKEN" \
+  "http://localhost:8000/api/v1/experiments/$EXP_ID?n=[1-301]" | sort | uniq -c
 ```
+<!-- expect: 200 -->
+<!-- expect: 429 -->
+
+It prints `300 200` and `1 429`. Until the minute is over, every request to that URL is
+refused, with a `Retry-After` header giving the seconds to wait:
+
+```{.bash exec}
+curl -s -i -X GET "http://localhost:8000/api/v1/experiments/$EXP_ID" \
+  -H "Authorization: Bearer $TOKEN"
+```
+<!-- expect: 429 Too Many Requests -->
+<!-- expect: retry-after: 60 -->
+<!-- expect: Too Many Requests. Please slow down and retry after a moment. -->
 
 Response (429 Too Many Requests):
 
@@ -1387,619 +1529,41 @@ created.
 
 ### Experiment Types
 
-#### 1. A/B Testing
+`experiment_type` is one of these, in lower case; anything else is a 422:
+
+| Value | What it is |
+|---|---|
+| `a_b` | An A/B test (the default) |
+| `mv` | A multivariate test, with several variants |
+| `split_url` | Each variant is a URL; see [Server-Side Split URL Testing](#server-side-split-url-testing) |
+| `bandit` | A multi-armed bandit, which shifts traffic towards the better variants; see [Multi-Armed Bandit](multi-armed-bandit.md) |
+
+Every type takes the same `variants`, each with a `name`, a `traffic_allocation` and an
+optional `configuration`. The allocations must add up to 100, and one variant must be the
+control (`"is_control": true`):
+
 ```json
 {
-  "experiment_type": "AB_TEST",
+  "experiment_type": "a_b",
   "variants": [
-    {
-      "id": "control",
-      "name": "Control",
-      "weight": 0.5
-    },
-    {
-      "id": "treatment",
-      "name": "Treatment",
-      "weight": 0.5
-    }
+    {"name": "control", "is_control": true, "traffic_allocation": 50, "configuration": {"color": "blue"}},
+    {"name": "red", "traffic_allocation": 50, "configuration": {"color": "red"}}
   ]
 }
 ```
 
-#### 2. Multivariate Testing
-```json
-{
-  "experiment_type": "MULTIVARIATE",
-  "factors": [
-    {
-      "name": "button_color",
-      "levels": ["red", "blue", "green"]
-    },
-    {
-      "name": "button_size",
-      "levels": ["small", "medium", "large"]
-    }
-  ],
-  "design": "FULL_FACTORIAL"
-}
-```
-
-#### 3. Feature Flag
-```json
-{
-  "experiment_type": "FEATURE_FLAG",
-  "default_value": false,
-  "overrides": [
-    {
-      "user_id": "user1",
-      "value": true
-    },
-    {
-      "user_segment": "beta_users",
-      "value": true
-    }
-  ]
-}
-```
+A feature flag is not an experiment type: flags have their own endpoints, under
+[Feature Flag Endpoints](#feature-flag-endpoints).
 
 ## SDK Usage
 
-### Python SDK
-
-#### Installation
-
-The `experimently` package is on PyPI (0.1.0, beta). The [Python SDK](../sdk/python.md#installation)
-page also shows how to install it from this repository.
-
-```bash
-pip install experimently==0.1.0
-```
-
-#### Basic Usage
-```python
-from experimentation import ExperimentationClient
-
-# Initialize client
-client = ExperimentationClient(
-    api_key="your_api_key",
-    base_url="http://localhost:8000"
-)
-
-# Get feature flags for a user
-flags = client.get_user_feature_flags(
-    user_id="user123",
-    context={
-        "country": "US",
-        "browser": "chrome"
-    }
-)
-
-# Track an event
-client.track_event(
-    event_type="PURCHASE",
-    user_id="user123",
-    experiment_id="exp456",
-    variant_id="var789",
-    value=99.99,
-    metadata={
-        "product_id": "ABC123",
-        "payment_method": "credit_card"
-    }
-)
-
-# Get experiment assignments
-assignments = client.get_user_assignments(
-    user_id="user123",
-    active_only=True
-)
-```
-
-### JavaScript SDK
-
-#### Installation
-
-The `@getexperimently/js-sdk` package is on npm (0.1.0, beta). The
-[JavaScript SDK](../sdk/javascript.md#installation) page also shows how to build and install it
-from this repository.
-
-```bash
-npm install @getexperimently/js-sdk@0.1.0
-```
-
-#### Basic Usage
-```javascript
-import { ExperimentationClient } from '@getexperimently/js-sdk';
-
-// Initialize client
-const client = new ExperimentationClient({
-  apiKey: 'your_api_key',
-  baseUrl: 'http://localhost:8000'
-});
-
-// Get feature flags for a user
-const flags = await client.getUserFeatureFlags('user123', {
-  context: {
-    country: 'US',
-    browser: 'chrome'
-  }
-});
-
-// Track an event
-await client.trackEvent({
-  eventType: 'PURCHASE',
-  userId: 'user123',
-  experimentId: 'exp456',
-  variantId: 'var789',
-  value: 99.99,
-  metadata: {
-    productId: 'ABC123',
-    paymentMethod: 'credit_card'
-  }
-});
-
-// Get experiment assignments
-const assignments = await client.getUserAssignments('user123', {
-  activeOnly: true
-});
-```
-
-### SDK Features
-
-#### 1. Automatic Caching
-```python
-# Python
-client = ExperimentationClient(
-    api_key="your_api_key",
-    cache_ttl=3600  # Cache for 1 hour
-)
-
-# JavaScript
-const client = new ExperimentationClient({
-  apiKey: 'your_api_key',
-  cacheTTL: 3600  // Cache for 1 hour
-});
-```
-
-#### 2. Error Handling
-```python
-# Python
-try:
-    flags = client.get_user_feature_flags("user123")
-except ExperimentationError as e:
-    if e.code == "RATE_LIMIT":
-        # Handle rate limiting
-    elif e.code == "INVALID_API_KEY":
-        # Handle invalid API key
-```
-
-```javascript
-// JavaScript
-try {
-  const flags = await client.getUserFeatureFlags('user123');
-} catch (error) {
-  if (error.code === 'RATE_LIMIT') {
-    // Handle rate limiting
-  } else if (error.code === 'INVALID_API_KEY') {
-    // Handle invalid API key
-  }
-}
-```
-
-#### 3. Batch Operations
-```python
-# Python
-client.track_events([
-    {
-        "event_type": "PURCHASE",
-        "user_id": "user1",
-        "value": 99.99
-    },
-    {
-        "event_type": "PURCHASE",
-        "user_id": "user2",
-        "value": 149.99
-    }
-])
-```
-
-```javascript
-// JavaScript
-await client.trackEvents([
-  {
-    eventType: 'PURCHASE',
-    userId: 'user1',
-    value: 99.99
-  },
-  {
-    eventType: 'PURCHASE',
-    userId: 'user2',
-    value: 149.99
-  }
-]);
-```
-
-## Framework Integration Examples
-
-### React Integration
-
-#### 1. Using React Hook
-```typescript
-// hooks/useExperimentation.ts
-import { useState, useEffect } from 'react';
-import { ExperimentationClient } from '@getexperimently/js-sdk';
-
-const client = new ExperimentationClient({
-  apiKey: process.env.REACT_APP_API_KEY,
-  baseUrl: process.env.REACT_APP_API_URL
-});
-
-export function useExperimentation(userId: string) {
-  const [flags, setFlags] = useState<Record<string, boolean>>({});
-  const [assignments, setAssignments] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<Error | null>(null);
-
-  useEffect(() => {
-    async function loadData() {
-      try {
-        const [flagsData, assignmentsData] = await Promise.all([
-          client.getUserFeatureFlags(userId, {
-            context: {
-              browser: navigator.userAgent,
-              screenSize: `${window.innerWidth}x${window.innerHeight}`
-            }
-          }),
-          client.getUserAssignments(userId, { activeOnly: true })
-        ]);
-        setFlags(flagsData);
-        setAssignments(assignmentsData);
-      } catch (err) {
-        setError(err as Error);
-      } finally {
-        setLoading(false);
-      }
-    }
-
-    loadData();
-  }, [userId]);
-
-  return { flags, assignments, loading, error };
-}
-
-// Usage in component
-function MyComponent({ userId }: { userId: string }) {
-  const { flags, assignments, loading, error } = useExperimentation(userId);
-
-  if (loading) return <div>Loading...</div>;
-  if (error) return <div>Error: {error.message}</div>;
-
-  return (
-    <div>
-      {flags.newFeature && <NewFeatureComponent />}
-      {assignments.map(assignment => (
-        <ExperimentVariant key={assignment.experiment_id} variant={assignment.variant_id}>
-          {/* Variant content */}
-        </ExperimentVariant>
-      ))}
-    </div>
-  );
-}
-```
-
-#### 2. Using Context Provider
-```typescript
-// contexts/ExperimentationContext.tsx
-import React, { createContext, useContext, useEffect, useState } from 'react';
-import { ExperimentationClient } from '@getexperimently/js-sdk';
-
-interface ExperimentationContextType {
-  flags: Record<string, boolean>;
-  assignments: any[];
-  trackEvent: (eventType: string, value?: number, metadata?: any) => Promise<void>;
-}
-
-const ExperimentationContext = createContext<ExperimentationContextType | null>(null);
-
-export function ExperimentationProvider({
-  children,
-  userId,
-  apiKey
-}: {
-  children: React.ReactNode;
-  userId: string;
-  apiKey: string;
-}) {
-  const client = new ExperimentationClient({ apiKey });
-  const [flags, setFlags] = useState<Record<string, boolean>>({});
-  const [assignments, setAssignments] = useState<any[]>([]);
-
-  useEffect(() => {
-    // Load initial data
-    loadExperimentationData();
-  }, [userId]);
-
-  async function loadExperimentationData() {
-    try {
-      const [flagsData, assignmentsData] = await Promise.all([
-        client.getUserFeatureFlags(userId),
-        client.getUserAssignments(userId)
-      ]);
-      setFlags(flagsData);
-      setAssignments(assignmentsData);
-    } catch (error) {
-      console.error('Failed to load experimentation data:', error);
-    }
-  }
-
-  async function trackEvent(eventType: string, value?: number, metadata?: any) {
-    try {
-      await client.trackEvent({
-        eventType,
-        userId,
-        value,
-        metadata
-      });
-    } catch (error) {
-      console.error('Failed to track event:', error);
-    }
-  }
-
-  return (
-    <ExperimentationContext.Provider value={{ flags, assignments, trackEvent }}>
-      {children}
-    </ExperimentationContext.Provider>
-  );
-}
-
-export function useExperimentationContext() {
-  const context = useContext(ExperimentationContext);
-  if (!context) {
-    throw new Error('useExperimentationContext must be used within ExperimentationProvider');
-  }
-  return context;
-}
-
-// Usage in app
-function App() {
-  return (
-    <ExperimentationProvider userId="user123" apiKey="your_api_key">
-      <MyApp />
-    </ExperimentationProvider>
-  );
-}
-```
-
-### Node.js Integration
-
-#### 1. Express.js Middleware
-```typescript
-// middleware/experimentation.ts
-import { ExperimentationClient } from '@getexperimently/js-sdk';
-
-const client = new ExperimentationClient({
-  apiKey: process.env.API_KEY,
-  baseUrl: process.env.API_URL
-});
-
-export function experimentationMiddleware() {
-  return async (req: any, res: any, next: any) => {
-    try {
-      const userId = req.user?.id || req.headers['x-user-id'];
-      if (!userId) {
-        return next();
-      }
-
-      const [flags, assignments] = await Promise.all([
-        client.getUserFeatureFlags(userId, {
-          context: {
-            ip: req.ip,
-            userAgent: req.headers['user-agent']
-          }
-        }),
-        client.getUserAssignments(userId)
-      ]);
-
-      // Attach to request object
-      req.experimentation = {
-        flags,
-        assignments,
-        trackEvent: async (eventType: string, value?: number, metadata?: any) => {
-          await client.trackEvent({
-            eventType,
-            userId,
-            value,
-            metadata: {
-              ...metadata,
-              path: req.path,
-              method: req.method
-            }
-          });
-        }
-      };
-
-      next();
-    } catch (error) {
-      console.error('Experimentation middleware error:', error);
-      next();
-    }
-  };
-}
-
-// Usage in Express app
-import express from 'express';
-import { experimentationMiddleware } from './middleware/experimentation';
-
-const app = express();
-
-app.use(experimentationMiddleware());
-
-app.get('/api/products', async (req, res) => {
-  const { flags, trackEvent } = req.experimentation;
-
-  // Use feature flags
-  if (flags.newPricingModel) {
-    // New pricing logic
-  }
-
-  // Track events
-  await trackEvent('VIEW_PRODUCTS', undefined, {
-    category: 'electronics'
-  });
-
-  res.json({ /* products */ });
-});
-```
-
-#### 2. NestJS Integration
-```typescript
-// experimentation.module.ts
-import { Module } from '@nestjs/common';
-import { ExperimentationService } from './experimentation.service';
-import { ExperimentationController } from './experimentation.controller';
-
-@Module({
-  providers: [ExperimentationService],
-  controllers: [ExperimentationController],
-  exports: [ExperimentationService]
-})
-export class ExperimentationModule {}
-
-// experimentation.service.ts
-import { Injectable } from '@nestjs/common';
-import { ExperimentationClient } from '@getexperimently/js-sdk';
-
-@Injectable()
-export class ExperimentationService {
-  private client: ExperimentationClient;
-
-  constructor() {
-    this.client = new ExperimentationClient({
-      apiKey: process.env.API_KEY,
-      baseUrl: process.env.API_URL
-    });
-  }
-
-  async getUserFlags(userId: string, context?: any) {
-    return this.client.getUserFeatureFlags(userId, { context });
-  }
-
-  async getUserAssignments(userId: string) {
-    return this.client.getUserAssignments(userId);
-  }
-
-  async trackEvent(eventType: string, userId: string, value?: number, metadata?: any) {
-    return this.client.trackEvent({
-      eventType,
-      userId,
-      value,
-      metadata
-    });
-  }
-}
-
-// experimentation.controller.ts
-import { Controller, Get, Post, Body, Param, UseGuards } from '@nestjs/common';
-import { ExperimentationService } from './experimentation.service';
-import { AuthGuard } from '@nestjs/passport';
-
-@Controller('experimentation')
-@UseGuards(AuthGuard('jwt'))
-export class ExperimentationController {
-  constructor(private experimentationService: ExperimentationService) {}
-
-  @Get('flags/:userId')
-  async getUserFlags(@Param('userId') userId: string) {
-    return this.experimentationService.getUserFlags(userId);
-  }
-
-  @Post('events')
-  async trackEvent(
-    @Body() body: {
-      eventType: string;
-      userId: string;
-      value?: number;
-      metadata?: any;
-    }
-  ) {
-    return this.experimentationService.trackEvent(
-      body.eventType,
-      body.userId,
-      body.value,
-      body.metadata
-    );
-  }
-}
-```
-
-#### 3. Next.js API Routes
-```typescript
-// pages/api/experimentation/flags.ts
-import { NextApiRequest, NextApiResponse } from 'next';
-import { ExperimentationClient } from '@getexperimently/js-sdk';
-
-const client = new ExperimentationClient({
-  apiKey: process.env.API_KEY,
-  baseUrl: process.env.API_URL
-});
-
-export default async function handler(
-  req: NextApiRequest,
-  res: NextApiResponse
-) {
-  if (req.method !== 'GET') {
-    return res.status(405).json({ message: 'Method not allowed' });
-  }
-
-  try {
-    const userId = req.query.userId as string;
-    if (!userId) {
-      return res.status(400).json({ message: 'userId is required' });
-    }
-
-    const flags = await client.getUserFeatureFlags(userId, {
-      context: {
-        userAgent: req.headers['user-agent'],
-        ip: req.headers['x-forwarded-for'] || req.socket.remoteAddress
-      }
-    });
-
-    res.status(200).json(flags);
-  } catch (error) {
-    console.error('Error fetching feature flags:', error);
-    res.status(500).json({ message: 'Internal server error' });
-  }
-}
-
-// pages/api/experimentation/events.ts
-export default async function handler(
-  req: NextApiRequest,
-  res: NextApiResponse
-) {
-  if (req.method !== 'POST') {
-    return res.status(405).json({ message: 'Method not allowed' });
-  }
-
-  try {
-    const { eventType, userId, value, metadata } = req.body;
-
-    await client.trackEvent({
-      eventType,
-      userId,
-      value,
-      metadata: {
-        ...metadata,
-        path: req.headers.referer,
-        userAgent: req.headers['user-agent']
-      }
-    });
-
-    res.status(200).json({ message: 'Event tracked successfully' });
-  } catch (error) {
-    console.error('Error tracking event:', error);
-    res.status(500).json({ message: 'Internal server error' });
-  }
-}
-```
+The SDKs call the tracking and evaluation endpoints above for you. Their own pages show how
+to install each one and the methods it has, with a quick start that CI runs against a real
+API:
+
+- [Python SDK](../sdk/python.md)
+- [JavaScript SDK](../sdk/javascript.md), and [React SDK](../sdk/react.md) for its hooks
+- Every other SDK is listed in the [SDK Integration Guide](../sdk-guide.md)
 
 ---
 
@@ -2009,7 +1573,7 @@ export default async function handler(
 
 See [Sequential Testing Guide](sequential-testing.md) for full documentation.
 
-```
+```text
 GET /api/v1/results/{experiment_id}/sequential
 ```
 Returns mSPRT analysis, always-valid confidence intervals, an early stopping recommendation and the advisory `at_risk` flag. `alpha_spending` is always empty: no planned-looks table is computed yet.
@@ -2064,7 +1628,7 @@ experiment answers **404**.
 
 See [CUPED Guide](cuped.md) for full documentation.
 
-```
+```text
 GET /api/v1/results/{experiment_id}/cuped
 ```
 Returns, for each conversion metric and each treatment, the effect against the control adjusted for each user's own events before assignment, with the variance reduction and the share of users with history. History counts only if the server received it before the user was assigned.
@@ -2077,12 +1641,14 @@ It takes no query parameters: the method comes from the experiment's `variance_r
 
 See [Dimensional Analysis Guide](dimensional-analysis.md) for full documentation.
 
-```
+```text
 GET /api/v1/experiments/{experiment_id}/segmented-results/{segment_by}
 ```
-Returns per-segment statistics with Bonferroni-corrected significance thresholds.
+Returns counts per segment of `segment_by`, variant and metric, with no significance test;
+an experiment in `draft` answers `400`. The breakdown with a test per segment is
+`GET /api/v1/results/{experiment_id}?breakdown=` (see the guide).
 
-**Query params:** `dimension` (required), `metric_id`, `base_alpha` (default `0.05`)
+**Query params:** `metric_id` (one metric only), `skip_cache` (default `false`)
 
 ---
 
@@ -2090,7 +1656,7 @@ Returns per-segment statistics with Bonferroni-corrected significance thresholds
 
 See [Multi-Armed Bandit Guide](multi-armed-bandit.md) for full documentation.
 
-```
+```text
 GET  /api/v1/bandit/{experiment_id}           — Current variant weights and stats
 POST /api/v1/bandit/{experiment_id}/update    — Trigger weight recalculation (DEVELOPER+)
 PUT  /api/v1/bandit/{experiment_id}/weights   — Override weights manually (ADMIN)
@@ -2102,7 +1668,7 @@ PUT  /api/v1/bandit/{experiment_id}/weights   — Override weights manually (ADM
 
 See [Interaction Detection Guide](interaction-detection.md) for full documentation.
 
-```
+```text
 GET /api/v1/interactions/scan                  — Overlap of every pair of active experiments
 GET /api/v1/interactions/{exp_a_id}/{exp_b_id} — Pairwise analysis (beta: overlap, and an interaction test on each primary metric)
 ```
@@ -2117,7 +1683,7 @@ Access: ANALYST, DEVELOPER or ADMIN (VIEWER returns 403).
 
 See [Mutual Exclusion Groups Guide](mutual-exclusion-groups.md) for full documentation.
 
-```
+```text
 GET    /api/v1/mutual-exclusion-groups                              — List groups
 POST   /api/v1/mutual-exclusion-groups                              — Create group (DEVELOPER+)
 GET    /api/v1/mutual-exclusion-groups/{group_id}                   — Get group
@@ -2133,7 +1699,7 @@ DELETE /api/v1/mutual-exclusion-groups/{group_id}/experiments/{eid} — Remove e
 
 See [Mutual Exclusion Groups Guide](mutual-exclusion-groups.md) for full documentation.
 
-```
+```text
 GET  /api/v1/holdout              — Get active holdout
 GET  /api/v1/holdout/all          — List all holdouts (ADMIN)
 POST /api/v1/holdout              — Create holdout (ADMIN)
@@ -2160,7 +1726,7 @@ See [Experiment Wizard Guide](../guides/experiment-wizard.md) for full documenta
 All six wizard operations are **deprecated**: the dashboard does not use them, and they
 may be removed in a later release.
 
-```
+```text
 POST /api/v1/wizard/drafts              — Create draft (deprecated)
 GET  /api/v1/wizard/drafts              — List my drafts (deprecated)
 GET  /api/v1/wizard/drafts/{id}         — Get draft (deprecated)
@@ -2173,7 +1739,7 @@ POST /api/v1/wizard/drafts/{id}/submit  — Submit → create experiment (deprec
 
 ### Rollout Schedules
 
-```
+```text
 POST   /api/v1/rollout-schedules                      — Create schedule
 GET    /api/v1/rollout-schedules                      — List schedules
 GET    /api/v1/rollout-schedules/{id}                 — Get schedule
@@ -2194,7 +1760,7 @@ POST   /api/v1/rollout-schedules/stages/{stage_id}/advance — Manual advance
 
 See [Audit Logging Guide](audit-logging.md) for full documentation.
 
-```
+```text
 GET  /api/v1/audit-logs/                  — Query audit logs
 GET  /api/v1/audit-logs/entity/{entity_type}/{entity_id}
                                           — Entries for one entity (ADMIN, ANALYST)
@@ -2216,7 +1782,7 @@ own entries on the list, user, stream and history routes. See
 
 See [Safety Monitoring](../feature-flags/safety.md).
 
-```
+```text
 GET  /api/v1/safety/settings                              — Global settings (superuser)
 POST /api/v1/safety/settings                              — Create/update global settings (superuser)
 GET  /api/v1/safety/feature-flags/{flag_id}/config        — Per-flag safety config (defaults when none)
@@ -2229,7 +1795,7 @@ POST /api/v1/safety/feature-flags/{flag_id}/rollback      — Manual rollback (?
 
 ### Audience Segments
 
-```
+```text
 POST   /api/v1/segments                  — Create segment (DEVELOPER+)
 GET    /api/v1/segments                  — List segments (?status=active|inactive|archived)
 GET    /api/v1/segments/{id}             — Get segment
@@ -2376,7 +1942,7 @@ same way. Preview takes rules, so it answers 422 for a body with none.
 
 See [Alerting Guide](alerting.md) for full documentation.
 
-```
+```text
 GET  /api/v1/notifications/preferences         — Get my preferences
 PUT  /api/v1/notifications/preferences         — Update my preferences
 GET  /api/v1/notifications/admin/preferences   — List all (ADMIN)
@@ -2386,24 +1952,27 @@ POST /api/v1/notifications/test                — Send test notification (DEVEL
 
 ---
 
-### AI Design & MCP
+### AI Endpoints and the MCP Manifest
 
-See [MCP Server Guide](../mcp-server.md) for full documentation.
+See [AI Endpoints and the MCP Manifest](../mcp-server.md) for full documentation. The
+manifest describes these operations as tools in the vocabulary of the Model Context
+Protocol, but the platform runs no MCP server: an MCP client cannot connect to it or call a
+tool through it. Call the endpoints over HTTP.
 
-```
+```text
 POST /api/v1/ai/design                    — AI experiment design suggestion
 POST /api/v1/ai/interpret/{experiment_id} — AI results interpretation
 GET  /api/v1/ai/sample-size               — Sample size calculator
 GET  /api/v1/ai/templates                 — List experiment templates
 GET  /api/v1/ai/templates/{id}            — Get template
-GET  /api/v1/mcp/manifest                 — MCP tool manifest (public)
+GET  /api/v1/mcp/manifest                 — Tool manifest in MCP's vocabulary (no sign-in)
 ```
 
 ---
 
 ### Scheduler Health
 
-```
+```text
 GET  /api/v1/scheduler/health           — Health summary for every scheduler
 GET  /api/v1/scheduler/health/{name}    — Health of one scheduler
 GET  /api/v1/scheduler/{name}/history   — Recent run history for one scheduler
@@ -2414,7 +1983,7 @@ POST /api/v1/scheduler/notify/test      — Send a test notification
 
 ### ETL / Glue Jobs
 
-```
+```text
 POST /api/v1/etl/jobs/run               — Trigger an ETL job run
 GET  /api/v1/etl/jobs/{run_id}/status   — Status of one run
 POST /api/v1/etl/crawler/run            — Trigger the Glue crawler
@@ -2464,7 +2033,7 @@ The API reaches Glue in the region named by `AWS_DEFAULT_REGION`, never
 
 ### Real-time DynamoDB Counters
 
-```
+```text
 GET  /api/v1/counters/{experiment_id}              — Get experiment counters
 POST /api/v1/counters/{experiment_id}/increment    — Increment counter
 POST /api/v1/counters/{experiment_id}/reset        — Reset counters (ADMIN)
@@ -2519,7 +2088,7 @@ Read (the list and the get) needs the **ADMIN** or **DEVELOPER** role; create, u
 
 **Integration CRUD**:
 
-```
+```text
 POST   /api/v1/integrations                      — Create integration (ADMIN)
 GET    /api/v1/integrations                      — List integrations (ADMIN or DEVELOPER)
 GET    /api/v1/integrations/{integration_type}   — Get integration details (ADMIN or DEVELOPER)
@@ -2529,7 +2098,7 @@ DELETE /api/v1/integrations/{integration_type}   — Delete integration (ADMIN)
 
 **Webhook receivers**:
 
-```
+```text
 POST /api/v1/integrations/webhooks/jira        — Receive Jira issue events
 POST /api/v1/integrations/webhooks/salesforce  — Receive Salesforce JSON (Flow/Apex callout)
 POST /api/v1/integrations/webhooks/github      — Receive GitHub events (HMAC-SHA256 validated)
@@ -2567,7 +2136,7 @@ Split URL experiments use `experiment_type: split_url` and carry a `split_url_co
 
 **Experiment management** uses the existing experiment CRUD endpoints with `experiment_type=split_url`:
 
-```
+```text
 POST /api/v1/experiments/              — Create split URL experiment (set experiment_type=split_url)
 PUT  /api/v1/experiments/{id}          — Update split URL config
 GET  /api/v1/experiments/{id}          — Returns split_url_config in response
@@ -2575,7 +2144,7 @@ GET  /api/v1/experiments/{id}          — Returns split_url_config in response
 
 **Split URL-specific endpoint**:
 
-```
+```text
 GET /api/v1/experiments/{experiment_id}/split-url/preview  — Preview variant assignment for a user (dev/QA)
 ```
 

@@ -185,9 +185,9 @@ Env: `EXPERIMENTLY_API_URL` (default `http://localhost:8000`), `EXPERIMENTLY_API
 `sdk_contract_flag`), `CONTRACT_USER_ID` (default random `smoke-<guid>`). On failure one line is
 written to stderr and the exit code is 1.
 
-Verified against a live backend: **not yet (toolchain unavailable — no dotnet SDK on the development
-machine)**. The code in this directory was reviewed by inspection only and has not been compiled
-or executed here; run `dotnet test sdk/dotnet` and
+CI runs this SDK's contract smoke against a real API: `dotnet` is in the `sdks:` list of the
+SDK Live Contract job in [pr-qa-gate.yml](https://github.com/getexperimently/experimently/blob/main/.github/workflows/pr-qa-gate.yml). Run it
+yourself with `dotnet test sdk/dotnet` and
 `python tests/sdk-contract/live/run_live_contract.py --sdk dotnet --strict` on a machine with the
 .NET 6+ SDK.
 
