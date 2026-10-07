@@ -46,7 +46,7 @@ Development-only dependencies — what `backend/requirements.txt` adds for test 
 | `pydantic_core` | 2.46.5 |
 | `python-http-client` | 3.3.7 |
 | `python3-saml` | 1.16.0 |
-| `pytz` | 2026.4 |
+| `pytz` | 2026.5 |
 | `redis` | 8.1.0 |
 | `sendgrid` | 6.12.5 |
 | `six` | 1.17.0 |
