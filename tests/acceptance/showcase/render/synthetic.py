@@ -7,6 +7,10 @@ recording, two made-up needles, and a manifest with every capture gate ok.
 Each option plants one defect instead:
 
 ``--plant-needle N``   draw needle 1 in frame N (gate 7 must refuse)
+``--plant-part N:K``   draw only the first K characters of needle 1 in frame N
+                       (gate 7, for K of 12 or more)
+``--plant-faint N``    draw needle 1 in frame N in the OCR canary's faint style,
+                       ``templates.FAINT_CANARY_PX`` px ``FAINT_CANARY_COLOUR`` (gate 7)
 ``--plant-key N``      draw a key-shaped value in frame N (gate 7)
 ``--plant-text N:T``   draw the text T in frame N (U4, for a forbidden phrase)
 ``--black N``          make frame N an all-black page (gate 11)
@@ -25,9 +29,10 @@ import os
 import secrets
 import sys
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 from showcase import contract
+from showcase.render import templates
 from showcase.render.chromium import Chromium
 
 CUE_TEXTS = [
@@ -65,7 +70,9 @@ def _cues() -> List[Dict[str, object]]:
     ]
 
 
-def page_html(step: int, extra: Optional[str] = None, black: bool = False) -> str:
+def page_html(
+    step: int, extra: Optional[str] = None, black: bool = False, faint: bool = False
+) -> str:
     if black:
         return (
             "<!doctype html><html><body style='margin:0;background:#000'></body></html>"
@@ -76,7 +83,13 @@ def page_html(step: int, extra: Optional[str] = None, black: bool = False) -> st
         + "</tr>"
         for i, row in enumerate(ROWS)
     )
-    planted = f"<div class='planted'>{html.escape(extra)}</div>" if extra else ""
+    style = (
+        f" style='font-family:inherit;font-size:{templates.FAINT_CANARY_PX}px;"
+        f"color:{templates.FAINT_CANARY_COLOUR}'"
+        if faint
+        else ""
+    )
+    planted = f"<div class='planted'{style}>{html.escape(extra)}</div>" if extra else ""
     return (
         "<!doctype html><html><head><meta charset='utf-8'><style>"
         "body{margin:0;font-family:-apple-system,system-ui,sans-serif;color:#0F172A;background:#F8FAFC}"
@@ -119,6 +132,8 @@ def write(
     root: Path,
     *,
     plant_needle: Optional[int] = None,
+    plant_part: Optional[Tuple[int, int]] = None,
+    plant_faint: Optional[int] = None,
     plant_key: Optional[int] = None,
     plant_text: Optional[Dict[int, str]] = None,
     black: Optional[int] = None,
@@ -138,13 +153,19 @@ def write(
             extra = None
             if index == plant_needle:
                 extra = f"One-time password: {needles[0]}"
+            elif plant_part and index == plant_part[0]:
+                extra = f"Device code {needles[0][: plant_part[1]]}"
+            elif index == plant_faint:
+                extra = f"Last edited by {needles[0]}"
             elif index == plant_key:
                 extra = f"X-API-Key: {key_like}"
             elif plant_text and index in plant_text:
                 extra = plant_text[index]
             name = f"{index + 1:06d}.jpg"
             browser.page_jpeg(
-                page_html(index, extra, black=index == black),
+                page_html(
+                    index, extra, black=index == black, faint=index == plant_faint
+                ),
                 frames_dir / name,
                 width=frame_size[0],
                 height=frame_size[1],
@@ -177,6 +198,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     )
     parser.add_argument("dir", type=Path)
     parser.add_argument("--plant-needle", type=int)
+    parser.add_argument("--plant-part", metavar="N:K")
+    parser.add_argument("--plant-faint", type=int)
     parser.add_argument("--plant-key", type=int)
     parser.add_argument("--plant-text", action="append", default=[], metavar="N:TEXT")
     parser.add_argument("--black", type=int)
@@ -189,6 +212,12 @@ def main(argv: Optional[List[str]] = None) -> int:
     root = write(
         args.dir,
         plant_needle=args.plant_needle,
+        plant_part=(
+            tuple(int(v) for v in args.plant_part.split(":"))
+            if args.plant_part
+            else None
+        ),
+        plant_faint=args.plant_faint,
         plant_key=args.plant_key,
         plant_text=texts,
         black=args.black,

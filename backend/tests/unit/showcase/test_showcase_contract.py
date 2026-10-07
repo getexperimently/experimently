@@ -219,7 +219,10 @@ def test_needles_must_be_private_present_and_long_enough(tmp_path):
     )
     root = make_capture(tmp_path / "b", needles=["short", "LONG-ENOUGH-VALUE"])
     text = refusal(root)
-    assert "needles.txt line 1 is 5 characters; a needle has at least 8" in text
+    assert (
+        "needles.txt line 1 is 5 characters without its case and separators; "
+        "a needle has at least 8" in text
+    )
     assert "short" not in text.split("refused:")[1].replace(
         "line 1 is 5 characters", ""
     )
@@ -230,6 +233,37 @@ def test_needles_must_be_private_present_and_long_enough(tmp_path):
     root = make_capture(tmp_path / "d")
     (root / "needles.txt").unlink()
     assert "needles.txt is missing" in refusal(root)
+
+
+@pytest.mark.regression
+@pytest.mark.parametrize(
+    "needle, length",
+    [
+        ("--------", 0),  # passed, then divided by zero in the OCR scan
+        ("_-_-_-_-_-_-", 0),
+        ("a_b_c_d_e", 5),
+        ("A B C D E F G", 7),
+    ],
+)
+def test_a_needle_is_long_enough_once_normalised(tmp_path, needle, length):
+    """The scan compares normalised text, so the minimum is counted there too."""
+    assert len(needle) >= contract.MIN_NEEDLE_CHARS
+    root = make_capture(tmp_path / "c", needles=["LONG-ENOUGH-VALUE", needle])
+    text = refusal(root)
+    assert (
+        f"needles.txt line 2 is {length} characters without its case and separators; "
+        f"a needle has at least {contract.MIN_NEEDLE_CHARS}" in text
+    )
+    assert needle not in text.split("refused:")[1]
+
+
+def test_contract_normalise_is_the_one_the_scan_uses():
+    from showcase.render import ocr
+
+    assert ocr.normalise is contract.normalise
+    assert contract.normalise("eptk_DEMO 0-1:2") == "eptkdemoolz"
+    for needle, length in (("--------", 0), ("a_b_c_d_e", 5), ("A B C D E F G", 7)):
+        assert len(contract.normalise(needle)) == length
 
 
 def test_read_needles_returns_the_values_for_the_scan(tmp_path):

@@ -88,8 +88,97 @@ FIRST_FRAME_MAX_MS = 100
 # --- Values the video must never show ----------------------------------------
 
 NEEDLES_MODE = 0o600
-#: A shorter value cannot be told apart from ordinary page text by OCR.
+#: A needle is at least this many characters once ``normalise`` has dropped
+#: its case and separators: a shorter value cannot be told apart from
+#: ordinary page text by OCR (and ``--------`` normalises to nothing at all).
 MIN_NEEDLE_CHARS = 8
+
+#: What OCR confuses, folded together: 0/O/@, 1/l/I/|, f/t, 2/Z, 5/S, 8/B.
+_CONFUSABLE = str.maketrans(
+    {
+        "0": "o",
+        "O": "o",
+        "@": "o",
+        "1": "l",
+        "I": "l",
+        "|": "l",
+        "f": "t",
+        "F": "t",
+        "T": "t",
+        "2": "z",
+        "Z": "z",
+        "5": "s",
+        "S": "s",
+        "8": "b",
+        "B": "b",
+    }
+)
+_DROPPED = re.compile(r"[\s_\-:]+")
+#: Cyrillic and Greek letters OCR returns for their Latin look-alikes
+#: (measured: Vision read the digit 6 of a key as Cyrillic be).
+_HOMOGLYPHS = str.maketrans(
+    {
+        "\u0430": "a",
+        "\u0410": "A",
+        "\u0432": "b",
+        "\u0412": "B",
+        "\u0431": "6",
+        "\u0435": "e",
+        "\u0415": "E",
+        "\u043a": "k",
+        "\u041a": "K",
+        "\u043c": "m",
+        "\u041c": "M",
+        "\u043d": "h",
+        "\u041d": "H",
+        "\u043e": "o",
+        "\u041e": "O",
+        "\u0440": "p",
+        "\u0420": "P",
+        "\u0441": "c",
+        "\u0421": "C",
+        "\u0442": "t",
+        "\u0422": "T",
+        "\u0443": "y",
+        "\u0423": "Y",
+        "\u0445": "x",
+        "\u0425": "X",
+        "\u0455": "s",
+        "\u0405": "S",
+        "\u0456": "i",
+        "\u0406": "I",
+        "\u0458": "j",
+        "\u0408": "J",
+        "\u0437": "3",
+        "\u0417": "3",
+        "\u04cf": "l",
+        "\u03b1": "a",
+        "\u03bf": "o",
+        "\u039f": "O",
+        "\u03c1": "p",
+        "\u03a1": "P",
+        "\u03c4": "t",
+        "\u03ba": "k",
+        "\u039a": "K",
+        "\u03b9": "i",
+        "\u03bd": "v",
+    }
+)
+
+
+def fold_glyphs(text: str) -> str:
+    """Latin letters for their Cyrillic and Greek look-alikes."""
+    return text.translate(_HOMOGLYPHS)
+
+
+def normalise(text: str) -> str:
+    """Fold what OCR confuses, drop case and separators (whitespace, ``_``, ``-``, ``:``).
+
+    The render's OCR scan compares needles and frame text in this form, so a
+    needle's length is counted in it too (``MIN_NEEDLE_CHARS``).
+    """
+    return _DROPPED.sub("", fold_glyphs(text).translate(_CONFUSABLE).lower())
+
 
 # --- The machine -------------------------------------------------------------
 
@@ -444,9 +533,14 @@ def needles_problems(path: Path) -> Tuple[List[str], int]:
     for number, value in enumerate(values, start=1):
         if not value.strip():
             problems.append(f"needles.txt line {number} is blank")
-        elif len(value) < MIN_NEEDLE_CHARS:
+            continue
+        # Counted as the OCR scan compares it: ``a_b_c_d_e`` is 5 characters
+        # there, and ``--------`` is none.
+        length = len(normalise(value))
+        if length < MIN_NEEDLE_CHARS:
             problems.append(
-                f"needles.txt line {number} is {len(value)} characters; a needle has at least {MIN_NEEDLE_CHARS}"
+                f"needles.txt line {number} is {length} characters without its case and "
+                f"separators; a needle has at least {MIN_NEEDLE_CHARS}"
             )
     return problems, len(values)
 

@@ -20,9 +20,17 @@ The order matters, and each step is a gate that refuses rather than warns:
 
 needles.txt is deleted on every path out of ``render``, pass or refuse, once
 the render has started; its values live only in memory, and only until the
-review page has been checked against them. A refusal deletes everything this
-render made: the ``.partial`` files, the review page and the work directory
-(an output directory it had to create is left, empty).
+review page has been checked against them. So a refusal, even a passing one
+such as low disk, means the capture has to be made again, and every refusal
+says so ("re-capture needed").
+
+Everything the render makes is written in its work directory, the ``.partial``
+files and the review page included, and reaches the output directory only by
+a hard link or a rename once every gate passed. The work directory is deleted
+on every way out (emptied, if it was there before), through
+``WorkDir.remove``, the only code in the render that deletes (EM condition
+7e). The ``paths`` gate refuses an output directory that is the work
+directory, or inside it, or around it.
 """
 
 from __future__ import annotations
@@ -33,12 +41,20 @@ import os
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any, Dict, List, Optional
 
 from showcase import contract
 from showcase.render import encode, ocr, probe, review, templates, timeline, vtt
 from showcase.render.chromium import Chromium, caption_problems
 from showcase.render.gates import GateLog, Refused
+from showcase.render.workdir import WorkDir, git_checkout_above
+
+#: The last line of every refusal: needles.txt is gone, so this capture cannot
+#: be rendered again.
+RECAPTURE = (
+    "needles.txt is deleted on every refusal, so this capture directory cannot be "
+    "rendered again: re-capture needed"
+)
 
 
 @dataclass(frozen=True)
@@ -51,18 +67,62 @@ class RenderResult:
     gates: Dict[str, Dict[str, Any]]
 
 
-def git_checkout_above(path: Path) -> Optional[Path]:
-    """The git checkout a path is inside, if any (a ``.git`` in it or an ancestor)."""
-    for candidate in [path, *path.parents]:
-        if (candidate / ".git").exists():
-            return candidate
-    return None
-
-
 def _existing(path: Path) -> Path:
     while not path.exists():
         path = path.parent
     return path
+
+
+def _device(path: Path) -> int:
+    """The filesystem a path is (or would be created) on."""
+    return os.stat(_existing(path)).st_dev
+
+
+def _overlap(a: Path, b: Path) -> bool:
+    return a == b or a in b.parents or b in a.parents
+
+
+def paths_problems(capture_dir: Path, out_dir: Path, work: Path) -> List[str]:
+    """The ``paths`` gate, on resolved paths: where the render may write and delete."""
+    problems: List[str] = []
+    for label, path in (("output", out_dir), ("work", work)):
+        checkout = git_checkout_above(path)
+        if checkout is not None:
+            problems.append(
+                f"the {label} directory {path} is inside the git checkout at {checkout}; "
+                "rendered videos and frames never go into a repository"
+            )
+    if out_dir == work:
+        problems.append(
+            f"the output and work directories are both {work}; the render deletes its "
+            "work directory when it ends, so give the output a place of its own"
+        )
+    elif work in out_dir.parents:
+        problems.append(
+            f"the output directory {out_dir} is inside the work directory {work}, "
+            "which the render deletes when it ends"
+        )
+    elif out_dir in work.parents:
+        problems.append(
+            f"the work directory {work} is inside the output directory {out_dir}; "
+            "give them separate places"
+        )
+    if _overlap(work, capture_dir):
+        problems.append(
+            f"the work directory {work} and the capture directory {capture_dir} "
+            "overlap; the render deletes its work directory when it ends"
+        )
+    if work.exists() and (not work.is_dir() or any(work.iterdir())):
+        problems.append(
+            f"the work directory {work} is not empty; give the render an empty or new one"
+        )
+    if _device(out_dir) != _device(work):
+        problems.append(
+            f"the output directory {out_dir} and the work directory {work} are on "
+            "different filesystems; the finished files are linked into place from "
+            "the work directory, so put both on one"
+        )
+    return problems
 
 
 def check_disk(paths: Dict[str, Path], floor: int) -> Dict[str, int]:
@@ -88,20 +148,12 @@ def sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
-def _remove(path: Path, *, allowed: Iterable[Path]) -> None:
-    """Delete a file or tree, only if it is one of the paths this render made."""
-    if path not in list(allowed):
-        raise RuntimeError(f"refusing to delete {path}: not a path this render made")
-    if path.is_dir() and not path.is_symlink():
-        shutil.rmtree(path)
-    elif path.exists() or path.is_symlink():
-        path.unlink()
-
-
 def _place(partial: Path, final: Path) -> None:
-    """Move a finished file into place; never over an existing one."""
+    """Link a finished file into place; never over an existing one.
+
+    The ``.partial`` name stays in the work directory and goes with it.
+    """
     os.link(partial, final)
-    partial.unlink()
 
 
 def render(
@@ -113,34 +165,24 @@ def render(
 ) -> RenderResult:
     capture_dir = Path(capture_dir).resolve()
     out_dir = Path(out_dir).expanduser().resolve()
-    work = (
+    needles_path = capture_dir / "needles.txt"
+    work = WorkDir(
         Path(work_dir).expanduser().resolve()
         if work_dir
-        else capture_dir.parent / "render"
+        else capture_dir.parent / "render",
+        needles=needles_path,
     )
     floor = max(disk_floor, contract.DISK_FLOOR_BYTES)
-    needles_path = capture_dir / "needles.txt"
     log = GateLog()
-    owned: List[Path] = []
-    made_work = False
+    started = created = False
     try:
-        for label, path in (("output", out_dir), ("work", work)):
-            checkout = git_checkout_above(path)
-            if checkout is not None:
-                raise Refused(
-                    "paths",
-                    f"the {label} directory {path} is inside the git checkout at {checkout}; "
-                    "rendered videos and frames never go into a repository",
-                )
-        if work.exists() and any(work.iterdir()):
-            raise Refused(
-                "paths",
-                f"the work directory {work} is not empty; give the render an empty or new one",
-            )
+        problems = paths_problems(capture_dir, out_dir, work.path)
+        if problems:
+            raise Refused("paths", problems)
         log.passed(
             "disk",
             {
-                "free_bytes": check_disk({"output": out_dir, "work": work}, floor),
+                "free_bytes": check_disk({"output": out_dir, "work": work.path}, floor),
                 "floor_bytes": floor,
             },
         )
@@ -176,16 +218,12 @@ def render(
         if missing:
             raise Refused("tools", f"this ffmpeg lacks the filters {missing}")
 
-        out_dir.mkdir(parents=True, exist_ok=True)
-        work.mkdir(parents=True, exist_ok=True)
-        made_work = True
-        partial_mp4 = out_dir / f"{sheet.slug}.mp4.partial"
-        partial_vtt = out_dir / f"{sheet.slug}.vtt.partial"
-        partial_review = out_dir / f"{sheet.slug}-review.partial"
-        owned = [partial_mp4, partial_vtt, partial_review]
-        for stale in owned:
-            if stale.exists() or stale.is_symlink():
-                _remove(stale, allowed=owned)
+        created = not work.path.exists()
+        work.path.mkdir(parents=True, exist_ok=True)
+        started = True
+        partial_mp4 = work.path / f"{sheet.slug}.mp4.partial"
+        partial_vtt = work.path / f"{sheet.slug}.vtt.partial"
+        partial_review = work.path / f"{sheet.slug}-review.partial"
 
         out_cues = timeline.output_cues(sheet)
         recording_frames = sheet.capture_frames
@@ -203,7 +241,7 @@ def render(
         if text_hits:
             raise Refused("7", text_hits)
 
-        pngs = work / "png"
+        pngs = work.path / "png"
         pngs.mkdir()
         band_files = [pngs / f"cue-{cue.number:02d}.png" for cue in out_cues]
         with Chromium() as browser:
@@ -233,7 +271,7 @@ def render(
                 raise Refused("7", f"{exc}; scan not run") from exc
             canary = ocr.self_test(found, ocr.canary_drawer(browser), work)
 
-        seq_dir = work / "sequence"
+        seq_dir = work.path / "sequence"
         encode.build_sequences(
             capture.frames_dir,
             [frame.file for frame in capture.frames],
@@ -247,10 +285,10 @@ def render(
             title_png, seq_dir, end_png, recording_frames, partial_mp4
         )
         try:
-            encode.encode(argv, work / "ffmpeg.log")
+            encode.encode(argv, work.path / "ffmpeg.log")
         except RuntimeError as exc:
             raise Refused("encode", str(exc)) from exc
-        shutil.rmtree(seq_dir)
+        work.remove(seq_dir)
 
         try:
             info = probe.ffprobe(partial_mp4)
@@ -291,7 +329,10 @@ def render(
             work,
             lambda: log.passed(
                 "disk-ocr",
-                {"free_bytes": check_disk({"work": work}, floor), "floor_bytes": floor},
+                {
+                    "free_bytes": check_disk({"work": work.path}, floor),
+                    "floor_bytes": floor,
+                },
             ),
         )
         scan_numbers["engines"] = [engine.name for engine in found]
@@ -315,7 +356,7 @@ def render(
         images = encode.extract_frames(
             partial_mp4,
             [w["frame"] for w in wanted],
-            work / "contact",
+            work.path / "contact",
             scale="960:540",
             ext="jpg",
         )
@@ -354,6 +395,7 @@ def render(
             encoding="utf-8",
         )
 
+        out_dir.mkdir(parents=True, exist_ok=True)
         _place(partial_vtt, finals["vtt"])
         _place(partial_mp4, finals["mp4"])
         partial_review.rename(finals["review"])
@@ -365,13 +407,12 @@ def render(
             vtt_sha256=vtt_sha,
             gates=log.gates,
         )
-    except BaseException:
-        for path in owned:
-            if path.exists() or path.is_symlink():
-                _remove(path, allowed=owned)
-        raise
+    except Refused as exc:
+        raise Refused(exc.gate, [*exc.problems, RECAPTURE]) from exc
     finally:
-        if needles_path.exists() or needles_path.is_symlink():
-            needles_path.unlink()
-        if made_work and work.exists():
-            _remove(work, allowed=[work])
+        work.remove(needles_path)
+        if started and created:
+            work.remove(work.path)
+        elif started:
+            for child in list(work.path.iterdir()):
+                work.remove(child)

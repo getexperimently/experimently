@@ -8,22 +8,44 @@ distinct frame (by its decoded checksum), and reads every one of those with
 every OCR engine on the machine: macOS Vision through a small Swift program
 built here, and tesseract. A frame is refused when its text holds:
 
-* any stretch of a needle (a value from needles.txt), read fuzzily: both
-  sides lose case, spaces, ``_``, ``-`` and ``:``, the characters OCR
-  confuses are folded together (0/O/@, 1/l/I/|, f/t, 2/Z, 5/S, 8/B), and a
-  needle matches when some window of the text is within 30 % edits of it (a
-  long needle is matched in overlapping 24-character pieces, so a part of it
-  on screen is found as well as all of it);
+* a needle (a value from needles.txt), or part of one, read fuzzily. Both
+  sides lose case, whitespace, ``_``, ``-`` and ``:``, and the characters OCR
+  confuses are folded together (0/O/@, 1/l/I/|, f/t, 2/Z, 5/S, 8/B, and
+  Cyrillic and Greek look-alikes): ``contract.normalise``. The needle is then
+  cut into pieces (``chunks``): the whole of it when it is 24 characters or
+  fewer, else 24-character pieces 8 apart; and, when it is longer than 12,
+  also 12-character pieces 4 apart. A frame is refused when some stretch of
+  its text is within 30 % edits of a piece (``NEEDLE_THRESHOLD``). So these
+  are found: a whole needle of up to 24 characters with up to 30 % of them
+  misread, lost or added; one of a longer needle's 24-character pieces with
+  up to 7; and any 12 or more characters of a needle in a row, read as
+  written (cut off by the edge of the page or a column, or wrapped onto two
+  lines), or one of its 12-character pieces with up to 3 misread. Fewer than
+  12 characters of a needle longer than that are not looked for: a stretch
+  that short cannot be told apart from ordinary page text;
 * key-shaped text: a word starting ``eptk`` (the API key prefix) with 5 or
   more key characters after it, or ``eyJ`` (a JSON web token) with 20 or more;
 * (U4) a phrase that must never be on screen: a local address, an error, a
   disconnected live view, a test leftover.
 
-Before any of that, a canary frame with a made-up value and a made-up key is
-put through the same encode and read by every engine; an engine that cannot
-read it stops the scan ("OCR self-test ... scan not run"). An engine that
-fails on any frame stops it too: a scan that read nothing never counts as a
-clean one. No refusal text ever holds a needle or the text OCR read.
+Before any of that, a canary frame with made-up values is put through the
+same encode: a value at 16 px and a key at 14 px, both #0F172A, which every
+engine must read, and a value in the faint small style
+``templates.FAINT_CANARY_PX`` px ``templates.FAINT_CANARY_COLOUR`` (13 px
+#94A3B8), which at least one engine must read. Otherwise the scan is not run
+and the render refuses ("OCR self-test ... scan not run"). The faint style is
+under anything the dashboard draws at the capture's zoom of 4/3 (measured in
+``frontend/src``: its faintest text is slate-400 or gray-400, 2.56 and 2.54
+to 1 on white, at 12 px at the smallest, so 16 px in the frame; its smallest
+text is 11 px, 14.7 px in the frame). Text smaller or fainter than the faint
+canary is not claimed. One engine is enough for the faint value because the
+engines miss it in different places (measured: on the canary page Vision read
+it at 1.00 and tesseract at 0.25 to 0.50 in 7 runs; on a page with nothing
+else, the other way round), and a frame is refused when either engine reads a
+needle. An engine that fails on any frame stops the scan too, as does a
+decode or an extraction that does not give exactly the frames asked for: a
+scan that read nothing never counts as a clean one. No refusal text ever
+holds a needle or the text OCR read.
 """
 
 from __future__ import annotations
@@ -40,16 +62,25 @@ from pathlib import Path
 from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
 from showcase import contract
+from showcase.contract import fold_glyphs, normalise
 from showcase.render import encode, probe, templates
 from showcase.render.children import child_env
 from showcase.render.gates import Refused
 from showcase.render.timeline import OutputCue
+from showcase.render.workdir import WorkDir
 
 NEEDLE_THRESHOLD = 0.7
 CAPTION_THRESHOLD = 0.9
 CAPTION_ABSENT_BELOW = 0.5
+#: A needle longer than ``CHUNK`` is matched in pieces of this many characters,
+#: ``CHUNK_STEP`` apart; one longer than ``SHORT_CHUNK`` also in pieces of that
+#: many, ``SHORT_CHUNK_STEP`` apart. Each step is one more than the edits its
+#: piece allows (7 in 24, 3 in 12), so any run of a needle's characters on
+#: screen as long as a piece holds one piece with no more edits than allowed.
 CHUNK = 24
 CHUNK_STEP = 8
+SHORT_CHUNK = 12
+SHORT_CHUNK_STEP = 4
 #: Samples inside each cue: 0.3 s after it starts and 0.3 s before it ends.
 CAPTION_SAMPLE_FRAMES = 9
 BATCH = 150
@@ -73,87 +104,6 @@ FORBIDDEN_TEXT = (
     "something went wrong",
     "not listed here yet",
 )
-
-_CONFUSABLE = str.maketrans(
-    {
-        "0": "o",
-        "O": "o",
-        "@": "o",
-        "1": "l",
-        "I": "l",
-        "|": "l",
-        "f": "t",
-        "F": "t",
-        "T": "t",
-        "2": "z",
-        "Z": "z",
-        "5": "s",
-        "S": "s",
-        "8": "b",
-        "B": "b",
-    }
-)
-_DROPPED = re.compile(r"[\s_\-:]+")
-#: Cyrillic and Greek letters OCR returns for their Latin look-alikes
-#: (measured: Vision read the digit 6 of a key as Cyrillic be).
-_HOMOGLYPHS = str.maketrans(
-    {
-        "\u0430": "a",
-        "\u0410": "A",
-        "\u0432": "b",
-        "\u0412": "B",
-        "\u0431": "6",
-        "\u0435": "e",
-        "\u0415": "E",
-        "\u043a": "k",
-        "\u041a": "K",
-        "\u043c": "m",
-        "\u041c": "M",
-        "\u043d": "h",
-        "\u041d": "H",
-        "\u043e": "o",
-        "\u041e": "O",
-        "\u0440": "p",
-        "\u0420": "P",
-        "\u0441": "c",
-        "\u0421": "C",
-        "\u0442": "t",
-        "\u0422": "T",
-        "\u0443": "y",
-        "\u0423": "Y",
-        "\u0445": "x",
-        "\u0425": "X",
-        "\u0455": "s",
-        "\u0405": "S",
-        "\u0456": "i",
-        "\u0406": "I",
-        "\u0458": "j",
-        "\u0408": "J",
-        "\u0437": "3",
-        "\u0417": "3",
-        "\u04cf": "l",
-        "\u03b1": "a",
-        "\u03bf": "o",
-        "\u039f": "O",
-        "\u03c1": "p",
-        "\u03a1": "P",
-        "\u03c4": "t",
-        "\u03ba": "k",
-        "\u039a": "K",
-        "\u03b9": "i",
-        "\u03bd": "v",
-    }
-)
-
-
-def fold_glyphs(text: str) -> str:
-    """Latin letters for their Cyrillic and Greek look-alikes."""
-    return text.translate(_HOMOGLYPHS)
-
-
-def normalise(text: str) -> str:
-    """Fold what OCR confuses, drop case and separators."""
-    return _DROPPED.sub("", fold_glyphs(text).translate(_CONFUSABLE).lower())
 
 
 def shaped(text: str, prefix: str, minimum: int) -> bool:
@@ -209,13 +159,46 @@ def best_distance(pattern: str, text: str) -> int:
     return best
 
 
+def _windows(needle: str, size: int, step: int) -> List[str]:
+    starts = list(range(0, len(needle) - size + 1, step))
+    if starts[-1] != len(needle) - size:
+        starts.append(len(needle) - size)
+    return [needle[s : s + size] for s in starts]
+
+
 def chunks(normalised_needle: str) -> List[str]:
-    if len(normalised_needle) <= CHUNK:
-        return [normalised_needle]
-    starts = list(range(0, len(normalised_needle) - CHUNK + 1, CHUNK_STEP))
-    if starts[-1] != len(normalised_needle) - CHUNK:
-        starts.append(len(normalised_needle) - CHUNK)
-    return [normalised_needle[s : s + CHUNK] for s in starts]
+    """The pieces a needle is matched in (see the module's docstring)."""
+    if not normalised_needle:
+        raise ValueError("an empty needle would match any text")
+    pieces = (
+        [normalised_needle]
+        if len(normalised_needle) <= CHUNK
+        else _windows(normalised_needle, CHUNK, CHUNK_STEP)
+    )
+    if len(normalised_needle) > SHORT_CHUNK:
+        pieces += _windows(normalised_needle, SHORT_CHUNK, SHORT_CHUNK_STEP)
+    return list(dict.fromkeys(pieces))
+
+
+def allowed_edits(length: int) -> int:
+    """The most edits a piece of this length may have and still match."""
+    edits = 0
+    while edits < length and 1 - (edits + 1) / length >= NEEDLE_THRESHOLD:
+        edits += 1
+    return edits
+
+
+def _could_match(piece: str, normalised_text: str) -> bool:
+    """False only if ``piece`` cannot be within its allowed edits of any stretch of the text.
+
+    Cut the piece into one part more than the edits it allows: each edit
+    touches at most one part, so a match leaves some part intact in the text.
+    """
+    parts = allowed_edits(len(piece)) + 1
+    bounds = [round(i * len(piece) / parts) for i in range(parts + 1)]
+    return any(
+        piece[bounds[i] : bounds[i + 1]] in normalised_text for i in range(parts)
+    )
 
 
 def needle_similarity(normalised_needle: str, normalised_text: str) -> float:
@@ -223,6 +206,22 @@ def needle_similarity(normalised_needle: str, normalised_text: str) -> float:
     best = 0.0
     for piece in chunks(normalised_needle):
         best = max(best, 1 - best_distance(piece, normalised_text) / len(piece))
+    return best
+
+
+def needle_match(normalised_needle: str, normalised_text: str) -> Optional[float]:
+    """``needle_similarity`` when it reaches ``NEEDLE_THRESHOLD``, else None.
+
+    The same answer, faster: a piece that cannot match is skipped before the
+    edit distance is computed.
+    """
+    best: Optional[float] = None
+    for piece in chunks(normalised_needle):
+        if not _could_match(piece, normalised_text):
+            continue
+        similarity = 1 - best_distance(piece, normalised_text) / len(piece)
+        if similarity >= NEEDLE_THRESHOLD and (best is None or similarity > best):
+            best = similarity
     return best
 
 
@@ -251,8 +250,8 @@ def findings(text: str, needles: Sequence[str]) -> List[Tuple[str, str]]:
     found: List[Tuple[str, str]] = []
     folded = normalise(text)
     for number, needle in enumerate(needles, start=1):
-        similarity = needle_similarity(normalise(needle), folded)
-        if similarity >= NEEDLE_THRESHOLD:
+        similarity = needle_match(normalise(needle), folded)
+        if similarity is not None:
             found.append(
                 ("7", f"needle {number} of {len(needles)} at {similarity:.2f}")
             )
@@ -336,12 +335,12 @@ class Vision(Engine):
         return texts
 
 
-def build_vision(work: Path) -> Optional[Vision]:
+def build_vision(work: WorkDir) -> Optional[Vision]:
     """Compile the Vision reader on macOS; None where there is no Vision."""
     swiftc = shutil.which("swiftc")
     if platform.system() != "Darwin" or not swiftc:
         return None
-    binary = work / "vision_ocr"
+    binary = work.path / "vision_ocr"
     source = Path(__file__).with_name("vision_ocr.swift")
     result = subprocess.run(
         [swiftc, "-O", str(source), "-o", str(binary)],
@@ -357,7 +356,7 @@ def build_vision(work: Path) -> Optional[Vision]:
     return Vision(name="vision", binary=str(binary))
 
 
-def engines(work: Path) -> List[Engine]:
+def engines(work: WorkDir) -> List[Engine]:
     found: List[Engine] = []
     vision = build_vision(work)
     if vision:
@@ -384,9 +383,16 @@ def _read(engine: Engine, paths: Sequence[Path], gate: str) -> Dict[Path, str]:
 
 
 def self_test(
-    found: Sequence[Engine], draw_canary: Callable[[str, str, Path], None], work: Path
-) -> Dict[str, float]:
-    """Read a made-up value and key through the video's encode; refuse if any engine misses."""
+    found: Sequence[Engine],
+    draw_canary: Callable[[str, str, str, Path], None],
+    work: WorkDir,
+) -> Dict[str, Dict[str, float]]:
+    """Read made-up values through the video's encode; refuse if the scan could not see them.
+
+    Every engine must read the value and the key drawn in dark text; at least
+    one must read the value drawn in the faint small style
+    (``templates.FAINT_CANARY_PX`` px ``templates.FAINT_CANARY_COLOUR``).
+    """
     if not found:
         raise Refused(
             "7",
@@ -394,15 +400,16 @@ def self_test(
         )
     alphabet = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"
     needle = "CANARY-" + "".join(secrets.choice(alphabet) for _ in range(16))
+    faint = "FAINT-" + "".join(secrets.choice(alphabet) for _ in range(16))
     key_like = "eptk_" + "".join(
         secrets.choice("abcdefghjkmnpqrstuvwxyz23456789") for _ in range(24)
     )
-    canary_dir = work / "canary"
+    canary_dir = work.path / "canary"
     canary_dir.mkdir()
     png = canary_dir / "canary.png"
-    draw_canary(needle, key_like, png)
+    draw_canary(needle, key_like, faint, png)
     decoded = encode.png_to_h264_and_back(png, canary_dir)
-    numbers: Dict[str, float] = {}
+    numbers: Dict[str, Dict[str, float]] = {"canary": {}, "faint": {}}
     problems = []
     for engine in found:
         try:
@@ -413,7 +420,10 @@ def self_test(
             )
             continue
         similarity = needle_similarity(normalise(needle), normalise(text))
-        numbers[engine.name] = round(similarity, 3)
+        numbers["canary"][engine.name] = round(similarity, 3)
+        numbers["faint"][engine.name] = round(
+            needle_similarity(normalise(faint), normalise(text)), 3
+        )
         if similarity < NEEDLE_THRESHOLD:
             problems.append(
                 f"OCR self-test: {engine.name} read the canary at {similarity:.2f} "
@@ -423,7 +433,17 @@ def self_test(
             problems.append(
                 f"OCR self-test: {engine.name} did not see the key-shaped canary; scan not run"
             )
-    shutil.rmtree(canary_dir)
+    if not problems and max(numbers["faint"].values()) < NEEDLE_THRESHOLD:
+        readings = ", ".join(
+            f"{name} {value:.2f}" for name, value in numbers["faint"].items()
+        )
+        problems.append(
+            f"OCR self-test: no engine read the faint canary "
+            f"({templates.FAINT_CANARY_PX} px {templates.FAINT_CANARY_COLOUR}: {readings}; "
+            f"needs {NEEDLE_THRESHOLD:.2f}), so the faintest dashboard text would go unread; "
+            "scan not run"
+        )
+    work.remove(canary_dir)
     if problems:
         raise Refused("7", problems)
     return numbers
@@ -434,17 +454,36 @@ def scan(
     expected_frames: int,
     needles: Sequence[str],
     found: Sequence[Engine],
-    work: Path,
+    work: WorkDir,
     check_disk: Callable[[], None],
 ) -> Tuple[Dict[str, object], Dict[str, object]]:
-    """Gates 7 and U4 over every distinct frame of the finished video."""
+    """Gates 7 and U4 over every distinct frame of the finished video.
+
+    The scan checks its own inputs rather than trusting its callers: some
+    needles, each long enough to look for; at least one engine; exactly
+    ``expected_frames`` decoded (never zero); and exactly the frames asked for
+    in every extraction. Anything else refuses, and the scan is not counted.
+    """
     if not needles:
         raise Refused("7", "0 needles: refusing to scan")
+    short = [
+        number
+        for number, needle in enumerate(needles, start=1)
+        if len(normalise(needle)) < contract.MIN_NEEDLE_CHARS
+    ]
+    if short:
+        raise Refused(
+            "7",
+            f"needles {short} are under {contract.MIN_NEEDLE_CHARS} characters without "
+            "their case and separators; refusing to scan",
+        )
+    if not found:
+        raise Refused("7", "no OCR engine; refusing to scan")
     try:
         sums = probe.framemd5(video)
     except (RuntimeError, ValueError) as exc:
         raise Refused("7", f"could not decode the video for OCR ({exc})") from exc
-    if len(sums) != expected_frames:
+    if expected_frames <= 0 or len(sums) != expected_frames:
         raise Refused(
             "7",
             f"decoded {len(sums)} frames, expected {expected_frames}; the scan is not counted",
@@ -455,7 +494,7 @@ def scan(
     unique = sorted(first.values())
     check_disk()
     texts: Dict[int, Dict[str, str]] = {index: {} for index in unique}
-    batch_root = work / "ocr"
+    batch_root = work.path / "ocr"
     for number, start in enumerate(range(0, len(unique), BATCH)):
         batch = unique[start : start + BATCH]
         batch_dir = batch_root / f"batch-{number:03d}"
@@ -466,11 +505,17 @@ def scan(
                 "7",
                 f"could not extract frames for OCR ({exc}); the scan is not counted",
             ) from exc
+        if len(paths) != len(batch) or len(set(paths)) != len(batch):
+            raise Refused(
+                "7",
+                f"extracted {len(set(paths))} distinct frames of the {len(batch)} asked for "
+                f"(batch {number}); the scan is not counted",
+            )
         for engine in found:
             read = _read(engine, paths, "7")
             for index, path in zip(batch, paths):
                 texts[index][engine.name] = read[path]
-        shutil.rmtree(batch_dir)
+        work.remove(batch_dir)
     counts = {
         engine.name: sum(1 for t in texts.values() if engine.name in t)
         for engine in found
@@ -570,13 +615,15 @@ def caption_problems(
 
 
 def check_captions(
-    video: Path, cues: Sequence[OutputCue], found: Sequence[Engine], work: Path
+    video: Path, cues: Sequence[OutputCue], found: Sequence[Engine], work: WorkDir
 ) -> Dict[str, object]:
     """Gate 5: every burned-in caption is there, in sync, and gone when the next one comes."""
     samples = caption_samples(cues)
     frames = sorted({frame for frame, _, _ in samples})
     try:
-        paths = encode.extract_frames(video, frames, work / "captions", crop_band=True)
+        paths = encode.extract_frames(
+            video, frames, work.path / "captions", crop_band=True
+        )
     except RuntimeError as exc:
         raise Refused("5", f"could not extract caption frames ({exc})") from exc
     read: Dict[int, List[str]] = {frame: [] for frame in frames}
@@ -584,7 +631,7 @@ def check_captions(
         texts = _read(engine, paths, "5")
         for frame, path in zip(frames, paths):
             read[frame].append(texts[path])
-    shutil.rmtree(work / "captions")
+    work.remove(work.path / "captions")
     problems, numbers = caption_problems(cues, samples, read)
     numbers["engines"] = [engine.name for engine in found]
     if problems:
@@ -592,8 +639,8 @@ def check_captions(
     return numbers
 
 
-def canary_drawer(browser) -> Callable[[str, str, Path], None]:
-    def draw(needle: str, key_like: str, path: Path) -> None:
-        browser.card(templates.canary_html(needle, key_like), path)
+def canary_drawer(browser) -> Callable[[str, str, str, Path], None]:
+    def draw(needle: str, key_like: str, faint: str, path: Path) -> None:
+        browser.card(templates.canary_html(needle, key_like, faint), path)
 
     return draw
