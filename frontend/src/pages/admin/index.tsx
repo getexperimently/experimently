@@ -55,27 +55,27 @@ export function AdminDashboard() {
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
             <StatTile
               label="Total Experiments"
-              value={stats.total_experiments}
+              value={stats.experiments.total}
               color="blue"
             />
             <StatTile
               label="Active Experiments"
-              value={stats.active_experiments}
+              value={stats.experiments.active}
               color="green"
             />
             <StatTile
               label="Total Feature Flags"
-              value={stats.total_feature_flags}
+              value={stats.feature_flags.total}
               color="blue"
             />
             <StatTile
               label="Active Feature Flags"
-              value={stats.active_feature_flags}
+              value={stats.feature_flags.active}
               color="green"
             />
             <StatTile
               label="Total Users"
-              value={stats.total_users}
+              value={stats.users.total}
               color="slate"
             />
           </div>

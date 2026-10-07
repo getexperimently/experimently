@@ -24,6 +24,7 @@ import {
   FeatureFlag,
   FeatureFlagsService,
   RolloutSchedule,
+  RolloutStage,
   UpdateFeatureFlagRequest,
   isFlagOn,
 } from '@/services/featureFlags';
@@ -103,6 +104,24 @@ export function pickSchedule(items: RolloutSchedule[]): RolloutSchedule | null {
     if (r !== 0) return r;
     return new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime();
   })[0];
+}
+
+/**
+ * The schedule's stage in progress (`current`) and the one after it (`next`),
+ * by `stage_order`. `next` is the first pending stage after the current one;
+ * with no stage in progress it is the first pending stage, the one that starts
+ * next. Either is null when there is none: no `next` on the last stage, and
+ * neither once every stage is completed.
+ */
+export function stageSummary(schedule: RolloutSchedule): {
+  current: RolloutStage | null;
+  next: RolloutStage | null;
+} {
+  const stages = [...schedule.stages].sort((a, b) => a.stage_order - b.stage_order);
+  const currentIndex = stages.findIndex((s) => s.status === 'in_progress');
+  const current = currentIndex >= 0 ? stages[currentIndex] : null;
+  const next = stages.slice(currentIndex + 1).find((s) => s.status === 'pending') ?? null;
+  return { current, next };
 }
 
 export default function FeatureFlagDetailPage() {
@@ -313,10 +332,7 @@ export default function FeatureFlagDetailPage() {
 
   const on = isFlagOn(flag);
   const schedule = schedules ? pickSchedule(schedules) : null;
-  const activeStage =
-    schedule?.stages.find((s) => s.status === 'in_progress') ??
-    schedule?.stages.find((s) => s.status === 'pending') ??
-    null;
+  const summary = schedule ? stageSummary(schedule) : { current: null, next: null };
 
   return (
     <div className="flex-1 bg-slate-50" data-testid="flag-detail">
@@ -423,9 +439,12 @@ export default function FeatureFlagDetailPage() {
                 <p className="text-sm text-slate-700 font-medium" data-testid="rollout-schedule-name">
                   {schedule.name}
                 </p>
-                <p className="text-xs text-slate-500 mt-0.5">
+                <p className="text-xs text-slate-500 mt-0.5" data-testid="rollout-schedule-summary">
                   Up to {schedule.max_percentage}%
-                  {activeStage ? ` · next: ${activeStage.name} → ${activeStage.target_percentage}%` : ''}
+                  {summary.current
+                    ? ` · current: ${summary.current.name} → ${summary.current.target_percentage}%`
+                    : ''}
+                  {summary.next ? ` · next: ${summary.next.name} → ${summary.next.target_percentage}%` : ''}
                 </p>
                 <ol className="mt-3 space-y-2" data-testid="rollout-stages">
                   {[...schedule.stages]

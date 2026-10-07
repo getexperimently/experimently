@@ -14,6 +14,7 @@ import uuid
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import event
 from sqlalchemy.orm import Session
 
 from backend.app.models.user import User, UserRole
@@ -717,3 +718,98 @@ class TestExistingRowsCarryNoPlan:
         for body in (mine[0], detail.json()):
             for gone in _REMOVED_FIELDS:
                 assert gone not in body, body
+
+
+def _add_member(as_user, owner: User, ws_id: str, user: User, role: str) -> None:
+    resp = as_user(
+        owner,
+        "POST",
+        f"/api/v1/workspaces/{ws_id}/members",
+        json={"user_id": str(user.id), "role": role},
+    )
+    assert resp.status_code == 201, resp.text
+
+
+@pytest.mark.integration
+class TestListCarriesMemberCounts:
+    """``GET /workspaces/`` answers each workspace's member count (#1008).
+
+    The list used to answer no count at all, so the dashboard's Workspaces
+    page showed "0 members" for every workspace.
+    """
+
+    @pytest.mark.regression
+    def test_each_listed_workspace_has_its_own_member_count(self, as_user, ws_people):
+        p = ws_people
+        three = _workspace_with_owners_and_admin(as_user, p)
+        alone = _new_workspace(as_user, p["owner"], "alone")
+        # Not the caller's: it is not listed, and its members count nowhere else.
+        theirs = _new_workspace(as_user, p["bystander"], "theirs")
+        _add_member(as_user, p["bystander"], theirs, p["outsider"], "VIEWER")
+
+        listed = as_user(p["owner"], "GET", "/api/v1/workspaces/")
+        assert listed.status_code == 200, listed.text
+        counts = {w["id"]: w.get("member_count") for w in listed.json()}
+        assert counts == {three: 3, alone: 1}, listed.json()
+
+        # The list and the workspace's own page agree.
+        for ws_id, expected in counts.items():
+            detail = as_user(p["owner"], "GET", f"/api/v1/workspaces/{ws_id}")
+            assert detail.status_code == 200, detail.text
+            assert detail.json()["member_count"] == expected, detail.json()
+
+    @pytest.mark.regression
+    def test_a_member_who_leaves_is_no_longer_counted(self, as_user, ws_people):
+        p = ws_people
+        ws_id = _workspace_with_owners_and_admin(as_user, p)
+        gone = as_user(
+            p["owner"],
+            "DELETE",
+            f"/api/v1/workspaces/{ws_id}/members/{p['wsadmin'].id}",
+        )
+        assert gone.status_code == 204, gone.text
+
+        listed = as_user(p["owner"], "GET", "/api/v1/workspaces/")
+        assert listed.status_code == 200, listed.text
+        mine = [w for w in listed.json() if w["id"] == ws_id]
+        assert [w.get("member_count") for w in mine] == [2], listed.json()
+
+    @pytest.mark.regression
+    def test_the_counts_cost_the_same_queries_for_one_workspace_or_four(
+        self, as_user, ws_people, db_session
+    ):
+        """One grouped count, not one query per workspace."""
+        p = ws_people
+        engine = db_session.get_bind()
+
+        def statements_for_list(user: User) -> list[str]:
+            seen: list[str] = []
+
+            def record(conn, cursor, statement, parameters, context, executemany):
+                seen.append(statement)
+
+            event.listen(engine, "before_cursor_execute", record)
+            try:
+                resp = as_user(user, "GET", "/api/v1/workspaces/")
+            finally:
+                event.remove(engine, "before_cursor_execute", record)
+            assert resp.status_code == 200, resp.text
+            return seen
+
+        _workspace_with_owners_and_admin(as_user, p)
+        one = statements_for_list(p["owner"])
+
+        for label in ("two", "three", "four"):
+            ws_id = _new_workspace(as_user, p["owner2"], label)
+            _add_member(as_user, p["owner2"], ws_id, p["owner"], "VIEWER")
+        listed = as_user(p["owner"], "GET", "/api/v1/workspaces/").json()
+        assert len(listed) == 4, listed
+        assert sorted(w["member_count"] for w in listed) == [2, 2, 2, 3], listed
+        four = statements_for_list(p["owner"])
+
+        # The listener sees the list's queries, the count among them.
+        counted = [
+            s for s in four if "count(" in s.lower() and "workspace_members" in s
+        ]
+        assert len(counted) == 1, four
+        assert len(four) == len(one), (one, four)

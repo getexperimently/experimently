@@ -1,8 +1,8 @@
 import React from 'react';
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
-import FeatureFlagDetailPage, { pickSchedule } from '@/pages/feature-flags/[id]';
+import FeatureFlagDetailPage, { pickSchedule, stageSummary } from '@/pages/feature-flags/[id]';
 import { apiFetch } from '@/services/api';
-import { FeatureFlag, RolloutSchedule } from '@/services/featureFlags';
+import { FeatureFlag, RolloutSchedule, RolloutStageStatus } from '@/services/featureFlags';
 import { SafetyCheckResponse } from '@/types/safety';
 import { apiError, makeRouter, routedApi, Route } from './helpers/apiMock';
 
@@ -132,6 +132,55 @@ describe('pickSchedule', () => {
   });
 });
 
+/** The default schedule with its three stages (Canary 10%, Half 50%, Everyone 100%) in these states. */
+function scheduleWith(statuses: [RolloutStageStatus, RolloutStageStatus, RolloutStageStatus]): RolloutSchedule {
+  const base = schedule();
+  return { ...base, stages: base.stages.map((stage, i) => ({ ...stage, status: statuses[i] })) };
+}
+
+describe('the rollout summary (#1009)', () => {
+  const cases: Array<[string, RolloutSchedule, string]> = [
+    [
+      'first stage in progress',
+      scheduleWith(['in_progress', 'pending', 'pending']),
+      'Up to 100% · current: Canary → 10% · next: Half → 50%',
+    ],
+    [
+      'middle stage in progress',
+      scheduleWith(['completed', 'in_progress', 'pending']),
+      'Up to 100% · current: Half → 50% · next: Everyone → 100%',
+    ],
+    [
+      'last stage in progress',
+      scheduleWith(['completed', 'completed', 'in_progress']),
+      'Up to 100% · current: Everyone → 100%',
+    ],
+    [
+      'no stage started',
+      { ...scheduleWith(['pending', 'pending', 'pending']), status: 'draft' },
+      'Up to 100% · next: Canary → 10%',
+    ],
+    [
+      'every stage completed',
+      { ...scheduleWith(['completed', 'completed', 'completed']), status: 'completed' },
+      'Up to 100%',
+    ],
+  ];
+
+  it.each(cases)('%s', async (_name, sched, expected) => {
+    install(happyRoutes({ schedules: [sched] }));
+    render(<FeatureFlagDetailPage />);
+    const summary = await screen.findByTestId('rollout-schedule-summary');
+    expect(summary.textContent).toBe(expected);
+  });
+
+  it('orders the stages by stage_order, not by the order the API lists them in', () => {
+    const sched = scheduleWith(['in_progress', 'pending', 'pending']);
+    const { current, next } = stageSummary({ ...sched, stages: [...sched.stages].reverse() });
+    expect([current?.name, next?.name]).toEqual(['Canary', 'Half']);
+  });
+});
+
 describe('FeatureFlagDetailPage', () => {
   it('renders header, on/off state, targeting rules, rollout schedule and safety check', async () => {
     install(happyRoutes());
@@ -157,7 +206,10 @@ describe('FeatureFlagDetailPage', () => {
     expect(stages[0]).toHaveTextContent('Canary');
     expect(stages[0]).toHaveTextContent('10%');
     expect(stages[1]).toHaveTextContent('In progress');
-    expect(screen.getByTestId('rollout-schedule-section')).toHaveTextContent('next: Half → 50%');
+    expect(screen.getByTestId('rollout-schedule-section')).toHaveTextContent('current: Half → 50%');
+    expect(screen.getByTestId('rollout-schedule-summary')).toHaveTextContent(
+      /^Up to 100% · current: Half → 50% · next: Everyone → 100%$/,
+    );
 
     // Safety
     expect(await screen.findByTestId('safety-status')).toHaveTextContent('Healthy');
