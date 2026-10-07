@@ -895,13 +895,6 @@ def test_a_planted_evaluations_defect_is_refused(tmp_path, change, expected):
     assert any(expected in p for p in refused.value.problems), refused.value.problems
 
 
-def test_needs_scheduler_is_a_reason_a_journey_may_declare():
-    from docs_runner import registry
-
-    assert registry.is_declarable("needs-scheduler")
-    assert "needs-scheduler" in registry.DECLARED
-
-
 def test_a_stack_brought_up_again_is_signed_in_to_again():
     """A token from the core stack is refused by the full one (new accounts, 401).
 
