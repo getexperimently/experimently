@@ -147,7 +147,8 @@ What an API answers can be kept for later steps and checked against an oracle
   ``expect.cells`` on a screen step: the cell of a table's column, in the row
   that has a cell reading ``row``, shows an oracle's number at the precision
   it is shown. ``expect.number`` does the same for the one element of a role
-  and name, once its text has stopped changing.
+  and name, reading its text again until it agrees or stops changing
+  (``checks.settle``).
 * ``expect.after`` on an api step: ``{<dotted path>: <saved name>}``, the time
   at each JSON path is later than the time an earlier step saved under that
   name (both ISO 8601, read on the stack's own clock; one written without a

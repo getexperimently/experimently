@@ -15,6 +15,7 @@ import uuid
 from datetime import datetime, timedelta
 
 import pytest
+from sqlalchemy import event
 from sqlalchemy.orm import Session
 
 from backend.app.models.user import User, UserRole
@@ -734,3 +735,40 @@ class TestWorkspaceStats:
     ):
         with pytest.raises(WorkspaceNotFound):
             svc.get_workspace_stats(db_session, uuid.uuid4())
+
+    @pytest.mark.regression
+    def test_member_counts_reads_only_the_listed_workspaces(
+        self,
+        db_session: Session,
+        svc: WorkspaceService,
+        workspace: Workspace,
+        other_user_id: uuid.UUID,
+        user_id: uuid.UUID,
+    ):
+        """One grouped query, filtered to the ids asked for: without the
+        filter it would count every workspace's members (the list route reads
+        only the listed ones, so its answers would stay right)."""
+        svc.add_member(db_session, workspace.id, other_user_id, "VIEWER", user_id)
+        suffix = uuid.uuid4().hex[:8]
+        unlisted = svc.create_workspace(
+            db_session, f"Unlisted {suffix}", f"unlisted-{suffix}", user_id
+        )
+        empty_id = uuid.uuid4()
+        statements = []
+
+        def seen(conn, cursor, statement, parameters, context, executemany):
+            statements.append(statement)
+
+        engine = db_session.get_bind()
+        event.listen(engine, "before_cursor_execute", seen)
+        try:
+            counts = svc.member_counts(db_session, [workspace.id, empty_id])
+        finally:
+            event.remove(engine, "before_cursor_execute", seen)
+
+        assert counts == {workspace.id: 2}
+        assert unlisted.id not in counts
+        counted = [s for s in statements if "count(" in s.lower()]
+        assert len(counted) == 1, statements
+        assert "workspace_members.workspace_id IN" in counted[0], counted[0]
+        assert svc.member_counts(db_session, []) == {}

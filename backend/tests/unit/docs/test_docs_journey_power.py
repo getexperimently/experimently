@@ -29,6 +29,7 @@ Temporary files only; no network, no browser, no git.
 
 from __future__ import annotations
 
+import ast
 import math
 import sys
 from pathlib import Path
@@ -360,3 +361,23 @@ def test_a_number_that_never_settles_is_given_up_on():
     text = checks.settle(screen.read, screen.changed, 1.0)
     assert not checks.agrees(text, 1.0)
     assert screen.waits == checks.MAX_CHANGES
+
+
+@pytest.mark.regression
+def test_a_settled_number_is_judged_by_the_one_helper_settle_uses():
+    """``checks.agrees_or_not`` is what ``settle`` waits on and what the runner
+    judges the settled text by: no number shown is a disagreement, not an
+    error, and ``execute.py`` keeps no copy of its own."""
+    assert checks.agrees_or_not("31,234", 31234.0)
+    assert not checks.agrees_or_not("31,198", 31234.0)
+    assert not checks.agrees_or_not("--", 31234.0)
+    assert not checks.agrees_or_not("", 31234.0)
+    tree = ast.parse((RUNNER_ROOT / "docs_runner" / "execute.py").read_text())
+    defined = {
+        node.name for node in ast.walk(tree) if isinstance(node, ast.FunctionDef)
+    }
+    assert not {"_agrees", "agrees_or_not", "_agrees_or_not"} & defined
+    called = {
+        ast.unparse(node.func) for node in ast.walk(tree) if isinstance(node, ast.Call)
+    }
+    assert "agrees_or_not" in called

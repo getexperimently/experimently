@@ -100,6 +100,7 @@ from docs_runner.checks import (
     OBSERVED_CHARS,
     StepFailed,
     agrees,
+    agrees_or_not,
     describe_action,
     describe_expect,
     json_at,
@@ -389,8 +390,9 @@ class JourneyRunner:
                 # show it. While one is recorded, only a field that holds a
                 # kept value is masked (marked for this screenshot); none
                 # should (the page check fails the step that shows one), and a
-                # password field draws dots.
-                page.evaluate(MARK_JS, [list(self.secrets.values()), MASK_MARK])
+                # password field draws dots. The values are the page check's:
+                # every one the run keeps, not only this journey's secrets.
+                page.evaluate(MARK_JS, [sorted(self.redactor.values), MASK_MARK])
                 masks.append(page.locator(f"[{MASK_MARK}]"))
             elif self.secrets:
                 # A field's value is not its text, so get_by_text cannot find a
@@ -1203,7 +1205,7 @@ class JourneyRunner:
             text = settle(
                 element.inner_text, lambda seen: self._changes(element, seen), oracle
             )
-            if not self._agrees(text, oracle):
+            if not agrees_or_not(text, oracle):
                 raise StepFailed(
                     f'{number.locator.role} "{number.locator.name}" shows'
                     f" {one_line(text, 40)!r}; {number.oracle.name} gives {oracle:.6g}"
@@ -1245,13 +1247,6 @@ class JourneyRunner:
         except AssertionError:
             return False
         return True
-
-    @staticmethod
-    def _agrees(text: str, value: float) -> bool:
-        try:
-            return agrees(text, value)
-        except StepFailed:
-            return False
 
     def _cell_text(self, page: Page, cell: Cell, here: str) -> str:
         """The text of the cell under ``cell.column`` in the one row reading ``cell.row``."""

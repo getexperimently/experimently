@@ -1103,6 +1103,34 @@ def test_a_restore_with_no_recorded_time_is_refused(staging):
     assert not any(c[1] == "restore-db-cluster-to-point-in-time" for c in staging.calls)
 
 
+def test_the_restore_time_is_recorded_before_the_restore_call(tmp_path):
+    """The restore call errors after RDS made the cluster. The time was
+    recorded before the call, so a run again at that time carries on with the
+    cluster it made, and a run at another time is refused; recorded after the
+    call, the time would be lost with the error, and both would be refused."""
+    world = World(tmp_path, STAGING, restore_error_after_create=True)
+    world.read()
+    tmp = f"staging-db-restore-{world.recorded('TS')}"
+    failed = world.restore()
+    assert failed.code == 255, (failed.code, failed.err)
+    assert "Connection was closed before we received a valid response" in failed.err
+    assert tmp in world.state["clusters"]
+    assert world.recorded("RESTORE_TIME") == "2026-10-06T12:00:00Z"
+    assert not (Path(world.evid) / "restore.ok").exists()
+
+    world.mutate(lambda s: s["faults"].clear())
+    refused(
+        world.run("restore", world.evid, "2026-10-06T11:30:00Z"),
+        f"{tmp} was restored to '2026-10-06T12:00:00Z', not 2026-10-06T11:30:00Z",
+    )
+    resumed = world.restore()
+    assert resumed.code == 0, resumed.err
+    assert f"{tmp} exists" in resumed.err
+    assert (Path(world.evid) / "restore.ok").exists()
+    restores = [c for c in world.calls if c[1] == "restore-db-cluster-to-point-in-time"]
+    assert len(restores) == 1, restores
+
+
 def test_keep_then_rollback_leaves_deletion_protection_on(staging):
     """EM ruling R1: `keep` protects the original; a rollback after it brings
     the original back onto the stack's names still protected, which the

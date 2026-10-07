@@ -515,6 +515,9 @@ phase_restore() {
   # not restored again, and only for the time it was restored to.
   s=$(cluster_status "$TMP")
   if [ "$s" = absent ]; then
+    # Recorded before the call: when the call fails after RDS has made the
+    # cluster, the time it was asked for is still recorded, so a run again at
+    # that time carries on with it (test_restore_repoint.py).
     save RESTORE_TIME
     aws rds restore-db-cluster-to-point-in-time --source-db-cluster-identifier "$CLUSTER" \
       --db-cluster-identifier "$TMP" --restore-to-time "$RESTORE_TIME" \
