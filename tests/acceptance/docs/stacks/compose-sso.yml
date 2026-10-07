@@ -1,0 +1,74 @@
+# The docs journeys' compose-sso stack (docs_runner/stacks.py, ComposeSso):
+#
+#   docker compose -f docker-compose.yml -f <sso.md's override file> -f this file up
+#
+# What this file adds is what a compose reader brings from outside and the run
+# cannot: an identity provider. Everything a reader sets is in the override
+# file docs/auth/sso.md gives them, which the stack takes from the page.
+#
+# The provider is the fake OIDC provider the SSO flow tests use
+# (modules/backend/tests/integration/api/fake_oidc_provider.py), run from the
+# API's own image with Python and nothing else, in the API's network
+# namespace. So https://localhost:28443/oauth2/default, the configuration's
+# sso_url, is one address: the browser reaches it through the port the api
+# service publishes on the host's loopback address only (127.0.0.1:28443),
+# and the API on its own localhost.
+#
+# Its certificate is signed by a CA the stack makes for the run, outside the
+# checkout; the CA's key is deleted once the certificate is signed. A real
+# Okta's certificate chains to a public CA, so a reader sets nothing for it;
+# the API here is given this CA as SSL_CERT_FILE, from which its sign-in
+# client (authlib over httpx2) builds its TLS context in place of the system's
+# store, so on this stack it trusts that CA and no other. That is the one
+# API setting this file makes, and backend/tests/unit/docs/
+# test_docs_journey_sso.py holds it to that: no ENVIRONMENT, APP_ENV,
+# DEV_AUTH_BYPASS or env_file on api, here or in the page's override.
+#
+# The stack sets DOCS_JOURNEY_IDP_DIR (the run's certificates),
+# DOCS_JOURNEY_FAKE_IDP (the provider's file in this checkout) and
+# DOCS_JOURNEY_IDP_USER (the caller's uid:gid, so the provider can read its
+# key, which only the caller may read).
+services:
+  api:
+    environment:
+      SSL_CERT_FILE: /idp/ca.pem
+    volumes:
+      - ${DOCS_JOURNEY_IDP_DIR:?}/ca.pem:/idp/ca.pem:ro
+    ports:
+      - "127.0.0.1:28443:28443"
+
+  idp:
+    # The image the api service builds; never pulled.
+    image: experimently-api:${EXPERIMENTLY_IMAGE_TAG:?}
+    pull_policy: never
+    network_mode: "service:api"
+    user: ${DOCS_JOURNEY_IDP_USER:?}
+    entrypoint:
+      - python
+      - /fake/fake_oidc_provider.py
+      - docs-journey-client
+      - docs-journey-secret
+      - reader@sso-docs.example.com
+      - --port
+      - "28443"
+    environment:
+      FAKE_OIDC_BIND: 0.0.0.0
+      FAKE_OIDC_TLS_CERT: /idp/leaf.pem
+      FAKE_OIDC_TLS_KEY: /idp/leaf.key
+      FAKE_OIDC_ISSUER: https://localhost:28443/oauth2/default
+      # The user info's groups, in this order: role_mapping takes the first
+      # one it maps (sso.md, "Group-to-Role Mapping").
+      FAKE_OIDC_GROUPS: Engineering,data-analysts,experimently-admins
+    volumes:
+      - ${DOCS_JOURNEY_FAKE_IDP:?}:/fake/fake_oidc_provider.py:ro
+      - ${DOCS_JOURNEY_IDP_DIR:?}:/idp:ro
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - import socket; socket.create_connection(("127.0.0.1", 28443), 2).close()
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    restart: "no"

@@ -92,6 +92,7 @@ JOURNEYS = HERE / "journeys"
 RETRY_PLUGINS = ("rerunfailures", "flaky", "pytest_retry", "retry")
 STACK_FIXTURES = {
     "compose-dev": "compose_dev_stack",
+    "compose-sso": "compose_sso_stack",
     "docs-local": "docs_local_stack",
     "docs-published": "docs_published_stack",
     "marketing-local": "marketing_local_stack",
@@ -223,6 +224,7 @@ def _stack_fixture(stack: str):
 
 
 compose_dev_stack = _stack_fixture("compose-dev")
+compose_sso_stack = _stack_fixture("compose-sso")
 docs_local_stack = _stack_fixture("docs-local")
 docs_published_stack = _stack_fixture("docs-published")
 marketing_local_stack = _stack_fixture("marketing-local")

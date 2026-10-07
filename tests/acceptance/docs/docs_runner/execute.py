@@ -1315,6 +1315,11 @@ class JourneyRunner:
             self.tokens.clear()
             self.stack = running
         options: Dict[str, Any] = {"viewport": VIEWPORT}
+        if running.ignore_https_errors:
+            # compose-sso only: its identity provider's certificate is signed
+            # by the run's own CA, which the browser does not know. What the
+            # stack is about is the API's trust in it (stacks.py).
+            options["ignore_https_errors"] = True
         video_dir = settings.run_dir / "videos" / journey_id
         self.secrets = {}
         for name in journey.passwords:

@@ -56,9 +56,34 @@ The SP metadata document, `GET /api/v1/auth/sso/saml/{config_id}/metadata`, adve
 
 ---
 
+## Trying it on the Docker Compose stack
+
+`docker-compose.yml` starts the core profile, and its `api` service passes on only the variables it names, so a `PUBLIC_BASE_URL` set in the shell or in a `.env` file never reaches the API. Start the full profile with an override file that sets it. Save this next to `docker-compose.yml` as `compose.sso.yml`:
+
+```yaml
+services:
+  api:
+    environment:
+      PUBLIC_BASE_URL: http://localhost:${FRONTEND_HOST_PORT:-3000}
+```
+
+Then start the stack with both files:
+
+```{.bash skip reason="idp: the sign-in this stack is for needs an identity-provider tenant"}
+EXPERIMENTLY_PROFILE=full docker compose -f docker-compose.yml -f compose.sso.yml up -d --wait
+```
+
+- `PUBLIC_BASE_URL` is the dashboard's address, `http://localhost:3000` with the default ports: the dashboard's container passes `/api/` on to the API, so the sign-in starts and ends there. Register `http://localhost:3000/api/v1/auth/sso/oidc/okta/callback` with the identity provider (for `okta`).
+- `DASHBOARD_ORIGINS` is not needed: the dashboard is served from `PUBLIC_BASE_URL`.
+- `ENVIRONMENT` stays `development`, the compose file's default, and the provider's `sso_url` must be `https`. The sign-in's cookie is `Secure`; Chrome accepts it from `http://localhost`.
+
+The dashboard at `http://localhost:3000/login` then shows **Sign in with SSO**. Create the configuration as an administrator (below, with `http://localhost:8000` for `https://app.example.com`), and sign in with an address in its domain.
+
+---
+
 ## Signing In from the Dashboard
 
-When the API lists the `sso` module (`GET /api/v1/modules`), the dashboard's sign-in page shows **Sign in with SSO**. The user enters a work email; the dashboard sends only its domain.
+When the API lists the `sso` module (`GET /api/v1/modules`), the dashboard's sign-in page shows **Sign in with SSO**. The user enters their **Work email** and chooses **Continue with SSO**; the dashboard sends only the email's domain.
 
 1. The dashboard makes a random 32-byte secret, keeps it in the tab's `sessionStorage`, and navigates to `GET /api/v1/auth/sso/login?domain=<domain>&return_to=<dashboard origin>&handoff=<base64url SHA-256 of the secret>`.
 2. The API finds the active OIDC configuration for the domain and redirects to its provider. The provider returns to the same callback it always has, `{PUBLIC_BASE_URL}/api/v1/auth/sso/oidc/{provider}/callback`: nothing changes in the identity provider's registration.
@@ -137,7 +162,13 @@ A configuration is returned without its `client_secret`.
 
 ## Creating an SSO Configuration
 
-The examples use `https://app.example.com` for `PUBLIC_BASE_URL` and an administrator's access token in `$ADMIN_TOKEN`.
+The examples use `https://app.example.com` for `PUBLIC_BASE_URL` and an administrator's access token in `$ADMIN_TOKEN`. Sign in as an administrator to get one:
+
+```{.bash skip reason="fragment: the address, the email and the password are your deployment's"}
+ADMIN_TOKEN=$(curl -s -X POST https://app.example.com/api/v1/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"email": "admin@example.com", "password": "your-password"}' | jq -r .access_token)
+```
 
 ### Configuration Fields
 
@@ -160,7 +191,7 @@ A configuration written by an earlier release keeps its `org_domain` as it was t
 
 ### SAML Configuration
 
-```{.bash skip reason="needs a full-profile deployment, an administrator's token and a real identity provider"}
+```{.bash skip reason="idp: needs a SAML identity provider's entity ID and certificate"}
 curl -X POST https://app.example.com/api/v1/auth/sso/configs \
   -H "Authorization: Bearer $ADMIN_TOKEN" \
   -H "Content-Type: application/json" \
@@ -183,7 +214,7 @@ The response carries the configuration's `id`: the ACS URL to register is `https
 
 ### OIDC Configuration
 
-```{.bash skip reason="needs a full-profile deployment, an administrator's token and a real identity provider"}
+```{.bash skip reason="idp: needs a Google OAuth client"}
 curl -X POST https://app.example.com/api/v1/auth/sso/configs \
   -H "Authorization: Bearer $ADMIN_TOKEN" \
   -H "Content-Type: application/json" \
@@ -362,7 +393,7 @@ The configuration holds one certificate. When the IdP switches to a new signing 
 
 There are no environment variables for a provider's client ID or secret: they are fields of the configuration. The `OIDC_GOOGLE_*`, `OIDC_GITHUB_*` and `OIDC_MICROSOFT_*` settings exist but nothing reads them.
 
-```{.bash skip reason="deployment settings; the values are examples"}
+```{.bash skip reason="fragment: deployment settings; the values are examples"}
 PUBLIC_BASE_URL=https://app.example.com
 SAML_SP_ENTITY_ID=https://app.example.com
 SAML_SP_ACS_URL=https://app.example.com/api/v1/auth/sso/saml/3f1c2b9e-0000-4000-8000-000000000000/acs
