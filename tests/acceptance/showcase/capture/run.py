@@ -109,10 +109,10 @@ def seed_counts(api_url: str, token: str) -> Dict[str, int]:
 
 def write_private(path: Path, text: str) -> None:
     """Create *path* with mode 0600 (never readable by anyone else), or fail."""
-    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, contract.NEEDLES_MODE)
     with os.fdopen(fd, "w", encoding="utf-8") as handle:
         handle.write(text)
-    os.chmod(path, 0o600)
+    os.chmod(path, contract.NEEDLES_MODE)
 
 
 def frame_stats(frames: Path, entries: List[Dict[str, Any]]) -> List[float]:
@@ -173,6 +173,8 @@ def preflight(options: Options, environ: Mapping[str, str]) -> None:
         checkout = guard.inside_git_checkout(path)
         if checkout is not None:
             raise guard.Refused(f"{name} {path} is inside the git checkout {checkout}")
+    if options.render:
+        guard.refuse_out_beside_work(options.out, options.work_dir)
     try:
         from importlib.metadata import version
 

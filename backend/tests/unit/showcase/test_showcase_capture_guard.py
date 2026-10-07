@@ -232,6 +232,31 @@ def test_a_link_in_the_work_root_is_removed_as_a_link(tmp_path):
     assert not (work.path / "video").exists()
 
 
+@pytest.mark.parametrize(
+    "out, work",
+    [
+        ("same", "same"),
+        ("work/videos", "work"),
+        ("videos", "videos/work"),
+    ],
+)
+def test_videos_and_the_work_root_never_overlap(tmp_path, out, work):
+    """The render deletes its work directory under --work-dir when it ends (#1077)."""
+    with pytest.raises(guard.Refused, match="overlap; the render deletes"):
+        guard.refuse_out_beside_work(tmp_path / out, tmp_path / work)
+
+
+def test_videos_and_the_work_root_on_two_filesystems_are_refused(tmp_path, monkeypatch):
+    videos = tmp_path / "videos"
+    monkeypatch.setattr(
+        guard, "_device", lambda path: 2 if path == videos.resolve() else 1
+    )
+    with pytest.raises(guard.Refused, match="different filesystems"):
+        guard.refuse_out_beside_work(videos, tmp_path / "work")
+    monkeypatch.undo()
+    guard.refuse_out_beside_work(videos, tmp_path / "work")
+
+
 # --- One run at a time (EM condition 7d) and the disk floor (7b) ------------------
 
 

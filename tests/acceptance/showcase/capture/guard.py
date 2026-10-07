@@ -257,6 +257,41 @@ class WorkRoot:
             shutil.rmtree(path)
 
 
+def _device(path: Path) -> int:
+    probe = path
+    while not probe.exists():
+        probe = probe.parent
+    return os.stat(probe).st_dev
+
+
+def refuse_out_beside_work(out: Path, work_root: Path) -> None:
+    """``--out`` apart from ``--work-dir``, on the same filesystem; else Refused.
+
+    The render works in ``<work-dir>/<video>/render``, deletes it when it
+    ends, and links the finished files from there into ``--out``. Its paths
+    gate refuses an overlap or two filesystems too, but only after the
+    capture; this refuses before anything starts.
+    """
+    out_path = Path(os.path.realpath(out))
+    work_path = Path(os.path.realpath(work_root))
+    if (
+        out_path == work_path
+        or work_path in out_path.parents
+        or out_path in work_path.parents
+    ):
+        raise Refused(
+            f"--out {out_path} and --work-dir {work_path} overlap; the render deletes"
+            " its work directory under --work-dir when it ends, so keep the videos"
+            " apart from it"
+        )
+    if _device(out_path) != _device(work_path):
+        raise Refused(
+            f"--out {out_path} and --work-dir {work_path} are on different"
+            " filesystems; the render links the finished files from its work"
+            " directory into --out, so put both on one"
+        )
+
+
 # ---------------------------------------------------------------------------
 # One run at a time
 # ---------------------------------------------------------------------------
