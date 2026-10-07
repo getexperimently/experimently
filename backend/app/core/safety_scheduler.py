@@ -15,7 +15,11 @@ from backend.app.db.session import SessionLocal
 from backend.app.models.feature_flag import FeatureFlag, FeatureFlagStatus
 from backend.app.models.safety import RollbackTriggerType
 from backend.app.services.notification_service import NotificationService
-from backend.app.services.safety_service import SafetyService, rollback_change
+from backend.app.services.safety_service import (
+    SafetyService,
+    format_metric_value,
+    rollback_change,
+)
 
 logger = get_logger(__name__)
 
@@ -192,7 +196,12 @@ class SafetyScheduler:
                         trigger_reason = "Automatic rollback due to safety issues"
                         for metric in safety_check.metrics:
                             if not metric.is_healthy:
-                                trigger_reason = f"Automatic rollback due to {metric.name} exceeding threshold ({metric.current_value} > {metric.threshold})"
+                                trigger_reason = (
+                                    f"Automatic rollback due to {metric.name} "
+                                    "exceeding threshold "
+                                    f"({format_metric_value(metric.current_value)} > "
+                                    f"{format_metric_value(metric.threshold)})"
+                                )
                                 break
 
                         # Roll back to the percentage configured for this flag
