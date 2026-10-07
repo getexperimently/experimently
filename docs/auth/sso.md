@@ -75,7 +75,7 @@ EXPERIMENTLY_PROFILE=full docker compose -f docker-compose.yml -f compose.sso.ym
 
 - `PUBLIC_BASE_URL` is the dashboard's address, `http://localhost:3000` with the default ports: the dashboard's container passes `/api/` on to the API, so the sign-in starts and ends there. Register `http://localhost:3000/api/v1/auth/sso/oidc/okta/callback` with the identity provider (for `okta`).
 - `DASHBOARD_ORIGINS` is not needed: the dashboard is served from `PUBLIC_BASE_URL`.
-- `ENVIRONMENT` stays `development`, the compose file's default. The provider's `sso_url` must be `https`, as it must be everywhere but in `test`. The sign-in's cookie is `Secure`, which Chrome and Firefox accept from `http://localhost`.
+- `ENVIRONMENT` stays `development`, the compose file's default, and the provider's `sso_url` must be `https`. The sign-in's cookie is `Secure`; Chrome accepts it from `http://localhost`.
 
 The dashboard at `http://localhost:3000/login` then shows **Sign in with SSO**. Create the configuration as an administrator (below, with `http://localhost:8000` for `https://app.example.com`), and sign in with an address in its domain.
 

@@ -45,9 +45,11 @@
   identity provider. That provider is ``modules/``'s fake OIDC provider
   (``fake_oidc_provider.py``), run from the API's own image in the API's
   network namespace (``network_mode: "service:api"``), serving https on
-  port 28443 with the issuer ``https://localhost:28443/oauth2/default``, so
-  the browser and the API reach it at the one address an SSO configuration's
-  ``sso_url`` names. Its certificate is signed by a CA made for the run with
+  port 28443 with the issuer ``https://localhost:28443/oauth2/default``. The
+  api service publishes that port on the host's loopback address only
+  (``127.0.0.1:28443``), so the browser and the API reach the provider at the
+  one address an SSO configuration's ``sso_url`` names, and nothing off the
+  host reaches it. Its certificate is signed by a CA made for the run with
   ``openssl`` in a temporary directory outside the checkout and the run
   directory; the CA's key is deleted as soon as the certificate is signed,
   and the directory is removed when the stack comes down. The API is given

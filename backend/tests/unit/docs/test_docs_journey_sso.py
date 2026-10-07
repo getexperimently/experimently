@@ -14,19 +14,21 @@ can pass for the wrong reason is held here, in the unit job:
   planted into the real overlay and refused, and the stack refuses them
   before it starts anything;
 * the overlay's only API setting is the run's CA (``SSL_CERT_FILE``), and the
-  page's override sets only variables the page documents;
+  page's override sets ``PUBLIC_BASE_URL`` and nothing else;
 * one address: the provider's issuer is the journey's ``sso_url``, the port
-  the api service publishes, and a ``localhost`` the API reaches in its own
-  network namespace; and the page's ``PUBLIC_BASE_URL`` is the dashboard's
+  the api service publishes on the host's loopback address only, and a
+  ``localhost`` the API reaches in its own network namespace; and the page's ``PUBLIC_BASE_URL`` is the dashboard's
   origin the stack opens, which the sign-in's cookie depends on;
-* the certificates: the CA's key is gone once the leaf is signed, the leaf is
-  for ``localhost``, and a TLS client trusts it with that CA and without
+* the certificates: the CA's key is gone once the leaf is signed (nothing is
+  left in the temporary directory it was made in), the leaf is for
+  ``localhost``, and a TLS client trusts it with that CA and without
   anything else, and refuses it without the CA;
 * only compose-sso's browser context ignores certificate errors;
 * compose-dev and compose-sso share one project, so whichever comes up brings
   the other down; compose-sso is brought up with the three files, and its
-  temporary directory, outside the checkout and the run directory, is removed
-  when it comes down.
+  temporary directory is removed when it comes down. A temporary directory
+  inside the checkout or the run directory is refused before docker starts
+  anything.
 
 ``docker`` is a fake that records its calls; ``openssl`` is the real one.
 Temporary files only; no network beyond a local socket pair, no git, nothing
@@ -42,6 +44,7 @@ import ssl
 import stat
 import subprocess
 import sys
+import tempfile
 import threading
 import types
 from pathlib import Path
@@ -133,14 +136,21 @@ def test_the_overlay_sets_only_the_runs_ca_on_api():
     assert set(services["api"]) == {"environment", "volumes", "ports"}
 
 
-def test_the_page_override_sets_only_what_the_page_documents():
-    """Every variable the reader's override sets is in the page's table of them."""
+def test_the_page_override_sets_public_base_url_and_nothing_else():
+    """The stack needs PUBLIC_BASE_URL alone; the page tells a reader to set no more.
+
+    ``DASHBOARD_ORIGINS`` in particular is not needed: the dashboard is
+    ``PUBLIC_BASE_URL``'s own origin. A variable added to the override fails
+    here until the stack is shown to need it.
+    """
+    override = _override()
+    assert set(override) == {"services"}
+    assert set(override["services"]) == {"api"}
+    assert set(override["services"]["api"]) == {"environment"}
+    environment = override["services"]["api"]["environment"]
+    assert set(environment) == {"PUBLIC_BASE_URL"}
     page = guides.load(REPO_ROOT / "docs", stacks.SSO_GUIDE)
-    table = page.section("environment-variables")
-    environment = _override()["services"]["api"]["environment"]
-    assert environment, "the override sets nothing"
-    for name in environment:
-        assert f"| `{name}` |" in table, name
+    assert "| `PUBLIC_BASE_URL` |" in page.section("environment-variables")
 
 
 def test_the_provider_is_at_one_address_for_the_browser_and_the_api():
@@ -151,7 +161,9 @@ def test_the_provider_is_at_one_address_for_the_browser_and_the_api():
     assert idp["network_mode"] == "service:api"
     assert idp["environment"]["FAKE_OIDC_BIND"] == "0.0.0.0"
     assert idp["entrypoint"][-2:] == ["--port", "28443"]
-    assert services["api"]["ports"] == ["28443:28443"]
+    # Published on the host's loopback address only: nothing off the host
+    # reaches the provider.
+    assert services["api"]["ports"] == ["127.0.0.1:28443:28443"]
     journey = yaml.safe_load(JOURNEY.read_text(encoding="utf-8"))
     created = journey["steps"][0]["do"]["api"]["body"]
     assert created["sso_url"] == issuer
@@ -189,13 +201,37 @@ def test_the_override_is_the_first_yaml_block_of_the_compose_section(tmp_path):
 # The run's certificates
 # ---------------------------------------------------------------------------
 @pytest.fixture
-def certificates(tmp_path) -> Path:
+def scratch(tmp_path, monkeypatch) -> Path:
+    """Where tempfile makes its directories for this test: an empty one of ours."""
+    where = tmp_path / "tmp"
+    where.mkdir()
+    monkeypatch.setenv("TMPDIR", str(where))
+    monkeypatch.setattr(tempfile, "tempdir", str(where))
+    return where
+
+
+@pytest.fixture
+def certificates(tmp_path, scratch) -> Path:
     directory = tmp_path / "idp"
     directory.mkdir()
     stacks.make_certificates(
         directory, {"PATH": os.environ.get("PATH", "")}, tmp_path / "openssl.log"
     )
     return directory
+
+
+def test_the_ca_key_is_discarded_with_the_directory_it_was_made_in(
+    certificates, scratch
+):
+    """The CA's key, the request and the extensions file are made in a directory
+    of their own, which is gone once the leaf is signed: nothing can sign with
+    the run's CA again."""
+    assert list(scratch.iterdir()) == []
+    for path in certificates.parent.rglob("*"):
+        if path.is_file():
+            assert "PRIVATE KEY" not in path.read_text(errors="replace") or (
+                path.name == "leaf.key"
+            ), path
 
 
 def _handshake(server: ssl.SSLContext, client: ssl.SSLContext) -> None:
@@ -254,7 +290,7 @@ def test_a_client_trusts_the_provider_with_the_runs_ca_and_not_without(certifica
         _handshake(server, stranger)
 
 
-def test_a_failing_openssl_is_a_stack_error(tmp_path):
+def test_a_failing_openssl_is_a_stack_error(tmp_path, scratch):
     fake = tmp_path / "bin"
     fake.mkdir()
     (fake / "openssl").write_text("#!/bin/sh\nexit 4\n")
@@ -263,6 +299,8 @@ def test_a_failing_openssl_is_a_stack_error(tmp_path):
     with pytest.raises(stacks.StackError, match="openssl exited 4"):
         stacks.make_certificates(tmp_path / "idp", {"PATH": str(fake)}, tmp_path / "l")
     assert list((tmp_path / "idp").iterdir()) == []
+    # The CA's own directory goes on failure too.
+    assert list(scratch.iterdir()) == []
 
 
 # ---------------------------------------------------------------------------
@@ -473,6 +511,23 @@ def test_a_refused_setting_stops_the_stack_before_docker_starts_it(tree, monkeyp
     with pytest.raises(stacks.StackError, match="sets ENVIRONMENT on api"):
         stack.up("full")
     assert not any(" up " in f" {call} " for call in _calls(tree))
+    assert stack.workdir is None
+
+
+@pytest.mark.parametrize("inside", ["repository", "run directory"])
+def test_a_temporary_directory_inside_the_tree_or_the_run_is_refused(
+    tree, monkeypatch, inside
+):
+    """The run's certificates and override never land where they could be
+    committed (the checkout) or uploaded (the run directory)."""
+    stack = _stack(ComposeSso, tree, monkeypatch)
+    where = tree / "tmp" if inside == "repository" else stack.logs.parent / "tmp"
+    where.mkdir(parents=True)
+    monkeypatch.setattr(tempfile, "tempdir", str(where))
+    with pytest.raises(stacks.StackError, match="is inside"):
+        stack.up("full")
+    assert not any(" up " in f" {call} " for call in _calls(tree))
+    assert list(where.iterdir()) == []
     assert stack.workdir is None
 
 

@@ -11,7 +11,8 @@
 # API's own image with Python and nothing else, in the API's network
 # namespace. So https://localhost:28443/oauth2/default, the configuration's
 # sso_url, is one address: the browser reaches it through the port the api
-# service publishes, and the API on its own localhost.
+# service publishes on the host's loopback address only (127.0.0.1:28443),
+# and the API on its own localhost.
 #
 # Its certificate is signed by a CA the stack makes for the run, outside the
 # checkout; the CA's key is deleted once the certificate is signed. A real
@@ -34,7 +35,7 @@ services:
     volumes:
       - ${DOCS_JOURNEY_IDP_DIR:?}/ca.pem:/idp/ca.pem:ro
     ports:
-      - "28443:28443"
+      - "127.0.0.1:28443:28443"
 
   idp:
     # The image the api service builds; never pulled.
