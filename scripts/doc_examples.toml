@@ -12,8 +12,8 @@
 # scripts/doc_examples.py), and each page's residual counts can only fall.
 
 [meta]
-documents = 39
-exec = 214
+documents = 43
+exec = 258
 universe = [
     ".github/pull_request_template.md",
     ".github/qa-templates/README.md",
@@ -437,13 +437,9 @@ reason = "run on a kind cluster by the chart-kind workflow (scripts/chart_kind.s
 [pending]
 "backend/lambda/README.md" = { comments = 0, unlabelled = 1, syntax = 0 }
 "backend/lambda/event_processor/README.md" = { comments = 0, unlabelled = 1, syntax = 0 }
-"docs/api/compliance.md" = { comments = 0, unlabelled = 0, syntax = 0 }
-"docs/api/endpoints.md" = { comments = 0, unlabelled = 21, syntax = 0 }
 "docs/api/integrations.md" = { comments = 0, unlabelled = 8, syntax = 0 }
-"docs/api/rbac.md" = { comments = 0, unlabelled = 12, syntax = 0 }
 "docs/api/split-url.md" = { comments = 0, unlabelled = 3, syntax = 0 }
 "docs/architecture/models.md" = { comments = 0, unlabelled = 1, syntax = 1 }
-"docs/architecture/technical-guide.md" = { comments = 0, unlabelled = 5, syntax = 0 }
 "docs/auth/auth-environment-variables.md" = { comments = 0, unlabelled = 4, syntax = 0 }
 "docs/auth/cognito-auth-testing.md" = { comments = 0, unlabelled = 0, syntax = 0 }
 "docs/auth/sso.md" = { comments = 0, unlabelled = 0, syntax = 0 }
@@ -542,3 +538,33 @@ environment = "stack"
 exec = 12
 skip = 0
 expects = 33
+
+# #1075: the API reference, compliance, RBAC and technical guide pages, each
+# signing in first and running as written.
+[[document]]
+path = "docs/api/endpoints.md"
+environment = "stack"
+exec = 21
+skip = 3
+expects = 39
+
+[[document]]
+path = "docs/architecture/technical-guide.md"
+environment = "stack"
+exec = 4
+skip = 4
+expects = 4
+
+[[document]]
+path = "docs/api/compliance.md"
+environment = "stack-full"
+exec = 5
+skip = 0
+expects = 12
+
+[[document]]
+path = "docs/api/rbac.md"
+environment = "stack-full"
+exec = 14
+skip = 0
+expects = 25
