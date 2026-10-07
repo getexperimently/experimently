@@ -17,9 +17,13 @@ pinned rather than reviewed once:
   checks out the deployed site's source by the commit
   ``docs_journeys_report.py deployed`` names, and runs the runner's own pytest
   root with its run directory, that source, the ref it was taken from (the
-  crawls say which they compared the site with) and the video switch; every
-  upload is of the run directory or a file in it, kept 14 days (90 on a
-  release tag);
+  crawls say which they compared the site with) and the video switch, on in
+  every run that can count toward the production-deploy checklist (scheduled,
+  or on ``main`` or a release tag) and in a dispatch that asks; every upload is
+  of the run directory or a file in it, kept 14 days (90 on a release tag);
+* in every run that records, the last step of the journeys job is the presence
+  check of the launch walkthroughs (``docs_journeys_report.py recordings``),
+  after the run directory's scan, so a counting run without R1-R8 is red;
 * nothing from the run directory leaves the job unless the runner's scan of it
   for the values the run made up, kept or signed in for ran and removed
   nothing: its ``secret-scan.json`` is there and lists no removed file. Every
@@ -56,6 +60,12 @@ REPO_ROOT = Path(__file__).resolve().parents[4]
 WORKFLOW = REPO_ROOT / ".github" / "workflows" / "docs-journeys.yml"
 
 RUN_DIR = "${{ runner.temp }}/docs-journeys-run"
+#: A run that records: one that can count toward T138's checklist (scheduled,
+#: on main or a release tag) records whatever the dispatch input says.
+RECORDS = (
+    "(github.event_name == 'schedule' || github.ref == 'refs/heads/main' ||"
+    " startsWith(github.ref, 'refs/tags/v') || inputs.record_video)"
+)
 SOURCE = "${{ runner.temp }}/published-source"
 JOB_PERMISSIONS = {
     "journeys": {"contents": "read", "deployments": "read"},
@@ -67,7 +77,7 @@ WALK_ENV = {
     "DOCS_JOURNEY_RUN_DIR": RUN_DIR,
     "DOCS_JOURNEY_PUBLISHED_SOURCE": SOURCE,
     "DOCS_JOURNEY_PUBLISHED_REF": "${{ steps.source.outputs.ref }}",
-    "DOCS_JOURNEY_RECORD_VIDEO": "${{ inputs.record_video && '1' || '0' }}",
+    "DOCS_JOURNEY_RECORD_VIDEO": "${{ " + RECORDS + " && '1' || '0' }}",
     "PYTHONDONTWRITEBYTECODE": "1",
 }
 SOURCE_STEP = "Check out the source of the published site"
@@ -120,8 +130,19 @@ SCANNED_LINES = [
     " the run kept, so the run directory is not uploaded'",
     "fi",
 ]
+RECORDINGS = "Recordings present"
+#: The presence check reads the run directory once the scan ran, in a run that records.
+RECORDINGS_IF = f"{RECORDED_IF} && {RECORDS}"
+RECORDINGS_RUN = (
+    "python3 scripts/docs_journeys_report.py recordings"
+    ' --run-dir "$RUNNER_TEMP/docs-journeys-run"'
+)
 #: The steps that read the run directory, and the scan each waits for.
-AFTER_SCAN = {"Step summary": CLEAN_IF, "Verdicts written": RECORDED_IF}
+AFTER_SCAN = {
+    "Step summary": CLEAN_IF,
+    "Verdicts written": RECORDED_IF,
+    RECORDINGS: RECORDINGS_IF,
+}
 VERDICTS_PATH = RUN_DIR + "/verdicts.json"
 VERDICTS_UPLOAD_IF = "always() && steps.verdicts.outputs.written == 'true'"
 POSTS = re.compile(
@@ -301,6 +322,19 @@ def workflow_problems(doc: Dict[Any, Any], text: str) -> List[str]:
         if reads and name not in (SCANNED, *AFTER_SCAN) and step.get("name") != WALK:
             if _condition(step) != CLEAN_IF:
                 found.append(f"{name} reads the run directory without a clean scan")
+    recordings = _named(doc, RECORDINGS)
+    journeys_steps = [
+        s.get("name") for s in jobs.get("journeys", {}).get("steps") or []
+    ]
+    if (
+        recordings is None
+        or _lines(recordings) != [RECORDINGS_RUN]
+        or not journeys_steps
+        or journeys_steps[-1] != RECORDINGS
+    ):
+        found.append(
+            "the walkthroughs' presence check is not the journeys job's last step"
+        )
     post = _named(doc, POST)
     if post is None or _condition(post) != POST_IF:
         found.append("posting is not limited to a scheduled run on main")
@@ -599,6 +633,51 @@ PLANTS: List[tuple] = [
         "live deployment",
     ),
     ("video-always", _env(WALK, "DOCS_JOURNEY_RECORD_VIDEO", "1"), "video switch"),
+    (
+        "video-only-when-asked",
+        _env(
+            WALK,
+            "DOCS_JOURNEY_RECORD_VIDEO",
+            "${{ inputs.record_video && '1' || '0' }}",
+        ),
+        "video switch",
+    ),
+    (
+        "recordings-check-dropped",
+        lambda doc, text: (
+            doc["jobs"]["journeys"]["steps"].remove(_named(doc, RECORDINGS)) or doc,
+            text,
+        ),
+        "presence check is not the journeys job's last step",
+    ),
+    (
+        "recordings-check-only-when-asked",
+        _step_set(
+            RECORDINGS,
+            "if",
+            f"{RECORDED_IF} && inputs.record_video",
+        ),
+        "Recordings present does not wait",
+    ),
+    (
+        "recordings-check-before-the-scan",
+        lambda doc, text: (
+            doc["jobs"]["journeys"]["steps"].insert(
+                0,
+                doc["jobs"]["journeys"]["steps"].pop(
+                    doc["jobs"]["journeys"]["steps"].index(_named(doc, RECORDINGS))
+                ),
+            )
+            or doc,
+            text,
+        ),
+        "Recordings present runs before the run directory's scan",
+    ),
+    (
+        "recordings-check-tolerant",
+        _replace_in(RECORDINGS, "recordings --run-dir", "recordings || true --run-dir"),
+        "presence check is not the journeys job's last step",
+    ),
     (
         "run-dir-in-the-tree",
         _env(WALK, "DOCS_JOURNEY_RUN_DIR", "${{ github.workspace }}/run"),

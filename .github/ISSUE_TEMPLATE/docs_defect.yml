@@ -1,0 +1,107 @@
+name: 📖 Docs defect
+description: >-
+  A step of a guide that a reader cannot follow, measured by the docs journeys.
+  One defect per issue.
+title: 'Docs: <guide title>, step <n> ("<heading>"): <what the reader cannot do>'
+labels: ["documentation", "qa-agent"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        File one of these once a step of a guide has failed in **two**
+        docs-journeys runs. One defect per issue: two failing steps of one
+        guide are two issues, unless the second was only NOT RUN because the
+        first failed.
+
+        Add the label `launch-blocking` when the guide is one of the launch
+        walkthroughs R1-R8 (`tests/acceptance/docs/recordings.toml`), and
+        `post-launch` otherwise.
+
+        Quote no response body from a hosted environment, and no key, token or
+        password.
+
+  - type: input
+    id: guide
+    attributes:
+      label: Guide
+      description: The page and the section's anchor, as published at a commit.
+      placeholder: "docs/getting-started/quick-start.md#step-2-log-in (as published at commit 0123abcd)"
+    validations:
+      required: true
+
+  - type: input
+    id: step
+    attributes:
+      label: Step
+      description: The journey's step number and the guide's heading for it.
+      placeholder: 'Step 2: "Log in"'
+    validations:
+      required: true
+
+  - type: textarea
+    id: guide-says
+    attributes:
+      label: The guide says
+      description: The sentence or the command, quoted from the guide.
+      placeholder: The dashboard is at http://localhost:3000.
+    validations:
+      required: true
+
+  - type: input
+    id: reader-sees
+    attributes:
+      label: Following it, a reader sees
+      description: One line, from the run's report.
+      placeholder: The sign-in form again, reading "Invalid credentials"
+    validations:
+      required: true
+
+  - type: input
+    id: expected
+    attributes:
+      label: Expected (written before the run)
+      description: The step's expectation in its journey file.
+      placeholder: The Experiments list, with the heading "Experiments"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: which-is-wrong
+    attributes:
+      label: Which is wrong
+      description: >-
+        The guide, if the product does what its API reference says; the
+        product, if the guide does; undecided when neither says.
+      options:
+        - The guide
+        - The product
+        - Undecided
+    validations:
+      required: true
+
+  - type: dropdown
+    id: walkthrough
+    attributes:
+      label: Is the guide a launch walkthrough (R1-R8)?
+      options:
+        - Yes, so launch-blocking
+        - No, so post-launch
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Reproduce
+      value: Follow steps 1-<n> of the guide on `docker compose up` at <commit>.
+    validations:
+      required: true
+
+  - type: input
+    id: run
+    attributes:
+      label: Run
+      description: The docs-journeys run whose report shows it.
+      placeholder: https://github.com/getexperimently/experimently/actions/runs/<id>
+    validations:
+      required: true

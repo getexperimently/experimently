@@ -44,12 +44,17 @@
 # through the API; nothing reads them earlier, so no cached answer can be
 # stale and the journey needs no invalidation.
 #
-# Not recorded: the journey makes an API key (model.reveals_credential), so a
-# recording could show what the run keeps out of its files.
+# Not recorded whole (video): the journey makes an API key
+# (model.reveals_credential). The launch walkthrough R5's A/B-lift half
+# (recordings.toml) records it all the same: the key is made and sent through
+# the API, never in the browser, and the runner checks the page for it after
+# every step.
 guide: guides/user-guide.md
 stack: compose-dev
 profile: core
 video: false
+recording:
+  name: R5-reading-results
 written: 2026-10-06
 steps:
   - id: sign-in-page

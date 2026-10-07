@@ -1,0 +1,87 @@
+# The launch walkthroughs: the recordings R1-R8 a counting docs-journeys run
+# keeps in its artifact (QA plan, UX D11.4; T138's production-deploy checklist
+# asks for "recordings R1-R8 in that run's artifacts").
+#
+# Each table is one file, recordings/<name>.webm in the run directory, recorded
+# by the one journey whose `recording.name` is the table's name, from that
+# journey's guide. A recording is the journey's own browser at 1280x720 and real
+# speed, with a caption bar naming each step's guide section and action, and is
+# never longer than `max_seconds`. What it must show is `shows`; the journey's
+# steps are what make it show that.
+#
+# What a viewer sees, measured on the first runs (2026-10-07): the journeys run
+# at the browser's own speed, so a walkthrough is as short as its steps are
+# quick (R1 about 7 s, R2 about 4 s, R8 about 30 s), and the caption bar
+# blinks once per screen step, when it is hidden for that step's screenshot.
+# Neither is cut or slowed: D11.4 asks for real speed and no cuts. Playwright
+# draws a screenshot's masks into the page, so while a walkthrough is recorded
+# only a field that holds a value the run keeps is masked, never every field;
+# the runner's page check fails the step that shows one, and the recording
+# with it. Publishing a walkthrough anywhere is a founder step (EM R-1).
+#
+# A table with `pending` names a recording no journey makes yet, and why; the
+# presence check (scripts/docs_journeys_report.py recordings) does not ask for
+# it, and fails when the file is there anyway, so the pull request that records
+# it also removes the `pending` line. Every other table is required in every run
+# that records: the check fails the run when its file is missing, empty, not a
+# 1280x720 WebM, or longer than `max_seconds`.
+#
+# backend/tests/unit/docs/test_docs_journey_recordings.py pins the names below
+# to R1-R8 and holds every journey to this file.
+
+[R1-quick-start]
+walkthrough = "R1"
+guide = "getting-started/quick-start.md"
+max_seconds = 180
+shows = "the dashboard sign-in, an experiment created and started, an API key created, a user assigned and a conversion tracked, and the results page"
+
+[R2-docker-guide]
+walkthrough = "R2"
+guide = "getting-started/docker-guide.md"
+max_seconds = 90
+shows = "the API healthy and the dashboard loading at the address the guide gives, then signing in"
+
+[R3-experiment-wizard]
+walkthrough = "R3"
+guide = "guides/experiment-wizard.md"
+max_seconds = 120
+shows = "all five steps of guided setup, the sample-size estimate, and the draft created and started"
+
+[R4-power-analysis]
+walkthrough = "R4"
+guide = "statistics/power-analysis.md"
+max_seconds = 60
+shows = "the calculator filled with the guide's worked examples, showing the sample sizes the guide prints"
+
+# R5 is two halves of at most a minute each: the A/B lift now, the sample-ratio
+# warning when its dataset lands.
+[R5-reading-results]
+walkthrough = "R5"
+guide = "guides/user-guide.md"
+max_seconds = 60
+shows = "a known population sent to a new experiment, and its results page recommending the winner with its p-value"
+
+[R5-srm-warning]
+walkthrough = "R5"
+guide = "guides/user-guide.md"
+max_seconds = 60
+shows = "the sample-ratio warning withholding a winner"
+pending = "no journey seeds a sample-ratio mismatch yet; the pull request that adds that dataset to the user-guide journey records this half and removes this line"
+
+[R6-feature-flag]
+walkthrough = "R6"
+guide = "feature-flags/create.md"
+max_seconds = 120
+shows = "a flag created with a targeting rule and a rollout and turned on, then the same rule-matching users answered on by the rule, and off once it is turned off"
+
+[R7-docs-site]
+walkthrough = "R7"
+guide = "README.md"
+max_seconds = 60
+shows = "the documentation home page, four searches, one SDK page and one API page, each answering"
+
+[R8-onboarding]
+walkthrough = "R8"
+guide = "auth/auth-user-guide.md"
+max_seconds = 90
+shows = "each invited role signing in, opening the admin area as its role allows, and changing its password; the old password refused"

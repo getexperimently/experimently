@@ -11,10 +11,14 @@
 # gives; the calculation itself is the power-calculator journey's, against a
 # scipy oracle); the Review step's Analysis row; Create Experiment makes a
 # draft; Start makes it active.
+#
+# The launch walkthrough R3 (recordings.toml) records the whole journey.
 guide: guides/experiment-wizard.md
 stack: compose-dev
 profile: core
-video: true
+video: false
+recording:
+  name: R3-experiment-wizard
 written: 2026-10-06
 steps:
   - id: sign-in-page

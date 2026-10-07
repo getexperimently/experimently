@@ -30,6 +30,23 @@ failed: a ``keep`` step, or one with ``snapshot: false``). A ``video: true``
 journey is recorded to ``videos/<journey>.webm`` (1280x720) unless
 ``DOCS_JOURNEY_RECORD_VIDEO=0``.
 
+A journey with a ``recording`` records its launch walkthrough
+(``recordings.toml``) to ``recordings/<name>.webm`` unless
+``DOCS_JOURNEY_RECORD_VIDEO=0``: ``page.screencast`` from its ``start`` step to
+its ``end`` step, 1280x720, real speed, opening on a title card (the
+walkthrough, the guide, the commit and, on the compose stack, how long the
+stack took to come up, which is not recorded) and with a caption bar (Playwright
+overlays, which no locator, ARIA snapshot or click sees, hidden for each
+screenshot) naming each step's guide section and action, and for a step off the
+screen its result, each line through the run's redactor. Before the segment
+starts and after each of its steps the page's text, its fields' placeholders,
+its open shadow roots and its fields are read for every value the run keeps
+(``DRAWN_JS``, ``redaction.on_screen``): one drawn there fails the step and the
+recording is dropped. While a walkthrough is recorded a screenshot masks only a
+field that holds a kept value (``MARK_JS``), since Playwright draws its masks
+into the page and the recording would show a mask over every field. A page that cannot be read drops the recording without failing the
+step; the presence check in ``docs-journeys.yml`` then fails the run.
+
 Nothing a run makes up, keeps or is given is written (``redaction.py``): every
 text above goes through the run's redactor (an error line before it is cut to
 length), an api step's answer is written through ``redaction.scrub`` (every
@@ -54,6 +71,8 @@ and its results are read once the count above them is shown.
 
 from __future__ import annotations
 
+import dataclasses
+import html
 import json
 import re
 import time
@@ -95,9 +114,75 @@ from docs_runner.model import (
     reveals_credential,
 )
 from docs_runner.oracles import ORACLES
+from docs_runner.registry import DOC_EXAMPLES
 from docs_runner.stacks import Running
 
 VIEWPORT = {"width": 1280, "height": 720}
+#: How long a walkthrough's title card stays on the screen.
+TITLE_CARD_MS = 1500
+#: The longest line a walkthrough's caption bar draws.
+CAPTION_CHARS = 180
+#: The kinds of step that do nothing on the screen: their caption shows their result.
+OFF_SCREEN = ("api", "traffic", "evaluations", "ref")
+#: Reads what a page draws: its rendered text, each field's placeholder, the
+#: text of every open shadow root, and each field's type and value (in the
+#: document and in those shadow roots). Same-origin frames, closed shadow
+#: roots, CSS-generated text and canvas are not read.
+DRAWN_JS = """() => {
+  const texts = [document.body ? document.body.innerText : ''];
+  const fields = [];
+  const visit = (root) => {
+    for (const el of root.querySelectorAll('*')) {
+      if (el.matches('input, textarea')) {
+        fields.push([String(el.type || 'text').toLowerCase(), String(el.value || '')]);
+        if (el.placeholder) texts.push(String(el.placeholder));
+      }
+      if (el.shadowRoot) {
+        texts.push(String(el.shadowRoot.textContent || ''));
+        visit(el.shadowRoot);
+      }
+    }
+  };
+  visit(document);
+  return [texts.join('\\n'), fields];
+}"""
+#: The attribute that marks, for one screenshot, a field holding a kept value.
+MASK_MARK = "data-docs-journey-mask"
+#: Marks every field (not a password field, which draws dots) whose value holds
+#: one of the given values, in the document and its open shadow roots (which
+#: Playwright's locators reach); answers how many it marked.
+MARK_JS = """([values, mark]) => {
+  let marked = 0;
+  const visit = (root) => {
+    for (const el of root.querySelectorAll('*')) {
+      if (el.matches('input, textarea')) {
+        const kind = String(el.type || 'text').toLowerCase();
+        const typed = String(el.value || '');
+        if (kind !== 'password' && values.some((v) => v && typed.includes(v))) {
+          el.setAttribute(mark, '');
+          marked += 1;
+        }
+      }
+      if (el.shadowRoot) visit(el.shadowRoot);
+    }
+  };
+  visit(document);
+  return marked;
+}"""
+UNMARK_JS = """(mark) => {
+  const visit = (root) => {
+    for (const el of root.querySelectorAll('*')) {
+      el.removeAttribute(mark);
+      if (el.shadowRoot) visit(el.shadowRoot);
+    }
+  };
+  visit(document);
+}"""
+CAPTION_STYLE = (
+    "position:fixed;left:0;right:0;bottom:0;padding:10px 20px;"
+    "background:rgba(17,24,39,0.9);color:#fff;"
+    "font:17px/1.45 -apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif"
+)
 
 
 @dataclass
@@ -124,6 +209,107 @@ class Settings:
     sha: str
     timeout_ms: int = 10000
     record_video: bool = True
+
+
+def _close(overlay) -> None:
+    """Remove a screencast overlay: Playwright's sync API disposes it on exit."""
+    if overlay is not None:
+        with overlay:
+            pass
+
+
+class Walkthrough:
+    """One journey's launch walkthrough, recorded with ``page.screencast``."""
+
+    def __init__(
+        self,
+        journey: Journey,
+        journey_id: str,
+        guide: Guide,
+        running: Running,
+        settings: "Settings",
+    ):
+        assert journey.recording is not None and journey.recorded is not None
+        self.name = journey.recording.name
+        self.journey_id = journey_id
+        self.first, self.last = journey.recorded
+        self.file = f"{redaction.RECORDINGS}/{self.name}.webm"
+        self.path = settings.run_dir / self.file
+        self.title = f"{self.name.split('-', 1)[0]}: {guide.title}"
+        stack = ""
+        if running.up_seconds:
+            stack = (
+                f"; the stack took {running.up_seconds:.0f} s to come up before"
+                " this recording"
+            )
+        self.description = f"{journey.guide}, commit {settings.sha[:12]}{stack}"
+        self.total = len(journey.steps)
+        self.active = False
+        self.started = 0.0
+        self.seconds = 0.0
+        #: Why the recording was dropped, or "".
+        self.dropped = ""
+        self.caption = None
+
+    def start(self, page: Page) -> None:
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            page.screencast.start(path=str(self.path), size=VIEWPORT)
+        except PlaywrightError as error:
+            self.dropped = f"the recording did not start: {one_line(str(error), 200)}"
+            return
+        self.active = True
+        self.started = time.monotonic()
+        try:
+            page.screencast.show_chapter(
+                self.title, description=self.description, duration=TITLE_CARD_MS
+            )
+        except PlaywrightError:
+            pass
+
+    def show(self, page: Page, lines: List[str]) -> None:
+        """Replace the caption bar with *lines* (each cut to ``CAPTION_CHARS``)."""
+        if not self.active:
+            return
+        body = "".join(
+            f"<div>{html.escape(one_line(line, CAPTION_CHARS))}</div>" for line in lines
+        )
+        try:
+            _close(self.caption)
+            self.caption = page.screencast.show_overlay(
+                f'<div style="{CAPTION_STYLE}">{body}</div>'
+            )
+        except PlaywrightError:
+            self.caption = None
+
+    def stop(self, page: Page) -> None:
+        if not self.active:
+            return
+        self.active = False
+        self.seconds = time.monotonic() - self.started
+        try:
+            _close(self.caption)
+            page.screencast.stop()
+        except PlaywrightError as error:
+            self.drop(f"the recording did not stop: {one_line(str(error), 200)}")
+        self.caption = None
+
+    def drop(self, why: str, page: Optional[Page] = None) -> None:
+        """Stop if recording, and remove what was recorded."""
+        if self.active and page is not None:
+            self.stop(page)
+        self.active = False
+        self.dropped = self.dropped or why
+        self.path.unlink(missing_ok=True)
+
+    def outcome(self) -> Dict[str, Any]:
+        kept = not self.dropped and self.path.is_file()
+        return {
+            "journey": self.journey_id,
+            "file": self.file if kept else "",
+            "seconds": round(self.seconds, 1),
+            "dropped": self.dropped,
+        }
 
 
 class JourneyRunner:
@@ -154,6 +340,11 @@ class JourneyRunner:
         self.visits: Dict[
             Tuple[str, str], Tuple[List[site.NavPage], Dict[str, Any]]
         ] = {}
+        #: The walkthrough being recorded, if any.
+        self.walkthrough: Optional[Walkthrough] = None
+        #: Each walkthrough this run recorded or tried to, by name
+        #: (``Walkthrough.outcome``).
+        self.recorded: Dict[str, Dict[str, Any]] = {}
         #: One line per step that polled, for the run's terminal summary:
         #: the journey, the step, how long it took and how many seconds each
         #: ``after`` time was later. Numbers only; the values are in the files.
@@ -180,11 +371,29 @@ class JourneyRunner:
         path.parent.mkdir(parents=True, exist_ok=True)
         try:
             masks = [page.get_by_text(value) for value in self.secrets.values()]
-            if self.secrets:
+            recording = self.walkthrough is not None and self.walkthrough.active
+            if self.secrets and recording:
+                # Playwright draws a mask into the page, so the recording would
+                # show it. While one is recorded, only a field that holds a
+                # kept value is masked (marked for this screenshot); none
+                # should (the page check fails the step that shows one), and a
+                # password field draws dots.
+                page.evaluate(MARK_JS, [list(self.secrets.values()), MASK_MARK])
+                masks.append(page.locator(f"[{MASK_MARK}]"))
+            elif self.secrets:
                 # A field's value is not its text, so get_by_text cannot find a
                 # typed secret: in a journey with secrets, every field is masked.
                 masks.append(page.locator("input, textarea, [contenteditable]"))
-            page.screenshot(path=str(path), mask=masks)
+            if recording:
+                # The step's screen is the page's, not the walkthrough's captions.
+                page.screencast.hide_overlays()
+            try:
+                page.screenshot(path=str(path), mask=masks)
+            finally:
+                if recording:
+                    page.screencast.show_overlays()
+                    if self.secrets:
+                        page.evaluate(UNMARK_JS, MASK_MARK)
             aria = page.locator("body").aria_snapshot()
         except PlaywrightError as error:
             aria = f"(no ARIA snapshot: {self._line(error)})"
@@ -958,6 +1167,10 @@ class JourneyRunner:
             self.redactor.add(self.secrets[name])
         if journey.video and settings.record_video and not journey.has_secrets:
             options.update(record_video_dir=str(video_dir), record_video_size=VIEWPORT)
+        walkthrough = None
+        if journey.recording is not None and settings.record_video:
+            walkthrough = Walkthrough(journey, journey_id, guide, running, settings)
+        self.walkthrough = walkthrough
         self.values = {}
         context = self.browser.new_context(**options)
         context.set_default_timeout(settings.timeout_ms)
@@ -974,6 +1187,13 @@ class JourneyRunner:
         failed = False
         try:
             for number, step in enumerate(journey.steps, 1):
+                drawn = ""
+                if walkthrough is not None and number - 1 == walkthrough.first:
+                    drawn = self._drawn(page, walkthrough)
+                    if not drawn and not walkthrough.dropped:
+                        walkthrough.start(page)
+                if walkthrough is not None and walkthrough.active and not failed:
+                    walkthrough.show(page, self._caption(step, number, anchors))
                 record = self._step(
                     journey,
                     journey_id,
@@ -986,10 +1206,32 @@ class JourneyRunner:
                     anchors,
                     failed,
                 )
+                if walkthrough is not None and walkthrough.active:
+                    if record.result != NOT_RUN:
+                        drawn = drawn or self._drawn(page, walkthrough)
+                    if not drawn and record.result != NOT_RUN:
+                        walkthrough.show(
+                            page, self._caption(step, number, anchors, record)
+                        )
+                if drawn:
+                    record = dataclasses.replace(
+                        record,
+                        result=FAIL,
+                        reason="",
+                        observed=self._line(
+                            f"{drawn}; recording {walkthrough.name} was dropped"
+                        ),
+                    )
+                if walkthrough is not None and number - 1 == walkthrough.last:
+                    walkthrough.stop(page)
                 failed = failed or record.result == FAIL
                 self.log.write(record)
                 records.append(record)
         finally:
+            if walkthrough is not None:
+                walkthrough.stop(page)
+                self.recorded[walkthrough.name] = walkthrough.outcome()
+                self.walkthrough = None
             video = page.video
             context.close()
             if api is not None:
@@ -999,6 +1241,71 @@ class JourneyRunner:
             if video is not None:
                 self._keep_video(video, journey_id)
         return records
+
+    # -- the walkthrough -----------------------------------------------------
+    def _drawn(self, page: Page, walkthrough: Walkthrough) -> str:
+        """What the step's failure says when the page draws a kept value, or "".
+
+        A drawn value drops the recording and fails the step. A page that
+        cannot be read drops the recording only: nothing says a value is on it,
+        but nothing can vouch that none is (the presence check then fails the
+        run, the walkthrough being missing).
+        """
+        read = None
+        for _ in range(2):
+            try:
+                read = page.evaluate(DRAWN_JS)
+                break
+            except PlaywrightError:
+                try:
+                    page.wait_for_load_state("domcontentloaded")
+                except PlaywrightError:
+                    pass
+        if read is None:
+            walkthrough.drop("the page could not be read for kept values", page)
+            return ""
+        text, fields = read
+        where = redaction.on_screen(
+            str(text),
+            [(str(kind), str(value)) for kind, value in fields],
+            self.redactor.values,
+        )
+        if where is None:
+            return ""
+        walkthrough.drop(f"a value the run keeps is drawn in {where}", page)
+        return f"a value the run keeps is drawn in {where} while it is recorded"
+
+    def _caption(
+        self,
+        step: Step,
+        number: int,
+        anchors: Dict[str, str],
+        record: Optional[Record] = None,
+    ) -> List[str]:
+        """The caption bar for *step*: before it runs, or with its result.
+
+        Every line is text the results log also holds (the heading, the action
+        and the observed line), and each goes through the run's redactor
+        (``_line``) before it is drawn, as the observed line does before it is
+        written.
+        """
+        walkthrough = self.walkthrough
+        assert walkthrough is not None
+        heading = anchors.get(step.doc) or step.doc
+        lines = [f"Step {number} of {walkthrough.total}: {heading}"]
+        action = describe_action(step)
+        if record is None:
+            lines.append(action)
+        elif step.do.kind in OFF_SCREEN:
+            if record.result == NOT_RUN and record.reason == DOC_EXAMPLES:
+                lines.append(f"{action}: run by Doc Examples, not in this walk")
+            elif record.observed:
+                lines.append(f"{action}: {record.result}, {record.observed}")
+            else:
+                lines.append(f"{action}: {record.result}")
+        else:
+            lines.append(f"{action}: {record.result}")
+        return [self._line(line, CAPTION_CHARS) for line in lines]
 
     def _keep_video(self, video, journey_id: str) -> None:
         try:

@@ -25,8 +25,9 @@ Environment:
   log ``results.jsonl``, a report per guide as ``<journey>.md`` and
   ``<journey>.html``, ``summary.md``, ``verdicts.json`` (each journey's
   verdict, for ``scripts/docs_journeys_report.py``), the screenshots and
-  snapshots, the videos, each stack's output under ``stacks/``, and last
-  ``secret-scan.json``). Refused inside the
+  snapshots, the videos, the launch walkthroughs as
+  ``recordings/<name>.webm`` (``recordings.toml``), each stack's output under
+  ``stacks/``, and last ``secret-scan.json``). Refused inside the
   repository, so the runner writes nothing into the tree (Python's own
   ``__pycache__`` aside: ``PYTHONDONTWRITEBYTECODE=1`` keeps that out too;
   marketing-local's build is the other exception, see ``stacks.py``). Unset, a
@@ -41,7 +42,8 @@ Environment:
   the link are ones they accept (a run in this repository's Actions);
   otherwise a plain line (``docs_runner/report.py``).
 * ``DOCS_JOURNEY_TIMEOUT_MS`` (10000), ``DOCS_JOURNEY_RECORD_VIDEO`` (``1``;
-  ``0`` records none), ``DOCS_JOURNEY_HEADED`` (``1`` shows the browser),
+  ``0`` records no video and no walkthrough), ``DOCS_JOURNEY_HEADED`` (``1``
+  shows the browser),
   ``DOCS_JOURNEY_KEEP_STACKS`` (``1`` leaves the stacks up at the end).
 * The stacks' own settings: ``docs_runner/stacks.py``.
 
@@ -101,6 +103,8 @@ REPORT_PROBLEMS = pytest.StashKey[List[str]]()
 RUN_DIR = pytest.StashKey[Optional[Path]]()
 #: Every value the run made up, kept or signed in for (the runner's redactor's).
 SECRET_VALUES = pytest.StashKey[Set[str]]()
+#: The launch walkthroughs the runner recorded, by name (``execute.Walkthrough``).
+RECORDED = pytest.StashKey[Dict[str, Dict[str, Any]]]()
 SCAN = pytest.StashKey[Dict[str, Any]]()
 #: One line per step that polled (``JourneyRunner.polls``): numbers only.
 POLLS = pytest.StashKey[List[str]]()
@@ -118,6 +122,7 @@ def pytest_configure(config: pytest.Config) -> None:
     config.stash[REPORT_PROBLEMS] = []
     config.stash[RUN_DIR] = None
     config.stash[SECRET_VALUES] = set()
+    config.stash[RECORDED] = {}
     config.stash[SCAN] = {}
     config.stash[POLLS] = []
     if os.environ.get("DOCS_JOURNEY_RUN_DIR"):
@@ -258,6 +263,8 @@ def journey_runner(
     )
     # The same set, so the end of the run scans for every value added later.
     pytestconfig.stash[SECRET_VALUES] = runner.redactor.values
+    # The same mapping, filled in as each walkthrough is recorded.
+    pytestconfig.stash[RECORDED] = runner.recorded
     # The same list, so the terminal summary prints every step that polled.
     pytestconfig.stash[POLLS] = runner.polls
     return runner
@@ -327,8 +334,22 @@ def walk_journey(request: pytest.FixtureRequest):
 # ---------------------------------------------------------------------------
 # The end of the run: the reports, and no skip reads as green
 # ---------------------------------------------------------------------------
+def owners_of(recorded: Dict[str, Dict[str, Any]]) -> Dict[str, str]:
+    """Each walkthrough file the runner wrote, with the journey that recorded it."""
+    return {
+        str(outcome["file"]): str(outcome["journey"])
+        for outcome in recorded.values()
+        if outcome.get("file")
+    }
+
+
 def write_reports(
-    runs: List[report.GuideRun], run_dir: Path, sha: str, date: str, link: str = ""
+    runs: List[report.GuideRun],
+    run_dir: Path,
+    sha: str,
+    date: str,
+    link: str = "",
+    recorded: Optional[Dict[str, Dict[str, Any]]] = None,
 ) -> Optional[str]:
     """Write every report; the first ReportError's message, or None."""
     problem = None
@@ -346,10 +367,23 @@ def write_reports(
             )
         except report.ReportError as error:
             problem = problem or str(error)
-    inventory = context_for(REPO_ROOT).inventory
+    context = context_for(REPO_ROOT)
+    walkthroughs = report.walkthrough_rows(
+        context.recordings,
+        recorded or {},
+        {run.journey: report.verdict(run) for run in runs},
+        lambda name: (run_dir / name).is_file(),
+    )
     try:
         (run_dir / "summary.md").write_text(
-            report.summary_markdown(runs, inventory, date=date, sha=sha, run_link=link),
+            report.summary_markdown(
+                runs,
+                context.inventory,
+                date=date,
+                sha=sha,
+                run_link=link,
+                walkthroughs=walkthroughs,
+            ),
             encoding="utf-8",
         )
     except report.ReportError as error:
@@ -371,29 +405,35 @@ def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
     runs = config.stash[RUNS]
     if runs or config.stash[RUN_DIR] is not None:
         run_dir = run_dir_of(config)
-        problem = write_reports(runs, run_dir, sha, date, run_link(os.environ))
+        recorded = config.stash[RECORDED]
+        owners = owners_of(recorded)
+        link = run_link(os.environ)
+        problem = write_reports(runs, run_dir, sha, date, link, recorded)
         if problem is not None:
             config.stash[REPORT_PROBLEMS].append(problem)
         values = config.stash[SECRET_VALUES]
-        scan = redaction.clear(run_dir, values)
+        scan = redaction.clear(run_dir, values, owners=owners)
         if scan["removed"]:
             # The journeys whose files held a value fail, in the reports and in
             # verdicts.json too, so a run's report job never reads all-pass
             # after a hit; what is written again is scanned again.
             removed = list(scan["removed"])
-            hit = redaction.journeys_of(removed, [run.journey for run in runs])
+            hit = redaction.journeys_of(
+                removed, [run.journey for run in runs], owners=owners
+            )
             runs[:] = [
                 dataclasses.replace(
-                    run, scrubbed=redaction.files_of(removed, run.journey)
+                    run,
+                    scrubbed=redaction.files_of(removed, run.journey, owners=owners),
                 )
                 if run.journey in hit
                 else run
                 for run in runs
             ]
-            problem = write_reports(runs, run_dir, sha, date, run_link(os.environ))
+            problem = write_reports(runs, run_dir, sha, date, link, recorded)
             if problem is not None:
                 config.stash[REPORT_PROBLEMS].append(problem)
-            scan = redaction.clear(run_dir, values, earlier=scan)
+            scan = redaction.clear(run_dir, values, earlier=scan, owners=owners)
         config.stash[SCAN] = scan
     removed = config.stash[SCAN].get("removed")
     if config.stash[SKIPPED] or config.stash[REPORT_PROBLEMS] or removed:

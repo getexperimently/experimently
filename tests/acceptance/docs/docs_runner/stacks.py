@@ -139,6 +139,9 @@ class Running:
     #: For the compose stack: each default host port a guide's address names,
     #: and the base URL that stands for it here.
     published: Mapping[int, str] = field(default_factory=dict)
+    #: How long bringing the stack up took, in seconds (0 when not measured):
+    #: a walkthrough's title card says it, the start itself not being recorded.
+    up_seconds: float = 0.0
 
 
 def free_port() -> int:
@@ -314,6 +317,7 @@ class ComposeDev:
         published = self.published()
         self.down()
         self._clear(profile)
+        started = time.monotonic()
         status = self._compose(
             profile, "up", "-d", "--wait", "--build", timeout=self.timeout
         )
@@ -332,6 +336,7 @@ class ComposeDev:
             profile=profile,
             accounts=DEMO_ACCOUNTS,
             published=published,
+            up_seconds=time.monotonic() - started,
         )
         try:
             served = self._served_profile(api_url)
