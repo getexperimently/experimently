@@ -475,6 +475,9 @@ def get_api_key(
         db.rollback()
         logger.warning(f"Could not record API key use for key {api_key.id}: {exc}")
 
+    # Hold a connection for the rest of the request whether or not the use was recorded.
+    db.connection()
+
     return user
 
 
