@@ -47,7 +47,7 @@ budgets are Phase 2 work (QA L2). Nothing may cite that run as meeting a budget.
 
 ## File Structure
 
-```
+```text
 backend/tests/performance/
 ├── __init__.py
 ├── specs/
@@ -68,95 +68,128 @@ backend/tests/performance/
 
 ## Running Load Tests Locally
 
+CI runs this section and
+[Running Unit Tests for the Load Test Framework](#running-unit-tests-for-the-load-test-framework)
+as written, against the [Quick Start](../getting-started/quick-start.md) stack.
+
 ### Prerequisites
 
-Activate the virtual environment:
+Run every command from the repository root, in the development virtual environment
+that [Python Virtual Environment Setup](../getting-started/python-virtual-env-setup.md)
+makes:
 
-```bash
+```{.bash exec}
 source venv/bin/activate
 ```
 
-Ensure dependencies are installed (includes locust==2.17.0):
+Its requirements include Locust, at the version `backend/requirements.txt` pins:
 
-```bash
+```{.bash skip reason="registry: pip installs the backend's requirements from PyPI; CI builds this venv before the page runs"}
 pip install -r backend/requirements.txt
+```
+
+The tests need PostgreSQL and Redis on `localhost`, and an API on port 8000 that uses
+them. The Quick Start stack is all three. With `make db` instead (PostgreSQL and
+Redis only), start the API from the checkout, in a separate terminal:
+
+```{.bash skip reason="server: runs the API until you stop it"}
+ENVIRONMENT=development uvicorn backend.app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
 Seed what the locustfiles call: the experiment `sdk_contract_ab`, the flag
 `sdk_contract_flag`, an API key, and the developer account the management tasks sign in
-as (`dev@demo.com`, not a superuser). The seed writes the key to
+as (`dev@demo.com`, not a superuser). The seed writes to the database the `POSTGRES_*`
+settings name, whose defaults are that PostgreSQL, and writes the key to
 `tests/sdk-contract/live/.api_key`:
 
-```bash
+```{.bash exec}
 python -m backend.scripts.seed_sdk_contract
 export LOAD_TEST_API_KEY_FILE=tests/sdk-contract/live/.api_key
 ```
+<!-- expect: sdk_contract_ab -->
+<!-- expect: Done. -->
 
-Start the backend API server (in a separate terminal) from the repository root:
+It names the experiment, the flag and the key it created, or found from an earlier
+run, and ends with `Done.`.
 
-```bash
-ENVIRONMENT=development uvicorn backend.app.main:app --reload --host 0.0.0.0 --port 8000
-```
+### Rate limits
+
+An API in the `development` environment, which is what the Quick Start stack and the
+command above run, answers 429 to an address that passes a route's rate limit: 6000
+requests a minute for each SDK route (`/api/v1/tracking/*`,
+`/api/v1/feature-flags/evaluate/*`). Locust counts a 429 as a failed request, so the
+run fails. Measured on a laptop, the baseline's 50 users sent about 100 tracking
+requests a second, which reaches that limit within the minute. So against a
+development API, keep a run small and short, as Option B does. For a real load, run
+the API in the `test` environment, where rate limiting is off, as Option C's
+`--start-server` and the weekly workflow do.
 
 ### Option A: Locust Web UI (interactive)
 
-```bash
-cd "$(git rev-parse --show-toplevel)"
-```
-
 Baseline test:
 
-```bash
+```{.bash skip reason="server: serves Locust's web UI until you stop it"}
 locust -f backend/tests/performance/locustfiles/api_load_test.py \
        --host http://localhost:8000
 ```
 
 Spike test:
 
-```bash
+```{.bash skip reason="server: serves Locust's web UI until you stop it"}
 locust -f backend/tests/performance/locustfiles/spike_test.py \
        --host http://localhost:8000
 ```
 
 Endurance test:
 
-```bash
+```{.bash skip reason="server: serves Locust's web UI until you stop it"}
 locust -f backend/tests/performance/locustfiles/endurance_test.py \
        --host http://localhost:8000
 ```
 
 Then open `http://localhost:8089` in your browser, configure the number of users
-and spawn rate, and click **Start swarming**.
+and spawn rate, and click **Start swarming**. Against a development API, the rate
+limits above apply.
 
 ### Option B: Headless mode (no browser)
 
-```bash
-cd "$(git rev-parse --show-toplevel)"
-```
+Baseline, 10 users for 20 seconds, which stays under a development API's rate limits:
 
-Baseline — 50 users, 60 seconds:
-
-```bash
+```{.bash exec timeout=180}
 locust -f backend/tests/performance/locustfiles/api_load_test.py \
        --headless \
-       --users 50 \
+       --users 10 \
        --spawn-rate 10 \
-       --run-time 60s \
+       --run-time 20s \
        --host http://localhost:8000 \
        --csv /tmp/locust_baseline
 ```
+<!-- expect: Total failures : 0 (0.00%) -->
 
-Results are written to `/tmp/locust_baseline_stats.csv`, `/tmp/locust_baseline_stats_history.csv`
-and `/tmp/locust_baseline_failures.csv`.
+It ends with the number of requests and of failures (`Total failures : 0 (0.00%)`),
+and exits 1 if any request failed. Results are written to
+`/tmp/locust_baseline_stats.csv`, `/tmp/locust_baseline_stats_history.csv` and
+`/tmp/locust_baseline_failures.csv`.
 
 ### Option C: CI runner (validates SLAs automatically)
 
-```bash
-cd "$(git rev-parse --show-toplevel)"
-source venv/bin/activate
+`run_load_tests.py` runs Locust headless and judges the result. With `--start-server`
+it first starts the API from the checkout in the `test` environment, where rate
+limiting is off, on `--server-port`, runs against it, and stops it afterwards. That
+API reads the same `POSTGRES_*` settings, with other defaults: in the `test`
+environment its database is `experimentation_test` and its schema
+`test_experimentation`. Name the ones the seed wrote to:
 
+```{.bash exec}
+export POSTGRES_DB=experimentation POSTGRES_SCHEMA=experimentation
+```
+
+Then:
+
+```{.bash skip reason="timing: gates on p50, p95, p99 and requests per second, which depend on the machine; the block after next runs the same load"}
 python backend/tests/performance/run_load_tests.py \
-    --host http://localhost:8000 \
+    --start-server \
+    --server-port 8001 \
     --users 50 \
     --spawn-rate 10 \
     --duration 60s
@@ -174,22 +207,23 @@ target's `method` and `endpoint` exactly.
 The weekly workflow adds `--sla report`, which prints latency and throughput beside the
 targets instead of gating on them (see above):
 
-```bash
-python backend/tests/performance/run_load_tests.py \
-    --host http://localhost:8000 \
-    --duration 60s \
-    --sla report
-```
-
-The runner can also start a local server automatically:
-
-```bash
+```{.bash exec timeout=300}
 python backend/tests/performance/run_load_tests.py \
     --start-server \
     --server-port 8001 \
     --users 50 \
-    --duration 60s
+    --spawn-rate 10 \
+    --duration 60s \
+    --sla report
 ```
+<!-- expect: Every declared target recorded and no request failed -->
+
+It ends with `Every declared target recorded and no request failed; latency and
+throughput reported, not gated. Exiting 0.`
+
+Against an API that is already running, pass `--host` (for example
+`--host http://localhost:8000`) instead of `--start-server` and `--server-port`. Against
+a development API, keep the run small and short, as in Option B.
 
 ---
 
@@ -262,7 +296,7 @@ skip this row automatically.
 
 The `run_load_tests.py` runner produces a structured report after each run:
 
-```
+```text
 ============================================================
 PERFORMANCE TEST REPORT
 ============================================================
@@ -291,7 +325,7 @@ Total endpoints: 5  |  Passed: 4  |  Failed: 1
 ## Updating SLA Targets
 
 SLA targets are defined in:
-```
+```text
 backend/tests/performance/specs/performance_targets.py
 ```
 
@@ -311,10 +345,10 @@ PERFORMANCE_TARGETS["list_feature_flags"] = PerformanceTarget(
 
 After updating targets, run the spec unit tests to verify consistency:
 
-```bash
-source venv/bin/activate
+```{.bash exec}
 python -m pytest backend/tests/performance/test_specs.py -v
 ```
+<!-- expect: passed -->
 
 To update an existing target (e.g., after a performance improvement):
 
@@ -344,28 +378,33 @@ To update an existing target (e.g., after a performance improvement):
 
 ## Running Unit Tests for the Load Test Framework
 
-```bash
+In the development virtual environment, as above:
+
+```{.bash exec}
 source venv/bin/activate
 export APP_ENV=test TESTING=true
 ```
 
 Test the SLA spec definitions:
 
-```bash
+```{.bash exec}
 python -m pytest backend/tests/performance/test_specs.py -v
 ```
+<!-- expect: passed -->
 
 Test the validators (percentile calculations, SLA checks, CSV parsing, reporting):
 
-```bash
+```{.bash exec}
 python -m pytest backend/tests/performance/test_validators.py -v
 ```
+<!-- expect: passed -->
 
 Run both together:
 
-```bash
+```{.bash exec}
 python -m pytest backend/tests/performance/test_specs.py \
                  backend/tests/performance/test_validators.py -v
 ```
+<!-- expect: passed -->
 
-All 43 unit tests should pass without a running database or API server.
+They pass without a running database or API server.

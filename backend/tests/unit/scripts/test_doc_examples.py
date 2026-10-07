@@ -2778,6 +2778,220 @@ def test_no_path_filter_can_skip_the_summary():
     assert "paths" not in pull_request and "paths-ignore" not in pull_request
 
 
+# --- timing: the one command that gates on latency or throughput (#1075) ----
+
+GATE = "python backend/tests/performance/run_load_tests.py --users 50 --duration 60s"
+
+
+def _skip(body: str, reason: str = "timing: gates on latency") -> str:
+    return f'{FENCE}{{.bash skip reason="{reason}"}}\n{body}\n{FENCE}'
+
+
+@pytest.mark.parametrize(
+    "body, problem",
+    [
+        (GATE, None),
+        (
+            "python backend/tests/performance/run_load_tests.py \\\n"
+            "    --users 50 \\\n    --duration 60s",
+            None,
+        ),
+        (f"cd backend && {GATE}", "holds exactly one command"),
+        (f"{GATE}\nprintf done", "holds exactly one command"),
+        (f"{GATE} > /tmp/out.txt", "holds exactly one command"),
+        (f"{GATE} --sla report", "is for a command that gates"),
+        (f"{GATE} --sla=report", "is for a command that gates"),
+        ("curl -s localhost:8000/health", "is for a command that gates"),
+        ("locust -f x.py --headless --run-time 60s", "is for a command that gates"),
+    ],
+    ids=[
+        "the-gate",
+        "the-gate-continued",
+        "another-command-before",
+        "another-command-after",
+        "a-redirection",
+        "the-report-run",
+        "the-report-run-equals",
+        "no-gate-at-all",
+        "locust-itself",
+    ],
+)
+def test_a_timing_skip_holds_only_the_command_that_gates(body, problem):
+    (block,) = blocks(page(_skip(body)))
+    found = dx.block_problems(block, "p.md")
+    if problem is None:
+        assert found == []
+    else:
+        assert any(problem in p for p in found), found
+
+
+def test_a_timing_skip_needs_the_same_command_run_with_sla_report():
+    report = f"{FENCE}{{.bash exec}}\n{GATE} \\\n    --sla report\n{FENCE}"
+    other = f"{FENCE}{{.bash exec}}\n{GATE.replace('50', '10')} --sla report\n{FENCE}"
+    assert dx._timing_runs(blocks(page(_skip(GATE), report)), "p.md") == []
+    for text in (page(_skip(GATE)), page(_skip(GATE), other)):
+        (problem,) = dx._timing_runs(blocks(text), "p.md")
+        assert problem.startswith("p.md:3: a 'timing' skip needs the same command")
+
+
+def test_the_check_applies_the_timing_rules(repo):
+    (repo / "docs" / "p.md").write_text(page(_skip(f"cd x && {GATE}")))
+    toml = enrol(
+        repo,
+        """
+        [meta]
+        documents = 1
+        exec = 0
+        universe = ["docs/p.md"]
+
+        [[document]]
+        path = "docs/p.md"
+        environment = "bare"
+        exec = 0
+        skip = 1
+        expects = 0
+        """,
+    )
+    problems = problems_of(toml)
+    assert any("holds exactly one command" in p for p in problems), problems
+    assert any("needs the same command with --sla report" in p for p in problems)
+
+
+# --- stack-dev: the Quick Start's stack and a development venv (#1075) ------
+
+
+def test_stack_dev_pages_run_in_dev_shards_of_their_own():
+    documents = [
+        _doc("docs/a.md"),
+        _doc("docs/d1.md", "stack-dev"),
+        _doc("docs/d2.md", "stack-dev"),
+        _doc("docs/f.md", "stack-full"),
+    ]
+    plan = _assert_partition(documents)
+    assert plan[("dev", 1, 1)] == ["docs/d1.md", "docs/d2.md"]
+    assert plan[("core", 1, 1)] == ["docs/a.md"]
+    assert dx.parse_shard("dev:1/1") == ("dev", 1, 1)
+
+
+def test_a_stack_dev_page_needs_the_quick_start_s_one_start(repo):
+    getting = repo / "docs" / "getting-started"
+    getting.mkdir()
+    (getting / "quick-start.md").write_text(
+        page(f"{FENCE}{{.bash exec}}\n{dx.STACK_UP}\n{FENCE}")
+    )
+    body = textwrap.dedent(
+        """
+        [meta]
+        documents = 2
+        exec = 2
+        universe = ["docs/getting-started/quick-start.md", "docs/p.md"]
+
+        [[document]]
+        path = "docs/p.md"
+        environment = "stack-dev"
+        exec = 1
+        skip = 1
+        expects = 1
+
+        [[document]]
+        path = "docs/getting-started/quick-start.md"
+        environment = "{env}"
+        exec = 1
+        skip = 0
+        expects = 0
+        """
+    )
+    dx.check(enrol(repo, body.format(env="bare")))
+    assert any(
+        "a 'stack-dev' document needs docs/getting-started/quick-start.md "
+        "enrolled as 'bare'" in p
+        for p in problems_of(enrol(repo, body.format(env="stack")))
+    )
+
+
+def _python(root: pathlib.Path, script: str) -> None:
+    """A stand-in for venv/bin/python under *root*."""
+    python = root / dx.DEV_VENV / "bin" / "python"
+    python.parent.mkdir(parents=True, exist_ok=True)
+    python.write_text(f"#!/bin/sh\n{script}\n")
+    python.chmod(0o755)
+
+
+@pytest.mark.parametrize(
+    "script, problem",
+    [
+        (None, "the development virtual environment is missing"),
+        (
+            "printf '%s\\n' \"ModuleNotFoundError: No module named 'locust'\" >&2; exit 1",
+            "cannot run the page: `venv/bin/python -c 'import alembic, locust, "
+            "backend.app.core.config'` exited 1: ModuleNotFoundError: No module "
+            "named 'locust'",
+        ),
+        ("exit 0", None),
+    ],
+    ids=["no-venv", "a-venv-without-locust", "a-venv-that-imports"],
+)
+def test_a_stack_dev_page_needs_the_dev_venv_before_its_stack_starts(
+    tmp_path, monkeypatch, script, problem
+):
+    """The venv check runs for real (a stand-in python); the stack start is
+    only recorded, and must not happen for a page that cannot run."""
+    monkeypatch.setattr(dx, "ROOT", tmp_path)
+    if script is not None:
+        _python(tmp_path, script)
+    monkeypatch.setattr(dx, "preflight", lambda env: [])
+    monkeypatch.setattr(dx, "project_resources", lambda project: [])
+    run_bounded, started, teardowns = dx.run_bounded, [], []
+
+    def start(argv, env, timeout, deadline=None):
+        if argv[0] == str(tmp_path / dx.DEV_VENV / "bin" / "python"):
+            return run_bounded(argv, env, timeout, deadline)
+        started.append(argv)
+        return 0, "", "", None
+
+    def docker(*args, env=None, timeout=120):
+        teardowns.append(args)
+        return dx.subprocess.CompletedProcess(["docker", *args], 0, "", "")
+
+    monkeypatch.setattr(dx, "run_bounded", start)
+    monkeypatch.setattr(dx, "_docker", docker)
+    doc = {"path": "p.md", "environment": "stack-dev", "exec": 1}
+    problems, reached = dx.run_document(doc, [], 0, {}, None, io.StringIO())
+    assert teardowns == [("compose", "down", "-v", "--remove-orphans")]
+    if problem is None:
+        assert problems == [] and len(started) == 1, (problems, started)
+        assert started[0][-1] == dx.STACK_UP
+    else:
+        assert started == [], "the stack started for a page that cannot run"
+        assert reached == 0
+        (found,) = problems
+        assert found.startswith("p.md: ") and problem in found, found
+        assert dx.DEV_VENV_BUILD in found
+
+
+def test_the_dev_shards_build_the_venv_the_runner_checks():
+    """The workflow's venv step is DEV_VENV_BUILD, runs in the dev shards only,
+    and the dev shards get the core images pre-built like the core shards."""
+    steps = _jobs()["examples"]["steps"]
+    (build,) = [
+        s for s in steps if s.get("name") == "Build the development virtual environment"
+    ]
+    assert build["if"] == "matrix.profile == 'dev'"
+    assert build["run"].strip().split("\n") == dx.DEV_VENV_BUILD.split(" && ")
+    (python,) = [
+        s for s in steps if s.get("uses", "").startswith("actions/setup-python@")
+    ]
+    assert python["with"]["cache"] == "${{ matrix.profile == 'dev' && 'pip' || '' }}"
+    (core,) = [s for s in steps if s.get("name", "").endswith("would build (core)")]
+    assert core["if"] == (
+        "github.event_name == 'pull_request' && "
+        "(matrix.profile == 'core' || matrix.profile == 'dev')"
+    )
+    assert steps.index(build) < [s.get("run", "") for s in steps].index(
+        'python scripts/doc_examples.py --run --shard "$SHARD" --report "$REPORT"'
+    )
+
+
 # --- the stack's ports are free before the next page (#1075) -----------------
 
 

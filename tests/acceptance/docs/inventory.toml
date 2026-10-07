@@ -321,8 +321,8 @@ class = "exec"
 reason = "its blocks run in Doc Examples"
 
 [pages."self-hosting/migrations.md"]
-class = "reference"
-reason = "an operator runbook for compose, Kubernetes and AWS; its shell blocks are not yet enrolled in Doc Examples"
+class = "exec"
+reason = "its compose commands run in Doc Examples in the API container of a fresh Quick Start stack (docker compose exec api ...); the destructive, placeholder and AWS ones are skipped with their reasons"
 
 [pages."self-hosting/releases.md"]
 class = "exec"
@@ -590,8 +590,8 @@ class = "reference"
 reason = "what each CI workflow does; no steps to follow"
 
 [pages."development/database/migrations.md"]
-class = "reference"
-reason = "contributor guide to the models and Alembic; its shell blocks are not yet enrolled in Doc Examples"
+class = "exec"
+reason = "its Alembic commands run in Doc Examples from a development virtual environment against a fresh Quick Start stack's PostgreSQL (stack-dev)"
 
 [pages."development/database/usage.md"]
 class = "reference"
@@ -623,8 +623,8 @@ exercised_by = ["none"]
 reason = "needs a Cognito user pool"
 
 [pages."performance/load-testing.md"]
-class = "reference"
-reason = "how contributors run the Locust suite; its commands are not walked"
+class = "exec"
+reason = "its seed, a short headless Locust run against a fresh Quick Start stack and the runner's --sla report run run in Doc Examples (stack-dev); only the run that gates on latency and throughput is skipped (timing)"
 
 # ---------------------------------------------------------------------------
 # The "Flows, at least" list of #939, each mapped to what verifies it.

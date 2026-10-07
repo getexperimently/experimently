@@ -46,7 +46,8 @@ LEFT = "-- List the event times left after the upgrade"
 _HEADING = re.compile(r"^(#{1,6})\s+(.+?)\s*#*\s*$")
 _SQL_BLOCK = re.compile(r"^[ \t]*```sql\n(.*?)^[ \t]*```", re.M | re.S)
 _TEXT_BLOCK = re.compile(r"^```text\n(.*?)^```", re.M | re.S)
-_BASH_BLOCK = re.compile(r"^```bash\n(.*?)^```", re.M | re.S)
+#: A shell block, untagged or in the form Doc Examples runs (#1075).
+_BASH_BLOCK = re.compile(r"^```(?:bash|\{\.bash [^}\n]*\})\n(.*?)^```", re.M | re.S)
 #: Where the section's prose ends: the next paragraph of "Rolling Back".
 _END = "Roll back to a specific revision:"
 
@@ -122,8 +123,10 @@ def test_the_quoted_log_line_has_the_shape_the_revision_prints():
 def test_the_rerun_recipe_names_the_parent_revision_and_never_minus_one():
     (recipe,) = _BASH_BLOCK.findall(section())
     assert recipe.splitlines() == [
-        "python -m alembic -c backend/app/db/alembic.ini downgrade a89544fb1075",
-        "python -m alembic -c backend/app/db/alembic.ini upgrade heads",
+        "docker compose exec api python -m alembic -c backend/app/db/alembic.ini"
+        " downgrade a89544fb1075",
+        "docker compose exec api python -m alembic -c backend/app/db/alembic.ini"
+        " upgrade heads",
     ]
     assert load_revision().down_revision == "a89544fb1075"
     prose = _prose()

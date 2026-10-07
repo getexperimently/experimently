@@ -837,6 +837,14 @@ PLANTS = [
         id="a-key-the-block-does-not-print",
     ),
     pytest.param(
+        _both(lambda p: p["replace"].pop("http://localhost:8000")),
+        PAGE,
+        None,
+        "replace puts nothing in place of {{api-url}}",
+        marks=pytest.mark.regression,
+        id="the-api-address-not-replaced",
+    ),
+    pytest.param(
         copy.deepcopy(GOOD),
         PAGE,
         "module m\n\ngo 1.99\n",

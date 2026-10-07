@@ -14,49 +14,53 @@ Migration files live in `backend/app/db/migrations/versions/`. Each file represe
 `modules/` directory and therefore one head; a full checkout has two, and
 `alembic_version` holds one row per head. That is why every command below says
 `heads` (plural) and never `head`: alembic refuses the singular when more than
-one head exists. Run every command from the repository root, or with an
-absolute `-c` path — the config resolves both branches from any directory.
+one head exists.
+
+**Where the commands run.** Every command on this page runs inside the API
+container, with the image's own alembic and the container's `POSTGRES_*`
+settings: `docker compose exec api ...`, from the directory of your compose file
+(the repository root for the [Quick Start](../getting-started/quick-start.md)
+stack, `deploy/compose/` for the production compose file). The image keeps the
+repository's layout under its working directory `/app`, so
+`-c backend/app/db/alembic.ini` is the same path there as in a checkout. Under
+Helm, run the same command in an API pod with `kubectl exec`. On AWS, see
+[Running Migrations in Production](#running-migrations-in-production).
+Running alembic from a checkout instead is a contributor's task:
+[Database Migrations with Alembic](../development/database/migrations.md#database-migrations-with-alembic).
+CI runs this page's `exec` blocks as written against the Quick Start stack.
 
 ---
 
 ## Running All Migrations
 
-To apply all pending migrations to the latest schema version:
+The API container runs the bootstrap (below) every time it starts, so a stack
+that is up is already at its heads. To apply all pending migrations by hand:
 
-Always activate your virtualenv first:
-
-```bash
-source venv/bin/activate
-```
-
-Set required environment variables:
-
-```bash
-export POSTGRES_DB=experimentation
-export POSTGRES_SCHEMA=experimentation
-export POSTGRES_SERVER=localhost
-export POSTGRES_USER=postgres
-export POSTGRES_PASSWORD=your-password
-```
-
-Run migrations:
-
-```bash
-python -m alembic -c backend/app/db/alembic.ini upgrade heads
+```{.bash exec}
+docker compose exec api python -m alembic -c backend/app/db/alembic.ini upgrade heads
 ```
 
 `heads` refers to the latest migration of every branch. This command applies all
-unapplied migrations in order.
+unapplied migrations in order. Alembic logs what it applies (to stderr); on a
+database already at its heads it applies nothing.
 
 On a database with no tables at all, run the bootstrap instead — the historical
 migration chain cannot be replayed from zero, so a fresh schema is created from
-the models and stamped:
+the models and stamped. On a database that has tables it runs `upgrade heads`:
 
-```bash
-ENVIRONMENT=production python -m backend.app.db.bootstrap
+```{.bash exec}
+docker compose exec api python -m backend.app.db.bootstrap
 ```
+<!-- expect: Database bootstrap complete -->
 
-Set `ENVIRONMENT` to the environment the database belongs to (`production`,
+It ends with `Database bootstrap complete (created)` on a new database and
+`Database bootstrap complete (upgraded)` on one that had tables.
+
+The bootstrap reads `ENVIRONMENT` from the container, which compose sets
+(`development` unless `ENVIRONMENT` was set when the stack was started); for
+another value, pass it to that one command:
+`docker compose exec -e ENVIRONMENT=production api python -m backend.app.db.bootstrap`.
+`ENVIRONMENT` is the environment the database belongs to (`production`,
 `staging`, or `development` for a local trial). On a database with no users the
 bootstrap creates the first administrator from `FIRST_SUPERUSER` and
 `FIRST_SUPERUSER_PASSWORD`, and it refuses a password that is empty, shorter
@@ -76,22 +80,27 @@ task is the only thing that runs the bootstrap (see
 
 ## Viewing Migration History
 
-Show all migrations and whether they have been applied:
+Show every migration the image carries, newest first:
 
-```bash
-python -m alembic -c backend/app/db/alembic.ini history
+```{.bash exec}
+docker compose exec api python -m alembic -c backend/app/db/alembic.ini history
 ```
+<!-- expect: (head) -->
+<!-- expect: <base> -->
 
-Output:
+Output, for example:
 
-```
-ef1234567890 -> ab1234567890 (head), Add safety_settings table
-cd1234567890 -> ef1234567890, Add split_url_config column to experiments
+```text
+d29a479daafe -> 37dcb2969766 (head), Segments: a kind (rules or id_list), and the members of an id list
+806901fb7735 -> d29a479daafe, Global holdouts: who each one covered, its own salt, and at most one active
 ...
-<base> -> a1b2c3d4e5f6, Initial schema
+<base> -> 84a772608a6e, Initial schema
 ```
 
-Revisions shown with `(head)` are the latest applied migration. Revisions not yet applied appear without a marker.
+`(head)` marks the newest revision of each branch in the image; a full image
+also lists the `modules` branch, labelled `(modules)`. `history` lists the
+image's revisions whether or not the database has them: `current` (next) says
+what the database has.
 
 ---
 
@@ -99,81 +108,44 @@ Revisions shown with `(head)` are the latest applied migration. Revisions not ye
 
 Show which migration is currently applied to the database:
 
-```bash
-python -m alembic -c backend/app/db/alembic.ini current
+```{.bash exec}
+docker compose exec api python -m alembic -c backend/app/db/alembic.ini current
+```
+<!-- expect: (head) -->
+
+Output, for a full install (a core install prints the first line only):
+
+```text
+37dcb2969766 (head)
+modules_0002_warehouse_analysis (head)
 ```
 
-Output:
-
-```
-ab1234567890 (head)
-```
-
-This is the revision ID of the last migration that was applied to the database.
+One line per head: the revision ID of the last migration applied on each
+branch, and `(head)` when it is the newest the image has.
 
 ---
 
 ## Creating a New Migration
 
-When you add or modify SQLAlchemy models, generate a migration script:
-
-Which head does this revision extend? (A core checkout has only one and can leave --head out entirely.)
-
-```bash
-python -m alembic -c backend/app/db/alembic.ini heads
-
-python -m alembic -c backend/app/db/alembic.ini revision --autogenerate \
-    --head <core head id> -m "add email_verified column to users"
-```
-
-Alembic inspects the difference between the current models and the database schema, then generates a migration file next to the head it extends: `backend/app/db/migrations/versions/` for a core revision, `modules/backend/app/db/migrations/versions/` for `--head modules@head`. Without `--head` it refuses with "Multiple heads are present" rather than guessing — do **not** answer that with `alembic merge`: the merge file lands in the core chain with the module head in its `down_revision`, and a core checkout then cannot load the migration directory at all.
-
-### Always Review the Generated File
-
-Auto-generated migrations are a starting point, not a finished product. Always open and review the generated file before applying it:
-
-```python
-# Example generated migration
-def upgrade() -> None:
-    op.add_column(
-        'users',
-        sa.Column('email_verified', sa.Boolean(), nullable=True),
-        schema='experimentation'
-    )
-
-def downgrade() -> None:
-    op.drop_column('users', 'email_verified', schema='experimentation')
-```
-
-Check for:
-- Correct `down_revision` pointing to the previous migration's ID
-- Correct schema name (`schema='experimentation'`) on all operations
-- No unintended table drops or data loss
-- Correct data types and constraints
+A migration is written in a checkout and ships in a release; it is not created
+against a deployment. See
+[Creating New Migrations](../development/database/migrations.md#creating-new-migrations).
 
 ---
 
 ## Applying a Specific Migration
 
-Apply migrations up to a specific revision (not necessarily the latest):
+Apply migrations up to a specific revision (not necessarily the latest), named
+by its ID from `history`:
 
-```bash
-python -m alembic -c backend/app/db/alembic.ini upgrade ab1234567890
+```{.bash skip reason="fragment: <revision> is a revision ID from history"}
+docker compose exec api python -m alembic -c backend/app/db/alembic.ini upgrade <revision>
 ```
 
-You can also use relative steps:
-
-Apply the next one migration:
-
-```bash
-python -m alembic -c backend/app/db/alembic.ini upgrade +1
-```
-
-Apply the next three migrations:
-
-```bash
-python -m alembic -c backend/app/db/alembic.ini upgrade +3
-```
+Name the revision rather than a relative step such as `upgrade +1`. A relative
+step counts along one line of revisions, and with two heads alembic refuses it:
+`Relative revision +1 didn't produce 1 migrations` (measured from a full checkout
+against a database at the core head, with the `modules` branch still to apply).
 
 ---
 
@@ -189,22 +161,21 @@ The modules branch has two revisions: `modules_0001_rbac` and, after it,
 
 The modules branch, one revision back (modules_0002_warehouse_analysis):
 
-```bash
-python -m alembic -c backend/app/db/alembic.ini downgrade modules@-1
-python -m alembic -c backend/app/db/alembic.ini downgrade modules@-2
+```{.bash skip reason="destructive: unapplies modules revisions and drops the tables they created"}
+docker compose exec api python -m alembic -c backend/app/db/alembic.ini downgrade modules@-1
+docker compose exec api python -m alembic -c backend/app/db/alembic.ini downgrade modules@-2
 ```
 
 One step back on the core chain:
 
-```bash
-python -m alembic -c backend/app/db/alembic.ini downgrade <core revision id>
+```{.bash skip reason="fragment: <core revision id> is the ID before the core head, from history"}
+docker compose exec api python -m alembic -c backend/app/db/alembic.ini downgrade <core revision id>
 ```
 
 **Not `modules@base`.** `modules_0001_rbac` is a child of the core revision
 `a7b8c9d0e1f2`, not an alembic base, and with a single tree root alembic cannot
-filter a downgrade by branch label: `downgrade modules@base` resolves to **35
-revisions** — the whole core chain to base — and drops every table in the
-schema.
+filter a downgrade by branch label: `downgrade modules@base` resolves to **the
+whole core chain** to base, and drops every table in the schema.
 
 Each modules revision downgrades only the objects its own `upgrade()` created
 (it marks them with a PostgreSQL COMMENT as it goes). On a database whose
@@ -338,9 +309,9 @@ every experiment's stored correction method and confidence level, and the
 `upgrade heads` after it puts back the defaults (Benjamini-Hochberg, 0.95), not
 the choices that were stored.
 
-```bash
-python -m alembic -c backend/app/db/alembic.ini downgrade a89544fb1075
-python -m alembic -c backend/app/db/alembic.ini upgrade heads
+```{.bash skip reason="destructive: steps the schema back a revision before running it again"}
+docker compose exec api python -m alembic -c backend/app/db/alembic.ini downgrade a89544fb1075
+docker compose exec api python -m alembic -c backend/app/db/alembic.ini upgrade heads
 ```
 
 On AWS these are two runs of the Database Migration workflow: direction
@@ -423,8 +394,8 @@ To go on, either remove the members first (`POST
 /api/v1/segments/{id}/members/remove`), or, once someone has agreed to lose
 them, run the same downgrade with the override:
 
-```bash
-python -m alembic -c backend/app/db/alembic.ini -x allow_member_loss=true downgrade d29a479daafe
+```{.bash skip reason="destructive: drops every id-list segment's members"}
+docker compose exec api python -m alembic -c backend/app/db/alembic.ini -x allow_member_loss=true downgrade d29a479daafe
 ```
 
 The Database Migration workflow does not pass `-x`, so on AWS it stops at this
@@ -432,14 +403,14 @@ revision while any id list has members.
 
 Roll back to a specific revision:
 
-```bash
-python -m alembic -c backend/app/db/alembic.ini downgrade ab1234567890
+```{.bash skip reason="fragment: <revision> is a revision ID from history"}
+docker compose exec api python -m alembic -c backend/app/db/alembic.ini downgrade <revision>
 ```
 
 Roll back all migrations (to the empty database state):
 
-```bash
-python -m alembic -c backend/app/db/alembic.ini downgrade base
+```{.bash skip reason="destructive: drops every table in the schema"}
+docker compose exec api python -m alembic -c backend/app/db/alembic.ini downgrade base
 ```
 
 **Note**: Not all migrations are safely reversible. If a migration deletes a column, the downgrade drops data. Review the `downgrade()` function in each migration file before rolling back in production. A migration that rewrites data may not be able to undo it at all: see [`1ab99332f0ba` rewrites stored event times to UTC](#1ab99332f0ba-rewrites-stored-event-times-to-utc).
@@ -456,14 +427,14 @@ The `stamp` command marks a migration as applied without actually running its SQ
 
 Mark current database state as "head":
 
-```bash
-python -m alembic -c backend/app/db/alembic.ini stamp heads
+```{.bash skip reason="destructive: records revisions as applied without running them"}
+docker compose exec api python -m alembic -c backend/app/db/alembic.ini stamp heads
 ```
 
 Mark as a specific revision:
 
-```bash
-python -m alembic -c backend/app/db/alembic.ini stamp ab1234567890
+```{.bash skip reason="fragment: <revision> is a revision ID from history"}
+docker compose exec api python -m alembic -c backend/app/db/alembic.ini stamp <revision>
 ```
 
 ---
@@ -472,19 +443,21 @@ python -m alembic -c backend/app/db/alembic.ini stamp ab1234567890
 
 If two developers create migrations from the same base revision, Alembic ends up with two "heads" (two branches in the migration graph). This error looks like:
 
-```
+```text
 FAILED: Multiple head revisions are present for given argument 'head'
 ```
 
 ### Diagnosis
 
-```bash
-python -m alembic -c backend/app/db/alembic.ini heads
+```{.bash exec}
+docker compose exec api python -m alembic -c backend/app/db/alembic.ini heads
 ```
+<!-- expect: (head) -->
 
-Output:
+A release image prints its core head, and a full image the `modules` head too,
+labelled `(modules)`. Two unlabelled heads look like this:
 
-```
+```text
 ab1234567890 (head)
 cd1234567890 (head)
 ```
@@ -493,30 +466,34 @@ cd1234567890 (head)
 
 The `modules` branch is *not* one of these: it is two heads on purpose, and
 `alembic heads` labels it. Never merge it. For two core revisions cut from the
-same parent, create a merge migration that unifies them:
+same parent, create a merge migration that unifies them. That is a fix in a
+checkout, committed and released, not a command against a deployment:
 
-```bash
+```{.bash skip reason="dev: writes a merge revision into a development checkout"}
 python -m alembic -c backend/app/db/alembic.ini merge -m "merge heads" ab1234567890 cd1234567890
 ```
 
-This creates a new migration file with both revisions as its `down_revision`. The merge migration itself has no SQL operations — it exists only to reunify the graph. Apply it normally:
+This creates a new migration file with both revisions as its `down_revision`. The merge migration itself has no SQL operations — it exists only to reunify the graph. Once the release that carries it is running, apply it normally:
 
-```bash
-python -m alembic -c backend/app/db/alembic.ini upgrade heads
+```{.bash exec}
+docker compose exec api python -m alembic -c backend/app/db/alembic.ini upgrade heads
 ```
 
 ---
 
 ## Environment Variables
 
-The following environment variables must be set before running any Alembic commands:
+Alembic and the bootstrap connect with these settings. In the API container they
+are already set, by the compose file (the values below are its defaults), the
+Helm chart or the task definition; set them yourself only when you run alembic
+somewhere else:
 
-| Variable | Example | Description |
+| Variable | Compose default | Description |
 |----------|---------|-------------|
-| `POSTGRES_SERVER` | `localhost` | Database host |
+| `POSTGRES_SERVER` | `postgres` | Database host (the compose service; `localhost` from the host) |
 | `POSTGRES_PORT` | `5432` | Database port |
 | `POSTGRES_USER` | `postgres` | Database username |
-| `POSTGRES_PASSWORD` | `your-password` | Database password |
+| `POSTGRES_PASSWORD` | `postgres` | Database password; set your own outside a local trial |
 | `POSTGRES_DB` | `experimentation` | Database name |
 | `POSTGRES_SCHEMA` | `experimentation` | PostgreSQL schema name |
 
@@ -555,23 +532,41 @@ UTC whatever the zone.
 
 ## Running Migrations in Production
 
-In production (ECS Fargate), migrations are run as a one-off ECS task before the new application version is deployed:
+In production (ECS Fargate), migrations run as a one-off ECS task of the family
+`experimentation-migrate-<env>`, before the new application version takes any
+traffic. You do not normally run it yourself: the Deploy workflow runs it, and
+the Database Migration workflow (`.github/workflows/db-migrate.yml`, Actions ›
+Database Migration) runs an `upgrade` or a `downgrade` to a target you name, after
+taking a snapshot. Both run it the same way:
 
-Run as a one-off ECS task:
+1. register a new revision of `experimentation-migrate-<env>` whose `backend`
+   container runs the image being deployed (the Database Migration workflow: the
+   image the API is serving), named by its digest
+   (`scripts/register_task_definition.sh`);
+2. run **that revision's ARN**, never the bare family, which resolves to
+   whichever revision registered last, wait for it to stop, and print its log
+   (`scripts/run_migration_task.sh`).
 
-```bash
-aws ecs run-task \
-  --cluster experimentation-<env> \
-  --task-definition experimentation-migrate-<env> \
-  --overrides '{"containerOverrides":[{"name":"backend","command":["python","-m","alembic","-c","backend/app/db/alembic.ini","upgrade","heads"]}]}' \
-  --launch-type FARGATE \
-  --network-configuration "awsvpcConfiguration={subnets=[subnet-xxxx],securityGroups=[sg-xxxx]}"
-```
-
-The CDK deployment pipeline runs this task automatically before routing traffic to the new deployment. The exact command is
-`MIGRATION_COMMAND` in `infrastructure/cdk/stacks/migration_task_stack.py`; the
+The task's command is `MIGRATION_COMMAND` in
+`infrastructure/cdk/stacks/migration_task_stack.py`: the bootstrap, `python -m
+backend.app.db.bootstrap`, which creates the schema of an empty database and runs
+`upgrade heads` on one with tables. The Database Migration workflow overrides it
+with `python -m alembic -c backend/app/db/alembic.ini <direction> <target>`. The
 path is relative to the image's `WORKDIR /app`, under which `backend/Dockerfile`
 copies the repository layout unchanged.
+
+By hand, from a checkout with AWS credentials for the environment, the Deploy
+workflow's two steps are these. `IMAGE` is the image by digest
+(`<registry>/<repository>@sha256:<digest>`), and `NETWORK` the task's network
+configuration, from the Fargate stack's `TaskSubnets` and `TaskSecurityGroup`
+outputs:
+
+```{.bash skip reason="aws: registers and runs a task in your AWS account"}
+ARN=$(bash scripts/register_task_definition.sh experimentation-migrate-staging "$IMAGE")
+bash scripts/run_migration_task.sh experimentation-staging "$ARN" "$NETWORK" \
+  '{"containerOverrides":[{"name":"backend","command":["python","-m","backend.app.db.bootstrap"]}]}' \
+  /ecs/experimentation-migrate-staging
+```
 
 ---
 
@@ -608,8 +603,8 @@ untouched.
 The escape hatch, when you really do want the core image to own that database:
 take a backup, then from the core image
 
-```bash
-python -m alembic -c backend/app/db/alembic.ini stamp --purge heads
+```{.bash skip reason="destructive: replaces the database's recorded revisions"}
+docker compose exec api python -m alembic -c backend/app/db/alembic.ini stamp --purge heads
 ```
 
 `--purge` replaces the whole version table with this build's own heads, so the
@@ -772,9 +767,10 @@ database is exactly as the release you upgraded from left it.
 
 For each group, choose the account that keeps the address and retire the
 others. Do this with `psql`, using the API's `POSTGRES_*` settings. Under Docker
-Compose, from `deploy/compose/`:
+Compose, from `deploy/compose/` (or the repository root for the Quick Start
+stack), this opens it; it reads statements until you type `\q`:
 
-```bash
+```{.bash exec}
 docker compose exec postgres sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"'
 ```
 
