@@ -115,9 +115,11 @@ What an API answers can be kept for later steps and checked against an oracle
   the action itself: every user assigned the variant the documented hash
   gives, every event accepted.
 * ``expect.computed`` on an api step: the number at each JSON path equals an
-  oracle's within a relative tolerance ``rel``. ``expect.cells`` on a screen
-  step: the cell of a table's column, in the row that has a cell reading
-  ``row``, shows an oracle's number at the precision it is shown.
+  oracle's within a relative tolerance ``rel`` (``rel: 0``, exactly).
+  ``expect.cells`` on a screen step: the cell of a table's column, in the row
+  that has a cell reading ``row``, shows an oracle's number at the precision
+  it is shown. ``expect.number`` does the same for the one element of a role
+  and name, once its text has stopped changing.
 """
 
 from __future__ import annotations
@@ -475,10 +477,14 @@ class NumberExpect(_Strict):
 
 
 class Computed(_Strict):
-    """A number in an API answer equals an oracle's, within ``rel`` of it."""
+    """A number in an API answer equals an oracle's, within ``rel`` of it.
+
+    ``rel: 0`` is equality: an oracle that gives a whole number (a sample
+    size) is met by that number and by no neighbour.
+    """
 
     oracle: Oracle
-    rel: StrictFloat = Field(gt=0, le=0.01)
+    rel: StrictFloat = Field(ge=0, le=0.01)
 
 
 class Cell(_Quoted):

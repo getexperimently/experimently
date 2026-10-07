@@ -1,0 +1,404 @@
+# Statistical Power Analysis (#939; QA plan D2): the dashboard's Power
+# Calculator and POST /api/v1/power/sample-size, each held to the number of
+# users per variant the guide's formula gives.
+#
+# The oracle (oracles.py, sample_size_proportions) is the guide's formula
+# ("The Formula": Fleiss, the null's variance pooled, the alternative's
+# unpooled, two-sided, p2 = baseline + baseline * MDE, Bonferroni over the
+# comparisons with the control) as statsmodels computes it, rounded up to a
+# whole user; it imports nothing from the product. The same six inputs go to
+# the calculator and to the API, and both must give the oracle's whole number
+# exactly (on the page at the precision shown, which for a whole number is the
+# number; on the API with rel: 0):
+#
+#   baseline  MDE   alpha  power  variants   n by the formula   users
+#   0.05      10%   0.05   0.80   2           31,233.438         31,234  (the guide's example)
+#   0.05      10%   0.01   0.90   2           59,210.049         59,211
+#   0.20       5%   0.05   0.90   2           34,246.868         34,247
+#   0.10      20%   0.01   0.80   3            6,515.023          6,516  (Bonferroni, 2 comparisons)
+#   0.30      15%   0.05   0.80   4            2,257.834          2,258  (Bonferroni, 3 comparisons)
+#   0.01       1%   0.05   0.80   2       15,617,695.792     15,617,696  (the page's smallest inputs)
+#
+# Three of the fractional parts are below one half, so a calculator that
+# rounded to the nearest user would show 31,233, 59,210 and 6,515: those
+# inputs hold the guide's "rounded up to a whole user". A one-sided alpha, a z
+# for the power rounded to two places, no Bonferroni correction, the pooled
+# formula or Cohen's h each give another whole number on at least one input
+# (backend/tests/unit/docs/test_docs_journey_power.py).
+#
+# The API alone also answers a mean (metric_type: mean; the calculator plans a
+# conversion rate only), held to statsmodels' NormalIndPower, and a mean whose
+# standard deviation leaves floating-point range, which the guide says answers
+# 422 with a fixed sentence rather than a number.
+#
+# Recorded when the run records: nothing here signs in or keeps a value.
+guide: statistics/power-analysis.md
+stack: compose-dev
+profile: core
+video: true
+written: 2026-10-06
+steps:
+  # -- The calculator, without signing in: the guide's example --------------
+  - id: calculator
+    doc: the-power-calculator-in-the-dashboard
+    do:
+      open: http://localhost:3000/power-calculator
+    expect:
+      status: 200
+      number:
+        locator: {role: status, name: Sample Size per Variant}
+        oracle:
+          name: sample_size_proportions
+          args: {baseline_rate: 0.05, minimum_detectable_effect: 0.1, alpha: 0.05, power: 0.8, n_variants: 2}
+      aria: |
+        - banner:
+          - link "Sign in"
+        - main:
+          - heading "Pre-Experiment Power Calculator" [level=1]
+          - slider "Baseline Conversion Rate": "0.05"
+          - slider "Minimum Detectable Effect (relative)": "0.1"
+          - combobox "Significance Level (alpha)":
+            - option "0.05 (95% confidence)" [selected]
+          - combobox "Statistical Power":
+            - option "0.80 (80%) — recommended" [selected]
+          - combobox "Number of Variants (including control)":
+            - option "2 (A/B test)" [selected]
+    fail: the calculator does not open without signing in, or its sample size is not the formula's for the guide's example
+
+  # -- alpha 0.01, power 0.90 ---------------------------------------------------
+  - id: alpha-one-percent
+    doc: the-power-calculator-in-the-dashboard
+    do:
+      select: {label: Significance Level (alpha), option: 0.01 (99% confidence)}
+    expect:
+      aria: |
+        - combobox "Significance Level (alpha)":
+          - option "0.01 (99% confidence)" [selected]
+    fail: the significance level cannot be set to 0.01
+  - id: power-ninety
+    doc: the-power-calculator-in-the-dashboard
+    do:
+      select: {label: Statistical Power, option: 0.90 (90%)}
+    expect:
+      number:
+        locator: {role: status, name: Sample Size per Variant}
+        oracle:
+          name: sample_size_proportions
+          args: {baseline_rate: 0.05, minimum_detectable_effect: 0.1, alpha: 0.01, power: 0.9, n_variants: 2}
+      aria: |
+        - combobox "Statistical Power":
+          - option "0.90 (90%)" [selected]
+    fail: at alpha 0.01 and 90% power the sample size is not the formula's
+
+  # -- baseline 20%, MDE 5%, alpha 0.05, power 0.90 ---------------------------
+  - id: baseline-twenty
+    doc: the-power-calculator-in-the-dashboard
+    do:
+      fill: {label: Baseline Conversion Rate, value: "0.2"}
+    expect:
+      aria: |
+        - slider "Baseline Conversion Rate": "0.2"
+    fail: the baseline slider cannot be set to 20%
+  - id: effect-five
+    doc: the-power-calculator-in-the-dashboard
+    do:
+      fill: {label: Minimum Detectable Effect (relative), value: "0.05"}
+    expect:
+      number:
+        locator: {role: status, name: MDE (absolute)}
+        oracle:
+          name: absolute_effect
+          args: {baseline_rate: 0.2, minimum_detectable_effect: 0.05, points: true}
+      aria: |
+        - slider "Minimum Detectable Effect (relative)": "0.05"
+    fail: a 5% effect on a 20% baseline is not shown as 1 percentage point
+  - id: alpha-five-percent
+    doc: the-power-calculator-in-the-dashboard
+    do:
+      select: {label: Significance Level (alpha), option: 0.05 (95% confidence)}
+    expect:
+      number:
+        locator: {role: status, name: Sample Size per Variant}
+        oracle:
+          name: sample_size_proportions
+          args: {baseline_rate: 0.2, minimum_detectable_effect: 0.05, alpha: 0.05, power: 0.9, n_variants: 2}
+      aria: |
+        - combobox "Significance Level (alpha)":
+          - option "0.05 (95% confidence)" [selected]
+    fail: at a 20% baseline, a 5% effect and 90% power the sample size is not the formula's
+
+  # -- baseline 10%, MDE 20%, alpha 0.01, power 0.80, three variants ---------
+  - id: baseline-ten
+    doc: the-power-calculator-in-the-dashboard
+    do:
+      fill: {label: Baseline Conversion Rate, value: "0.1"}
+    expect:
+      aria: |
+        - slider "Baseline Conversion Rate": "0.1"
+    fail: the baseline slider cannot be set to 10%
+  - id: effect-twenty
+    doc: the-power-calculator-in-the-dashboard
+    do:
+      fill: {label: Minimum Detectable Effect (relative), value: "0.2"}
+    expect:
+      number:
+        locator: {role: status, name: MDE (absolute)}
+        oracle:
+          name: absolute_effect
+          args: {baseline_rate: 0.1, minimum_detectable_effect: 0.2, points: true}
+      aria: |
+        - slider "Minimum Detectable Effect (relative)": "0.2"
+    fail: a 20% effect on a 10% baseline is not shown as 2 percentage points
+  - id: alpha-one-percent-again
+    doc: the-power-calculator-in-the-dashboard
+    do:
+      select: {label: Significance Level (alpha), option: 0.01 (99% confidence)}
+    expect:
+      aria: |
+        - combobox "Significance Level (alpha)":
+          - option "0.01 (99% confidence)" [selected]
+    fail: the significance level cannot be set back to 0.01
+  - id: power-eighty
+    doc: the-power-calculator-in-the-dashboard
+    do:
+      select: {label: Statistical Power, option: 0.80 (80%) — recommended}
+    expect:
+      aria: |
+        - combobox "Statistical Power":
+          - option "0.80 (80%) — recommended" [selected]
+    fail: the power cannot be set back to 80%
+  - id: three-variants
+    doc: multi-variant-experiments
+    do:
+      select: {label: Number of Variants (including control), option: 3 (A/B/C test)}
+    expect:
+      number:
+        locator: {role: status, name: Sample Size per Variant}
+        oracle:
+          name: sample_size_proportions
+          args: {baseline_rate: 0.1, minimum_detectable_effect: 0.2, alpha: 0.01, power: 0.8, n_variants: 3}
+      aria: |
+        - combobox "Number of Variants (including control)":
+          - option "3 (A/B/C test)" [selected]
+        - paragraph: Bonferroni correction applied for 2 comparisons.
+    fail: with three variants the sample size is not the formula's at alpha divided by two comparisons
+
+  # -- baseline 30%, MDE 15%, alpha 0.05, power 0.80, four variants ----------
+  - id: baseline-thirty
+    doc: the-power-calculator-in-the-dashboard
+    do:
+      fill: {label: Baseline Conversion Rate, value: "0.3"}
+    expect:
+      aria: |
+        - slider "Baseline Conversion Rate": "0.3"
+    fail: the baseline slider cannot be set to 30%
+  - id: effect-fifteen
+    doc: the-power-calculator-in-the-dashboard
+    do:
+      fill: {label: Minimum Detectable Effect (relative), value: "0.15"}
+    expect:
+      number:
+        locator: {role: status, name: MDE (absolute)}
+        oracle:
+          name: absolute_effect
+          args: {baseline_rate: 0.3, minimum_detectable_effect: 0.15, points: true}
+      aria: |
+        - slider "Minimum Detectable Effect (relative)": "0.15"
+    fail: a 15% effect on a 30% baseline is not shown as 4.5 percentage points
+  - id: alpha-five-percent-again
+    doc: the-power-calculator-in-the-dashboard
+    do:
+      select: {label: Significance Level (alpha), option: 0.05 (95% confidence)}
+    expect:
+      aria: |
+        - combobox "Significance Level (alpha)":
+          - option "0.05 (95% confidence)" [selected]
+    fail: the significance level cannot be set back to 0.05
+  - id: four-variants
+    doc: multi-variant-experiments
+    do:
+      select: {label: Number of Variants (including control), option: 4 (A/B/C/D test)}
+    expect:
+      number:
+        locator: {role: status, name: Sample Size per Variant}
+        oracle:
+          name: sample_size_proportions
+          args: {baseline_rate: 0.3, minimum_detectable_effect: 0.15, alpha: 0.05, power: 0.8, n_variants: 4}
+      aria: |
+        - combobox "Number of Variants (including control)":
+          - option "4 (A/B/C/D test)" [selected]
+        - paragraph: Bonferroni correction applied for 3 comparisons.
+    fail: with four variants the sample size is not the formula's at alpha divided by three comparisons
+
+  # -- the page's smallest inputs: baseline 1%, MDE 1% ------------------------
+  - id: baseline-one
+    doc: 2-minimum-detectable-effect-mde
+    do:
+      fill: {label: Baseline Conversion Rate, value: "0.01"}
+    expect:
+      aria: |
+        - slider "Baseline Conversion Rate": "0.01"
+    fail: the baseline slider cannot be set to its smallest value, 1%
+  - id: effect-one
+    doc: 2-minimum-detectable-effect-mde
+    do:
+      fill: {label: Minimum Detectable Effect (relative), value: "0.01"}
+    expect:
+      number:
+        locator: {role: status, name: MDE (absolute)}
+        oracle:
+          name: absolute_effect
+          args: {baseline_rate: 0.01, minimum_detectable_effect: 0.01, points: true}
+      aria: |
+        - slider "Minimum Detectable Effect (relative)": "0.01"
+    fail: a 1% effect on a 1% baseline is not shown as 0.01 percentage points
+  - id: two-variants
+    doc: 2-minimum-detectable-effect-mde
+    do:
+      select: {label: Number of Variants (including control), option: 2 (A/B test)}
+    expect:
+      number:
+        locator: {role: status, name: Sample Size per Variant}
+        oracle:
+          name: sample_size_proportions
+          args: {baseline_rate: 0.01, minimum_detectable_effect: 0.01, alpha: 0.05, power: 0.8, n_variants: 2}
+      aria: |
+        - combobox "Number of Variants (including control)":
+          - option "2 (A/B test)" [selected]
+    fail: at the page's smallest baseline and effect the sample size is not the formula's (the guide warns it is very large)
+
+  # -- The API: the same six inputs ---------------------------------------------
+  - id: api-guides-example
+    doc: post-apiv1powersample-size
+    do:
+      api:
+        method: POST
+        path: /api/v1/power/sample-size
+        as: anonymous
+        body: {baseline_rate: 0.05, minimum_detectable_effect: 0.1, alpha: 0.05, power: 0.8, n_variants: 2, two_tailed: true, metric_type: proportion}
+    expect:
+      status: 200
+      computed:
+        per_variant:
+          oracle:
+            name: sample_size_proportions
+            args: {baseline_rate: 0.05, minimum_detectable_effect: 0.1, alpha: 0.05, power: 0.8, n_variants: 2}
+          rel: 0
+    fail: the API's sample size for the guide's example is not the formula's
+  - id: api-alpha-one-percent-power-ninety
+    doc: post-apiv1powersample-size
+    do:
+      api:
+        method: POST
+        path: /api/v1/power/sample-size
+        as: anonymous
+        body: {baseline_rate: 0.05, minimum_detectable_effect: 0.1, alpha: 0.01, power: 0.9, n_variants: 2, two_tailed: true, metric_type: proportion}
+    expect:
+      status: 200
+      computed:
+        per_variant:
+          oracle:
+            name: sample_size_proportions
+            args: {baseline_rate: 0.05, minimum_detectable_effect: 0.1, alpha: 0.01, power: 0.9, n_variants: 2}
+          rel: 0
+    fail: the API's sample size at alpha 0.01 and 90% power is not the formula's
+  - id: api-baseline-twenty
+    doc: post-apiv1powersample-size
+    do:
+      api:
+        method: POST
+        path: /api/v1/power/sample-size
+        as: anonymous
+        body: {baseline_rate: 0.2, minimum_detectable_effect: 0.05, alpha: 0.05, power: 0.9, n_variants: 2, two_tailed: true, metric_type: proportion}
+    expect:
+      status: 200
+      computed:
+        per_variant:
+          oracle:
+            name: sample_size_proportions
+            args: {baseline_rate: 0.2, minimum_detectable_effect: 0.05, alpha: 0.05, power: 0.9, n_variants: 2}
+          rel: 0
+    fail: the API's sample size at a 20% baseline, a 5% effect and 90% power is not the formula's
+  - id: api-three-variants
+    doc: multi-variant-experiments
+    do:
+      api:
+        method: POST
+        path: /api/v1/power/sample-size
+        as: anonymous
+        body: {baseline_rate: 0.1, minimum_detectable_effect: 0.2, alpha: 0.01, power: 0.8, n_variants: 3, two_tailed: true, metric_type: proportion}
+    expect:
+      status: 200
+      computed:
+        per_variant:
+          oracle:
+            name: sample_size_proportions
+            args: {baseline_rate: 0.1, minimum_detectable_effect: 0.2, alpha: 0.01, power: 0.8, n_variants: 3}
+          rel: 0
+    fail: the API's sample size with three variants is not the formula's at alpha divided by two comparisons
+  - id: api-four-variants
+    doc: multi-variant-experiments
+    do:
+      api:
+        method: POST
+        path: /api/v1/power/sample-size
+        as: anonymous
+        body: {baseline_rate: 0.3, minimum_detectable_effect: 0.15, alpha: 0.05, power: 0.8, n_variants: 4, two_tailed: true, metric_type: proportion}
+    expect:
+      status: 200
+      computed:
+        per_variant:
+          oracle:
+            name: sample_size_proportions
+            args: {baseline_rate: 0.3, minimum_detectable_effect: 0.15, alpha: 0.05, power: 0.8, n_variants: 4}
+          rel: 0
+    fail: the API's sample size with four variants is not the formula's at alpha divided by three comparisons
+  - id: api-smallest-inputs
+    doc: post-apiv1powersample-size
+    do:
+      api:
+        method: POST
+        path: /api/v1/power/sample-size
+        as: anonymous
+        body: {baseline_rate: 0.01, minimum_detectable_effect: 0.01, alpha: 0.05, power: 0.8, n_variants: 2, two_tailed: true, metric_type: proportion}
+    expect:
+      status: 200
+      computed:
+        per_variant:
+          oracle:
+            name: sample_size_proportions
+            args: {baseline_rate: 0.01, minimum_detectable_effect: 0.01, alpha: 0.05, power: 0.8, n_variants: 2}
+          rel: 0
+    fail: the API's sample size at a 1% baseline and a 1% effect is not the formula's
+
+  # -- The API alone: a mean, and a mean out of range --------------------------
+  - id: api-mean
+    doc: post-apiv1powersample-size
+    do:
+      api:
+        method: POST
+        path: /api/v1/power/sample-size
+        as: anonymous
+        body: {baseline_rate: 0.2, minimum_detectable_effect: 0.1, alpha: 0.05, power: 0.8, n_variants: 2, two_tailed: true, metric_type: mean, baseline_std: 0.1}
+    expect:
+      status: 200
+      computed:
+        per_variant:
+          oracle:
+            name: sample_size_means
+            args: {baseline_rate: 0.2, minimum_detectable_effect: 0.1, baseline_std: 0.1, alpha: 0.05, power: 0.8, n_variants: 2}
+          rel: 0
+    fail: the API's sample size for a mean is not the z-test's
+  - id: api-mean-out-of-range
+    doc: rest-api-reference
+    do:
+      api:
+        method: POST
+        path: /api/v1/power/sample-size
+        as: anonymous
+        body: {baseline_rate: 0.2, minimum_detectable_effect: 0.1, alpha: 0.05, power: 0.8, n_variants: 2, two_tailed: true, metric_type: mean, baseline_std: 1.0e+200}
+    expect:
+      status: 422
+      json:
+        detail: These values are too large or too small to calculate with. Use values nearer those of a real experiment.
+    fail: a mean whose standard deviation leaves floating-point range does not answer the guide's 422
