@@ -265,7 +265,7 @@ curl -X POST "http://localhost:8000/api/v1/users/" \
 - Admin endpoints: 50 requests per minute
 
 ### Request Size Limits
-- Maximum request body size: 1MB
+- Maximum request body size: 5 MiB (5,242,880 bytes); a larger body is answered `413`, with or without a `Content-Length` header
 - Maximum response size: 10MB
 
 ### Pagination
