@@ -594,11 +594,21 @@ def test_the_requests_file_holds_each_distinct_5xx_request(tmp_path):
     ]
 
 
+#: The application's own modules: a tree without them has no application to
+#: route with, and only then do the tests below skip.
+APP_MODULES = ("backend", "backend.app", "backend.app.main")
+
+
 def _real_app():
+    """The application, or a skip when this tree does not hold it. Any other
+    import error fails: these tests are what catches a FastAPI bump that
+    breaks the route resolution, and a skip would hide it."""
     try:
         from backend.app.main import app
-    except Exception as error:  # pragma: no cover - environment
-        pytest.skip(f"the application does not import here ({type(error).__name__})")
+    except ModuleNotFoundError as error:
+        if error.name in APP_MODULES:
+            pytest.skip(f"{error.name} is not installed in this tree")
+        raise
     return app
 
 
@@ -795,6 +805,10 @@ def _known(**fields: Any) -> str:
         (_known(issue=None), "either the issue or the cause"),
         (_known(cause="aws"), "either the issue or the cause"),
         (_known(issue=None, cause="network"), "cause must be"),
+        (_known(issue=None, cause="config", status=500), "needs an issue"),
+        (_known(issue=None, cause="config", status=502), "needs an issue"),
+        (_known(issue=None, cause="aws", status=503), "needs an issue"),
+        (_known(issue=None, cause="aws", status=504), "needs an issue"),
         (_known(issue=0), "public issue number"),
         (_known(issue="#955"), "public issue number"),
         (_known(reason="short"), "reason"),
@@ -809,6 +823,16 @@ def test_the_known_list_refuses_for_every_pass(tmp_path, text, message):
     for pass_name in fuzz_check.PASSES:
         with pytest.raises(fuzz_check.ListError, match=message):
             fuzz_check.load_known(path, pass_name, OPERATIONS)
+
+
+@pytest.mark.parametrize(("cause", "status"), [("aws", 500), ("config", 503)])
+def test_a_cause_lists_its_own_status(tmp_path, cause, status):
+    """An aws call to the closed port fails as 500, and a missing setting is
+    answered 503; those are the only statuses a cause may list."""
+    text = _known(issue=None, cause=cause, status=status)
+    assert fuzz_check.load_known(
+        _write(tmp_path / "k.toml", text), "viewer", OPERATIONS
+    ) == {("GET /api/v1/items", status)}
 
 
 def test_a_known_entry_may_name_a_route_its_pass_does_not_select(tmp_path):

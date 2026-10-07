@@ -23,9 +23,10 @@ name: API fuzzing
 #
 # THE SEED. Both lists hold for the seed they were built from, 20261006
 # (LISTS_SEED in scripts/fuzz_check.py). Schemathesis runs with
-# --generation-deterministic, so at one commit that seed sends the same
-# requests every night, and the lists cannot flap from one night to the next:
-# a change in them is a change in the API or in the fuzzer's pins. The
+# --generation-deterministic, so at one commit that seed is meant to send the
+# same requests every night, and the lists are meant not to flap from one
+# night to the next: a change in them should be a change in the API or in the
+# fuzzer's pins (every run measured so far was on one UTC day). The
 # scheduled run always uses it, and so does a dispatch unless it names
 # another; another seed changes the fuzzing phase's requests, so its list
 # differences are not, by themselves, API changes.

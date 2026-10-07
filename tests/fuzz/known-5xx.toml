@@ -22,6 +22,13 @@
 # and a one-line reason. Entries are kept per pass and in the order of the
 # document's paths.
 #
+# An entry covers every cause of its status on its route: a second bug there
+# that answers the same status is not reported. When one route and status
+# carry two issues, the entry cites the second in its reason (a duplicate
+# holdout name, #1019, beside #957). A pull request that fixes a cited issue
+# removes its entries, unless the reason names another open issue for the
+# same key; the stale refusal then says when the last one is fixed.
+#
 # The list holds for the seed it was built from, 20261006, which the nightly
 # run always uses (fuzz.yml). It was built from the workflow's own stack: a
 # local reproduction of _platform.yml's fuzz arm at that seed, then confirmed
@@ -125,7 +132,7 @@ pass = "superuser"
 operation = "POST /api/v1/holdout"
 status = 500
 issue = 957
-reason = "A field of the wrong type reaches the handler before validation."
+reason = "A field of the wrong type reaches the handler before validation; a duplicate name (#1019) answers the same."
 
 [[known]]
 pass = "superuser"
@@ -302,7 +309,7 @@ pass = "viewer"
 operation = "POST /api/v1/holdout"
 status = 500
 issue = 957
-reason = "A field of the wrong type reaches the handler before validation."
+reason = "A field of the wrong type reaches the handler before validation; a duplicate name (#1019) answers the same."
 
 [[known]]
 pass = "viewer"

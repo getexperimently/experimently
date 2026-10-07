@@ -594,23 +594,68 @@ def test_the_post_step_opens_then_comments_on_the_issue_it_opened(tmp_path):
 # ---------------------------------------------------------------------------
 
 
+#: The decide step reads these from fetch-metadata, exactly; a renamed
+#: output would hand the script an empty value and the rule below would never
+#: see /tests/fuzz.
+AUTOMERGE_DECIDE_ENV = {
+    "UPDATE_TYPE": "${{ steps.meta.outputs.update-type }}",
+    "ECOSYSTEM": "${{ steps.meta.outputs.package-ecosystem }}",
+    "DIRECTORY": "${{ steps.meta.outputs.directory }}",
+}
+
+
+def _decide_step(doc=None) -> Dict[str, Any]:
+    doc = doc or _load(AUTOMERGE)
+    return next(s for s in doc["jobs"]["automerge"]["steps"] if s.get("id") == "decide")
+
+
 def _decide_script() -> str:
-    doc = _load(AUTOMERGE)
-    step = next(s for s in doc["jobs"]["automerge"]["steps"] if s.get("id") == "decide")
-    return step["run"]
+    return _decide_step()["run"]
+
+
+def automerge_problems(doc: Dict[str, Any]) -> List[str]:
+    step = _decide_step(doc)
+    if step.get("env") != AUTOMERGE_DECIDE_ENV:
+        return [
+            f"the decide step's env is {step.get('env')}, not {AUTOMERGE_DECIDE_ENV}"
+        ]
+    return []
+
+
+def test_the_decide_step_reads_the_update_s_directory():
+    assert automerge_problems(_load(AUTOMERGE)) == []
+
+
+@pytest.mark.parametrize(
+    "name, value",
+    [
+        ("DIRECTORY", "${{ steps.meta.outputs.directories }}"),
+        ("DIRECTORY", "${{ steps.metadata.outputs.directory }}"),
+        ("ECOSYSTEM", "${{ steps.meta.outputs.ecosystem }}"),
+    ],
+)
+def test_a_renamed_metadata_output_is_caught(name, value):
+    doc = copy.deepcopy(_load(AUTOMERGE))
+    _decide_step(doc)["env"][name] = value
+    assert any(name in problem for problem in automerge_problems(doc))
 
 
 @pytest.mark.skipif(shutil.which("bash") is None, reason="bash is not installed")
 @pytest.mark.parametrize(
-    ("directory", "update", "merges"),
+    ("ecosystem", "directory", "update", "merges"),
     [
-        ("/tests/fuzz", "version-update:semver-patch", "no"),
-        ("/tests/fuzz", "version-update:semver-minor", "no"),
-        ("/backend", "version-update:semver-minor", "yes"),
-        ("/", "version-update:semver-major", "no"),
+        ("pip", "/tests/fuzz", "version-update:semver-patch", "no"),
+        ("pip", "/tests/fuzz", "version-update:semver-minor", "no"),
+        ("pip", "/backend", "version-update:semver-minor", "yes"),
+        ("pip", "/", "version-update:semver-major", "no"),
+        # no directory came through: it may be the fuzzer's, so it waits
+        ("pip", "", "version-update:semver-patch", "no"),
+        ("npm_and_yarn", "", "version-update:semver-patch", "yes"),
     ],
 )
-def test_a_fuzz_pin_bump_is_left_for_a_human(tmp_path, directory, update, merges):
+def test_a_fuzz_pin_bump_is_left_for_a_human(
+    tmp_path, ecosystem, directory, update, merges
+):
     output = tmp_path / "out"
     result = subprocess.run(
         ["bash", "-c", _decide_script()],
@@ -618,7 +663,7 @@ def test_a_fuzz_pin_bump_is_left_for_a_human(tmp_path, directory, update, merges
             "PATH": "/usr/bin:/bin",
             "GITHUB_OUTPUT": str(output),
             "UPDATE_TYPE": update,
-            "ECOSYSTEM": "pip",
+            "ECOSYSTEM": ecosystem,
             "DIRECTORY": directory,
         },
         capture_output=True,

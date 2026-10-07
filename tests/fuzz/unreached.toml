@@ -1100,7 +1100,7 @@ reason = "A VIEWER may not change counters (403); the other requests fail valida
 [[unreached]]
 pass = "viewer"
 operation = "POST /api/v1/counters/bulk"
-reason = "A VIEWER may not read counters in bulk (403); the other requests fail validation (400, 422)."
+reason = "A VIEWER may not change counters (403); the other requests fail validation (422)."
 
 [[unreached]]
 pass = "viewer"

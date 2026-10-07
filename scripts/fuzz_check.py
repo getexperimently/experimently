@@ -121,10 +121,12 @@ SDK_PATH_REGEX = "^(?:" + "|".join(re.escape(p) for p in SDK_PATH_PREFIXES) + ")
 #: was not reached.
 NOT_REACHED = frozenset({400, 401, 403, 404, 405, 422, 429})
 
-#: A known-5xx entry names a public issue, or one of these causes: ``aws``,
-#: an AWS call the stack points at a closed port; ``config``, a setting the
-#: stack deliberately leaves unset, which the route answers with 503.
-KNOWN_CAUSES = ("aws", "config")
+#: A known-5xx entry names a public issue, or one of these causes, each with
+#: the one status it may list: ``aws``, an AWS call the stack points at a
+#: closed port, which fails as 500; ``config``, a setting the stack
+#: deliberately leaves unset, which the route answers with 503. Any other
+#: status of such a route is a defect, and needs an issue.
+KNOWN_CAUSES = {"aws": 500, "config": 503}
 
 HTTP_METHODS = ("get", "put", "post", "delete", "options", "head", "patch", "trace")
 LABEL = re.compile(r"(GET|PUT|POST|DELETE|OPTIONS|HEAD|PATCH|TRACE) /\S*")
@@ -304,7 +306,8 @@ def load_known(
     An entry names its pass, the operation of the route that ANSWERED (any
     operation of the document: a probe can be answered by a route the pass
     does not select), a 5xx status, and either the public issue that tracks it
-    or a cause from ``KNOWN_CAUSES``, with a one-line reason. Every entry of
+    or a cause from ``KNOWN_CAUSES`` (only at that cause's status), with a
+    one-line reason. Every entry of
     every pass is checked, so a broken entry fails all three passes."""
     name = path.name
     listed: Dict[str, Set[Known]] = {p: set() for p in PASSES}
@@ -334,7 +337,12 @@ def load_known(
         ):
             raise ListError(f"{where}: issue must be a public issue number")
         if cause is not None and cause not in KNOWN_CAUSES:
-            raise ListError(f"{where}: cause must be one of {KNOWN_CAUSES}")
+            raise ListError(f"{where}: cause must be one of {sorted(KNOWN_CAUSES)}")
+        if cause is not None and status != KNOWN_CAUSES[cause]:
+            raise ListError(
+                f"{where}: cause {cause} lists only status {KNOWN_CAUSES[cause]};"
+                " any other status needs an issue"
+            )
         _reason(entry, where)
         key = (label, status)
         if key in listed[entry_pass]:

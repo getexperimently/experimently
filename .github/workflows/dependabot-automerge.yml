@@ -47,6 +47,9 @@ name: Dependabot auto-merge
 #                                    fuzzer. Someone dispatches fuzz.yml on
 #                                    the branch and rebuilds a list that
 #                                    moved, in the same pull request.
+#                                    A pip update whose directory came
+#                                    through empty is left too: it may be
+#                                    one of these.
 #
 # SECURITY SHAPE
 #
@@ -97,8 +100,10 @@ jobs:
               if [ "$ECOSYSTEM" = "github_actions" ]; then ok=yes; else ok=no; fi ;;
             *) ok=no ;;
           esac
-          # The fuzzer's pins -- see the header.
+          # The fuzzer's pins -- see the header. A pip update with no
+          # directory could be one of them, so it is left too.
           if [ "$DIRECTORY" = "/tests/fuzz" ]; then ok=no; fi
+          if [ "$ECOSYSTEM" = "pip" ] && [ -z "$DIRECTORY" ]; then ok=no; fi
           echo "ok=$ok" >> "$GITHUB_OUTPUT"
           echo "$ECOSYSTEM / $UPDATE_TYPE -> auto-merge: $ok"
 
