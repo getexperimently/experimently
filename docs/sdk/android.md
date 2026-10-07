@@ -20,11 +20,6 @@ the SDK caches the answer per user + key. Nothing is bucketed locally.
 
 Source: `sdk/android` (module `sdk/android/sdk`, Compose example in `sdk/android/examples`).
 
-> **Not executed here.** No gradle / Android SDK is installed on the development machine, so the
-> rewire onto the public API was reviewed line by line but the module has not been compiled and
-> its unit tests have not been run. Android has no contract smoke (it needs a device runtime) and
-> no entry in the live runner manifest `tests/sdk-contract/live/run_live_contract.py`.
-
 ---
 
 ## Requirements
@@ -394,9 +389,9 @@ encoding, `user_id` query, headers, JSON body), response mapping, sticky cache h
 bodies, key-less fan-out, "nothing cached → no request", batch chunking at 100 and that `track`
 never throws. `HashCompatibilityTest` (22 tests) pins the golden vectors.
 
-Unit tests only (JUnit 5 + MockWebServer); no contract smoke (needs a device runtime). The live
-runner manifest in `tests/sdk-contract/live/run_live_contract.py` has no `android` entry.
+The contract smoke, `bash sdk/android/examples/contract_smoke.sh`, compiles the SDK's Kotlin
+sources for a plain JVM (`sdk/android/jvm`), so it needs no Android SDK and no emulator; the
+live runner runs it with `python tests/sdk-contract/live/run_live_contract.py --sdk android --strict`.
 
-Verified against a live backend: **not yet (toolchain unavailable — no gradle/Android SDK on the
-development machine)**. The unit tests have not been executed on this machine either; the code
-was reviewed by inspection only.
+CI runs this SDK's contract smoke against a real API: `android` is in the `sdks:` list of the
+SDK Live Contract job in [pr-qa-gate.yml](https://github.com/getexperimently/experimently/blob/main/.github/workflows/pr-qa-gate.yml).

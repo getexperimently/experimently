@@ -207,34 +207,6 @@ aws cloudwatch put-metric-alarm \
 
 ---
 
-## Distributed Tracing (AWS X-Ray)
-
-The platform integrates with **AWS X-Ray** for distributed tracing across the API, Lambda functions, and DynamoDB calls.
-
-### Enabling X-Ray
-
-Set the environment variable:
-
-```bash
-AWS_XRAY_DAEMON_ADDRESS=xray-daemon:2000
-```
-
-The ECS task definition includes the X-Ray daemon as a sidecar container. Traces are automatically captured for:
-
-- All incoming HTTP requests
-- DynamoDB read and write operations
-- Lambda invocations
-- External HTTP calls (Slack, SendGrid, GitHub, Salesforce)
-
-### Viewing Traces
-
-1. Open the **AWS X-Ray Console**
-2. Navigate to **Traces** and filter by service name: `experimentation-api`
-3. Use the Service Map to visualize dependencies
-4. Click any trace to see the full execution timeline and identify bottlenecks
-
----
-
 ## Health Check
 
 The platform exposes a health check endpoint for load balancer and monitoring use:

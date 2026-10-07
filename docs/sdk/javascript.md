@@ -15,7 +15,8 @@ Source: `sdk/js`. For React apps use the [React SDK](react.md); for edge runtime
 [Edge SDK](edge.md); for the vendor-neutral API the [OpenFeature provider](openfeature.md), which
 delegates to this package.
 
-Verified against a live backend: **yes (2026-09-11)** via the contract smoke below.
+CI runs this SDK's contract smoke against a real API: `js` is in the `sdks:` list of the
+SDK Live Contract job in [pr-qa-gate.yml](https://github.com/getexperimently/experimently/blob/main/.github/workflows/pr-qa-gate.yml).
 
 ---
 

@@ -351,10 +351,8 @@ that line to stdout (on first run `dotnet run` may print restore/build messages 
 runner reads the last stdout line) and, on failure, one line to stderr with exit code 1. This is
 the command in `tests/sdk-contract/live/run_live_contract.py`.
 
-Verified against a live backend: **not yet (toolchain unavailable — no dotnet SDK on the development
-machine)**. The SDK, its tests and the smoke were reviewed by inspection only and were not compiled
-or executed here. Run `python tests/sdk-contract/live/run_live_contract.py --sdk dotnet --strict`
-on a machine with the .NET 6+ SDK.
+CI runs this SDK's contract smoke against a real API: `dotnet` is in the `sdks:` list of the
+SDK Live Contract job in [pr-qa-gate.yml](https://github.com/getexperimently/experimently/blob/main/.github/workflows/pr-qa-gate.yml).
 
 ---
 
