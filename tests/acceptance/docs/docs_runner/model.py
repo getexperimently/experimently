@@ -175,7 +175,10 @@ the page leaves to the reader; ``answers`` name the block's variables (or
 ``called.<stub>``) whose values must be the oracle's: the variant the
 documented assignment hash gives ``user``, and the flag answer the documented
 rollout hash gives at ``rollout`` percent. Its check is the action itself; an
-install that fails is FAIL, never NOT RUN.
+install that fails is FAIL, never NOT RUN. With ``language: go`` the install
+section's block is the page's ``go mod init`` and ``go get``, run in its order,
+the block is a complete program that prints one ``key=value`` line, and
+``answers`` name the keys of that line (no stubs, no paths).
 """
 
 from __future__ import annotations
@@ -525,7 +528,7 @@ class Answers(_Strict):
 class Sdk(_Strict):
     """Install an SDK as its page says and run its block (``sdk.py``)."""
 
-    language: Literal["typescript", "python"]
+    language: Literal["typescript", "python", "go"]
     #: The anchor of the section whose first shell block installs the package.
     install: StrictStr = Field(pattern=r"^[^#\s]+$")
     #: The anchor of the section whose first code block is run.
@@ -558,6 +561,21 @@ class Sdk(_Strict):
         twice = sorted({value for value in values if values.count(value) > 1})
         if twice:
             raise ValueError(f"replace puts {twice[0]} in place of two strings")
+        return self
+
+    @model_validator(mode="after")
+    def _a_go_block_answers_with_its_line(self) -> "Sdk":
+        if self.language != "go":
+            return self
+        if self.stubs:
+            raise ValueError("a go block is a complete program; it takes no stubs")
+        for _, expressions in self.answers.items():
+            for expression in expressions:
+                if "." in expression:
+                    raise ValueError(
+                        f"{expression}: a go block's answers are keys of the one"
+                        " key=value line it prints, not paths"
+                    )
         return self
 
     @model_validator(mode="after")

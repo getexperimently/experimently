@@ -160,8 +160,9 @@ class = "reference"
 reason = "not walked: the page says the package is not yet on npm; the SDK live contract (tests/sdk-contract/live/run_live_contract.py) runs the SDK against a live API in the PR QA Gate"
 
 [pages."sdk/go.md"]
-class = "reference"
-reason = "not walked: go get resolves to the head of main (a pseudo-version; the module has no tags; measured 2026-10-07: v0.0.0-20261007045802-d4853547fb9f), which is the source the SDK live contract (tests/sdk-contract/live/run_live_contract.py) runs against a live API in the PR QA Gate"
+class = "journey"
+journey = "sdk-go"
+reason = "the page's go mod init and go get, run as written in a fresh directory with the Go line its go.mod names (the module resolved is compared with this checkout's sdk/go), and its Quick Start program, run against the compose stack for two users: each variant and flag answer is the documented hashes', and each run adds exactly one conversion"
 
 [pages."sdk/ios.md"]
 class = "device"
@@ -585,9 +586,8 @@ note = "the table is held to the dashboard's source by a unit test; every exec p
 
 [[flow]]
 text = "the SDK quick starts"
-journeys = ["sdk-javascript", "sdk-python"]
+journeys = ["sdk-javascript", "sdk-python", "sdk-go"]
 pages = [
-    "sdk/go.md",
     "sdk/java.md",
     "sdk/react.md",
     "sdk/ios.md",
@@ -602,7 +602,7 @@ pages = [
     "sdk/elixir.md",
     "sdk/local-evaluation.md",
 ]
-note = "the JavaScript and Python quick starts are journeys, each package installed from its public registry as its page says; every other SDK page's class and reason say what verifies it"
+note = "the JavaScript, Python and Go quick starts are journeys, each package installed from its public registry or module proxy as its page says; every other SDK page's class and reason say what verifies it"
 
 [[flow]]
 text = "self-hosting guides where they can be rehearsed without AWS"
