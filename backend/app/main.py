@@ -30,6 +30,9 @@ from backend.app.middleware.rate_limiter import RateLimitMiddleware
 from backend.app.middleware.relative_redirect_middleware import (
     RelativeSlashRedirectMiddleware,
 )
+from backend.app.middleware.request_body_limit_middleware import (
+    RequestBodyLimitMiddleware,
+)
 from backend.app.middleware.security_middleware import SecurityHeadersMiddleware
 from backend.app.middleware.trusted_host_middleware import TrustedHostMiddleware
 from backend.app.middleware.unhandled_error_middleware import UnhandledErrorMiddleware
@@ -97,8 +100,12 @@ if settings.dev_auth_bypass_active:
         settings.ENVIRONMENT,
     )
 
-# Maximum request body size (1 MB) — prevents DoS via oversized payloads
-MAX_REQUEST_BODY_SIZE: int = 1_048_576  # 1 MB
+# The largest request body the API reads: 5 MiB. A larger one is answered 413
+# on every route (RequestBodyLimitMiddleware, registered below). It admits the
+# largest documented request, 10,000 segment member IDs of 255 characters
+# (2,590,009 bytes as JSON), and it equals the dashboard proxy's
+# `client_max_body_size 5m` (frontend/nginx.conf). A constant, not a setting.
+MAX_REQUEST_BODY_SIZE: int = 5 * 1024 * 1024
 
 
 class EnvironmentNotSet(RuntimeError):
@@ -221,10 +228,22 @@ for _level, _message in cors_start_up_messages(settings):
 # with none of them. Its position is asserted in test_unhandled_error_cors.py.
 app.add_middleware(UnhandledErrorMiddleware)
 
+# A request body larger than MAX_REQUEST_BODY_SIZE is answered 413, on every
+# route: at once when its Content-Length says so, otherwise when the bytes read
+# pass the limit. Registered directly after the error layer, so it is inside
+# CORS, the request id and the response headers layer, and its 413 carries
+# their headers like any other response. It must also stay inside every
+# BaseHTTPMiddleware layer: registered outside one, the route reading the body
+# is handed an ExceptionGroup instead of the HTTPException, and FastAPI answers
+# a chunked body over the limit with 400 (measured). No layer outside it reads
+# the body.
+app.add_middleware(RequestBodyLimitMiddleware, max_body_size=MAX_REQUEST_BODY_SIZE)
+
 # Trailing-slash redirects keep the client's own origin (#86). Registered
-# second, so it sits just outside the error layer above and sees the router's
-# redirect before anything else can act on it. (Starlette still inserts its own
-# ExceptionMiddleware between these and the router.)
+# next, so it sits just outside the two layers above (neither changes a
+# redirect) and sees the router's redirect before anything else can act on it.
+# (Starlette still inserts its own ExceptionMiddleware between these and the
+# router.)
 app.add_middleware(RelativeSlashRedirectMiddleware)
 
 # Rate limiter — disabled during tests to avoid interfering with test assertions

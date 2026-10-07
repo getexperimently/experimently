@@ -118,7 +118,7 @@ Not in that picture, because nothing deploys it:
 | Audit Logging | All CRUD + auth events logged | #9 | Active |
 | CORS Restriction | Explicit origin allowlist | #5 | Active |
 | Sensitive Data Masking | Headers + body fields in logs | #2 | Active |
-| Request Size Limits | 1 MB max body size | #5 | Active |
+| Request Size Limits | 5 MiB (5,242,880 bytes) max request body; larger is answered `413` | #5 | Active |
 | Dependency Scanning | Safety + Trivy + Semgrep in CI | #6 | Active |
 | Secret Detection | Gitleaks in CI + pre-commit | #2 | Active |
 

@@ -220,6 +220,10 @@ archive the flag, then archive the segment.
 | Who can change members | ADMIN and DEVELOPER (ANALYST and VIEWER get `403`) |
 | Segments per targeting ruleset | 10 |
 
+A request body is at most 5 MiB (5,242,880 bytes); a larger one is answered `413`. 10,000 IDs
+of 255 ASCII characters come to about 2.6 MB, but the ID limit counts characters, not bytes: with
+long non-ASCII IDs, send fewer per request.
+
 Each add or remove writes one `segment_update` entry to the audit log with the counts, never
 the IDs. A rules segment answers `409` on the member routes, and so does an archived one.
 

@@ -268,7 +268,7 @@ lists every route with its own limit. Over a limit the API answers `429` with a
 `Retry-After` header (see [Rate Limiting](#3-rate-limiting) below).
 
 ### Request Size Limits
-- Maximum request body size: 1MB
+- Maximum request body size: 5 MiB (5,242,880 bytes); a larger body is answered `413`, with or without a `Content-Length` header
 - Maximum response size: 10MB
 
 ### Pagination
