@@ -60,6 +60,19 @@ The probability of detecting a real effect. Standard is 0.80 (80%).
 
 ---
 
+## The Power Calculator in the dashboard
+
+The dashboard's Power Calculator is at `/power-calculator`: on the Docker Compose stack,
+http://localhost:3000/power-calculator. It needs no sign-in. Set **Baseline Conversion Rate**
+and **Minimum Detectable Effect (relative)** with their sliders, and choose
+**Significance Level (alpha)**, **Statistical Power** and
+**Number of Variants (including control)**. **Sample Size per Variant** then shows how many
+users each variant needs, by the formula below, with the Bonferroni correction of
+[Multi-Variant Experiments](#multi-variant-experiments) when there are more than two
+variants; **MDE (absolute)** shows the effect in percentage points.
+
+---
+
 ## The Formula
 
 For a two-proportions z-test (the standard for conversion rate experiments), the required sample size per variant is:
@@ -76,6 +89,8 @@ Where:
 - `p_bar` = (p1 + p2) / 2
 - `z_alpha` = `norm.ppf(1 - alpha/2)` for two-tailed (e.g. 1.96 for alpha=0.05)
 - `z_power` = `norm.ppf(power)` (e.g. 0.842 for power=0.80)
+
+The Power Calculator and `POST /api/v1/power/sample-size` give `n` rounded up to a whole user.
 
 This is the **Fleiss (2003)** formula, which is more accurate than the simpler pooled formula for small proportions.
 

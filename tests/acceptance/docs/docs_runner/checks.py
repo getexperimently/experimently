@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import json
 import re
-from typing import Any, List
+from typing import Any, Callable, List
 
 from docs_runner.model import SEARCH_TOP, Step
 from docs_runner.redaction import MIN_LENGTH
@@ -152,10 +152,13 @@ def describe_expect(step: Step) -> str:
     for path, value in (expect_.json_ or {}).items():
         parts.append(f"json {path} = {json.dumps(value)}")
     for path, computed in (expect_.computed or {}).items():
-        parts.append(
-            f"json {path} = {_oracle_call(computed.oracle)} within"
-            f" {computed.rel:g} of it"
-        )
+        if computed.rel == 0:
+            parts.append(f"json {path} = {_oracle_call(computed.oracle)} exactly")
+        else:
+            parts.append(
+                f"json {path} = {_oracle_call(computed.oracle)} within"
+                f" {computed.rel:g} of it"
+            )
     if expect_.number is not None:
         number = expect_.number
         parts.append(
@@ -222,6 +225,38 @@ def agrees(text: str, value: float) -> bool:
     places = shown_places(text)
     shown = parse_number(text)
     return abs(shown - value) <= 0.5 * 10.0 ** (-places) + 1e-12
+
+
+#: How many times a shown number may change while a step waits for it.
+MAX_CHANGES = 20
+
+
+def _agrees_or_not(text: str, value: float) -> bool:
+    try:
+        return agrees(text, value)
+    except StepFailed:
+        return False
+
+
+def settle(
+    read: Callable[[], str], changed: Callable[[str], bool], value: float
+) -> str:
+    """The text a shown number settles on: read again while it changes.
+
+    A page that recalculates after an input changes (the Power Calculator
+    waits 400 ms) still shows the old number, or none, right after the step.
+    So the text is read, and read again each time it changes, until it agrees
+    with *value* at the precision shown (``agrees``), or ``changed(text)``
+    reports that it stayed *text* for the whole timeout, or it has changed
+    ``MAX_CHANGES`` times. Returns the last text read; the caller compares
+    it, so a number that settles on a wrong value fails, after one timeout.
+    """
+    text = read()
+    for _ in range(MAX_CHANGES):
+        if _agrees_or_not(text, value) or not changed(text):
+            return text
+        text = read()
+    return text
 
 
 def within(seen: Any, wanted: float, rel: float) -> bool:

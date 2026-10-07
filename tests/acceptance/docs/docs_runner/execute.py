@@ -70,8 +70,8 @@ from docs_runner.checks import (
     describe_expect,
     json_at,
     one_line,
-    parse_number,
     same_json,
+    settle,
     within,
 )
 from docs_runner.guide import Guide
@@ -756,10 +756,16 @@ class JourneyRunner:
                     f" visible at {here()}"
                 ),
             )
-            shown = parse_number(element.inner_text())
-            oracle = ORACLES[number.oracle.name](**number.oracle.args)
-            if shown != oracle:
-                raise StepFailed(f"shows {shown:g}; the oracle gives {oracle:g}")
+            oracle = self._oracle(number.oracle)
+            text = settle(
+                element.inner_text, lambda seen: self._changes(element, seen), oracle
+            )
+            if not self._agrees(text, oracle):
+                raise StepFailed(
+                    f'{number.locator.role} "{number.locator.name}" shows'
+                    f" {one_line(text, 40)!r}; {number.oracle.name} gives {oracle:.6g}"
+                )
+            shown_number = f"{number.locator.name} {one_line(text, 40)}"
         if wanted.aria is not None:
             self._holds(
                 lambda: expect(page.locator("body")).to_match_aria_snapshot(
@@ -780,11 +786,29 @@ class JourneyRunner:
                 )
             shown_cells.append(f"{cell.column} {one_line(text, 40)}")
         observed = f"at {here()}"
+        if wanted.number is not None:
+            observed += f" ({shown_number}, its oracle's)"
         if shown_cells:
             observed += " (" + ", ".join(shown_cells) + ", each its oracle's)"
         if response is not None:
             observed += f" (status {response.status})"
         return observed
+
+    @staticmethod
+    def _changes(element, seen: str) -> bool:
+        """Wait for *element*'s text to stop being *seen*; False if it never does."""
+        try:
+            expect(element).not_to_have_text(seen)
+        except AssertionError:
+            return False
+        return True
+
+    @staticmethod
+    def _agrees(text: str, value: float) -> bool:
+        try:
+            return agrees(text, value)
+        except StepFailed:
+            return False
 
     def _cell_text(self, page: Page, cell: Cell, here: str) -> str:
         """The text of the cell under ``cell.column`` in the one row reading ``cell.row``."""

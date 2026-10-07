@@ -329,9 +329,7 @@ reason = "its API steps run on a stack in Doc Examples"
 [pages."statistics/power-analysis.md"]
 class = "journey"
 journey = "power-calculator"
-pending = true
-planned = "D2"
-reason = "the dashboard's power calculator and POST /api/v1/power/sample-size, both checked against a scipy oracle"
+reason = "the dashboard's power calculator and POST /api/v1/power/sample-size, both checked against an oracle from scipy and statsmodels"
 
 [pages."statistics/post-stratification.md"]
 class = "reference"
