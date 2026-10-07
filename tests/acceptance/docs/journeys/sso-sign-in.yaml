@@ -1,0 +1,139 @@
+# The SSO Guide (docs/auth/sso.md, #1075): an Okta (OIDC) configuration, then
+# Sign in with SSO from the dashboard, on the compose stack started the way the
+# page's "Trying it on the Docker Compose stack" says: the full profile, with
+# the page's own override file passed with -f (the stack takes it from the
+# page at run time: docs_runner/stacks.py, ComposeSso).
+#
+# The identity provider is the one thing a reader brings that the run cannot:
+# tests/acceptance/docs/stacks/compose-sso.yml runs the repository's fake OIDC
+# provider, Okta-shaped and strict about PKCE, state, nonce and single-use
+# codes, at https://localhost:28443/oauth2/default, the address both the
+# browser and the API reach it at. The API stays in ENVIRONMENT=development,
+# the compose default, where an http provider is refused; it trusts the
+# provider's certificate through SSL_CERT_FILE, the run's own CA, where a real
+# Okta needs nothing. That CA, and the browser accepting the provider's
+# certificate on this stack only, are the two ways the run differs from a
+# reader's sign-in.
+#
+# The configuration is created as the page's Okta (OIDC) steps say:
+# provider_type okta, the client ID as entity_id, the client secret, the
+# authorization server as sso_url, and the page's own role_mapping example. Its
+# org_domain is written " @SSO-Docs.Example.com", which the page says is
+# stored as sso-docs.example.com. The provider sends the groups Engineering,
+# data-analysts and experimently-admins, in that order, so the role is
+# analyst: the first group the mapping names, not the highest one.
+#
+# Expectations written on 2026-10-07 from the page, the dashboard's source
+# (frontend/src/pages/login.tsx, modules/frontend/src/components/sso/
+# SsoSignIn.tsx) and the provider's, before the first run.
+guide: auth/sso.md
+stack: compose-sso
+profile: full
+video: false
+written: 2026-10-07
+steps:
+  - id: create-okta-configuration
+    doc: okta-oidc
+    do:
+      api:
+        method: POST
+        path: /api/v1/auth/sso/configs
+        as: admin
+        body:
+          org_name: SSO docs journey
+          org_domain: " @SSO-Docs.Example.com"
+          provider_type: okta
+          entity_id: docs-journey-client
+          client_secret: docs-journey-secret
+          sso_url: https://localhost:28443/oauth2/default
+          role_mapping:
+            experimently-admins: admin
+            developers: developer
+            data-analysts: analyst
+            contractors: viewer
+    expect:
+      status: 201
+      json:
+        org_domain: sso-docs.example.com
+        provider_type: okta
+        entity_id: docs-journey-client
+        sso_url: https://localhost:28443/oauth2/default
+        is_active: true
+    fail: an administrator cannot create the Okta configuration the page describes, or its org_domain is not stored normalised
+  - id: sign-in-page
+    doc: trying-it-on-the-docker-compose-stack
+    do:
+      open: http://localhost:3000/login
+    expect:
+      status: 200
+      aria: |
+        - main:
+          - heading "Sign in" [level=1]
+          - button "Sign in"
+          - button "Sign in with SSO"
+    fail: the dashboard's sign-in page on the full profile does not offer Sign in with SSO
+  - id: open-sso-form
+    doc: signing-in-from-the-dashboard
+    do:
+      click:
+        role: button
+        name: Sign in with SSO
+    expect:
+      aria: |
+        - main:
+          - textbox "Work email"
+          - button "Continue with SSO"
+    fail: Sign in with SSO does not ask for a work email
+  - id: work-email
+    doc: signing-in-from-the-dashboard
+    do:
+      fill:
+        label: Work email
+        value: reader@sso-docs.example.com
+    expect:
+      aria: |
+        - main:
+          - textbox "Work email": reader@sso-docs.example.com
+          - button "Continue with SSO"
+    fail: the Work email field does not take the address
+  - id: signed-in
+    doc: signing-in-from-the-dashboard
+    do:
+      click:
+        role: button
+        name: Continue with SSO
+    expect:
+      url: /experiments
+      aria: |
+        - banner:
+          - button "Log out"
+        - main:
+          - heading "Experiments" [level=1]
+    fail: the sign-in through the identity provider does not come back to the dashboard signed in
+  - id: account-created
+    doc: jit-user-provisioning
+    do:
+      api:
+        method: GET
+        path: /api/v1/users/
+        as: admin
+    expect:
+      status: 200
+      json:
+        items.0.email: reader@sso-docs.example.com
+        items.0.full_name: Fake User
+        items.0.is_superuser: false
+    fail: the first sign-in did not create the account, or not with the provider's email and name
+  - id: role-from-groups
+    doc: group-to-role-mapping
+    do:
+      api:
+        method: GET
+        path: /api/v1/users/
+        as: admin
+    expect:
+      status: 200
+      json:
+        items.0.email: reader@sso-docs.example.com
+        items.0.role: ANALYST
+    fail: the new account's role is not the one role_mapping gives the first mapped group the provider sent
