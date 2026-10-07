@@ -289,7 +289,14 @@ When the monitor finds a flag unhealthy and `enable_automatic_rollbacks` is on, 
    turns the flag off), pausing the flag's active rollout schedule in the same transaction
 2. Records a `SafetyRollbackRecord` with trigger type `automatic`, the
    metric value and threshold, the previous and target percentages, and the reason
-3. Dispatches a notification to the configured Slack channels and email addresses
+3. Writes a `safety_rollback` entry to the flag's audit history
+   (`GET /api/v1/audit-logs/entity/feature_flag/{flag_id}`), with `system:safety-monitor` as its
+   `user_email` and no `user_id`. Its `reason` is the rollback's: the first breaching metric with
+   its value and threshold, such as
+   `Automatic rollback due to error_rate exceeding threshold (0.1 > 0.05)`. Its `new_value` holds
+   `trigger_type` (`automatic`), `previous_percentage`, `new_percentage`, `deactivated` and
+   `paused_schedules` (see [Audit Logging](../api/audit-logging.md#changes-the-platform-makes-on-its-own))
+4. Dispatches a notification to the configured Slack channels and email addresses
 
 Investigate the root cause before re-enabling.
 

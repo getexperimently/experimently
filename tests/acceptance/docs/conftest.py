@@ -106,6 +106,8 @@ SECRET_VALUES = pytest.StashKey[Set[str]]()
 #: The launch walkthroughs the runner recorded, by name (``execute.Walkthrough``).
 RECORDED = pytest.StashKey[Dict[str, Dict[str, Any]]]()
 SCAN = pytest.StashKey[Dict[str, Any]]()
+#: One line per step that polled (``JourneyRunner.polls``): numbers only.
+POLLS = pytest.StashKey[List[str]]()
 
 
 def pytest_configure(config: pytest.Config) -> None:
@@ -122,6 +124,7 @@ def pytest_configure(config: pytest.Config) -> None:
     config.stash[SECRET_VALUES] = set()
     config.stash[RECORDED] = {}
     config.stash[SCAN] = {}
+    config.stash[POLLS] = []
     if os.environ.get("DOCS_JOURNEY_RUN_DIR"):
         try:
             config.stash[RUN_DIR] = run_directory(os.environ, REPO_ROOT)
@@ -262,6 +265,8 @@ def journey_runner(
     pytestconfig.stash[SECRET_VALUES] = runner.redactor.values
     # The same mapping, filled in as each walkthrough is recorded.
     pytestconfig.stash[RECORDED] = runner.recorded
+    # The same list, so the terminal summary prints every step that polled.
+    pytestconfig.stash[POLLS] = runner.polls
     return runner
 
 
@@ -440,6 +445,8 @@ def pytest_terminal_summary(terminalreporter, exitstatus, config) -> None:
         f"docs journeys: {len(runs)} run, {len(failed)} failed;"
         + (f" results in {where}" if where is not None else " nothing written")
     )
+    for line in config.stash[POLLS]:
+        terminalreporter.write_line(f"docs journeys: {line}")
     scan = config.stash[SCAN]
     if scan:
         terminalreporter.write_line(

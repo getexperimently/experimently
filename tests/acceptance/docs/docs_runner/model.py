@@ -145,6 +145,18 @@ What an API answers can be kept for later steps and checked against an oracle
   that has a cell reading ``row``, shows an oracle's number at the precision
   it is shown. ``expect.number`` does the same for the one element of a role
   and name, once its text has stopped changing.
+* ``expect.after`` on an api step: ``{<dotted path>: <saved name>}``, the time
+  at each JSON path is later than the time an earlier step saved under that
+  name (both ISO 8601, read on the stack's own clock; one written without a
+  zone is UTC, as the API writes ``datetime.utcnow()``). Equal or earlier
+  fails, and so does a value that is absent or is not a time. The step's log
+  line says how many seconds later it was.
+* ``poll: {up_to_seconds, every_seconds}`` on a ``GET`` api step (a step
+  field, beside ``expect``): the request is sent again every
+  ``every_seconds`` until the expectation holds or ``up_to_seconds`` have
+  passed, for what a background job of the stack does on its own timer
+  (``waiting.py``). A poll that never holds FAILs at the bound with the last
+  answer.
 """
 
 from __future__ import annotations
@@ -273,7 +285,9 @@ BROWSER_ACTIONS = (*SCREEN_ACTIONS, "search", "keep")
 BROWSER_EXPECTS = ("url", "status", "visible", "text", "number", "cells", "aria")
 #: A screen step's structural expectations: all but the ARIA snapshot.
 STRUCTURAL_EXPECTS = tuple(name for name in BROWSER_EXPECTS if name != "aria")
-API_EXPECTS = ("status", "json", "computed")
+#: What an api step may expect of its answer; ``after`` compares times in it.
+API_ANSWER_EXPECTS = ("status", "json", "computed")
+API_EXPECTS = (*API_ANSWER_EXPECTS, "after")
 SEARCH_EXPECTS = ("found",)
 #: The stacks that serve the documentation site and name its source.
 SITE_STACKS = ("docs-local", "docs-published")
@@ -553,6 +567,24 @@ class Cell(_Quoted):
     oracle: Oracle
 
 
+class Poll(_Strict):
+    """Ask again every ``every_seconds`` until the expectation holds, for at most
+    ``up_to_seconds`` (``waiting.py``)."""
+
+    up_to_seconds: StrictInt = Field(ge=5, le=900)
+    every_seconds: StrictInt = Field(ge=5, le=60)
+
+    @model_validator(mode="after")
+    def _every_within_up_to(self) -> "Poll":
+        if self.every_seconds > self.up_to_seconds:
+            raise ValueError("every_seconds cannot be more than up_to_seconds")
+        return self
+
+
+#: A dotted path into an api step's JSON answer (``items.0.started_at``).
+JsonPath = Annotated[StrictStr, Field(pattern=r"^[^.\s]+(?:\.[^.\s]+)*$")]
+
+
 class Expect(_Strict):
     """What must hold after the step; at least one entry."""
 
@@ -562,6 +594,8 @@ class Expect(_Strict):
     text: Optional[OneLine] = None
     json_: Optional[Dict[str, Any]] = Field(default=None, alias="json", min_length=1)
     computed: Optional[Dict[StrictStr, Computed]] = Field(default=None, min_length=1)
+    #: The time at each JSON path is later than the time saved under the name.
+    after: Optional[Dict[JsonPath, Name]] = Field(default=None, min_length=1)
     number: Optional[NumberExpect] = None
     cells: Optional[List[Cell]] = Field(default=None, min_length=1)
     found: Optional[StrictStr] = Field(default=None, pattern=r"^/\S*$")
@@ -615,6 +649,7 @@ class Step(_Strict):
     snapshot_reason: Optional[StrictStr] = None
     not_run: Optional[StrictStr] = None
     save: Optional[Dict[Name, Save]] = Field(default=None, min_length=1)
+    poll: Optional[Poll] = None
 
     @field_validator("fail")
     @classmethod

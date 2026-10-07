@@ -8,16 +8,22 @@ is NOT RUN with that reason, and ``ref: doc-examples`` is NOT RUN
 Elements are found only by role and accessible name, or by label, with exact
 matching. Waiting is Playwright's own: an action waits for its element and an
 expectation retries until it holds or ``DOCS_JOURNEY_TIMEOUT_MS`` (default
-10000) passes. No step sleeps; the crawl's one re-ask and the sign-in pacer
+10000) passes. No step sleeps; the crawl's one re-ask, the sign-in pacer
 (``pacer.py``: no faster than the stack's 10 sign-ins a minute, the step that
-waited saying so) are the only waits that are not Playwright's own.
+waited saying so) and an api step's ``poll`` (``waiting.py``: its request sent
+again until its expectation holds, up to its bound, for what a background job
+of the stack does on its own timer) are the only waits that are not
+Playwright's own. A step that polled says in its log line how long it took,
+and the run's terminal summary prints that line too (``JourneyRunner.polls``).
 
 Files, under ``<run dir>/<journey>/``: ``NN-<step>.expected.aria.yml`` (the
 expected ARIA snapshot, written before the step runs), ``NN-<step>.png`` and
 ``NN-<step>.aria.yml`` (the screen and its ARIA snapshot, after the step, or
 when it fails), ``NN-<step>.api.json`` (an api step's status and the values at
-its expected JSON paths), ``NN-<step>.expected.json`` (a ``crawl: nav`` step's
-pages, URLs and headings, read from the site's source before the step runs),
+its expected JSON paths, with how many seconds later each ``after`` time was
+and, for a step that polls, how the poll ended), ``NN-<step>.expected.json``
+(a ``crawl: nav`` step's pages, URLs and headings, read from the site's source
+before the step runs),
 ``NN-<step>.crawl.json`` (what a crawl saw, and what differed),
 ``NN-<step>.observed.json`` (what a step that keeps no screen saw when it
 failed: a ``keep`` step, or one with ``snapshot: false``). A ``video: true``
@@ -76,7 +82,7 @@ from playwright.sync_api import Browser, Page, Playwright, expect
 from playwright.sync_api import Error as PlaywrightError
 
 from docs_runner import pacer as pacing
-from docs_runner import redaction, registry, site, values
+from docs_runner import redaction, registry, site, values, waiting
 from docs_runner import traffic as population
 from docs_runner.checks import (
     OBSERVED_CHARS,
@@ -87,7 +93,9 @@ from docs_runner.checks import (
     json_at,
     one_line,
     same_json,
+    seconds_after,
     settle,
+    shown_seconds,
     within,
 )
 from docs_runner.guide import Guide
@@ -126,6 +134,21 @@ CAPTION_STYLE = (
     "background:rgba(17,24,39,0.9);color:#fff;"
     "font:17px/1.45 -apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif"
 )
+
+
+@dataclass
+class _Judged:
+    """One answer to an api step's request, held against its expectation."""
+
+    status: int
+    document: Any
+    #: What the step's file records: the status, and each expected path's value.
+    seen: Dict[str, Any]
+    problems: List[str]
+    #: For each ``after`` path, how many seconds later than its saved time.
+    later: List[str]
+
+
 #: The count MkDocs Material shows above the search results once they are in.
 SEARCH_COUNT = re.compile(r"^(?:No|[0-9]+) matching documents?$")
 
@@ -273,6 +296,10 @@ class JourneyRunner:
         #: Each walkthrough this run recorded or tried to, by name
         #: (``Walkthrough.outcome``).
         self.recorded: Dict[str, Dict[str, Any]] = {}
+        #: One line per step that polled, for the run's terminal summary:
+        #: the journey, the step, how long it took and how many seconds each
+        #: ``after`` time was later. Numbers only; the values are in the files.
+        self.polls: List[str] = []
         expect.set_options(timeout=settings.timeout_ms)
 
     # -- files -------------------------------------------------------------
@@ -360,22 +387,12 @@ class JourneyRunner:
     def _oracle(oracle: Oracle) -> float:
         return float(ORACLES[oracle.name](**oracle.args))
 
-    def _api_step(
-        self, step: Step, running: Running, api, journey_id: str, number: int
-    ):
-        call = step.do.api
-        try:
-            path = values.substitute(call.path, self.values)
-            body = values.substitute_in(call.body, self.values)
-        except KeyError as error:
-            raise StepFailed(str(error.args[0])) from None
-        headers = self._headers(running, call.as_, api)
-        if call.key is not None:
-            headers = {"X-API-Key": self._secret(call.key)}
-        answer = api.fetch(path, method=call.method, headers=headers, data=body)
+    def _judge(self, step: Step, answer) -> _Judged:
+        """The answer held against the step's ``expect``: what was seen, what is wrong."""
         expect_ = step.expect
         seen: Dict[str, Any] = {"status": answer.status}
         problems: List[str] = []
+        later: List[str] = []
         if expect_.status is not None and answer.status != expect_.status:
             problems.append(f"status {answer.status}, expected {expect_.status}")
         try:
@@ -390,7 +407,9 @@ class JourneyRunner:
             # a credential route answers its plaintext secret under `key`.
             if reveals_credential(step) and isinstance(document, dict):
                 self.redactor.add_all(document.get("key"))
-        if document is None and (expect_.json_ or expect_.computed or step.save):
+        if document is None and (
+            expect_.json_ or expect_.computed or expect_.after or step.save
+        ):
             problems.append("the answer is not JSON")
         secret_paths = {s.path for s in (step.save or {}).values() if s.secret}
         for path, written in (expect_.json_ or {}).items():
@@ -422,6 +441,71 @@ class JourneyRunner:
                     f"json {path} = {json.dumps(value)}; {computed.oracle.name}"
                     f" gives {oracle!r}"
                 )
+        for path, name in (expect_.after or {}).items():
+            if name not in self.values:
+                problems.append(f"no value saved as {name!r}")
+                continue
+            since = self.values[name]
+            try:
+                value = json_at(document, path)
+            except KeyError:
+                seen[path] = "(absent)"
+                problems.append(f"json {path} absent")
+                continue
+            shown = redaction.scrub(path, value, redactor=self.redactor)
+            try:
+                seconds = seconds_after(value, since)
+            except StepFailed as error:
+                seen[path] = {"value": shown, "after": name, "since": since}
+                problems.append(f"json {path}: {error}")
+                continue
+            seen[path] = {
+                "value": shown,
+                "after": name,
+                "since": since,
+                "seconds_after": round(seconds, 3),
+            }
+            if seconds > 0:
+                later.append(f"{path} {shown_seconds(seconds)} s after {name}")
+            elif seconds == 0:
+                problems.append(
+                    f"json {path} is at the same time as {name}, not after it"
+                )
+            else:
+                problems.append(
+                    f"json {path} is {shown_seconds(-seconds)} s before {name}"
+                )
+        return _Judged(answer.status, document, seen, problems, later)
+
+    def _api_step(
+        self, step: Step, running: Running, api, journey_id: str, number: int
+    ):
+        call = step.do.api
+        try:
+            path = values.substitute(call.path, self.values)
+            body = values.substitute_in(call.body, self.values)
+        except KeyError as error:
+            raise StepFailed(str(error.args[0])) from None
+
+        def ask() -> _Judged:
+            headers = self._headers(running, call.as_, api)
+            if call.key is not None:
+                headers = {"X-API-Key": self._secret(call.key)}
+            answer = api.fetch(path, method=call.method, headers=headers, data=body)
+            return self._judge(step, answer)
+
+        polled: Optional[waiting.Polled] = None
+        if step.poll is None:
+            judged = ask()
+        else:
+            polled = waiting.poll(
+                ask,
+                lambda judged: not judged.problems,
+                up_to_seconds=step.poll.up_to_seconds,
+                every_seconds=step.poll.every_seconds,
+            )
+            judged = polled.answer
+        document, seen, problems = judged.document, judged.seen, judged.problems
         for name, save in (step.save or {}).items():
             try:
                 value = json_at(document, save.path)
@@ -447,11 +531,34 @@ class JourneyRunner:
                 problems.append(
                     f"json {save.path}: {error}, so nothing is saved as {name}"
                 )
+        if polled is not None:
+            seen["poll"] = {
+                "up_to_seconds": step.poll.up_to_seconds,
+                "every_seconds": step.poll.every_seconds,
+                "held": polled.held,
+                "asks": polled.asks,
+                "seconds": round(polled.seconds, 1),
+            }
         snapshot = self._write(
             self._name(journey_id, number, step, ".api.json"),
             json.dumps(seen, indent=2, ensure_ascii=False) + "\n",
         )
-        observed = "; ".join(problems) if problems else f"status {answer.status}"
+        if problems:
+            observed = "; ".join(problems)
+        else:
+            observed = "; ".join([f"status {judged.status}", *judged.later])
+        if polled is not None:
+            ended = waiting.describe(polled, step.poll.up_to_seconds)
+            joiner = "; the last answer: " if problems else ": "
+            observed = ended + joiner + observed
+            # The job log's line: how long it took, and how much later each
+            # time was, never a value the answer held.
+            self.polls.append(
+                self._line(
+                    f"{journey_id} step {number} ({step.id}): {ended}"
+                    + "".join(f"; {line}" for line in judged.later)
+                )
+            )
         if problems:
             raise _Failed(self._line(observed), snapshot)
         return self._line(observed), snapshot

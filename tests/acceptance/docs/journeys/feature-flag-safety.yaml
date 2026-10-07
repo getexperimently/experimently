@@ -1,21 +1,33 @@
 # Safety monitoring, as "Safety Monitoring" configures and checks it, with a
-# manual rollback and the way back (#939; QA plan D3b).
+# manual rollback, the way back, and the safety monitor's automatic rollback
+# (#939; QA plan D3b, and NEW-1 of plan v1.3).
 #
 # What the journey holds: a flag without a configuration reads the platform
 # default (the nil UUID); the guide's configuration is stored as sent; the
 # check is healthy with no errors; the manual rollback to 0% turns the flag
 # off, so every user, matched by a rule or not, gets enabled: false with
 # reason inactive; turning it on again brings it back at 0%, and raising it to
-# 5% serves exactly the users the documented rollout hash puts below 5%; then
-# 25 errors reported with an API key against its 250 evaluations make the
-# error rate 0.1, above the 0.05 critical threshold, and the check and the
-# dashboard's Safety page say so.
+# 5% serves exactly the users the documented rollout hash puts below 5%. A
+# second flag, the control, is configured the same way and evaluated 100
+# times with no error, so it is healthy. Then 25 errors reported with an API
+# key against the first flag's 250 evaluations make its error rate 0.1, above
+# the 0.05 critical threshold, and the check and the dashboard's Safety page
+# say so. The safety monitor's next pass turns that flag off (inactive, 0%),
+# every user then gets enabled: false with reason inactive, the flag's audit
+# history names the monitor as who did it, and the healthy control is still
+# on at 50%.
 #
-# The automatic rollback is NOT RUN (needs-scheduler): the safety monitor runs
-# every 5 minutes on the compose stack (SAFETY_CHECK_INTERVAL_MINUTES, which
-# the Docker guide's stack does not set), longer than a journey runs. The
-# unhealthy flag is made last, so a monitor pass during the journey can only
-# turn it off after every step that reads it has run.
+# The monitor runs at the Docker guide's own interval: every 5 minutes
+# (SAFETY_CHECK_INTERVAL_MINUTES, which the stack does not set; nothing here
+# sets it either). Step deciding-tick says how long that can take.
+#
+# A monitor pass may come at any moment after report-errors, before the steps
+# that read the flag (unhealthy, the sign-in, safety-page). It breaks none of
+# them: the check route ignores the flag's status, so it still reports the
+# error rate of a flag already turned off; the Safety page lists every flag,
+# whatever its status; and safety-page's snapshot asserts neither "Off" nor
+# the Roll back button. Nothing needs to come in a particular order around
+# the monitor's pass, so nothing is ordered for it.
 #
 # Not recorded: the journey makes an API key (model.reveals_credential), so a
 # recording could show what the run keeps out of its files.
@@ -221,6 +233,111 @@ steps:
         reason: rollout
         rollout: 5
     fail: at 5% a user gets the flag other than the documented rollout hash decides
+  # The control: a second flag the monitor checks on the same pass. It is
+  # healthy (100 evaluations, no error), so a monitor that turns healthy flags
+  # off too fails step control-stays-on.
+  - id: control-flag
+    doc: what-triggers-a-rollback
+    do:
+      api:
+        method: POST
+        path: /api/v1/feature-flags/
+        as: admin
+        body:
+          key: docs-journey-safety-control
+          name: Docs Journey Safety Control
+          rollout_percentage: 50
+          is_active: true
+    expect:
+      status: 201
+      json:
+        status: active
+        rollout_percentage: 50
+    save:
+      control-id:
+        path: id
+    fail: the control flag cannot be created on for half of all users
+  - id: control-configure
+    doc: create-or-update-a-flags-configuration
+    do:
+      api:
+        method: POST
+        path: /api/v1/safety/feature-flags/{{control-id}}/config
+        as: admin
+        body:
+          enabled: true
+          metrics:
+            error_rate: {warning_threshold: 0.02, critical_threshold: 0.05, comparison_type: greater_than}
+            p95_latency: {warning_threshold: 300, critical_threshold: 500, comparison_type: greater_than}
+          rollback_percentage: 0
+    expect:
+      status: 200
+      json:
+        enabled: true
+        rollback_percentage: 0
+        metrics.error_rate.critical_threshold: 0.05
+    save:
+      # When the control was configured, on the stack's clock: the pass that
+      # decides started after it (steps quiet, unhealthy and deciding-tick
+      # check each link of that chain).
+      control-at:
+        path: updated_at
+    fail: the guide's configuration is not stored as sent for the control flag
+  - id: control-traffic
+    doc: what-triggers-a-rollback
+    do:
+      evaluations:
+        flag: docs-journey-safety-control
+        key: sdk-key
+        users: safety-control-user
+        count: 100
+        reason: rollout
+        rollout: 50
+    fail: at 50% a user gets the control flag other than the documented rollout hash decides
+  - id: control-healthy
+    doc: running-a-check
+    do:
+      api:
+        method: GET
+        path: /api/v1/safety/feature-flags/{{control-id}}/check
+        as: admin
+    expect:
+      status: 200
+      json:
+        is_healthy: true
+        metrics.0.name: error_rate
+        metrics.0.current_value: 0.0
+        metrics.0.is_healthy: true
+        details.error_count: 0
+        details.total_evaluations: 100
+    fail: the control flag, with 100 evaluations and no error, is not healthy
+  # The check before the errors: healthy, with the 250 evaluations the error
+  # rate will be divided by. Its last_checked, on the stack's clock, is before
+  # the errors are reported: the audit entry must be later. A check only
+  # reads (GET; the flag's configuration and the global settings exist by
+  # now, so it creates neither), so it changes nothing a later step asserts.
+  - id: quiet
+    doc: running-a-check
+    do:
+      api:
+        method: GET
+        path: /api/v1/safety/feature-flags/{{flag-id}}/check
+        as: admin
+    expect:
+      status: 200
+      json:
+        is_healthy: true
+        metrics.0.name: error_rate
+        metrics.0.current_value: 0.0
+        metrics.0.is_healthy: true
+        details.error_count: 0
+        details.total_evaluations: 250
+      after:
+        last_checked: control-at
+    save:
+      quiet-at:
+        path: last_checked
+    fail: with 250 evaluations and no error the flag is not healthy
   - id: report-errors
     doc: what-a-rollback-changes
     do:
@@ -276,6 +393,15 @@ steps:
         metrics.0.name: error_rate
         metrics.0.current_value: 0.1
         metrics.0.is_healthy: false
+        details.error_count: 25
+        details.total_evaluations: 250
+      after:
+        last_checked: quiet-at
+    save:
+      # The check saw the 25 errors, so they were stored before this time, on
+      # the stack's clock: the monitor's pass that decides started after it.
+      errors-at:
+        path: last_checked
     fail: 25 errors in 250 evaluations (0.1, above 0.05) do not make the check unhealthy
   - id: sign-in-page
     doc: running-a-check
@@ -341,6 +467,40 @@ steps:
             - text: /Docs Journey Safety docs-journey-safety critical Error Rate 10\.00%/
             - heading "Rollbacks this session" [level=2]
     fail: the dashboard's Safety page does not show automatic rollbacks on and the flag critical at a 10% error rate
+  # The monitor's pass that decides: the newest safety run that started after
+  # the check saw the errors (errors-at), on the stack's clock. A run is
+  # recorded only once it has finished, after every flag it checked
+  # (scheduler_tick.run_locked_tick), so when this step passes the pass has
+  # done whatever it was going to do, and the steps after it read the result
+  # without waiting.
+  #
+  # The bound, 420 s: the monitor's loop runs a pass and then sleeps
+  # SAFETY_CHECK_INTERVAL_MINUTES * 60 = 300 s (core/safety_scheduler.py,
+  # _run_scheduler). So a pass starts at most 300 s plus one pass's duration
+  # after errors-at; if a pass was already running when the errors were
+  # stored, it does not count (it started before errors-at), and the next one
+  # starts at most 300 s plus two passes' durations after errors-at. One pass
+  # took 0.15 s with 3 flags (PE, v1.3), so 420 s leaves about 115 s. A
+  # monitor that is not running (not started with the API) fails here, at the
+  # bound. The run's log prints how long this step waited and how many seconds
+  # after errors-at the pass started.
+  - id: deciding-tick
+    doc: auto-rollback
+    do:
+      api:
+        method: GET
+        path: /api/v1/scheduler/safety/history?limit=1
+        as: admin
+    poll:
+      up_to_seconds: 420
+      every_seconds: 15
+    expect:
+      status: 200
+      json:
+        0.scheduler_name: safety
+      after:
+        0.started_at: errors-at
+    fail: no pass of the safety monitor that started after the errors were reported finished within 420 s, so the monitor is not running every 5 minutes
   - id: automatic-rollback
     doc: auto-rollback
     do:
@@ -353,5 +513,45 @@ steps:
       json:
         status: inactive
         rollout_percentage: 0
-    not_run: needs-scheduler
-    fail: the safety monitor's next pass does not roll the unhealthy flag back to 0%
+    fail: the safety monitor's pass after the errors finished and the unhealthy flag is still on, not rolled back to 0%
+  - id: off-after-rollback
+    doc: what-a-rollback-changes
+    do:
+      evaluations:
+        flag: docs-journey-safety
+        key: sdk-key
+        users: safety-user
+        count: 50
+        reason: inactive
+    fail: a user still gets the flag after the automatic rollback to 0%
+  - id: rollback-audit
+    doc: auto-rollback
+    do:
+      api:
+        method: GET
+        path: /api/v1/audit-logs/entity/feature_flag/{{flag-id}}
+        as: admin
+    expect:
+      status: 200
+      json:
+        0.action_type: safety_rollback
+        0.user_email: system:safety-monitor
+        0.user_id: null
+        0.reason: Automatic rollback due to error_rate exceeding threshold (0.1 > 0.05)
+        0.new_value: '{"deactivated": true, "new_percentage": 0, "paused_schedules": [], "previous_percentage": 5, "trigger_type": "automatic"}'
+      after:
+        0.timestamp: quiet-at
+    fail: the flag's newest audit entry is not the safety monitor's automatic rollback from 5%, made after the errors were reported
+  - id: control-stays-on
+    doc: what-triggers-a-rollback
+    do:
+      api:
+        method: GET
+        path: /api/v1/feature-flags/{{control-id}}
+        as: admin
+    expect:
+      status: 200
+      json:
+        status: active
+        rollout_percentage: 50
+    fail: the safety monitor turned off the healthy control flag

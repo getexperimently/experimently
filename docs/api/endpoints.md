@@ -260,9 +260,12 @@ curl -X POST "http://localhost:8000/api/v1/users/" \
 ## Rate Limiting and API Constraints
 
 ### Rate Limits
-- Authentication endpoints: 5 requests per minute
-- API endpoints: 100 requests per minute per API key
-- Admin endpoints: 50 requests per minute
+Limits are counted per client address. Most routes allow 300 requests a minute.
+AI design (`POST /api/v1/ai/design`) allows 10 a minute, and AI results
+interpretation (`POST /api/v1/ai/interpret/{experiment_id}`) 10 a minute for every
+experiment id together. The [API Documentation Guide](api-docs-guide.md#rate-limiting)
+lists every route with its own limit. Over a limit the API answers `429` with a
+`Retry-After` header (see [Rate Limiting](#3-rate-limiting) below).
 
 ### Request Size Limits
 - Maximum request body size: 1MB
