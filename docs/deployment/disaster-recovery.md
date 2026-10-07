@@ -318,7 +318,9 @@ credentials. The first marks
 the restored database, which also proves those credentials open it; the second checks that the
 original reads as unmarked. `password authentication failed` in `probe.log` means the password was
 changed after the restore time: set the restored cluster's master password to the secret's value
-and run `restore` again, which carries on with the cluster it made.
+and run `restore` again with the same time, which carries on with the cluster it made. It
+refuses another time for a cluster it already made: to restore to another time, run `read` again
+for a new evidence directory.
 
 Step 3: Check the data on the restored cluster before anything points at it: the rows you expect
 are there and the bad change is not. `probe.log` shows the restored database's `alembic_version`.
@@ -341,9 +343,10 @@ what it was, and starts the API only after two probes in a row, from the API tas
 reached the marked database through that endpoint. The API gets back the task count and scaling
 Step 1 recorded.
 
-During the cutover the load balancer answers 503 to every request, and the composite alarm
-`experimentation-api-no-healthy-task-$ENV` emails `ALARM_EMAIL` after about three minutes, then
-clears. A green `/health` afterwards does not show which cluster answered, because it runs
+During the cutover the load balancer is expected to answer 503 to every request, and the composite
+alarm `experimentation-api-no-healthy-task-$ENV` is expected to email `ALARM_EMAIL` after about
+three minutes, then clear. Both are read from the stacks and the load balancer's documentation, not
+measured; the staging rehearsal records them (its step R5). A green `/health` afterwards does not show which cluster answered, because it runs
 `SELECT 1`; the probes do. Writes made to the original between the restore time and the cutover
 stay on it, under its new name.
 
@@ -381,7 +384,9 @@ scripts/restore_repoint.sh rollback "$EVID"
 restored cluster leaves the stack's names as `<env>-db-abandoned-<time>`, the original comes back
 onto them, and the probes check that the endpoint reaches the unmarked database. If the API never
 started on the restored cluster nothing is lost; otherwise the writes made after the cutover stay
-on the abandoned cluster. Run `keep` afterwards to keep that one.
+on the abandoned cluster. Run `keep` afterwards to keep that one. If `keep` already ran for the
+original, the original comes back onto the stack's names with deletion protection on, which the
+database stack does not set: deleting the database stack fails while it is on.
 
 #### If the script stops part-way
 
@@ -392,8 +397,9 @@ prints where every cluster of the restore is (`log.txt` has it too):
   was renamed. `scripts/restore_repoint.sh start-api "$EVID"` puts the API's task count and
   scaling back.
 - `cutover` stopped after the original was renamed, for instance because the endpoint changed (the
-  message then names the rollback command): wait until no cluster or instance of the restore is
-  `renaming`, then run `rollback`. It also works when no cluster holds the stack's identifier yet,
+  message then names the rollback command) or the probes did not pass within 30 minutes
+  (`probe.log`): wait until no cluster or instance of the restore is `renaming`, then run
+  `rollback`. It also works when no cluster holds the stack's identifier yet,
   by moving the original back on its own.
 - `rollback` stopped part-way: there is no scripted way on. The Engineering Lead decides, with
   `log.txt` and the list the script printed.

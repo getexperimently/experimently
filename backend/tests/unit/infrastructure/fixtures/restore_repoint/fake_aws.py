@@ -22,10 +22,28 @@ plants one defect each:
     dns_lag              a renamed-onto hostname resolves to its previous
                          holder for this many more probe runs
     marker_everywhere    every database reads as marked
-    describe_error       {"id": ..., "code": ...}: describing that cluster fails
-                         with that error code, as an expired session does
+    describe_error       {"id": ..., "code": ..., "kind": "cluster"|"instance"}:
+                         describing that cluster (the default) or instance
+                         fails with that error code, as an expired session does
     refuse_rename_of     renaming the cluster with this identifier fails
                          (InvalidDBClusterStateFault)
+    stop_lag             scaling the API to 0 marks its tasks desired STOPPED
+                         at once, and each stays last RUNNING for this many
+                         more describe-tasks answers (ECS drains them)
+    writer_pending_reboot   a created instance's parameter group is
+                         `pending-reboot`, not `in-sync`
+    ghost_after_rename   "cluster" or "instance": a rename of that kind leaves
+                         the old identifier answering `available` (renames are
+                         then immediate, with no `renaming` answer first)
+    strict_tag_removal   removing a tag key the cluster does not carry fails
+                         (the pessimistic reading of RDS, which is unmeasured)
+    api_does_not_start   scaling the API up starts no task
+    no_endpoint          describing this cluster gives no Endpoint
+
+`"scaling": null` in the state is an API service with no scalable target.
+
+Every rename made while an API or migration task is not yet STOPPED is
+recorded in `renamed_while_running`.
 
 Every call is appended to `calls.log` (one JSON list of arguments per line);
 anything it does not know, and any delete, exits 99.
@@ -124,7 +142,11 @@ def settle(record, busy):
 
 
 def members(cid):
-    out = [i for i, x in st["instances"].items() if x["cluster"] == cid]
+    out = [
+        i
+        for i, x in st["instances"].items()
+        if x["cluster"] == cid and not x.get("ghost")
+    ]
     return sorted(out, key=lambda i: (not st["instances"][i]["writer"], i))
 
 
@@ -152,7 +174,7 @@ def cluster_view(cid):
     view.update(
         DBClusterIdentifier=cid,
         Status=status,
-        Endpoint=endpoint(cid),
+        Endpoint=None if FAULTS.get("no_endpoint") == cid else endpoint(cid),
         DBClusterArn=f"arn:aws:rds:{REGION}:{ACCOUNT}:cluster:{cid}",
         VpcSecurityGroups=[
             {"VpcSecurityGroupId": g, "Status": "active"} for g in c["sgs"]
@@ -179,7 +201,10 @@ def instance_view(iid):
         "PromotionTier": x["tier"],
         "DBClusterIdentifier": x["cluster"],
         "DBParameterGroups": [
-            {"DBParameterGroupName": x["pg"], "ParameterApplyStatus": "in-sync"}
+            {
+                "DBParameterGroupName": x["pg"],
+                "ParameterApplyStatus": x.get("apply", "in-sync"),
+            }
         ],
         "DBSubnetGroup": {
             "DBSubnetGroupName": st["clusters"][x["cluster"]]["DBSubnetGroup"]
@@ -220,6 +245,22 @@ def task_definition(ref):
             }
         ],
     }
+
+
+def note_rename(what):
+    """Record a rename made while an API or migration task is not STOPPED."""
+    busy = [
+        arn
+        for arn, t in st["tasks"].items()
+        if t["family"].startswith(
+            ("experimentation-backend", "experimentation-migrate")
+        )
+        and t["last"] != "STOPPED"
+    ]
+    if busy:
+        st.setdefault("renamed_while_running", []).append(
+            {"rename": what, "tasks": busy}
+        )
 
 
 # --- cloudformation ------------------------------------------------------------
@@ -270,7 +311,7 @@ if SVC == "cloudformation" and OP == "describe-stack-resources":
 if SVC == "rds" and OP == "describe-db-clusters":
     cid = opt("--db-cluster-identifier")
     error = FAULTS.get("describe_error")
-    if error and error["id"] == cid:
+    if error and error["id"] == cid and error.get("kind", "cluster") == "cluster":
         fail(error["code"], "DescribeDBClusters", "The session has expired")
     if cid not in st["clusters"]:
         fail(
@@ -282,6 +323,9 @@ if SVC == "rds" and OP == "describe-db-clusters":
 
 if SVC == "rds" and OP == "describe-db-instances":
     iid = opt("--db-instance-identifier")
+    error = FAULTS.get("describe_error")
+    if error and error["id"] == iid and error.get("kind") == "instance":
+        fail(error["code"], "DescribeDBInstances", "Rate exceeded")
     if iid not in st["instances"]:
         fail(
             "DBInstanceNotFound", "DescribeDBInstances", f"DBInstance {iid} not found."
@@ -325,6 +369,7 @@ if SVC == "rds" and OP == "create-db-instance":
         "writer": not members(cid),
         "class": opt("--db-instance-class"),
         "pg": opt("--db-parameter-group-name") or "default.aurora-postgresql15",
+        "apply": "pending-reboot" if FAULTS.get("writer_pending_reboot") else "in-sync",
         "public": "--no-publicly-accessible" not in REST,
         "tier": int(opt("--promotion-tier", 1)),
         "Status": "creating",
@@ -349,9 +394,14 @@ if SVC == "rds" and OP == "modify-db-cluster":
             fail("DBClusterAlreadyExistsFault", "ModifyDBCluster", new)
         if "--apply-immediately" not in REST or FAULTS.get("rename_deferred"):
             emit({"DBCluster": {"DBClusterIdentifier": cid}})  # waits for the window
+        note_rename(f"cluster {cid} -> {new}")
         moved = st["clusters"].pop(cid)
         st["clusters"][new] = moved
         moved.update(Status="renaming", pending=1)
+        if FAULTS.get("ghost_after_rename"):
+            moved.update(Status="available", pending=0)
+        if FAULTS.get("ghost_after_rename") == "cluster":
+            st["clusters"][cid] = dict(moved, uid=-1, Status="available")
         for x in st["instances"].values():
             if x["cluster"] == cid:
                 x["cluster"] = new
@@ -362,6 +412,8 @@ if SVC == "rds" and OP == "modify-db-cluster":
         st["dns_holder"][endpoint(new)] = moved["uid"]
     if "--deletion-protection" in REST:
         st["clusters"][new or cid]["DeletionProtection"] = True
+    if "--no-deletion-protection" in REST:
+        st["clusters"][new or cid]["DeletionProtection"] = False
     emit({"DBCluster": {"DBClusterIdentifier": new or cid}})
 
 if SVC == "rds" and OP == "modify-db-instance":
@@ -372,8 +424,15 @@ if SVC == "rds" and OP == "modify-db-instance":
         fail("DBInstanceAlreadyExists", "ModifyDBInstance", new)
     if "--apply-immediately" not in REST or FAULTS.get("rename_deferred"):
         emit({"DBInstance": {"DBInstanceIdentifier": iid}})
+    note_rename(f"instance {iid} -> {new}")
     st["instances"][new] = st["instances"].pop(iid)
     st["instances"][new].update(Status="renaming", pending=1)
+    if FAULTS.get("ghost_after_rename"):
+        st["instances"][new].update(Status="available", pending=0)
+    if FAULTS.get("ghost_after_rename") == "instance":
+        st["instances"][iid] = dict(
+            st["instances"][new], Status="available", ghost=True
+        )
     emit({"DBInstance": {"DBInstanceIdentifier": new}})
 
 if SVC == "rds" and OP in ("add-tags-to-resource", "remove-tags-from-resource"):
@@ -386,8 +445,21 @@ if SVC == "rds" and OP in ("add-tags-to-resource", "remove-tags-from-resource"):
             tags[:] = [t for t in tags if t["Key"] != tag["Key"]] + [tag]
     else:
         keys = set(opts("--tag-keys"))
+        absent = keys - {t["Key"] for t in tags}
+        if FAULTS.get("strict_tag_removal") and absent:
+            fail(
+                "InvalidParameterValue",
+                "RemoveTagsFromResource",
+                f"Tag keys {sorted(absent)} are not on the resource",
+            )
         tags[:] = [t for t in tags if t["Key"] not in keys]
     emit({})
+
+if SVC == "rds" and OP == "list-tags-for-resource":
+    cid = opt("--resource-name").rsplit(":", 1)[1]
+    if cid not in st["clusters"]:
+        fail("DBClusterNotFoundFault", "ListTagsForResource", cid)
+    emit({"TagList": st["clusters"][cid]["tags"]})
 
 if SVC == "rds" and OP == "create-db-cluster-snapshot":
     cid, sid = opt("--db-cluster-identifier"), opt("--db-cluster-snapshot-identifier")
@@ -415,6 +487,12 @@ if SVC == "ecs" and OP == "list-tasks":
     )
 
 if SVC == "ecs" and OP == "describe-tasks":
+    for arn in opts("--tasks"):
+        task = st["tasks"][arn]
+        if task.get("draining", 0) > 0:
+            task["draining"] -= 1
+        elif task.get("draining") == 0:
+            task["last"] = "STOPPED"
     emit(
         {
             "tasks": [
@@ -438,9 +516,13 @@ if SVC == "ecs" and OP == "update-service":
     api = [a for a, t in st["tasks"].items() if t["family"] == st["service"]["family"]]
     if count == 0:
         for k, arn in enumerate(api):
-            if not (FAULTS.get("stuck_task") and k == 0):
+            if FAULTS.get("stuck_task") and k == 0:
+                continue
+            if FAULTS.get("stop_lag"):
+                st["tasks"][arn].update(desired="STOPPED", draining=FAULTS["stop_lag"])
+            else:
                 st["tasks"][arn].update(desired="STOPPED", last="STOPPED")
-    else:
+    elif not FAULTS.get("api_does_not_start"):
         for k in range(count):
             st["n"] += 1
             st["tasks"][f"arn:aws:ecs:{REGION}:{ACCOUNT}:task/started{st['n']}"] = {
@@ -509,7 +591,7 @@ if SVC == "ecs" and OP == "run-task":
             "task_definition": opt("--task-definition"),
             "network": json.loads(opt("--network-configuration")),
             "overrides_bytes": len(raw.encode()),
-            "command": override["command"][:2],
+            "command": override["command"],
             "env": env,
             "target": target,
             "exit": code,
@@ -519,7 +601,7 @@ if SVC == "ecs" and OP == "run-task":
 
 # --- application-autoscaling, codedeploy, logs ---------------------------------
 if SVC == "application-autoscaling" and OP == "describe-scalable-targets":
-    emit({"ScalableTargets": [st["scaling"]]})
+    emit({"ScalableTargets": [st["scaling"]] if st["scaling"] else []})
 
 if SVC == "application-autoscaling" and OP == "register-scalable-target":
     st["scaling"]["MinCapacity"] = int(opt("--min-capacity"))

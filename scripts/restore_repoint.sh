@@ -280,7 +280,7 @@ swap_stopped() {
 # swap <name the cluster now holding the stack's identifier leaves under>
 #      <cluster that takes the identifier> <probe mode afterwards> <phase>
 swap() {
-  local out=$1 in=$2 mode=$3 phase=$4 holder s list j m endpoint arn
+  local out=$1 in=$2 mode=$3 phase=$4 holder s list j m endpoint arn keys
   local -a live incoming
   live=()
   s=$(cluster_status "$in")
@@ -334,10 +334,19 @@ swap() {
     die "the endpoint did not follow the identifier: '$endpoint' is not '$ENDPOINT'. The API is still at 0, and there is no scripted way on from here"
   fi
   note "endpoint unchanged: $endpoint"
-  # The cluster on the stack's identifier carries none of this procedure's tags.
+  # The cluster on the stack's identifier carries none of this procedure's
+  # tags. Only keys it carries are removed: on a cutover it carries none (the
+  # restored cluster was never tagged), and how RDS answers a request to
+  # remove a key that is not there is not something this relies on.
   arn=$(cluster_arn "$CLUSTER")
-  aws rds remove-tags-from-resource --resource-name "$arn" \
-    --tag-keys experimently:left-identifier experimently:restore > /dev/null
+  keys=$(aws rds list-tags-for-resource --resource-name "$arn" --output json |
+           jq -r '[.TagList[]?.Key
+                   | select(. == "experimently:left-identifier" or . == "experimently:restore")]
+                  | join(" ")')
+  if [ -n "$keys" ]; then
+    # shellcheck disable=SC2086
+    aws rds remove-tags-from-resource --resource-name "$arn" --tag-keys $keys > /dev/null
+  fi
   j=0
   for m in "${incoming[@]}"; do
     if [ "$m" != "${MEMBERS[$j]}" ]; then rename_instance "$m" "${MEMBERS[$j]}"; fi
@@ -489,7 +498,11 @@ phase_read() {
 }
 
 phase_restore() {
-  local s re parity iparity id
+  local s re parity iparity id saved
+  # Only a run that gets to the end may let a cutover go ahead: an earlier
+  # run's restore.ok says nothing about the cluster as it is now.
+  rm -f "$EVID/restore.ok"
+  saved=${RESTORE_TIME:-}
   RESTORE_TIME=$1
   re='^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$'
   [[ "$RESTORE_TIME" =~ $re ]] ||
@@ -499,17 +512,19 @@ phase_restore() {
     [ "$s" = absent ] || die "$id exists ('$s'): this evidence directory was cut over already"
   done
   # Resumable: a restored cluster from an earlier run of this phase is checked,
-  # not restored again.
+  # not restored again, and only for the time it was restored to.
   s=$(cluster_status "$TMP")
   if [ "$s" = absent ]; then
+    save RESTORE_TIME
     aws rds restore-db-cluster-to-point-in-time --source-db-cluster-identifier "$CLUSTER" \
       --db-cluster-identifier "$TMP" --restore-to-time "$RESTORE_TIME" \
       --db-subnet-group-name "$SUBNET_GROUP" --vpc-security-group-ids "${SG_IDS[@]}" \
       --db-cluster-parameter-group-name "$CLUSTER_PG" --copy-tags-to-snapshot \
       --output json > "$EVID/restore.json"
-    save RESTORE_TIME
     note "restore of $CLUSTER to $RESTORE_TIME started as $TMP"
   else
+    [ "$saved" = "$RESTORE_TIME" ] ||
+      die "$TMP was restored to '${saved:-an unrecorded time}', not $RESTORE_TIME. To restore to another time, run read again for a new evidence directory (and decide what to do with $TMP)"
     note "$TMP exists ('$s'): checking it, not restoring again"
   fi
   wait_for cluster "$TMP" available "$WAIT_RESTORE_MIN"
@@ -589,6 +604,10 @@ load() {
 
 command -v aws > /dev/null || die "the AWS CLI is not on PATH"
 command -v jq > /dev/null || die "jq is not on PATH"
+# The probe runs this file's text; an empty one would run `python -c ""`,
+# which exits 0, and every probe would pass.
+[ -s "$ROOT/scripts/restore_probe.py" ] ||
+  die "$ROOT/scripts/restore_probe.py is missing or empty: run this from a full checkout"
 cmd=${1:-}
 case "$cmd" in
   read)

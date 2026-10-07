@@ -698,6 +698,17 @@ def test_the_restore_path_is_the_script_and_says_what_it_cannot_do():
     assert "plus the cutover's downtime, which is not measured yet" in flat
     assert "Decide before an incident" not in flat
     assert "#### If the script stops part-way" in scenario
+    # The downtime's monitors are expected, not measured (EM ruling R3).
+    assert "the load balancer is expected to answer 503 to every request" in flat
+    assert "the staging rehearsal records them (its step R5)" in flat
+    assert "the load balancer answers 503" not in flat
+    # A probe timeout goes to rollback, never to start-api (R3).
+    assert "or the probes did not pass within 30 minutes (`probe.log`)" in flat
+    # keep, then rollback, leaves the stack's cluster protected (R1).
+    assert (
+        "the original comes back onto the stack's names with deletion protection on, "
+        "which the database stack does not set"
+    ) in flat
     # The phases the script dispatches: the case labels after `cmd=`.
     dispatch = REPOINT.read_text().split("cmd=${1:-}", 1)[1]
     labels = re.findall(r"^\s*([a-z-]+(?: \| [a-z-]+)*)\)", dispatch, re.M)

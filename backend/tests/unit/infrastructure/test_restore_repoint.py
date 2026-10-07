@@ -19,8 +19,10 @@ and nothing about RDS itself (the staging rehearsal does that):
   tag, the confirmation that did not come from a terminal, an error that is
   not "not found", and the others its contract lists;
 * what it must never do: delete anything, rename without
-  `--apply-immediately`, rename with an API task running, run a probe on a
-  revision other than the one `read` recorded;
+  `--apply-immediately`, rename while an API or migration task is not yet
+  STOPPED (ECS marks a draining task desired STOPPED at once), run a probe
+  on a revision other than the one `read` recorded, or run anything but the
+  probe file's text;
 * every flag it passes is one the AWS CLI has (botocore's service model);
 * no workflow runs it and the deploy role gains nothing from it.
 
@@ -275,10 +277,11 @@ class World:
         confirm: str | None = None,
         piped: str | None = None,
         bash: str = "bash",
+        script: Path = SCRIPT,
         **waits: str,
     ) -> Result:
         env = {**self.env, **self.waits, **waits}
-        command = [bash, str(SCRIPT), *args]
+        command = [bash, str(script), *args]
         options = {
             "cwd": self.tmp,
             "env": env,
@@ -403,6 +406,9 @@ def assert_never_deleted_or_deferred(world: World) -> None:
         assert not call[1].startswith("delete-"), call
     for call in renames(world.calls):
         assert "--apply-immediately" in call, call
+    assert not world.state.get("renamed_while_running"), world.state[
+        "renamed_while_running"
+    ]
 
 
 # --- the paths that work ----------------------------------------------------------
@@ -606,7 +612,10 @@ def test_the_probe_runs_the_revision_read_recorded(staging):
                 "assignPublicIp": "DISABLED",
             }
         }
-        assert probe["command"] == ["python", "-c"]
+        # The probe file's text, exactly: an empty or unread file would be
+        # `python -c ""`, which exits 0, and every probe would pass.
+        assert probe["command"] == ["python", "-c", PROBE.read_text().rstrip("\n")]
+        assert "PROBE verdict" in probe["command"][2]
         assert set(probe["env"]) == {"POSTGRES_SERVER", "RESTORE_ID", "PROBE_MODE"}
         # ECS refuses overrides over 8 KiB.
         assert probe["overrides_bytes"] < 8192, probe["overrides_bytes"]
@@ -892,6 +901,362 @@ def test_usage(staging):
     for args in ([], ["cutover"], ["read"], ["restore", "x"], ["bogus", "x"]):
         assert staging.run(*args).code == 2, args
     refused(staging.run("cutover", str(staging.tmp)), "is not an evidence directory")
+
+
+# --- review round 1 (#1017): fail-open paths ----------------------------------------
+
+
+def test_a_restore_refused_on_parity_leaves_no_restore_ok(staging):
+    """A restore that finished once, then is run again and refused, must not
+    leave the earlier run's `restore.ok`: a cutover would put the cluster
+    live as it is now, out of parity."""
+    staging.read()
+    assert staging.restore().code == 0
+    ok = Path(staging.evid) / "restore.ok"
+    assert ok.exists()
+    tmp = f"staging-db-restore-{staging.recorded('TS')}"
+    staging.mutate(
+        lambda s: s["clusters"][tmp].update(
+            DBClusterParameterGroup="default.aurora-postgresql15"
+        )
+    )
+    refused(staging.restore(), "differs from the original (parity.diff)")
+    assert not ok.exists(), "a refused restore left restore.ok behind"
+    refused(staging.cutover(), "the restore phase did not finish")
+    assert renames(staging.calls) == []
+
+
+def test_any_refused_restore_rerun_invalidates_restore_ok(staging):
+    """`restore.ok` goes first, before any refusal: a re-run refused for its
+    input (here a time that is not UTC) leaves no `restore.ok` either."""
+    staging.read()
+    assert staging.restore().code == 0
+    refused(staging.run("restore", staging.evid, "2026-10-06T12:00:00"), "is not UTC")
+    assert not (Path(staging.evid) / "restore.ok").exists()
+    refused(staging.cutover(), "the restore phase did not finish")
+
+
+def test_a_restore_again_at_another_time_is_refused(staging):
+    """The restored cluster exists: a second `restore` with a different time
+    would silently check the first restore and let it be cut over."""
+    staging.read()
+    assert staging.restore().code == 0
+    restores = len(
+        [c for c in staging.calls if c[1] == "restore-db-cluster-to-point-in-time"]
+    )
+    result = staging.run("restore", staging.evid, "2026-10-06T11:30:00Z")
+    refused(result, "was restored to '2026-10-06T12:00:00Z', not 2026-10-06T11:30:00Z")
+    assert "run read again" in result.err
+    assert not (Path(staging.evid) / "restore.ok").exists()
+    # The same time carries on with the cluster it made.
+    assert staging.restore().code == 0
+    assert (Path(staging.evid) / "restore.ok").exists()
+    assert restores == len(
+        [c for c in staging.calls if c[1] == "restore-db-cluster-to-point-in-time"]
+    )
+
+
+@pytest.mark.parametrize("probe", ["missing", "empty"])
+def test_a_missing_or_empty_probe_is_refused(staging, probe):
+    """The probe is `python -c "$(cat scripts/restore_probe.py)"`: with the file
+    missing or empty that is `python -c ""`, which exits 0, so every probe
+    would pass. The script refuses before it does anything."""
+    copy = staging.tmp / "checkout" / "scripts"
+    copy.mkdir(parents=True)
+    for name in ("restore_repoint.sh", "run_migration_task.sh"):
+        shutil.copy2(REPO_ROOT / "scripts" / name, copy / name)
+    if probe == "empty":
+        (copy / "restore_probe.py").write_text("")
+    result = staging.run("read", "staging", script=copy / "restore_repoint.sh")
+    refused(result, "restore_probe.py is missing or empty")
+    assert staging.calls == []
+
+
+def test_the_api_tasks_are_stopped_before_any_rename(tmp_path):
+    """ECS marks a draining task desired STOPPED at once while it still holds
+    pooled connections: the wait is for every earlier task to be STOPPED,
+    not only for none to be desired RUNNING."""
+    world = World(tmp_path, STAGING, stop_lag=2)
+    world.read()
+    world.restore()
+    result = world.cutover(REPOINT_WAIT_TASKS_MIN="1")
+    assert result.code == 0, result.err
+    log = world.log()
+    assert "2 of the API's earlier tasks not yet STOPPED" in log
+    assert log.index("not yet STOPPED") < log.index(
+        "no API or migration task is running"
+    )
+    assert_never_deleted_or_deferred(world)
+
+
+def test_a_running_migration_task_refuses_the_cutover(staging):
+    """A migration task (a deploy's, or db-migrate.yml's) is writing to the
+    original: no rename while it runs."""
+    staging.read()
+    staging.restore()
+    task = f"arn:aws:ecs:{REGION}:{ACCOUNT}:task/experimentation-staging/migration"
+    staging.mutate(
+        lambda s: s["tasks"].update(
+            {
+                task: {
+                    "family": STAGING.migrate_family,
+                    "desired": "RUNNING",
+                    "last": "RUNNING",
+                }
+            }
+        )
+    )
+    result = staging.cutover()
+    refused(result, "tasks still running", "(1 desired RUNNING, 0 not STOPPED)")
+    assert renames(staging.calls) == []
+    assert staging.holder_uid() == 1
+
+
+def test_a_restored_writer_that_differs_is_refused(tmp_path):
+    """The writer's parity: here its parameter group is not applied yet."""
+    world = World(tmp_path, STAGING, writer_pending_reboot=True)
+    world.read()
+    refused(world.restore(), "the restored writer differs from the original's")
+    assert "pending-reboot" in (Path(world.evid) / "parity.diff").read_text()
+    assert not (Path(world.evid) / "restore.ok").exists()
+    refused(world.cutover(), "the restore phase did not finish")
+
+
+READ_REFUSALS = {
+    "cluster_pg": ("other-clusterparametergroup", "the cluster parameter group"),
+    "subnet_group": ("other-dbsubnetgroup", "subnet group"),
+    "sg": ("sg-0other", "VPC groups"),
+    "instance_pg": (
+        "other-instanceparametergroup",
+        "the stack's instance parameter group",
+    ),
+    "cluster": ("other-cluster", "the stack output names"),
+}
+
+
+@pytest.mark.parametrize("resource", sorted(READ_REFUSALS))
+def test_the_original_must_use_the_stacks_resources(tmp_path, resource):
+    """`read` refuses an original whose groups, or whose cluster, are not the
+    database stack's: the restore copies them, and a swap would carry the
+    difference into the stack's names."""
+    world = World(tmp_path, STAGING)
+    value, message = READ_REFUSALS[resource]
+    world.mutate(lambda s: s["stack"].update({resource: value}))
+    _refused_at_read(world, message)
+
+
+def test_a_restored_cluster_with_more_instances_than_the_stack(staging):
+    staging.read()
+    staging.restore()
+    tmp = f"staging-db-restore-{staging.recorded('TS')}"
+    staging.mutate(
+        lambda s: s["instances"].update(
+            {f"{tmp}-2": dict(s["instances"][f"{tmp}-1"], writer=False)}
+        )
+    )
+    refused(staging.cutover(), f"{tmp} has 2 instances, more than the stack's 1")
+    _nothing_renamed_api_untouched(staging)
+
+
+def test_a_holder_that_is_not_available(staging):
+    staging.read()
+    staging.restore()
+    staging.mutate(lambda s: s["clusters"][STAGING.cluster].update(Status="backing-up"))
+    refused(staging.cutover(), f"{STAGING.cluster} is 'backing-up', not available")
+    _nothing_renamed_api_untouched(staging)
+
+
+@pytest.mark.parametrize("kind", ["cluster", "instance"])
+def test_an_old_name_that_does_not_go(tmp_path, kind):
+    """A rename is done only when the new name answers and the old one is
+    gone: two clusters (or instances) answering is not a finished swap."""
+    world = World(tmp_path, STAGING, ghost_after_rename=kind)
+    world.read()
+    world.restore()
+    old = STAGING.cluster if kind == "cluster" else STAGING.instances[0]
+    result = world.cutover(REPOINT_WAIT_RENAME_MIN="0")
+    refused(result, f"{kind} {old} is still 'available' after 0 min (wanted absent)")
+    assert "stopped part-way" in result.err
+
+
+# --- review round 2 (#1017): the rest of the refusals, and the EM's rulings --------
+
+
+def test_a_restore_with_no_recorded_time_is_refused(staging):
+    """A restore call that errored after RDS made the cluster leaves the
+    cluster and no recorded time: which time it holds is unknown, so a
+    restore phase must not carry on with it."""
+    staging.read()
+    tmp = f"staging-db-restore-{staging.recorded('TS')}"
+
+    def made_but_not_recorded(state):
+        state["clusters"][tmp] = dict(
+            state["clusters"][STAGING.cluster], uid=9, tags=[]
+        )
+
+    staging.mutate(made_but_not_recorded)
+    refused(
+        staging.restore(),
+        f"{tmp} was restored to 'an unrecorded time'",
+        "run read again",
+    )
+    assert not any(c[1] == "restore-db-cluster-to-point-in-time" for c in staging.calls)
+
+
+def test_keep_then_rollback_leaves_deletion_protection_on(staging):
+    """EM ruling R1: `keep` protects the original; a rollback after it brings
+    the original back onto the stack's names still protected, which the
+    database stack does not set. Pinned here, said on the page."""
+    staging.read()
+    staging.restore()
+    assert staging.cutover().code == 0
+    assert staging.run("keep", staging.evid).code == 0
+    assert staging.rollback().code == 0
+    assert staging.holder_uid() == 1
+    assert staging.state["clusters"][STAGING.cluster]["DeletionProtection"] is True
+
+
+def test_tag_removal_names_only_keys_the_cluster_carries(tmp_path):
+    """EM ruling R2: on a cutover the cluster taking the identifier never
+    carried this procedure's tags. If RDS refused to remove an absent key,
+    every cutover would stop inside the downtime window after a good swap.
+    With the fake refusing exactly that, cutover and rollback both finish."""
+    world = World(tmp_path, STAGING, strict_tag_removal=True)
+    world.read()
+    world.restore()
+    assert world.cutover().code == 0
+    removals = [c for c in world.calls if c[1] == "remove-tags-from-resource"]
+    assert removals == [], "the cutover asked to remove keys the cluster did not carry"
+    assert world.rollback().code == 0
+    (removal,) = [c for c in world.calls if c[1] == "remove-tags-from-resource"]
+    assert removal[removal.index("--tag-keys") + 1 :] == [
+        "experimently:left-identifier",
+        "experimently:restore",
+    ]
+    assert world.state["clusters"][STAGING.cluster]["tags"] == [
+        {"Key": "Environment", "Value": "staging"}
+    ]
+
+
+def test_a_stack_output_that_cannot_be_read(tmp_path):
+    world = World(tmp_path, STAGING)
+    world.mutate(
+        lambda s: s["outputs"]["experimentation-fargate-staging"].pop("TaskSubnets")
+    )
+    _refused_at_read(world, "could not read TASK_SUBNETS (got 'None')")
+
+
+def test_read_refuses_a_service_with_no_scalable_target(tmp_path):
+    world = World(tmp_path, STAGING)
+    world.mutate(lambda s: s.update(scaling=None))
+    _refused_at_read(world, "has no scalable target")
+
+
+def test_a_restored_cluster_with_no_endpoint(staging):
+    staging.read()
+    tmp = f"staging-db-restore-{staging.recorded('TS')}"
+    staging.mutate(lambda s: s["faults"].update(no_endpoint=tmp))
+    refused(staging.restore(), "could not read TMP_ENDPOINT")
+    assert staging.state["probes"] == []
+
+
+def test_an_instance_describe_error_is_not_absent(staging):
+    """Only DBInstanceNotFound means absent: a throttled describe of the
+    restored writer must not read as "no writer yet" and make a second one."""
+    staging.read()
+    tmp = f"staging-db-restore-{staging.recorded('TS')}"
+    staging.mutate(
+        lambda s: s["faults"].update(
+            describe_error={"id": f"{tmp}-1", "code": "Throttling", "kind": "instance"}
+        )
+    )
+    result = staging.restore()
+    assert result.code != 0
+    assert "Throttling" in result.err
+    assert not any(c[1] == "create-db-instance" for c in staging.calls)
+
+
+def test_a_cutover_with_no_cluster_on_the_identifier(staging):
+    staging.read()
+    staging.restore()
+    staging.mutate(lambda s: s["clusters"].pop(STAGING.cluster))
+    refused(
+        staging.cutover(), f"no cluster holds the stack's identifier {STAGING.cluster}"
+    )
+    _nothing_renamed_api_untouched(staging)
+
+
+def test_a_restored_cluster_with_no_instance(staging):
+    staging.read()
+    staging.restore()
+    tmp = f"staging-db-restore-{staging.recorded('TS')}"
+    staging.mutate(lambda s: s["instances"].pop(f"{tmp}-1"))
+    refused(staging.cutover(), f"{tmp} has no instance")
+    _nothing_renamed_api_untouched(staging)
+
+
+def test_probes_that_never_pass_twice(tmp_path):
+    """The hostname keeps reaching the original: the cutover stops with the
+    API at 0 and does not start it (the page sends this to rollback)."""
+    world = World(tmp_path, STAGING, dns_lag=100)
+    world.read()
+    world.restore()
+    result = world.cutover(REPOINT_WAIT_PROBE_MIN="0")
+    refused(result, "did not pass twice in a row within 0 min")
+    assert "stopped part-way" in result.err
+    assert world.api() == (0, 0, True)
+
+
+def test_an_api_that_does_not_come_back(tmp_path):
+    world = World(tmp_path, STAGING, api_does_not_start=True)
+    world.read()
+    world.restore()
+    result = world.cutover()
+    refused(result, "the API has 0 of 2 tasks 0 min after it was started")
+    assert "stopped part-way" in result.err
+
+
+def test_a_rollback_whose_endpoint_does_not_follow(staging):
+    """The rollback's own endpoint check: there is no scripted way on."""
+    staging.read()
+    staging.restore()
+    assert staging.cutover().code == 0
+    failed = f"staging-db-failed-{staging.recorded('TS')}"
+
+    def original_moves_endpoint(state):
+        state["clusters"][failed]["suffix"] = "zzz"
+        state["faults"]["suffix_per_cluster"] = True
+
+    staging.mutate(original_moves_endpoint)
+    result = staging.rollback()
+    refused(result, "the endpoint did not follow", "no scripted way on from here")
+    assert staging.api() == (0, 0, True)
+
+
+def test_keep_with_no_cluster_out_of_the_stack(staging):
+    staging.read()
+    refused(staging.run("keep", staging.evid), "no cluster of this restore is out")
+    assert staging.changes() == []
+
+
+@pytest.mark.parametrize("missing", ["aws", "jq"])
+def test_a_missing_tool_is_refused(staging, missing):
+    """Without the CLI or jq on PATH the script stops before anything. The
+    PATH here holds only `dirname` (and, for the jq case, a failing `aws`)."""
+    bin_dir = staging.tmp / "bare-bin"
+    bin_dir.mkdir()
+    os.symlink(shutil.which("dirname"), bin_dir / "dirname")
+    if missing == "jq":
+        stub = bin_dir / "aws"
+        stub.write_text("#!/bin/sh\nprintf 'NO-REAL-AWS\\n' >&2\nexit 97\n")
+        stub.chmod(stub.stat().st_mode | stat.S_IEXEC)
+    staging.env["PATH"] = str(bin_dir)
+    result = staging.run("read", "staging", bash=shutil.which("bash"))
+    refused(
+        result,
+        "the AWS CLI is not on PATH" if missing == "aws" else "jq is not on PATH",
+    )
+    assert staging.calls == []
 
 
 # --- what the script passes ------------------------------------------------------
