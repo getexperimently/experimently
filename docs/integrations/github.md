@@ -24,11 +24,11 @@ Before creating the integration, you need:
 
 ### Creating a GitHub PAT
 
+The token is stored for calls to GitHub, which nothing in the platform makes yet, so an integration that only receives webhooks can leave it out.
+
 1. In GitHub, go to **Settings → Developer Settings → Personal access tokens → Tokens (classic)**
 2. Click **Generate new token**
-3. Select the following scopes:
-   - `repo` — Full repository access (or `public_repo` for public repositories only)
-   - `issues` — If you want to create issues from the platform
+3. Select the `repo` scope (or `public_repo` for public repositories only)
 4. Generate and copy the token
 
 ---
@@ -104,7 +104,7 @@ There is one GitHub configuration, and it is addressed by its type, `github`, no
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `token` | string | Yes | GitHub PAT or GitHub App installation token. Passed as `Authorization: Bearer <token>` on outbound API calls to GitHub. |
+| `token` | string | Yes | GitHub PAT or GitHub App installation token, stored for calls to GitHub, which nothing in the platform makes yet. |
 | `repo_owner` | string | Yes | Owner (user or organisation) of the repository |
 | `repo_name` | string | Yes | Repository name |
 | `webhook_secret` | string | Yes | A secret string used to verify incoming webhook payloads. Must match what you set in GitHub's webhook configuration. |

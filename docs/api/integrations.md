@@ -496,14 +496,14 @@ These are the keys of `encrypted_config`. `webhook_secret` is required by all th
 
 ### Jira Config
 
-Authentication method: **HTTP Basic Auth** — `email:api_token`.
+The Jira client is written for **HTTP Basic Auth** (`email:api_token`); nothing in the platform calls it yet.
 
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `base_url` | `string` | Yes | Jira instance base URL (e.g., `https://your-org.atlassian.net`) |
 | `email` | `string` | Yes | Atlassian account email used for API access |
 | `api_token` | `string` | Yes | Jira API token (generated at `id.atlassian.com/manage-profile/security/api-tokens`) |
-| `project_key` | `string` | No | Default project for issues the platform creates (e.g. `EXP`) |
+| `project_key` | `string` | No | A Jira project key such as `EXP`, stored for calls to Jira, which nothing in the platform makes yet |
 | `webhook_secret` | `string` | Yes | Authenticates inbound deliveries to `/webhooks/jira` |
 
 ```json
@@ -520,7 +520,7 @@ Authentication method: **HTTP Basic Auth** — `email:api_token`.
 
 ### Salesforce Config
 
-Authentication method: **OAuth 2.0 Client Credentials** — exchanges `client_id` + `client_secret` for an access token at the Salesforce token endpoint.
+The Salesforce client is written for **OAuth 2.0 Client Credentials** (`client_id` and `client_secret` for an access token at the Salesforce token endpoint); nothing in the platform calls it yet.
 
 | Field | Type | Required | Description |
 |---|---|---|---|
@@ -542,7 +542,7 @@ Authentication method: **OAuth 2.0 Client Credentials** — exchanges `client_id
 
 ### GitHub Config
 
-Authentication method: **Bearer Token** — uses a GitHub Personal Access Token (PAT) or GitHub App installation token in the `Authorization: Bearer <token>` header.
+The GitHub client is written for a **Bearer Token** (a GitHub Personal Access Token or a GitHub App installation token in `Authorization: Bearer <token>`); nothing in the platform calls it yet.
 
 | Field | Type | Required | Description |
 |---|---|---|---|

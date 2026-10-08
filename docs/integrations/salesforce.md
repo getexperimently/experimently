@@ -21,7 +21,9 @@ Before creating the integration, you need:
 1. A **Salesforce Connected App** configured in your Salesforce org with OAuth 2.0 enabled
 2. The **Consumer Key** (Client ID) and **Consumer Secret** (Client Secret) from the connected app
 3. Your **Salesforce instance URL** (e.g., `https://your-org.my.salesforce.com`)
-4. A Salesforce user account with permission to access the objects you want to sync
+4. A Salesforce user account for the Connected App to run as
+
+The Connected App's credentials are stored for calls to Salesforce, which nothing in the platform makes yet, so an integration that only receives webhooks needs nothing but a `webhook_secret`.
 
 ### Creating a Salesforce Connected App
 
@@ -215,7 +217,7 @@ The platform accepts JSON objects from a Salesforce Flow HTTP Callout, an Apex c
 | `campaign_id` | string | Salesforce Campaign record ID |
 | `campaign_name` | string | Human-readable campaign name |
 | `status` | string | New status of the Salesforce record |
-| `experiment_key` | string | Optional. Links the Salesforce record to a specific experiment |
+| `experiment_key` | string | Optional. The experiment the event is about; nothing in the platform reads it yet |
 
 **Response: 200 OK**
 

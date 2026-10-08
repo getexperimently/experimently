@@ -92,9 +92,9 @@ const sections = [
     description: 'Connect Experimently to your existing data stack.',
     links: [
       { label: 'AWS', href: docsUrl('integrations/aws'), desc: 'ECS Fargate, Aurora, ElastiCache, DynamoDB and Lambda' },
-      { label: 'Jira', href: docsUrl('api/integrations'), desc: 'Sync experiment status, auto-create issues' },
-      { label: 'Salesforce', href: docsUrl('integrations/salesforce'), desc: 'OAuth2 integration, webhook sync' },
-      { label: 'GitHub', href: docsUrl('integrations/github'), desc: 'HMAC-signed webhooks, PR linking' },
+      { label: 'Jira', href: docsUrl('api/integrations'), desc: 'Inbound webhooks, signed or with a shared secret' },
+      { label: 'Salesforce', href: docsUrl('integrations/salesforce'), desc: 'Inbound webhooks from a Flow or Apex callout' },
+      { label: 'GitHub', href: docsUrl('integrations/github'), desc: 'Inbound HMAC-signed webhooks' },
       { label: 'Slack & Email', href: docsUrl('api/alerting'), desc: 'Alerting and experiment notifications' },
     ],
   },

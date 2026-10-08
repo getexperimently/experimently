@@ -45,7 +45,7 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
-from typing import Iterator, List, Optional, Tuple
+from typing import Dict, Iterator, List, Optional, Tuple
 
 import pytest
 
@@ -336,3 +336,141 @@ def test_each_forbidden_pattern_matches_the_text_it_removed(
 def test_the_page_says_what_the_api_does(page: str, text: str, why: str) -> None:
     body = (REPO_ROOT / page).read_text(encoding="utf-8")
     assert text in body, f"{page} does not contain {text!r} ({why})"
+
+
+# ---------------------------------------------------------------------------
+# What the pages say the platform does with Jira, Salesforce and GitHub
+# ---------------------------------------------------------------------------
+#
+# The phrase rules above catch the wordings that were removed; a paraphrase
+# ("The platform creates a GitHub issue for each experiment") gets past them.
+# So every sentence on these pages that puts the platform next to an action and
+# a Jira, Salesforce or GitHub object is a claim, and each one has to be on the
+# list below, word for word. Nothing in the platform calls those services and a
+# delivery changes nothing (test_integration_wiring.py holds both), so the list
+# holds only sentences that say so, or that describe the inbound direction. A
+# new sentence of that shape fails here until someone reads it and lists it;
+# when a call is wired, the pages and this list change together.
+
+#: The pages whose sentences are checked against the list.
+PLATFORM_PAGES = (
+    "docs/api/integrations.md",
+    "docs/integrations/github.md",
+    "docs/integrations/salesforce.md",
+    "docs/getting-started/faq.md",
+)
+
+#: A sentence is a claim when it has all three. The verbs are stems, so
+#: "creates", "created" and "creating" are one entry; the actor includes
+#: "automatically", the usual subject of a passive claim.
+_ACTOR = re.compile(r"(?i)\b(?:platform|experimently|automatically)\b")
+_ACTION = re.compile(
+    r"(?i)\b(?:creat|push|sync|updat|link|post|comment|open|clos|transition|send"
+    r"|sent|writ|notif|finali[sz]|mark|map|call|act|pass|exchang|refresh|make"
+    r"|made|reach|fil)\w*"
+)
+_REMOTE = re.compile(
+    r"(?i)\b(?:jira|salesforce|github|issues?|campaigns?|opportunit(?:y|ies)"
+    r"|pull requests?|PRs?|tickets?|comments?)\b"
+)
+_FENCE = re.compile(r"^([ \t]*)(`{3,}|~{3,}).*?^\1\2[ \t]*$", re.S | re.M)
+_COMMENT = re.compile(r"<!--.*?-->", re.S)
+
+ALLOWED_PLATFORM_SENTENCES: Dict[str, Tuple[str, ...]] = {
+    "docs/api/integrations.md": (
+        "Nothing in the platform calls Jira, Salesforce or GitHub yet, and an authenticated delivery is acknowledged without changing anything in the platform (see [What a delivery does](#what-a-delivery-does)).",
+        "An authenticated delivery is acknowledged, and nothing in the platform changes because of it yet: no experiment, flag or other record is created or updated from a Jira, Salesforce or GitHub event.",
+        "Then set the same value at the provider: GitHub's webhook *Secret* field, Jira's webhook secret (Jira Cloud) or the `X-Experimently-Webhook-Secret` header on the relay in front of it, and the same header on the Salesforce callout (or relay).",
+        "The Jira client is written for **HTTP Basic Auth** (`email:api_token`); nothing in the platform calls it yet.",
+        "A Jira project key such as `EXP`, stored for calls to Jira, which nothing in the platform makes yet",
+        "The Salesforce client is written for **OAuth 2.0 Client Credentials** (`client_id` and `client_secret` for an access token at the Salesforce token endpoint); nothing in the platform calls it yet.",
+        "The GitHub client is written for a **Bearer Token** (a GitHub Personal Access Token or a GitHub App installation token in `Authorization: Bearer <token>`); nothing in the platform calls it yet.",
+    ),
+    "docs/integrations/github.md": (
+        "It also stores a token and a repository for calls to GitHub, but nothing in the platform calls GitHub yet, and a delivery is acknowledged without changing anything in the platform.",
+        "- **Inbound (GitHub → Platform)**: Receive webhook events from GitHub (`push`, `pull_request`, `issues`).",
+        "Nothing in the platform acts on the event yet: no pull request is linked to an experiment, and no experiment changes.",
+        "Nothing in the platform calls GitHub, so the `token` and the repository are stored but not used.",
+        "The token is stored for calls to GitHub, which nothing in the platform makes yet, so an integration that only receives webhooks can leave it out.",
+        "GitHub PAT or GitHub App installation token, stored for calls to GitHub, which nothing in the platform makes yet.",
+        "An answered delivery changes nothing in the platform yet: a pull request is not linked to an experiment, whatever its body says.",
+    ),
+    "docs/integrations/salesforce.md": (
+        "The Salesforce integration receives the events a Salesforce Flow or Apex callout sends to the platform, and authenticates each one.",
+        "It also stores your Connected App's credentials for calls to Salesforce, but nothing in the platform calls Salesforce yet, and a delivery is acknowledged without changing anything in the platform.",
+        "Nothing in the platform calls Salesforce, so no experiment's status or result reaches a Salesforce record; the Connected App's credentials are stored but not used.",
+        "- **Inbound (Salesforce → Platform)**: Receive events from Salesforce via webhook, posted as JSON by a Flow HTTP Callout, an Apex callout or a relay.",
+        "The Connected App's credentials are stored for calls to Salesforce, which nothing in the platform makes yet, so an integration that only receives webhooks needs nothing but a `webhook_secret`.",
+        "The Salesforce client in the platform is written for the **OAuth 2.0 Client Credentials** flow, and nothing calls it yet.",
+        "To receive incoming events from Salesforce, configure a Salesforce Flow with an HTTP Callout (or an Apex callout, or a relay in front of the platform) to POST a JSON object to:",
+        "In Salesforce, build the sender: a Flow that runs on the record change you care about (for example a Campaign whose status becomes `Completed`) and calls an **HTTP Callout** action, or an Apex callout, or point your relay at the platform",
+        "The platform accepts JSON objects from a Salesforce Flow HTTP Callout, an Apex callout or a relay.",
+        "Nothing in the platform calls Salesforce yet: no experiment's status or result is written to a Salesforce record, and the `instance_url`, `client_id` and `client_secret` are stored for a sync that is not wired.",
+        "Ensure your platform is accessible from the public internet (Salesforce requires a reachable HTTPS endpoint)",
+    ),
+    "docs/getting-started/faq.md": (
+        "Nothing in the platform calls Jira, Salesforce or GitHub yet, and a delivery changes nothing in the platform:",
+    ),
+}
+
+
+def platform_claims(text: str) -> List[str]:
+    """The sentences of *text*, outside code and comments, that are claims.
+
+    A line is split at table cells and after sentence-ending punctuation, and
+    its whitespace collapsed, so a sentence wrapped differently is the same.
+    """
+    text = _COMMENT.sub(" ", _FENCE.sub("\n", text))
+    found = []
+    for line in text.splitlines():
+        for cell in line.split("|"):
+            for piece in re.split(r"(?<=[.!?])\s+", cell):
+                sentence = " ".join(piece.split())
+                if (
+                    sentence
+                    and _ACTOR.search(sentence)
+                    and _ACTION.search(sentence)
+                    and _REMOTE.search(sentence)
+                ):
+                    found.append(sentence)
+    return found
+
+
+def test_every_claim_about_what_the_platform_does_is_on_the_list() -> None:
+    assert set(ALLOWED_PLATFORM_SENTENCES) == set(PLATFORM_PAGES)
+    problems = []
+    for page in PLATFORM_PAGES:
+        found = platform_claims((REPO_ROOT / page).read_text(encoding="utf-8"))
+        allowed = ALLOWED_PLATFORM_SENTENCES[page]
+        for sentence in found:
+            if sentence not in allowed:
+                problems.append(f"{page}: not on the list: {sentence!r}")
+        for sentence in allowed:
+            if sentence not in found:
+                problems.append(
+                    f"{page}: listed but no longer on the page: {sentence!r}"
+                )
+    assert not problems, (
+        "\n".join(problems)
+        + "\n\nA sentence that puts the platform next to an action on Jira,"
+        " Salesforce or GitHub is a claim. Nothing in the platform calls them"
+        " (test_integration_wiring.py): reword it, or, if it is true, list it in"
+        " ALLOWED_PLATFORM_SENTENCES."
+    )
+
+
+@pytest.mark.parametrize(
+    "sentence",
+    [
+        "The platform creates a GitHub issue for each experiment.",
+        "A Salesforce campaign is updated automatically when an experiment completes.",
+        "Experimently opens a pull request for every rollout.",
+        "Results are pushed to Jira by the platform.",
+        "| `project_key` | Default project for issues the platform creates |",
+    ],
+)
+def test_a_reworded_claim_is_still_a_claim(sentence: str) -> None:
+    claims = platform_claims(sentence)
+    assert claims, f"{sentence!r} was not seen as a claim"
+    listed = {s for page in ALLOWED_PLATFORM_SENTENCES.values() for s in page}
+    assert not set(claims) & listed

@@ -4,7 +4,9 @@
  * Each entry is a claim the hub used to make: an SDK count `sdk/` had
  * outgrown, a latency nobody measured, local hashing the SDKs do not do (the
  * server decides), a one-step deploy that takes several, a search box that was
- * a folder listing, and the AWS name as a hyphenated adjective.
+ * a folder listing, the AWS name as a hyphenated adjective, and Jira,
+ * Salesforce and GitHub syncs that nothing in the platform makes: it calls
+ * none of them, and an inbound webhook changes nothing.
  *
  * The fragments are concatenated, not joined with whitespace, so each entry is
  * exactly the regular expression it reads as once put together; they are split
@@ -29,6 +31,10 @@ const retired: Array<[string[], string]> = [
   [['consistent\\s+', '(MD5\\s+)?hash'], 'the SDKs do not bucket locally'],
   [['One-', 'command'], 'the CDK deploy takes several steps'],
   [['Search\\s+the', '\\s+documentation'], 'the link opens a listing, not a search'],
+  [['Sync\\s+experiment', '\\s+status'], 'nothing in the platform calls Jira'],
+  [['auto-', 'create'], 'nothing in the platform creates a Jira issue'],
+  [['webhook\\s+', 'sync'], 'a Salesforce delivery is answered and changes nothing'],
+  [['PR\\s+', 'linking'], 'a pull request is not linked to an experiment'],
 ];
 
 describe('/docs hub', () => {
