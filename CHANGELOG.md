@@ -10,6 +10,27 @@ longer applies and release-please can generate this file directly. Until it
 does, entries below 0.2.2 are hand-written and the links in them are the
 reason why.
 
+## [0.27.0](https://github.com/getexperimently/experimently/compare/v0.26.4...v0.27.0) (2026-10-08)
+
+
+### Features
+
+* **showcase:** capture the getting-started walkthrough from a local stack ([#1079](https://github.com/getexperimently/experimently/issues/1079)) ([6b4580d](https://github.com/getexperimently/experimently/commit/6b4580dfa52800c0d235a76f75f8a46a39bb9beb))
+* **showcase:** render captured walkthroughs into captioned 1080p MP4s with subtitle files and a review page ([#1077](https://github.com/getexperimently/experimently/issues/1077)) ([d29a941](https://github.com/getexperimently/experimently/commit/d29a941cb600700f1bdb2dfed37884ff21aabe76))
+
+
+### Bug Fixes
+
+* **auth:** an http SSO URL is refused when an Okta configuration is saved ([#1095](https://github.com/getexperimently/experimently/issues/1095)) ([eb692fb](https://github.com/getexperimently/experimently/commit/eb692fb737c33534caa924ba030d389d4234c608))
+* **dashboard:** the web container's access log leaves query strings out ([#1099](https://github.com/getexperimently/experimently/issues/1099)) ([7b73405](https://github.com/getexperimently/experimently/commit/7b7340530614a807cee3e4508523ac351c10a095))
+* **logging:** the API log leaves sign-in and token query values out ([#1094](https://github.com/getexperimently/experimently/issues/1094)) ([7c377a0](https://github.com/getexperimently/experimently/commit/7c377a08bb8fa7c0a492ec19a35abf8c1dbb3ecb))
+
+
+### Documentation
+
+* the API reference, compliance, RBAC and technical guide pages run as written ([#1090](https://github.com/getexperimently/experimently/issues/1090)) ([1672943](https://github.com/getexperimently/experimently/commit/1672943b364eff1bc990c76046ac322b196cdd86))
+* verify a release and describe the MCP manifest as they are, both run by Doc Examples ([#1084](https://github.com/getexperimently/experimently/issues/1084)) ([77e7594](https://github.com/getexperimently/experimently/commit/77e75943d6247d82b6ab55a071480c41b91c2219))
+
 ## [0.26.4](https://github.com/getexperimently/experimently/compare/v0.26.3...v0.26.4) (2026-10-07)
 
 
