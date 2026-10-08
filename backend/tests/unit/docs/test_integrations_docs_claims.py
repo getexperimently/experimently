@@ -363,7 +363,13 @@ PLATFORM_PAGES = (
 #: A sentence is a claim when it has all three. The verbs are stems, so
 #: "creates", "created" and "creating" are one entry; the actor includes
 #: "automatically", the usual subject of a passive claim.
-_ACTOR = re.compile(r"(?i)\b(?:platform|experimently|automatically)\b")
+_ACTOR = re.compile(
+    r"(?i)\b(?:platform|experimently|automatically)\b"
+    # An actor-less passive ("a Jira issue is created for ...") is a claim too.
+    r"|\b(?:is|are|was|were|be|been|being|gets?|got)\s+(?:\w+ly\s+)?"
+    r"(?:creat|push|sync|updat|link|post|comment|open|clos|transition|sent|writ"
+    r"|written|notif|mark|fil)\w*"
+)
 _ACTION = re.compile(
     r"(?i)\b(?:creat|push|sync|updat|link|post|comment|open|clos|transition|send"
     r"|sent|writ|notif|finali[sz]|mark|map|call|act|pass|exchang|refresh|make"
@@ -375,6 +381,7 @@ _REMOTE = re.compile(
 )
 _FENCE = re.compile(r"^([ \t]*)(`{3,}|~{3,}).*?^\1\2[ \t]*$", re.S | re.M)
 _COMMENT = re.compile(r"<!--.*?-->", re.S)
+_BLOCK_START = re.compile(r"^\s*(?:[-*+]\s|\d+[.)]\s|\||#|>|<)")
 
 ALLOWED_PLATFORM_SENTENCES: Dict[str, Tuple[str, ...]] = {
     "docs/api/integrations.md": (
@@ -387,6 +394,8 @@ ALLOWED_PLATFORM_SENTENCES: Dict[str, Tuple[str, ...]] = {
         "The GitHub client is written for a **Bearer Token** (a GitHub Personal Access Token or a GitHub App installation token in `Authorization: Bearer <token>`); nothing in the platform calls it yet.",
     ),
     "docs/integrations/github.md": (
+        "Received when a pull request is opened, updated, merged, or closed.",
+        "Received when an issue is opened, edited, closed, or labeled.",
         "It also stores a token and a repository for calls to GitHub, but nothing in the platform calls GitHub yet, and a delivery is acknowledged without changing anything in the platform.",
         "- **Inbound (GitHub → Platform)**: Receive webhook events from GitHub (`push`, `pull_request`, `issues`).",
         "Nothing in the platform acts on the event yet: no pull request is linked to an experiment, and no experiment changes.",
@@ -396,6 +405,7 @@ ALLOWED_PLATFORM_SENTENCES: Dict[str, Tuple[str, ...]] = {
         "An answered delivery changes nothing in the platform yet: a pull request is not linked to an experiment, whatever its body says.",
     ),
     "docs/integrations/salesforce.md": (
+        "Set the method to `POST` and the URL to your webhook URL: `https://your-platform.example.com/api/v1/integrations/webhooks/salesforce`",
         "The Salesforce integration receives the events a Salesforce Flow or Apex callout sends to the platform, and authenticates each one.",
         "It also stores your Connected App's credentials for calls to Salesforce, but nothing in the platform calls Salesforce yet, and a delivery is acknowledged without changing anything in the platform.",
         "Nothing in the platform calls Salesforce, so no experiment's status or result reaches a Salesforce record; the Connected App's credentials are stored but not used.",
@@ -409,6 +419,7 @@ ALLOWED_PLATFORM_SENTENCES: Dict[str, Tuple[str, ...]] = {
         "Ensure your platform is accessible from the public internet (Salesforce requires a reachable HTTPS endpoint)",
     ),
     "docs/getting-started/faq.md": (
+        "Integrations are created by an ADMIN at `POST /api/v1/integrations`, are addressed by their type afterwards (`GET /api/v1/integrations/github`; there is one of each type), and have per-service webhook endpoints at `POST /api/v1/integrations/webhooks/github (also /jira, /salesforce)`.",
         "Nothing in the platform calls Jira, Salesforce or GitHub yet, and a delivery changes nothing in the platform:",
     ),
 }
@@ -417,12 +428,21 @@ ALLOWED_PLATFORM_SENTENCES: Dict[str, Tuple[str, ...]] = {
 def platform_claims(text: str) -> List[str]:
     """The sentences of *text*, outside code and comments, that are claims.
 
-    A line is split at table cells and after sentence-ending punctuation, and
-    its whitespace collapsed, so a sentence wrapped differently is the same.
+    A hard-wrapped line is joined to the line it continues (any non-blank line
+    that does not start a list item, a table row or a heading), then each line
+    is split at table cells and after sentence-ending punctuation and its
+    whitespace collapsed, so a sentence wrapped differently is the same.
     """
     text = _COMMENT.sub(" ", _FENCE.sub("\n", text))
+    lines: List[str] = []
+    for raw in text.splitlines():
+        starts_block = not raw.strip() or bool(_BLOCK_START.match(raw))
+        if lines and lines[-1].strip() and not starts_block:
+            lines[-1] = f"{lines[-1]} {raw.strip()}"
+        else:
+            lines.append(raw)
     found = []
-    for line in text.splitlines():
+    for line in lines:
         for cell in line.split("|"):
             for piece in re.split(r"(?<=[.!?])\s+", cell):
                 sentence = " ".join(piece.split())
