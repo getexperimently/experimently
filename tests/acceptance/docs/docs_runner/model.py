@@ -178,8 +178,9 @@ documented assignment hash gives ``user``, and the flag answer the documented
 rollout hash gives at ``rollout`` percent. Its check is the action itself; an
 install that fails is FAIL, never NOT RUN. With ``language: go`` the install
 section's block is the page's ``go mod init`` and ``go get``, run in its order,
-the block is a complete program that prints one ``key=value`` line, and
-``answers`` name the keys of that line (no stubs, no paths).
+the block is a complete program that prints one ``key=value`` line,
+``answers`` name the keys of that line (no stubs, no paths), and ``replace``
+must also put ``{{api-url}}`` in place of the API address the program names.
 """
 
 from __future__ import annotations
@@ -203,6 +204,7 @@ from pydantic import (
 )
 
 from docs_runner.redaction import credential_key, credential_path
+from docs_runner.sdk import required_placeholders
 
 STACKS = (
     "compose-dev",
@@ -561,13 +563,17 @@ class Sdk(_Strict):
     @model_validator(mode="after")
     def _replaces_what_the_oracle_answers_for(self) -> "Sdk":
         used = set(self.replace.values())
-        missing = [
-            p for p in ("{{experiment}}", "{{flag}}", "{{user}}") if p not in used
-        ]
+        missing = [p for p in required_placeholders(self.language) if p not in used]
         if missing:
             raise ValueError(
                 f"replace puts nothing in place of {', '.join(missing)}: the block"
                 " must use the step's experiment, flag and user"
+                + (
+                    ", and a go block the stack's address, which its program names"
+                    " itself"
+                    if "{{api-url}}" in missing
+                    else ""
+                )
             )
         values = list(self.replace.values())
         twice = sorted({value for value in values if values.count(value) > 1})

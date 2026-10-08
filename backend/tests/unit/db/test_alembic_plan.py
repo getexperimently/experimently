@@ -259,9 +259,12 @@ def test_unapplying_the_branch_is_one_revision_and_modules_at_base_is_all_of_the
 
 
 #: A command line, not a mention of one: the three documents all warn about
-#: ``modules@base`` in prose now, and must not hand it to anybody to run.
+#: ``modules@base`` in prose now, and must not hand it to anybody to run. The
+#: operator page runs alembic in the API container (``docker compose exec api
+#: python -m alembic ...``, #1075), so that prefix is a command line too.
 _MODULES_AT_BASE_COMMAND = re.compile(
-    r"(?m)^\s*(?:\$ ?)?(?:python -m )?alembic\b.*downgrade modules@base"
+    r"(?m)^\s*(?:\$ ?)?(?:docker compose exec (?:-\S+ ){0,4}api )?"
+    r"(?:python -m )?alembic\b.*downgrade modules@base"
 )
 
 

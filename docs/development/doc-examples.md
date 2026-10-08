@@ -189,6 +189,7 @@ of the source will see:
 | `destructive` | changes state a reader must choose to change (restore, rollback, delete) |
 | `demo` | needs the demo applications |
 | `fragment` | is a template to fill in, not runnable as written |
+| `timing` | gates on latency or throughput, which one run on a shared runner cannot hold: one command, `run_load_tests.py` without `--sla report`, and the page runs the same command with `--sla report` in an `exec` block |
 | `bug #N` | fails because of the product defect in issue N: `bug #123: …` |
 
 The check prints how many skipped blocks each category holds.
@@ -222,11 +223,12 @@ inside a here-document is not a comment and is fine.
 |---|---|
 | `bare` | Docker is available and nothing is running. The page starts its own stack. |
 | `stack` | The Quick Start's `docker compose up -d --wait` has already run. |
+| `stack-dev` | As `stack`, and the repository root has a development virtual environment, `venv/`, with `backend/requirements.txt` installed, for a contributor's page (`source venv/bin/activate`). CI builds it; a page whose venv cannot `import alembic, locust, backend.app.core.config` fails before its stack starts. |
 | `stack-full` | The full profile's `EXPERIMENTLY_PROFILE=full docker compose up -d --wait` has already run, and `GET /api/v1/modules` said `"profile": "full"`. For a page about a module. |
 | `local` | Reserved for the demo applications, and refused as not implemented yet. |
 
-A `stack` page is coupled to the Quick Start by assertion: the Quick Start must be
-enrolled as `bare` and contain exactly one block that runs
+A `stack` or `stack-dev` page is coupled to the Quick Start by assertion: the Quick
+Start must be enrolled as `bare` and contain exactly one block that runs
 `docker compose up -d --wait`, or the check fails. A `stack-full` page is coupled the
 same way to [Modules and profiles](../getting-started/modules.md), which must be enrolled
 as `stack-full` and contain exactly one block that runs
@@ -267,8 +269,10 @@ CI splits the pages that run into **shards**, each a job of its own, and a **sum
 job checks them all:
 
 - The runner decides the shards, from `scripts/doc_examples.toml`
-  (`python scripts/doc_examples.py --plan` prints them). Pages are grouped by the images
-  they need: `core` for `bare` and `stack` pages, `full` for `stack-full` pages. Each
+  (`python scripts/doc_examples.py --plan` prints them). Pages are grouped by what
+  their stack needs: `core` for `bare` and `stack` pages, `full` for `stack-full`
+  pages, and `dev` for `stack-dev` pages, whose shard builds the virtual environment
+  once before its pages run. Each
   group is dealt across as many shards as keep each one to a few pages, since each page
   starts a stack of its own and takes about a minute. Enrolling a page never means
   editing the workflow.
