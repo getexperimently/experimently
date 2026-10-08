@@ -1352,6 +1352,12 @@ jobs:
           cache-from: type=gha,scope=web
           cache-to: type=gha,scope=web,mode=max
 
+      # The dashboard's access log writes no query string (#1098), checked in
+      # the image just built: the rendered nginx config, then the lines three
+      # requests leave. tests/web/access_log.sh says what a pass means.
+      - name: Dashboard access log leaves query strings out
+        run: bash tests/web/access_log.sh experimently-web:core
+
       # The check release.yml runs on every published image, run here on every
       # pull request so a label regression is caught before a tag. It includes
       # the source label: the dashboard's nginx base sets

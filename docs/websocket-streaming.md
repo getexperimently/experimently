@@ -259,7 +259,9 @@ Ways to present the token, in order of preference:
    URLs and therefore out of access logs.
 2. **`Authorization: Bearer <token>` header** for non-browser clients.
 3. **`?token=<token>` query parameter**, supported for compatibility only. URLs are
-   written to proxy and server access logs, so prefer 1 or 2.
+   written to proxy and server access logs, so prefer 1 or 2. The dashboard's nginx,
+   which proxies `/api/` in Docker Compose, leaves the query string out of its access
+   log; its error log, written when it cannot reach the API, still includes it.
 
 `frontend/src/hooks/useExperimentStream.ts` stops reconnecting and reports
 `status: 'unauthorized'` on close code 4401.

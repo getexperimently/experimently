@@ -49,6 +49,9 @@ Not in that picture, because nothing deploys it:
   proxies nothing (its `API_UPSTREAM` is `http://127.0.0.1:1`, so a stray
   `/api` request gets a 502). In Docker Compose there is no ALB: nginx proxies
   `/api/`, `/ws/` and `/health` to the API, and the browser talks only to nginx.
+  Its access log writes each request's method, path and protocol and leaves the
+  query string out. Its error log does not: when nginx cannot reach the API, the
+  error line carries the full request line, query included.
 
 ## Authentication & Authorization
 
