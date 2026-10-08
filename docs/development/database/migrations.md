@@ -8,34 +8,32 @@ This guide explains how to use the SQLAlchemy models that we've created for the 
 2. [Using the SQLAlchemy Models](#using-the-sqlalchemy-models)
 3. [Database Migrations with Alembic](#database-migrations-with-alembic)
 4. [Working with Experiments](#working-with-experiments)
-5. [Working with Feature Flags](#working-with-feature-flags)
-6. [Event Tracking](#event-tracking)
-7. [Users and Permissions](#users-and-permissions)
-8. [Model Relationships](#model-relationships)
-9. [Performance Considerations](#performance-considerations)
 
 ## Project Structure
 
-The project follows this structure:
+The parts of the repository this guide uses:
 
-```
-├── alembic/                    # Migration scripts and configuration
-│   ├── versions/               # Generated migration scripts
-│   ├── env.py                  # Alembic environment configuration
-│   └── script.py.mako          # Template for migration scripts
-├── core/
-│   └── config.py               # Application configuration
+```text
+backend/app/
+├── core/config.py            settings, including the POSTGRES_* connection
 ├── db/
-│   └── session.py              # Database session setup
-├── models/                     # SQLAlchemy model definitions
-│   ├── __init__.py
-│   ├── base.py                 # Base model with common fields
-│   ├── user.py                 # User and permission models
-│   ├── experiment.py           # Experiment and variant models
-│   ├── feature_flag.py         # Feature flag models
-│   ├── assignment.py           # Experiment assignment models
-│   └── event.py                # Event tracking models
-└── .env                        # Environment variables
+│   ├── alembic.ini           the Alembic configuration every command passes with -c
+│   ├── bootstrap.py          the schema of a new database; upgrade heads on one with tables
+│   ├── session.py            the engine and SessionLocal
+│   └── migrations/
+│       ├── env.py            the Alembic environment: connection, schema, both branches
+│       ├── script.py.mako    the template of a new revision
+│       └── versions/         the core chain's revisions
+└── models/                   the SQLAlchemy models, one module per area
+    ├── base.py               the base model and its common fields
+    ├── experiment.py         Experiment, Variant, ExperimentStatus, ExperimentType
+    ├── feature_flag.py
+    ├── assignment.py
+    ├── event.py
+    └── user.py
+modules/backend/app/          a full checkout only
+├── db/migrations/versions/   the modules branch's revisions
+└── models/                   the optional modules' models
 ```
 
 ## Using the SQLAlchemy Models
@@ -45,8 +43,8 @@ The project follows this structure:
 Here's how to use the models in your application code:
 
 ```python
-from db.session import SessionLocal
-from models import Experiment, Variant, ExperimentStatus
+from backend.app.db.session import SessionLocal
+from backend.app.models.experiment import Experiment, ExperimentStatus, Variant
 
 # Create a database session
 db = SessionLocal()
@@ -104,8 +102,8 @@ In a FastAPI application, you can use dependency injection:
 from fastapi import Depends, FastAPI, HTTPException
 from sqlalchemy.orm import Session
 
-from db.session import get_db
-from models import Experiment
+from backend.app.api.deps import get_db
+from backend.app.models.experiment import Experiment
 
 app = FastAPI()
 
@@ -119,54 +117,106 @@ def get_experiment(experiment_id: str, db: Session = Depends(get_db)):
 
 ## Database Migrations with Alembic
 
-### Initial Setup
+### Before You Start
 
-Before using migrations, make sure your database is created:
+Run every command in this section from the repository root, in the development
+virtual environment that
+[Python Virtual Environment Setup](../../getting-started/python-virtual-env-setup.md)
+makes:
 
-Create the database if it doesn't exist:
-
-```bash
-createdb experimentation
+```{.bash exec}
+source venv/bin/activate
 ```
 
-Then initialize the database with Alembic:
+Alembic connects with the `POSTGRES_*` settings. Their defaults (`localhost:5432`,
+user and password `postgres`, database `experimentation`, schema
+`experimentation`) are the PostgreSQL that `make db` starts, which is also the
+[Quick Start](../../getting-started/quick-start.md) stack's. Set them only for
+another server. CI runs this section as written against the Quick Start stack.
 
-Generate the initial migration:
+### A New Database
 
-```bash
-alembic -c backend/app/db/alembic.ini revision --autogenerate -m "Initial migration"
-```
+A new database gets its schema from the bootstrap, never from the migrations:
+the historical chain cannot be replayed from an empty database. Do not
+autogenerate an "initial migration" for one either. Against an empty database
+`--autogenerate` writes a revision that creates every table again, beside the
+chain that already does. The bootstrap creates the schema from the models and
+records the heads. On a database that already has tables it runs `upgrade heads`
+instead, so it is safe to run again:
 
-Apply the migration:
-
-```bash
-python -m alembic -c backend/app/db/alembic.ini upgrade heads
-```
-
-On a database with no tables at all, use the bootstrap instead: the historical
-migration chain cannot be replayed from zero.
-
-```bash
+```{.bash exec}
 ENVIRONMENT=development python -m backend.app.db.bootstrap
 ```
+<!-- expect: Database bootstrap complete -->
+
+It ends with `Database bootstrap complete (created)` on a new database and
+`Database bootstrap complete (upgraded)` on one that had tables.
+`ENVIRONMENT=development` lets it create the first administrator with the
+development default password (`FIRST_SUPERUSER`, `FIRST_SUPERUSER_PASSWORD`) when
+the database has no users.
+
+The Quick Start stack runs the core images, so the database it makes has the
+core chain only. A full checkout's bootstrap against it also applies the
+`modules` branch and creates the module tables, and logs a WARNING saying so
+(see [Switching Profile](../../self-hosting/migrations.md#switching-profile)).
+
+A full checkout has two heads, the core chain and the `modules` branch, and
+`heads` labels the second:
+
+```{.bash exec}
+alembic -c backend/app/db/alembic.ini heads
+```
+<!-- expect: (modules) (head) -->
+
+The database records one row per head:
+
+```{.bash exec}
+alembic -c backend/app/db/alembic.ini current
+```
+<!-- expect: (head) -->
 
 ### Creating New Migrations
 
-Whenever you make changes to the models:
+Whenever you make changes to the models, generate a new migration script. Name
+the head the revision extends: the core head is the line of `heads` without
+`(modules)`, and a module's change extends `modules@head`. The file lands next to
+that head. Without `--head`, alembic refuses with "Multiple heads are present".
+Never answer that with `alembic merge`: the merge file lands in the core chain
+with the module head in its `down_revision`, and a core checkout then cannot
+load its migrations at all.
 
-Generate a new migration script. A full checkout has two heads -- the core chain and the `modules` branch -- so name the one the revision extends; the file lands next to that head:
-
-```bash
-alembic -c backend/app/db/alembic.ini heads
+```{.bash skip reason="fragment: <core head id> is the core line that alembic heads prints"}
 alembic -c backend/app/db/alembic.ini revision --autogenerate \
         --head <core head id> -m "Description of changes"
 ```
 
-- `alembic -c backend/app/db/alembic.ini heads`: both, with the `modules` label
+Autogenerate compares the models with the database, so run it against a database
+at the heads. Its file is a starting point, not a finished migration. Open and
+review it before applying it:
+
+```python
+# Example generated migration
+def upgrade() -> None:
+    op.add_column(
+        'users',
+        sa.Column('email_verified', sa.Boolean(), nullable=True),
+        schema='experimentation'
+    )
+
+def downgrade() -> None:
+    op.drop_column('users', 'email_verified', schema='experimentation')
+```
+
+Check for:
+
+- a `down_revision` that is the revision ID of the head it extends;
+- the schema name (`schema='experimentation'`) on every operation;
+- no table dropped, and no data lost, that you did not mean;
+- the data types and constraints you meant.
 
 Apply the migration:
 
-```bash
+```{.bash exec}
 python -m alembic -c backend/app/db/alembic.ini upgrade heads
 ```
 
@@ -178,33 +228,36 @@ does. A core checkout has one head and needs no `--head`.
 
 Upgrade to the latest version:
 
-```bash
+```{.bash exec}
 python -m alembic -c backend/app/db/alembic.ini upgrade heads
 ```
 
-Downgrade the previous revision of one branch. With two heads a bare `downgrade -1` is ambiguous -- alembic warns and picks one -- so name the branch: `modules@-1` for a module's, the revision id for a core one. NOT `modules@base`: modules_0001_rbac is a child of core a7b8c9d0e1f2, not an alembic base, and `modules@base` resolves to the whole core chain -- 32 revisions, every table dropped:
+Downgrade the previous revision of one branch. With two heads a bare `downgrade -1` is ambiguous -- alembic warns and picks one -- so name the branch: `modules@-1` for a module's, the revision id for a core one. NOT `modules@base`: modules_0001_rbac is a child of core a7b8c9d0e1f2, not an alembic base, and `modules@base` resolves to the whole core chain, every table dropped:
 
-```bash
+```{.bash skip reason="destructive: unapplies the newest modules revision and drops the tables it created"}
 alembic -c backend/app/db/alembic.ini downgrade modules@-1
 ```
 
 Downgrade to a specific version:
 
-```bash
+```{.bash skip reason="fragment: <revision> is a revision id from alembic history"}
 alembic -c backend/app/db/alembic.ini downgrade <revision>
 ```
 
 Show current version (one row per head):
 
-```bash
+```{.bash exec}
 alembic -c backend/app/db/alembic.ini current
 ```
+<!-- expect: (head) -->
 
-Show migration history:
+Show migration history, newest first, down to the first revision (`<base> -> ...`):
 
-```bash
+```{.bash exec}
 alembic -c backend/app/db/alembic.ini history
 ```
+<!-- expect: (modules) (head) -->
+<!-- expect: <base> -->
 
 The modules branch has two revisions, `modules_0001_rbac` and then
 `modules_0002_warehouse_analysis`: `downgrade modules@-1` unapplies
@@ -216,7 +269,7 @@ branch.
 ### Creating an Experiment
 
 ```python
-from models import Experiment, Variant, ExperimentStatus, ExperimentType
+from backend.app.models.experiment import Experiment, ExperimentStatus, ExperimentType, Variant
 from uuid import UUID
 
 def create_experiment(db, name, description, hypothesis, owner_id, variants_data):

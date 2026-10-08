@@ -60,7 +60,9 @@ import does not compile):
   change), and a branch run fails when main's sdk/go has moved past the
   branch's.
 * The block is the page's complete ``package main``, written to main.go with
-  only its placeholders replaced, and run with ``go run .``. It must print
+  only its placeholders replaced, and run with ``go run .``. The program names
+  the API's address itself, so a go step must replace it with ``{{api-url}}``
+  (``GO_REQUIRED_PLACEHOLDERS``; the model refuses a step that does not). It must print
   exactly one line on stdout, ``key=value`` pairs separated by single spaces
   (``variant=treatment flag=true``), whose keys are exactly the step's
   ``answers`` (``read_line``); ``true`` and ``false`` are read as booleans.
@@ -130,6 +132,19 @@ LINE_VALUE = re.compile(r"^[^\s=]{1,200}$")
 PLACEHOLDERS = ("{{api-url}}", "{{experiment}}", "{{flag}}", "{{user}}")
 #: The placeholders every sdk step must replace: the oracle answers for these.
 REQUIRED_PLACEHOLDERS = ("{{experiment}}", "{{flag}}", "{{user}}")
+#: A Go block also names the API's address in the program itself
+#: (``exp.WithBaseURL("http://localhost:8000")``), where no environment variable
+#: overrides it, so a go step must replace that too: a step that did not would
+#: run the program against whatever answers on the page's address, never the
+#: journey's stack.
+GO_REQUIRED_PLACEHOLDERS = REQUIRED_PLACEHOLDERS + ("{{api-url}}",)
+
+
+def required_placeholders(language: str) -> Tuple[str, ...]:
+    """The placeholders a step in *language* must replace."""
+    return GO_REQUIRED_PLACEHOLDERS if language == "go" else REQUIRED_PLACEHOLDERS
+
+
 #: The page's install command, by the language of its block.
 INSTALL = {
     "typescript": re.compile(

@@ -2,10 +2,12 @@
 #
 # `examples` runs every enrolled page's examples, as written, against a stack of
 # the page's own (scripts/doc_examples.py --run), in shards: `plan` asks the
-# runner for them (--plan: by image profile, at most PAGES_PER_SHARD pages each)
-# and `summary` fails unless every page ran exactly once and every block ran
-# (--summarise). On a pull request the images are pre-built from the GHA cache
-# first, by bake reading docker-compose.yml itself, so the documented
+# runner for them (--plan: by image profile, at most PAGES_PER_SHARD pages each;
+# `dev` for the contributor pages, which also need a development virtual
+# environment, built once in their shard) and `summary` fails unless every page
+# ran exactly once and every block ran (--summarise). On a pull request the
+# images are pre-built from the GHA cache first, by bake reading
+# docker-compose.yml itself, so the documented
 # `docker compose up -d --wait` starts them without rebuilding; on main, the
 # nightly and a dispatch, compose builds from nothing, which is the path a
 # reader takes.
@@ -163,9 +165,26 @@ jobs:
 
       - uses: actions/checkout@v7
 
+      # The runner itself needs only the standard library. The pip cache is for
+      # the dev shards' virtual environment (below), and only they ask for it.
       - uses: actions/setup-python@v7
         with:
           python-version: '3.11'
+          cache: ${{ matrix.profile == 'dev' && 'pip' || '' }}
+          cache-dependency-path: backend/requirements.txt
+
+      # The contributor pages (environment stack-dev) start with `source
+      # venv/bin/activate` in a checkout whose venv has the backend's
+      # requirements, as docs/getting-started/python-virtual-env-setup.md sets
+      # one up. Built once per dev shard, before the run; the runner checks it
+      # through venv/bin/python and fails a page that cannot import what it
+      # runs. The commands are DEV_VENV_BUILD in scripts/doc_examples.py (a test
+      # holds the two equal).
+      - name: Build the development virtual environment
+        if: matrix.profile == 'dev'
+        run: |
+          python -m venv venv
+          venv/bin/pip install -r backend/requirements.txt
 
       # docs/self-hosting/releases.md verifies the newest release's signature
       # and SBOM with cosign, the way its reader does. No registry login: the
@@ -190,7 +209,7 @@ jobs:
       # profile picks the API's build target and the dashboard's build argument
       # exactly as `docker compose` does.
       - name: Pre-build the images compose would build (core)
-        if: github.event_name == 'pull_request' && matrix.profile == 'core'
+        if: github.event_name == 'pull_request' && (matrix.profile == 'core' || matrix.profile == 'dev')
         uses: docker/bake-action@v7
         with:
           source: .

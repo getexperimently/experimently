@@ -55,10 +55,11 @@ authors).  It checks, without running anything:
 
 ``--plan``
     the shards CI runs, as a GitHub Actions matrix: the pages that run, split by
-    the image profile they need (``core``: ``bare`` and ``stack``; ``full``:
-    ``stack-full``) and dealt, in path order, across as many shards as keep each
-    one inside the budget (``PAGES_PER_SHARD``).  Computed from the enrolment,
-    never listed by hand.
+    what their stack needs (``core``: ``bare`` and ``stack``; ``full``:
+    ``stack-full``; ``dev``: ``stack-dev``, the core stack and a development
+    virtual environment, which only those shards build) and dealt, in path
+    order, across as many shards as keep each one inside the budget
+    (``PAGES_PER_SHARD``).  Computed from the enrolment, never listed by hand.
 
 ``--summarise DIR``
     after every shard: fails unless each page that runs appears in exactly one
@@ -81,6 +82,7 @@ import os
 import pathlib
 import re
 import secrets
+import shlex
 import shutil
 import signal
 import socket
@@ -119,7 +121,7 @@ OTHER_SHELLS = (
     "batch",
     "cmd",
 )
-ENVIRONMENTS = ("bare", "stack", "stack-full", "local")
+ENVIRONMENTS = ("bare", "stack", "stack-dev", "stack-full", "local")
 DEFAULT_TIMEOUT = 120
 AUTHORING = "docs/development/doc-examples.md"
 
@@ -145,6 +147,7 @@ CATEGORIES = (
     "destructive",
     "demo",
     "fragment",
+    "timing",
     "bug",
 )
 
@@ -279,6 +282,17 @@ STACK_FULL_UP = "EXPERIMENTLY_PROFILE=full docker compose up -d --wait"
 # otherwise answer every module route 404, and a page that does not assert on
 # its output would pass.
 MODULES_URL = "http://localhost:8000/api/v1/modules"
+# ``stack-dev``: the Quick Start's stack, started the same way as for ``stack``,
+# and a development virtual environment at the repository root with
+# backend/requirements.txt installed, which a contributor's page activates
+# (``source venv/bin/activate``).  CI's ``dev`` shards build it before the run;
+# the runner only checks it, through the venv's own python, so a venv that
+# exists but lacks what the pages run is refused too.
+DEV_VENV = "venv"
+DEV_VENV_CHECK = "import alembic, locust, backend.app.core.config"
+DEV_VENV_BUILD = (
+    "python -m venv venv && venv/bin/pip install -r backend/requirements.txt"
+)
 
 # ---------------------------------------------------------------------------
 # Shards (E0b).  Every page that runs costs about the same: one stack start
@@ -296,8 +310,9 @@ MODULES_URL = "http://localhost:8000/api/v1/modules"
 PAGE_SECONDS = 80
 SHARD_BUDGET_SECONDS = 480
 PAGES_PER_SHARD = SHARD_BUDGET_SECONDS // PAGE_SECONDS
-# The image profile a page's stack needs.  Order is the plan's order.
-PROFILES = ("core", "full")
+# What a page's stack needs: the image profile, and for ``dev`` the development
+# virtual environment as well.  Order is the plan's order.
+PROFILES = ("core", "full", "dev")
 
 # The run deadline: the job's own start and timeout, exported by the workflow
 # (the timeout from the same expression as `timeout-minutes`).  The runner
@@ -739,6 +754,14 @@ _PACKAGE_MANAGER = re.compile(
 )
 # PE C10: an example that runs never reaches an AWS account.
 _CLOUD = re.compile(_COMMAND_AT + r"(?P<tool>aws|cdk|sam)" + _WORD_END, re.M)
+# `timing:` skips the one command that fails on latency or throughput: one
+# run's timings on a shared runner are not a stable statistic, and no gate
+# asserts a single wall-clock measurement.  So the skip holds that command
+# alone, and the page runs the same command without the gate (`--sla report`)
+# in an exec block, so the load itself is still run and checked (#1075).
+_TIMING_GATE = re.compile(r"(?:^|[\s/])run_load_tests\.py(?=\s|$)")
+_SLA_REPORT = re.compile(r"\s--sla(?:\s+|=)report(?=\s|$)")
+_SEPARATOR = re.compile(r"[;&|`<>\n]|\$\(")
 
 
 def shell_text(body: str) -> str:
@@ -835,6 +858,61 @@ def _bash_n(bash: str, body: str) -> Optional[str]:
     return None
 
 
+def _gate_words(command: str) -> Optional[tuple[str, ...]]:
+    """*command*'s words without its ``--sla`` option; None if it does not split."""
+    try:
+        words = shlex.split(command)
+    except ValueError:
+        return None
+    kept, i = [], 0
+    while i < len(words):
+        if words[i] == "--sla":
+            i += 2
+            continue
+        if not words[i].startswith("--sla="):
+            kept.append(words[i])
+        i += 1
+    return tuple(kept)
+
+
+def _timing_problems(block: Block, where: str) -> list[str]:
+    """A ``timing`` skip holds one command, and it is one that gates on time."""
+    command = shell_text(block.body).strip()
+    if not command or _SEPARATOR.search(command):
+        return [
+            f"{where}: a 'timing' skip holds exactly one command, the one that "
+            "gates on latency or throughput; run the others "
+            f"({AUTHORING}#pages-that-cannot-run-here)"
+        ]
+    if not _TIMING_GATE.search(command) or _SLA_REPORT.search(command):
+        return [
+            f"{where}: a 'timing' skip is for a command that gates on latency or "
+            "throughput (run_load_tests.py without --sla report); this one does "
+            "not, so tag it exec"
+        ]
+    return []
+
+
+def _timing_runs(blocks: list[Block], name: str) -> list[str]:
+    """Each ``timing`` skip's command also runs, with ``--sla report``."""
+    reported = {
+        _gate_words(line)
+        for b in blocks
+        if b.kind == "exec"
+        for line in shell_text(b.body).split("\n")
+        if _TIMING_GATE.search(line) and _SLA_REPORT.search(line)
+    }
+    return [
+        f"{name}:{b.line}: a 'timing' skip needs the same command with --sla "
+        "report in an exec block on the page, so the load still runs and is "
+        "checked; only the latency and throughput gate is skipped"
+        for b in blocks
+        if b.kind == "skip"
+        and category_of(b.reason) == "timing"
+        and _gate_words(shell_text(b.body).strip()) not in reported
+    ]
+
+
 def block_problems(block: Block, name: str) -> list[str]:
     """Everything a reader could not paste, or a run could not do, in *block*."""
     where = f"{name}:{block.line}"
@@ -851,6 +929,8 @@ def block_problems(block: Block, name: str) -> list[str]:
                 f"{where}: the skip reason says 'registry' but the block runs no "
                 "package manager; name the category that fits"
             )
+        if category == "timing":
+            problems += _timing_problems(block, where)
         # A fragment is a template to fill in, not shell as written (plan M4).
         if category != "fragment" and block.body.strip():
             syntax = syntax_problem(block.body)
@@ -1112,6 +1192,7 @@ def _check_stack(documents: list[dict], parsed: dict[str, list[Block]]) -> None:
     problems = []
     for environment, doc_path, doc_environment, up in (
         ("stack", STACK_DOC, "bare", STACK_UP),
+        ("stack-dev", STACK_DOC, "bare", STACK_UP),
         ("stack-full", STACK_FULL_DOC, "stack-full", STACK_FULL_UP),
     ):
         if not any(d["environment"] == environment for d in documents):
@@ -1154,6 +1235,7 @@ def _enrolled_page(
         if block is not None:
             blocks.append(block)
             problems += block_problems(block, rel)
+    problems += _timing_runs(blocks, rel)
     got = {
         "exec": sum(b.kind == "exec" for b in blocks),
         "skip": sum(b.kind == "skip" for b in blocks),
@@ -1685,8 +1767,8 @@ _SHARD = re.compile(
 
 
 def profile_of(doc: dict) -> str:
-    """The image profile a page's stack needs."""
-    return "full" if doc["environment"] == "stack-full" else "core"
+    """What a page's stack needs: the image profile, or ``dev``."""
+    return {"stack-full": "full", "stack-dev": "dev"}.get(doc["environment"], "core")
 
 
 def runs(doc: dict) -> bool:
@@ -2609,6 +2691,26 @@ def full_profile_problem(rel: str, fetch: Callable[[str], object] = _get_json):
     return None
 
 
+def dev_venv_problem(rel: str, env: dict[str, str]) -> Optional[str]:
+    """None when the development virtual environment can run a stack-dev page."""
+    python = ROOT / DEV_VENV / "bin" / "python"
+    if not python.is_file():
+        return (
+            f"{rel}: the development virtual environment is missing "
+            f"({DEV_VENV}/bin/python at the repository root); a stack-dev page "
+            f"runs in it. Build it with `{DEV_VENV_BUILD}`."
+        )
+    rc, _, stderr, why = run_bounded([str(python), "-c", DEV_VENV_CHECK], env, 120)
+    if why or rc != 0:
+        last = (stderr.strip().splitlines() or [""])[-1]
+        return (
+            f"{rel}: the development virtual environment cannot run the page: "
+            f"`{DEV_VENV}/bin/python -c '{DEV_VENV_CHECK}'` "
+            f"{why or f'exited {rc}'}: {last} Build it with `{DEV_VENV_BUILD}`."
+        )
+    return None
+
+
 def run_document(
     doc: dict,
     blocks: list[Block],
@@ -2629,9 +2731,15 @@ def run_document(
     reached = 0
     starts = {
         "stack": (STACK_UP, stack_up),
+        "stack-dev": (STACK_UP, stack_up),
         "stack-full": (STACK_FULL_UP, stack_full_up),
     }
     try:
+        if doc["environment"] == "stack-dev":
+            problem = dev_venv_problem(rel, env)
+            if problem:
+                problems = [problem]
+                return problems, reached
         if doc["environment"] in starts:
             command, source = starts[doc["environment"]]
             rc, _, stderr, why = run_bounded(

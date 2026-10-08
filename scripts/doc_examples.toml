@@ -12,8 +12,8 @@
 # scripts/doc_examples.py), and each page's residual counts can only fall.
 
 [meta]
-documents = 47
-exec = 280
+documents = 50
+exec = 305
 universe = [
     ".github/pull_request_template.md",
     ".github/qa-templates/README.md",
@@ -456,7 +456,6 @@ reason = "run on a kind cluster by the chart-kind workflow (scripts/chart_kind.s
 "docs/deployment/iam-permissions.md" = { comments = 0, unlabelled = 1, syntax = 1 }
 "docs/deployment/rollback-runbook.md" = { comments = 0, unlabelled = 1, syntax = 0 }
 "docs/deployment/secrets-management.md" = { comments = 0, unlabelled = 0, syntax = 0 }
-"docs/development/database/migrations.md" = { comments = 0, unlabelled = 1, syntax = 1 }
 "docs/development/guidelines.md" = { comments = 0, unlabelled = 2, syntax = 0 }
 "docs/development/testing-guide.md" = { comments = 0, unlabelled = 0, syntax = 0 }
 "docs/development/workflow-explanation.md" = { comments = 0, unlabelled = 0, syntax = 0 }
@@ -475,7 +474,6 @@ reason = "run on a kind cluster by the chart-kind workflow (scripts/chart_kind.s
 "docs/monitoring/monitoring-guide.md" = { comments = 0, unlabelled = 1, syntax = 0 }
 "docs/monitoring/setup-guide.md" = { comments = 0, unlabelled = 1, syntax = 0 }
 "docs/monitoring/troubleshooting-guide.md" = { comments = 0, unlabelled = 1, syntax = 0 }
-"docs/performance/load-testing.md" = { comments = 0, unlabelled = 3, syntax = 0 }
 "docs/sdk-guide.md" = { comments = 0, unlabelled = 0, syntax = 0 }
 "docs/sdk/android.md" = { comments = 0, unlabelled = 0, syntax = 0 }
 "docs/sdk/dotnet.md" = { comments = 0, unlabelled = 0, syntax = 0 }
@@ -493,7 +491,6 @@ reason = "run on a kind cluster by the chart-kind workflow (scripts/chart_kind.s
 "docs/sdk/react.md" = { comments = 0, unlabelled = 0, syntax = 0 }
 "docs/sdk/ruby.md" = { comments = 0, unlabelled = 0, syntax = 0 }
 "docs/self-hosting/cdk.md" = { comments = 0, unlabelled = 1, syntax = 3 }
-"docs/self-hosting/migrations.md" = { comments = 0, unlabelled = 4, syntax = 1 }
 "docs/self-hosting/monitoring.md" = { comments = 0, unlabelled = 0, syntax = 0 }
 "frontend/README.md" = { comments = 0, unlabelled = 1, syntax = 0 }
 "sdk/android/README.md" = { comments = 0, unlabelled = 0, syntax = 0 }
@@ -573,6 +570,31 @@ environment = "stack-full"
 exec = 14
 skip = 0
 expects = 25
+
+# The operator's migration commands, run in the API container of the Quick
+# Start's stack (docker compose exec api ...), as a self-hoster runs them.
+[[document]]
+path = "docs/self-hosting/migrations.md"
+environment = "stack"
+exec = 7
+skip = 12
+expects = 5
+
+# The contributor pages: the Quick Start's stack and a development virtual
+# environment at the repository root (stack-dev; CI's dev shards build it).
+[[document]]
+path = "docs/development/database/migrations.md"
+environment = "stack-dev"
+exec = 8
+skip = 3
+expects = 6
+
+[[document]]
+path = "docs/performance/load-testing.md"
+environment = "stack-dev"
+exec = 10
+skip = 6
+expects = 8
 
 # #1075: the integration pages' setup and inbound webhook examples, each
 # signing in first and signing its deliveries as the page says. Nothing on
