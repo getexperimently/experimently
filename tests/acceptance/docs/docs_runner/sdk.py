@@ -143,6 +143,8 @@ GO_REQUIRED_PLACEHOLDERS = REQUIRED_PLACEHOLDERS + ("{{api-url}}",)
 def required_placeholders(language: str) -> Tuple[str, ...]:
     """The placeholders a step in *language* must replace."""
     return GO_REQUIRED_PLACEHOLDERS if language == "go" else REQUIRED_PLACEHOLDERS
+
+
 #: The page's install command, by the language of its block.
 INSTALL = {
     "typescript": re.compile(
