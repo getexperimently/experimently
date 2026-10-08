@@ -20,6 +20,11 @@ what they said. On main (`modules/backend/app/api/v1/endpoints/integrations.py`,
   custom headers: with no header it is a 401, and with the header added by a
   proxy the XML body is a 400. So no page may say an outbound message uses or
   can set the shared-secret header.
+* Nothing in the platform calls Jira, Salesforce or GitHub, and an
+  authenticated delivery changes nothing: the pages said the platform synced
+  both ways, pushed results to Salesforce campaigns and linked pull requests to
+  experiments. `modules/backend/tests/unit/services/test_integration_wiring.py`
+  fails when a call is wired, so the pages and this test change with it.
 
 This test forbids the phrasings that were removed and requires the pages to say
 what is true. It is a sweep, not a proof: a new wording of the same claim is not
@@ -168,6 +173,36 @@ STALE: Tuple[Rule, ...] = (
         None,
         "Confirm the **Endpoint URL** in the Salesforce Outbound Message matches your integration webhook URL",
     ),
+    (
+        r"(?i)\bbidirectional (?:sync|integrations?)\b",
+        "nothing in the platform calls Jira, Salesforce or GitHub; only the inbound webhooks are wired",
+        ("docs/",),
+        "The platform supports bidirectional sync with Jira, Salesforce, and GitHub",
+    ),
+    (
+        r"(?i)push(?:es)? experiment (?:results|data|status)[^.\n]{0,40}\bSalesforce\b",
+        "nothing in the platform calls Salesforce",
+        ("docs/",),
+        "When the platform pushes experiment data to Salesforce:",
+    ),
+    (
+        r"(?i)creates an association between the PR and the experiment",
+        "a pull_request delivery is answered and nothing is stored",
+        ("docs/",),
+        "The platform parses this field from incoming `pull_request` webhook events and creates an association between the PR and the experiment.",
+    ),
+    (
+        r"(?i)maps Jira issue transitions to experiment lifecycle actions",
+        "a Jira delivery changes no experiment",
+        ("docs/",),
+        "The platform maps Jira issue transitions to experiment lifecycle actions.",
+    ),
+    (
+        r"(?i)create GitHub issues (?:directly )?from the platform",
+        "nothing in the platform calls GitHub",
+        ("docs/",),
+        "and create GitHub issues directly from the platform.",
+    ),
 )
 
 #: (page, text it must contain, why).
@@ -221,6 +256,26 @@ REQUIRED: Tuple[Tuple[str, str, str], ...] = (
         "docs/api/integrations.md",
         "Flow HTTP Callout",
         "what sends to the Salesforce route: a native Outbound Message cannot",
+    ),
+    (
+        "docs/api/integrations.md",
+        "Nothing in the platform calls Jira, Salesforce or GitHub yet",
+        "no outbound call is wired (test_integration_wiring.py)",
+    ),
+    (
+        "docs/integrations/github.md",
+        "nothing in the platform calls GitHub yet",
+        "no outbound call is wired (test_integration_wiring.py)",
+    ),
+    (
+        "docs/integrations/salesforce.md",
+        "nothing in the platform calls Salesforce yet",
+        "no outbound call is wired (test_integration_wiring.py)",
+    ),
+    (
+        "docs/getting-started/faq.md",
+        "Nothing in the platform calls Jira, Salesforce or GitHub yet",
+        "no outbound call is wired (test_integration_wiring.py)",
     ),
 )
 

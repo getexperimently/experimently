@@ -3,14 +3,14 @@
 !!! info "Part of the `integrations` module"
     Third-party integrations is one of the optional modules -- present in the **full profile**, absent from the core one. A core deployment does not serve these routes. See [Modules and profiles](../getting-started/modules.md) for what each profile includes and how to run the full one.
 
-The GitHub integration connects the platform to your GitHub repositories. You can receive push and pull request events to link code changes to experiments, and create GitHub issues directly from the platform.
+The GitHub integration receives your repository's webhook deliveries and checks each one's signature. It also stores a token and a repository for calls to GitHub, but nothing in the platform calls GitHub yet, and a delivery is acknowledged without changing anything in the platform.
 
 ---
 
 ## What the Integration Does
 
-- **Inbound (GitHub → Platform)**: Receive webhook events from GitHub (`push`, `pull_request`, `issues`). The platform validates the payload using HMAC-SHA256 and processes the event.
-- **Outbound (Platform → GitHub)**: Create GitHub issues to track experiment-related action items, and link pull requests to active experiments.
+- **Inbound (GitHub → Platform)**: Receive webhook events from GitHub (`push`, `pull_request`, `issues`). The platform checks each delivery's HMAC-SHA256 signature and answers it. Nothing in the platform acts on the event yet: no pull request is linked to an experiment, and no experiment changes.
+- **Outbound (Platform → GitHub)**: not wired yet. Nothing in the platform calls GitHub, so the `token` and the repository are stored but not used.
 
 ---
 
@@ -37,21 +37,45 @@ Before creating the integration, you need:
 
 Creating, changing and deleting an integration needs an **ADMIN** bearer token; an ADMIN or a DEVELOPER can read it. `is_active` defaults to `false`, and only an active integration answers webhook deliveries, so send `true`.
 
-```bash
-curl -X POST http://localhost:8000/api/v1/integrations \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "integration_type": "github",
-    "is_active": true,
-    "encrypted_config": {
-      "token": "ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
-      "repo_owner": "your-org",
-      "repo_name": "your-repo",
-      "webhook_secret": "a-strong-random-secret-at-least-32-chars"
-    }
-  }'
+The examples on this page run against a local full-profile stack (see [Modules and profiles](../getting-started/modules.md)); on your own deployment, use its URL instead of `localhost:8000`. Sign in as the stack's administrator, which saves a token in `$TOKEN`:
+
+```{.bash exec}
+TOKEN=$(curl -s -X POST localhost:8000/api/v1/auth/login \
+  -H 'content-type: application/json' \
+  -d '{"email":"admin@demo.com","password":"Demo1234!"}' | jq -r .access_token)
+
+curl -s localhost:8000/api/v1/auth/me -H "Authorization: Bearer $TOKEN" | jq .role
 ```
+<!-- expect: "ADMIN" -->
+
+It prints `"ADMIN"`. If it prints `null`, the sign-in failed and `$TOKEN` holds no token.
+
+This generates a webhook secret, keeps it in `$WEBHOOK_SECRET`, and creates the integration with it. The token and the repository are examples: use your own.
+
+```{.bash exec}
+WEBHOOK_SECRET=$(openssl rand -hex 32)
+
+jq -n --arg secret "$WEBHOOK_SECRET" '{
+    integration_type: "github",
+    is_active: true,
+    encrypted_config: {
+      token: "ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+      repo_owner: "your-org",
+      repo_name: "your-repo",
+      webhook_secret: $secret
+    }
+  }' \
+  | curl -s -X POST http://localhost:8000/api/v1/integrations \
+      -H "Authorization: Bearer $TOKEN" \
+      -H "Content-Type: application/json" \
+      --data @- \
+  | jq .
+```
+<!-- expect: "integration_type": "github" -->
+<!-- expect: "is_active": true -->
+<!-- expect: "repo_owner": "your-org" -->
+<!-- expect: "token", -->
+<!-- expect: "webhook_secret" -->
 
 **Response: 201 Created**
 
@@ -93,11 +117,11 @@ Neither the `token` nor the `webhook_secret` is returned in any response: a resp
 
 1. In your GitHub repository, go to **Settings → Webhooks → Add webhook**
 2. Set the **Payload URL** to:
-   ```
+   ```text
    https://your-platform.example.com/api/v1/integrations/webhooks/github
    ```
 3. Set **Content type** to `application/json`
-4. Set the **Secret** to the same value you used as `webhook_secret` when creating the integration
+4. Set the **Secret** to the same value you used as `webhook_secret` when creating the integration (`printf '%s\n' "$WEBHOOK_SECRET"` prints it)
 5. Under **Which events would you like to trigger this webhook?**, select:
    - Individual events: `Push`, `Pull requests`, `Issues`
    - Or "Send me everything" if you want all events
@@ -107,7 +131,7 @@ Neither the `token` nor the `webhook_secret` is returned in any response: a resp
 
 ## Webhook Endpoint
 
-```
+```text
 POST /api/v1/integrations/webhooks/github
 ```
 
@@ -126,7 +150,7 @@ GitHub sends the following headers with every webhook delivery:
 
 The platform validates every incoming webhook using the `X-Hub-Signature-256` header. The validation algorithm:
 
-```
+```text
 expected_signature = "sha256=" + HMAC-SHA256(webhook_secret, raw_request_body)
 provided_signature = X-Hub-Signature-256 header value
 
@@ -137,6 +161,44 @@ if not constant_time_compare(expected_signature, provided_signature):
 Requests with a missing or invalid `X-Hub-Signature-256` header receive `401 Unauthorized` and are not processed. This prevents spoofed webhook deliveries.
 
 Every refused delivery gets the same answer, whatever the reason: `401` with the body `{"detail": "Webhook authentication failed"}`. A wrong or missing signature, an integration that is not active, an integration with no `webhook_secret`, and no GitHub integration at all are not told apart.
+
+### Sending a signed delivery
+
+GitHub signs each delivery for you. To see the check pass, sign one the same way, with the secret created above: the HMAC-SHA256 of the raw body, keyed with the `webhook_secret`, in hex, after `sha256=`:
+
+```{.bash exec}
+BODY='{"action": "opened", "number": 42, "pull_request": {"title": "feat: Add new checkout flow experiment"}}'
+SIGNATURE="sha256=$(printf '%s' "$BODY" | openssl dgst -sha256 -hmac "$WEBHOOK_SECRET" | awk '{print $NF}')"
+
+curl -s -X POST http://localhost:8000/api/v1/integrations/webhooks/github \
+  -H "Content-Type: application/json" \
+  -H "X-GitHub-Event: pull_request" \
+  -H "X-GitHub-Delivery: 72d3162e-cc78-11e3-81ab-4c9367dc0958" \
+  -H "X-Hub-Signature-256: $SIGNATURE" \
+  --data-binary "$BODY" | jq -c .
+```
+<!-- expect: {"status":"received"} -->
+
+It prints `{"status":"received"}`. `printf '%s'` adds no newline and `--data-binary` sends the body byte for byte, so the signature covers exactly what is sent. `openssl dgst` prints the digest as the last field of its line (after `SHA2-256(stdin)= ` with OpenSSL 3, on its own with LibreSSL), which `awk` keeps.
+
+The same signature on a body with one byte changed (`43` for `42`) is refused, and so is the body with no signature:
+
+```{.bash exec}
+curl -s -X POST http://localhost:8000/api/v1/integrations/webhooks/github \
+  -H "Content-Type: application/json" \
+  -H "X-GitHub-Event: pull_request" \
+  -H "X-Hub-Signature-256: $SIGNATURE" \
+  --data-binary "${BODY/42/43}" | jq -c .
+
+curl -s -X POST http://localhost:8000/api/v1/integrations/webhooks/github \
+  -H "Content-Type: application/json" \
+  -H "X-GitHub-Event: pull_request" \
+  --data-binary "$BODY" | jq -c .
+```
+<!-- expect: {"detail":"Webhook authentication failed"} -->
+<!-- expect: {"detail":"Webhook authentication failed"} -->
+
+Each prints `{"detail":"Webhook authentication failed"}`.
 
 ---
 
@@ -209,17 +271,7 @@ Received when an issue is opened, edited, closed, or labeled.
 
 A delivery from an authenticated sender is answered `200` even when the platform could not process the event: the failure is logged, so the provider does not retry something it cannot fix. A body that is not a JSON object is `400 Bad Request`, and that is checked only after the sender is authenticated.
 
----
-
-## Linking an Experiment to a Pull Request
-
-To link a pull request to a platform experiment, include the experiment key in the pull request body using the convention:
-
-```
-experiment_key: checkout-flow-v2
-```
-
-The platform parses this field from incoming `pull_request` webhook events and creates an association between the PR and the experiment. This association appears in the experiment's activity feed and allows the dashboard to show which PRs are part of a given experiment.
+An answered delivery changes nothing in the platform yet: a pull request is not linked to an experiment, whatever its body says.
 
 ---
 
