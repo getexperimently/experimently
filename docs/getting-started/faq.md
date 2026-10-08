@@ -184,11 +184,11 @@ See [Compliance Audit Trail API](../api/compliance.md) for full documentation.
 
 ### Can I integrate with Jira, Salesforce, or GitHub?
 
-Yes. The platform supports bidirectional integrations with all three:
+In one direction. The platform stores one configuration for each and receives their webhooks, authenticating every delivery against the integration's webhook secret. Nothing in the platform calls Jira, Salesforce or GitHub yet, and a delivery changes nothing in the platform:
 
-- **Jira**: Link experiments to Jira issues and receive status transition events via webhook
-- **Salesforce**: Push experiment results to Salesforce campaign objects via OAuth 2.0
-- **GitHub**: Receive push/pull_request/issues events; webhook payloads are validated using HMAC-SHA256 against your webhook secret
+- **Jira**: receives issue events, signed by Jira Cloud or carrying the secret from Jira Server
+- **Salesforce**: receives JSON from a Flow HTTP Callout, an Apex callout or a relay
+- **GitHub**: receives push, pull_request and issues events, each signed with HMAC-SHA256
 
 Integrations are created by an ADMIN at `POST /api/v1/integrations`, are addressed by their type afterwards (`GET /api/v1/integrations/github`; there is one of each type), and have per-service webhook endpoints at `POST /api/v1/integrations/webhooks/github   (also /jira, /salesforce)`.
 
