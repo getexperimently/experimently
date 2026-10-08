@@ -2563,15 +2563,16 @@ def _get_json(url: str):
     """GET *url* and decode its JSON answer; this side closes the connection.
 
     The request keeps the connection alive, and this side closes it once the
-    answer is read.  The side of a TCP connection that closes first keeps it
+    answer is read.  Whichever side of a TCP connection closes first keeps it
     in TIME_WAIT on its own port (60 s on Linux), and until then a bind without
     SO_REUSEADDR -- the preflight's -- is refused.  ``urllib.request.urlopen``
-    sends ``Connection: close``, so the API closed first and the port held was
-    the stack's published one.  This is the one request the runner makes to a
-    stack, only for a stack-full page, and the page after the modules page in
-    the full shard was the one refused with port 8000 in use (#1075).
-    Measured against a local HTTP/1.1 server: after urlopen the server's port
-    could not be bound again 10 times in 10, after this request 0 in 10.
+    sends ``Connection: close``, so the server closed first: against a local
+    HTTP/1.1 server its port could not be bound again 10 times in 10 (macOS),
+    and 0 in 10 after this request; the regression test fails the same way on
+    the CI runner's Linux.  This is the one request the runner makes to a
+    stack, and the page after the modules page in the full shard was refused
+    with port 8000 in use (#1075).  Through Docker's port proxy which side
+    closes first is a race: a dispatched run with urlopen put back passed.
     """
     parts = urllib.parse.urlsplit(url)
     connection = http.client.HTTPConnection(parts.hostname, parts.port, timeout=10)
