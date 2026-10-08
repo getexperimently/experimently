@@ -35,11 +35,12 @@ YAML, or not a mapping, stops at that. Refused, besides what ``model`` refuses:
   ``ref: doc-examples`` or declares ``not_run``);
 * ``ref: doc-examples`` on a section with no shell block Doc Examples runs, or
   on a guide ``scripts/doc_examples.toml`` does not enrol;
-* an ``api`` step on a stack with no API (every stack but compose-dev);
+* an ``api`` step on a stack with no API (every stack but compose-dev and
+  compose-sso);
 * an oracle not in ``docs_runner.oracles.ORACLES``;
 * a ``not_run`` reason the registry does not let a journey declare;
 * a ``written`` date after today;
-* ``open`` on any stack but compose-dev, or of a URL whose origin
+* ``open`` on any stack but compose-dev and compose-sso, or of a URL whose origin
   (``http://localhost:<port>``) the guide's text does not contain;
 * a ``fill`` that types a ``secret`` no ``passwords`` entry makes up and no
   earlier ``keep`` step keeps, or that does not say ``snapshot: false``;
@@ -118,6 +119,7 @@ from docs_runner.model import (
     API_ANSWER_EXPECTS,
     API_EXPECTS,
     BROWSER_EXPECTS,
+    COMPOSE_STACKS,
     LOCAL_URL,
     SCREEN_ACTIONS,
     SEARCH_EXPECTS,
@@ -394,7 +396,7 @@ def _expect_problems(label: str, step: Step, stack: Optional[str]) -> List[str]:
             found.append(f"{label}: {article} {kind} step has no screen to snapshot")
         return found
     if kind == "api":
-        if stack is not None and stack != "compose-dev":
+        if stack is not None and stack not in COMPOSE_STACKS:
             found.append(
                 f"{label}: an api step needs a stack with an API; {stack} has none"
             )
@@ -522,7 +524,7 @@ def _step_problems(
                 )
     found.extend(_expect_problems(label, step, stack))
     if step.do.open is not None:
-        if stack is not None and stack != "compose-dev":
+        if stack is not None and stack not in COMPOSE_STACKS:
             found.append(
                 f"{label}: open is for an address the guide gives for the compose"
                 f" stack; {stack} is not it"

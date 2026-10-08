@@ -346,6 +346,160 @@ class TestUpdateSSOConfig:
 
 
 # ---------------------------------------------------------------------------
+# CRUD: an OIDC sso_url must be https when it is saved
+# ---------------------------------------------------------------------------
+
+HTTPS_DETAIL = (
+    "OIDC provider endpoints must use https; check this SSO configuration's sso_url"
+)
+
+
+def _okta_data(sso_url: str) -> Dict[str, Any]:
+    return {
+        "org_name": "Acme Corp",
+        "org_domain": "acme.com",
+        "provider_type": SSOProviderType.OKTA,
+        "entity_id": "client-1",
+        "sso_url": sso_url,
+        "client_secret": "client-pw-value",
+        "role_mapping": {},
+        "is_enforced": False,
+        "is_active": True,
+    }
+
+
+class TestSsoUrlIsHttpsWhenSaved:
+    """The sign-in's rule (``_provider_endpoint``) applied at create and update."""
+
+    @pytest.fixture
+    def outside_test(self, monkeypatch):
+        from backend.app.core.config import settings as core_settings
+
+        monkeypatch.setattr(core_settings, "ENVIRONMENT", "development")
+        assert not core_settings.is_test
+
+    @pytest.mark.regression
+    @pytest.mark.parametrize(
+        "sso_url",
+        [
+            "http://org.okta.example/oauth2/default",
+            "org.okta.example",
+            # urlparse raises ValueError on it; stored, a sign-in answered 500.
+            "https://[org.okta.example",
+        ],
+    )
+    def test_create_refuses_an_okta_sso_url_that_is_not_https(
+        self, outside_test, sso_url
+    ):
+        db = _make_db_session()
+        with pytest.raises(HTTPException) as exc_info:
+            create_sso_config(db, _okta_data(sso_url))
+        assert exc_info.value.status_code == 400
+        assert exc_info.value.detail == HTTPS_DETAIL
+        db.add.assert_not_called()
+        db.commit.assert_not_called()
+
+    @pytest.mark.regression
+    def test_update_refuses_an_http_sso_url(self, outside_test):
+        db = _make_db_session()
+        cfg = _oidc_config(SSOProviderType.OKTA, "https://org.okta.example/oauth2")
+        db.first.return_value = cfg
+        with pytest.raises(HTTPException) as exc_info:
+            update_sso_config(db, cfg.id, {"sso_url": "http://org.okta.example/oauth2"})
+        assert exc_info.value.status_code == 400
+        assert exc_info.value.detail == HTTPS_DETAIL
+        assert cfg.sso_url == "https://org.okta.example/oauth2"
+        db.commit.assert_not_called()
+
+    @pytest.mark.regression
+    def test_update_refuses_making_a_saml_config_with_an_http_url_oidc(
+        self, outside_test
+    ):
+        db = _make_db_session()
+        cfg = _make_saml_config(sso_url="http://idp.acme.example/sso")
+        db.first.return_value = cfg
+        with pytest.raises(HTTPException) as exc_info:
+            update_sso_config(db, cfg.id, {"provider_type": SSOProviderType.OKTA})
+        assert exc_info.value.detail == HTTPS_DETAIL
+        assert cfg.provider_type == SSOProviderType.SAML
+        db.commit.assert_not_called()
+
+    def test_an_update_that_does_not_touch_the_url_is_not_checked(self, outside_test):
+        db = _make_db_session()
+        cfg = _oidc_config(SSOProviderType.OKTA, "http://legacy.okta.example")
+        db.first.return_value = cfg
+        update_sso_config(db, cfg.id, {"org_name": "Renamed"})
+        db.commit.assert_called_once()
+
+    def test_https_is_accepted(self, outside_test):
+        db = _make_db_session()
+        create_sso_config(db, _okta_data("HTTPS://org.okta.example/oauth2/default"))
+        db.commit.assert_called_once()
+
+    @pytest.mark.parametrize(
+        "provider",
+        [
+            SSOProviderType.SAML,
+            SSOProviderType.GOOGLE,
+            SSOProviderType.GITHUB,
+            SSOProviderType.MICROSOFT,
+            SSOProviderType.AZURE_AD,
+            SSOProviderType.ONELOGIN,
+        ],
+    )
+    def test_a_provider_that_ignores_sso_url_is_not_checked(
+        self, outside_test, provider
+    ):
+        db = _make_db_session()
+        data = {**_okta_data("http://idp.acme.example/sso"), "provider_type": provider}
+        create_sso_config(db, data)
+        db.commit.assert_called_once()
+
+        cfg = _oidc_config(provider, "https://idp.acme.example/sso")
+        db = _make_db_session()
+        db.first.return_value = cfg
+        update_sso_config(db, cfg.id, {"sso_url": "accounts.example.com"})
+        db.commit.assert_called_once()
+
+    @pytest.mark.regression
+    def test_the_checked_providers_are_those_whose_endpoints_use_sso_url(
+        self, outside_test
+    ):
+        """Okta alone today; a provider added with ``{sso_url}`` joins it."""
+        refused = set()
+        for provider in SSOProviderType:
+            try:
+                sso_service.refuse_non_https_sso_url(provider, "http://x.example")
+            except HTTPException:
+                refused.add(provider)
+        uses_sso_url = {
+            provider
+            for provider in SSOProviderType
+            if any(
+                "{sso_url}" in value
+                for value in sso_service._OIDC_PROVIDERS.get(
+                    provider.value, {}
+                ).values()
+            )
+        }
+        assert refused == uses_sso_url == {SSOProviderType.OKTA}
+
+    def test_the_test_environment_accepts_http_as_the_sign_in_does(self):
+        from backend.app.core.config import settings as core_settings
+
+        assert core_settings.is_test
+        db = _make_db_session()
+        create_sso_config(db, _okta_data("http://127.0.0.1:9/oauth2"))
+        db.commit.assert_called_once()
+
+    def test_the_sign_in_refuses_it_with_the_same_message(self, outside_test):
+        cfg = _oidc_config(SSOProviderType.OKTA, "http://org.okta.example/oauth2")
+        with pytest.raises(HTTPException) as exc_info:
+            build_oidc_authorization_url(cfg, "okta", "https://app/cb", "s", "v" * 43)
+        assert exc_info.value.detail == HTTPS_DETAIL
+
+
+# ---------------------------------------------------------------------------
 # CRUD: delete_sso_config
 # ---------------------------------------------------------------------------
 

@@ -1,4 +1,4 @@
-"""The four stacks a journey runs against. ``conftest.py`` makes each a fixture.
+"""The five stacks a journey runs against. ``conftest.py`` makes each a fixture.
 
 * ``compose-dev``: the Docker guide's ``docker compose up -d --wait`` at the
   repository root, under its own compose project, with its own host ports, and
@@ -36,6 +36,39 @@
   service on this stack's port, and one of a port the compose file does not
   default to reaches nothing.
 
+* ``compose-sso``: compose-dev's stack in the full profile, brought up the way
+  ``docs/auth/sso.md`` tells a compose reader to bring it up for SSO sign-in:
+  with the override file its section "Trying it on the Docker Compose stack"
+  gives (the first YAML block there, taken from the page at run time and
+  passed with ``-f``), plus ``stacks/compose-sso.yml`` beside this runner,
+  which adds what a reader brings from outside and the run cannot: an
+  identity provider. That provider is ``modules/``'s fake OIDC provider
+  (``fake_oidc_provider.py``), run from the API's own image in the API's
+  network namespace (``network_mode: "service:api"``), serving https on
+  port 28443 with the issuer ``https://localhost:28443/oauth2/default``. The
+  api service publishes that port on the host's loopback address only
+  (``127.0.0.1:28443``), so the browser and the API reach the provider at the
+  one address an SSO configuration's ``sso_url`` names, and nothing off the
+  host reaches it. Its certificate is signed by a CA made for the run with
+  ``openssl`` in a temporary directory outside the checkout and the run
+  directory; the CA's key is deleted as soon as the certificate is signed,
+  and the directory is removed when the stack comes down. The API is given
+  that CA as ``SSL_CERT_FILE``; its sign-in client (authlib over httpx2) then
+  builds its TLS context from that file alone, in place of the system's
+  store, so on this stack it trusts that CA and no other. The browser's
+  context for a journey on
+  this stack ignores certificate errors (``Running.ignore_https_errors``);
+  no other stack's does. The two files may not set ``ENVIRONMENT``,
+  ``APP_ENV`` or ``DEV_AUTH_BYPASS`` on ``api``, nor give it an ``env_file``
+  (``refused_api_settings``): the walk is of the development environment a
+  compose reader runs, not of ``test``, which allows an ``http`` provider.
+  The dashboard and the API are opened at ``localhost``, not ``127.0.0.1``:
+  the sign-in's cookie belongs to the host ``PUBLIC_BASE_URL`` names, and the
+  page's override names ``localhost``. It shares compose-dev's project, ports
+  and images: whichever of the two comes up brings the other down first.
+  Before it comes down, what the API and the provider printed is added to its
+  log, ``stacks/compose-sso.log``.
+
 A command that cannot be started at all (no ``docker``, no ``npm``) is a
 ``StackError`` like one that fails, so the journey is reported FAIL before its
 first step rather than ending the session.
@@ -67,6 +100,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import secrets
 import shutil
 import socket
 import subprocess
@@ -77,7 +111,7 @@ import urllib.error
 import urllib.request
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, Mapping, Optional, Tuple
+from typing import Any, Dict, List, Mapping, Optional, Tuple
 
 import yaml
 
@@ -119,6 +153,32 @@ DEMO_ACCOUNTS: Dict[str, Tuple[str, str]] = {
 }
 
 
+#: compose-sso: the guide whose override file the stack is brought up with, and
+#: the section (its anchor) whose first YAML block is that file.
+SSO_GUIDE = "auth/sso.md"
+SSO_OVERRIDE_SECTION = "trying-it-on-the-docker-compose-stack"
+#: What the stack adds that a reader does not: the identity provider.
+SSO_OVERLAY = Path("tests") / "acceptance" / "docs" / "stacks" / "compose-sso.yml"
+#: The provider it runs (under modules/: the full profile's).
+FAKE_IDP = (
+    Path("modules")
+    / "backend"
+    / "tests"
+    / "integration"
+    / "api"
+    / "fake_oidc_provider.py"
+)
+#: Settings on ``api`` that would walk another environment than a compose
+#: reader's: ``test`` allows an ``http`` provider and turns the rate limits off.
+REFUSED_API_SETTINGS = ("ENVIRONMENT", "APP_ENV", "DEV_AUTH_BYPASS")
+#: How long each openssl command may take.
+OPENSSL_SECONDS = 60
+
+#: The compose stack each project is up as, so that compose-dev and compose-sso
+#: (one project, one set of ports) are never up at once.
+_COMPOSE_UP: Dict[str, "ComposeDev"] = {}
+
+
 class StackError(RuntimeError):
     """The stack did not come up; the message says where its output is."""
 
@@ -142,6 +202,9 @@ class Running:
     #: How long bringing the stack up took, in seconds (0 when not measured):
     #: a walkthrough's title card says it, the start itself not being recorded.
     up_seconds: float = 0.0
+    #: The browser accepts any certificate: only compose-sso, whose identity
+    #: provider's certificate is signed by the run's own CA.
+    ignore_https_errors: bool = False
 
 
 def free_port() -> int:
@@ -270,6 +333,12 @@ class _StaticServer:
 
 
 class ComposeDev:
+    #: The stack's name, its log file's stem, and the host its URLs name.
+    NAME = "compose-dev"
+    HOST = "127.0.0.1"
+    #: Whether the browser accepts any certificate on this stack.
+    IGNORE_HTTPS_ERRORS = False
+
     def __init__(self, repo_root: Path, logs: Path, environ: Mapping[str, str]):
         self.repo_root = repo_root
         self.logs = logs
@@ -299,45 +368,79 @@ class ComposeDev:
         env.update({name: str(port) for name, port in self.ports.items()})
         return env
 
+    @property
+    def log(self) -> Path:
+        return self.logs / f"{self.NAME}.log"
+
+    def files(self) -> Tuple[str, ...]:
+        """The ``-f`` arguments ``up`` is given: none, so docker-compose.yml."""
+        return ()
+
+    def prepare(self, profile: str) -> None:
+        """What must exist before ``up``: nothing here."""
+
     def _compose(self, profile: str, *args: str, timeout: float) -> Optional[int]:
         return _run_logged(
             ["docker", "compose", "-p", self.project, *args],
             cwd=self.repo_root,
             env=self.env(profile),
-            log=self.logs / "compose-dev.log",
+            log=self.log,
             timeout=timeout,
         )
 
     def _clear(self, profile: str) -> None:
+        # docker-compose.yml alone: --remove-orphans takes any other service
+        # the project runs (compose-sso's identity provider) with it.
         self._compose(profile, "down", "-v", "--remove-orphans", timeout=600)
 
     def up(self, profile: str) -> Running:
         if self.running is not None and self.running.profile == profile:
             return self.running
         published = self.published()
+        holder = _COMPOSE_UP.get(self.project)
+        if holder is not None and holder is not self:
+            holder.down()
         self.down()
         self._clear(profile)
+        try:
+            self.prepare(profile)
+        except StackError:
+            self._clear(profile)
+            raise
+        except OSError as error:
+            self._clear(profile)
+            raise StackError(
+                f"the {self.NAME} stack could not be prepared: {error}"
+            ) from None
         started = time.monotonic()
         status = self._compose(
-            profile, "up", "-d", "--wait", "--build", timeout=self.timeout
+            profile,
+            *self.files(),
+            "up",
+            "-d",
+            "--wait",
+            "--build",
+            timeout=self.timeout,
         )
         if status != 0:
             self._clear(profile)
             raise StackError(
                 f"docker compose up ({profile}) "
                 + ("timed out" if status is None else f"exited {status}")
-                + "; its output is in stacks/compose-dev.log"
+                + f"; its output is in stacks/{self.log.name}"
             )
-        api_url = f"http://127.0.0.1:{self.ports['API_HOST_PORT']}"
+        api_url = f"http://{self.HOST}:{self.ports['API_HOST_PORT']}"
         self.running = Running(
-            name="compose-dev",
-            base_url=f"http://127.0.0.1:{self.ports['FRONTEND_HOST_PORT']}/",
+            name=self.NAME,
+            base_url=f"http://{self.HOST}:{self.ports['FRONTEND_HOST_PORT']}/",
             api_url=api_url,
             profile=profile,
             accounts=DEMO_ACCOUNTS,
             published=published,
             up_seconds=time.monotonic() - started,
+            ignore_https_errors=self.IGNORE_HTTPS_ERRORS,
         )
+        _COMPOSE_UP[self.project] = self
         try:
             served = self._served_profile(api_url)
             if served != profile:
@@ -345,8 +448,7 @@ class ComposeDev:
                     f"the stack serves the {served} profile, not {profile}"
                 )
         except StackError:
-            self.running = None
-            self._clear(profile)
+            self.down()
             raise
         return self.running
 
@@ -359,7 +461,7 @@ class ComposeDev:
                 f"docker-compose.yml gives no default host port for {missing[0]}"
             )
         return {
-            defaults[name]: f"http://127.0.0.1:{self.ports[name]}"
+            defaults[name]: f"http://{self.HOST}:{self.ports[name]}"
             for name in HTTP_PORT_VARIABLES
         }
 
@@ -374,11 +476,211 @@ class ComposeDev:
             raise StackError(f"GET /api/v1/modules did not answer: {error}") from None
 
     def down(self) -> None:
+        if _COMPOSE_UP.get(self.project) is self:
+            del _COMPOSE_UP[self.project]
         if self.running is None:
             return
         profile = self.running.profile
         self.running = None
         self._clear(profile)
+
+
+def refused_api_settings(text: str, name: str) -> List[str]:
+    """What a compose file sets on ``api`` that compose-sso refuses, one line each.
+
+    ``REFUSED_API_SETTINGS`` in its ``environment`` (a mapping or a list of
+    ``KEY=value``), and an ``env_file``, which could set them unseen. A file
+    that is not a compose mapping is refused too.
+    """
+    try:
+        data = yaml.safe_load(text)
+    except yaml.YAMLError as error:
+        return [f"{name} is not YAML: {str(error).splitlines()[0]}"]
+    services = data.get("services") if isinstance(data, dict) else None
+    if not isinstance(services, dict):
+        return [f"{name} has no services mapping"]
+    api = services.get("api") or {}
+    if not isinstance(api, dict):
+        return [f"{name}: services.api is not a mapping"]
+    found: List[str] = []
+    if "env_file" in api:
+        found.append(
+            f"{name} gives api an env_file; compose-sso sets api's environment only"
+            " where it can be read"
+        )
+    environment: Any = api.get("environment") or {}
+    if isinstance(environment, dict):
+        keys = [str(key) for key in environment]
+    elif isinstance(environment, list):
+        keys = [str(entry).split("=", 1)[0] for entry in environment]
+    else:
+        return found + [f"{name}: services.api.environment is not a mapping or list"]
+    for key in keys:
+        if key.strip() in REFUSED_API_SETTINGS:
+            found.append(
+                f"{name} sets {key.strip()} on api; compose-sso walks the environment"
+                " a compose reader runs, so it may not"
+            )
+    return found
+
+
+def page_override(repo_root: Path) -> str:
+    """The first YAML block of sso.md's compose section: the reader's override file."""
+    from docs_runner import guide as guides
+    from docs_runner.sdk import blocks
+
+    try:
+        page = guides.load(repo_root / "docs", SSO_GUIDE)
+    except OSError as error:
+        raise StackError(f"docs/{SSO_GUIDE} cannot be read: {error}") from None
+    section = page.section(SSO_OVERRIDE_SECTION)
+    if not section:
+        raise StackError(f"docs/{SSO_GUIDE} has no section #{SSO_OVERRIDE_SECTION}")
+    found = [block.text for block in blocks(section) if block.language == "yaml"]
+    if not found:
+        raise StackError(
+            f"docs/{SSO_GUIDE}#{SSO_OVERRIDE_SECTION} gives no YAML override file"
+        )
+    return found[0]
+
+
+def make_certificates(directory: Path, env: Mapping[str, str], log: Path) -> None:
+    """``ca.pem`` and a ``leaf.pem``/``leaf.key`` for ``localhost`` it signed.
+
+    The CA's key is made in a directory of its own and deleted with it as soon
+    as the leaf is signed, so nothing can sign with that CA again. StackError
+    when openssl fails or cannot be started.
+    """
+    private = Path(tempfile.mkdtemp(prefix="docs-journeys-ca-"))
+    try:
+        ca_key = private / "ca.key"
+        csr = private / "leaf.csr"
+        extensions = private / "leaf.ext"
+        extensions.write_text(
+            "basicConstraints = critical, CA:FALSE\n"
+            "keyUsage = critical, digitalSignature, keyEncipherment\n"
+            "extendedKeyUsage = serverAuth\n"
+            "subjectAltName = DNS:localhost\n"
+            "subjectKeyIdentifier = hash\n"
+            "authorityKeyIdentifier = keyid, issuer\n",
+            encoding="utf-8",
+        )
+        ca = directory / "ca.pem"
+        commands = [
+            "openssl req -x509 -newkey rsa:2048 -nodes -sha256 -days 2"
+            " -subj /CN=docs-journeys-ca"
+            " -addext basicConstraints=critical,CA:TRUE"
+            " -addext keyUsage=critical,keyCertSign,cRLSign".split()
+            + ["-keyout", str(ca_key), "-out", str(ca)],
+            "openssl req -newkey rsa:2048 -nodes -sha256 -subj /CN=localhost".split()
+            + ["-keyout", str(directory / "leaf.key"), "-out", str(csr)],
+            "openssl x509 -req -sha256 -days 2".split()
+            + ["-in", str(csr), "-CA", str(ca), "-CAkey", str(ca_key)]
+            + ["-set_serial", str(secrets.randbits(63) or 1)]
+            + ["-extfile", str(extensions), "-out", str(directory / "leaf.pem")],
+        ]
+        for argv in commands:
+            status = _run_logged(
+                argv, cwd=private, env=env, log=log, timeout=OPENSSL_SECONDS
+            )
+            if status != 0:
+                raise StackError(
+                    "openssl "
+                    + ("timed out" if status is None else f"exited {status}")
+                    + f" making the identity provider's certificate; see stacks/{log.name}"
+                )
+    finally:
+        shutil.rmtree(private, ignore_errors=True)
+    # The API reads the CA as its own user, the provider reads its key as the
+    # caller's (the overlay's DOCS_JOURNEY_IDP_USER).
+    directory.chmod(0o755)
+    (directory / "ca.pem").chmod(0o644)
+    (directory / "leaf.pem").chmod(0o644)
+    (directory / "leaf.key").chmod(0o600)
+
+
+class ComposeSso(ComposeDev):
+    """compose-dev's stack, full profile, with sso.md's override and an identity provider."""
+
+    NAME = "compose-sso"
+    HOST = "localhost"
+    IGNORE_HTTPS_ERRORS = True
+
+    def __init__(self, repo_root: Path, logs: Path, environ: Mapping[str, str]):
+        super().__init__(repo_root, logs, environ)
+        #: The run's own directory: the override file, and ``idp/`` (the
+        #: certificates the provider and the API read). Outside the checkout.
+        self.workdir: Optional[Path] = None
+
+    def env(self, profile: str) -> Dict[str, str]:
+        env = super().env(profile)
+        if self.workdir is not None:
+            env.update(
+                {
+                    "DOCS_JOURNEY_IDP_DIR": str(self.workdir / "idp"),
+                    "DOCS_JOURNEY_FAKE_IDP": str(self.repo_root / FAKE_IDP),
+                    "DOCS_JOURNEY_IDP_USER": f"{os.getuid()}:{os.getgid()}",
+                }
+            )
+        return env
+
+    def files(self) -> Tuple[str, ...]:
+        if self.workdir is None:
+            return ()
+        return (
+            "-f",
+            str(self.repo_root / "docker-compose.yml"),
+            "-f",
+            str(self.workdir / "compose.sso.yml"),
+            "-f",
+            str(self.repo_root / SSO_OVERLAY),
+        )
+
+    def up(self, profile: str) -> Running:
+        if profile != "full":
+            raise StackError(
+                f"compose-sso is the full profile's stack (the sso module is not in"
+                f" {profile})"
+            )
+        return super().up(profile)
+
+    def prepare(self, profile: str) -> None:
+        override = page_override(self.repo_root)
+        try:
+            overlay = (self.repo_root / SSO_OVERLAY).read_text(encoding="utf-8")
+        except OSError as error:
+            raise StackError(
+                f"{SSO_OVERLAY.as_posix()} cannot be read: {error}"
+            ) from None
+        problems = refused_api_settings(
+            override, f"docs/{SSO_GUIDE}'s override file"
+        ) + refused_api_settings(overlay, SSO_OVERLAY.as_posix())
+        if problems:
+            raise StackError("; ".join(problems))
+        if not (self.repo_root / FAKE_IDP).is_file():
+            raise StackError(f"{FAKE_IDP.as_posix()} is missing (a core checkout?)")
+        self.workdir = Path(tempfile.mkdtemp(prefix="docs-journeys-sso-"))
+        for inside in (self.repo_root.resolve(), self.logs.parent.resolve()):
+            if self.workdir.resolve().is_relative_to(inside):
+                raise StackError(
+                    f"the temporary directory {self.workdir} is inside {inside}"
+                )
+        (self.workdir / "compose.sso.yml").write_text(override, encoding="utf-8")
+        (self.workdir / "idp").mkdir()
+        make_certificates(self.workdir / "idp", self.env(profile), self.log)
+
+    def _clear(self, profile: str) -> None:
+        if self.workdir is not None:
+            # The API's and the provider's own output, into this stack's log
+            # before they are removed: a sign-in that fails shows the reader
+            # only its sso_error code, and the API's log says why.
+            self._compose(
+                profile, *self.files(), "logs", "--no-color", "api", "idp", timeout=120
+            )
+        super()._clear(profile)
+        if self.workdir is not None:
+            shutil.rmtree(self.workdir, ignore_errors=True)
+            self.workdir = None
 
 
 class DocsLocal:
@@ -488,6 +790,7 @@ class MarketingLocal:
 
 STACK_CLASSES = {
     "compose-dev": ComposeDev,
+    "compose-sso": ComposeSso,
     "docs-local": DocsLocal,
     "docs-published": DocsPublished,
     "marketing-local": MarketingLocal,

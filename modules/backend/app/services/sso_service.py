@@ -279,6 +279,50 @@ _OIDC_PROVIDERS: Dict[str, Dict[str, str]] = {
 
 ORG_DOMAIN_REQUIRED_DETAIL = "org_domain is required"
 ORG_DOMAIN_TAKEN_DETAIL = "An SSO configuration already exists for this domain"
+#: The 400 for a configuration whose OIDC endpoints are built from an
+#: ``sso_url`` that is not https: when the configuration is saved, and when a
+#: sign-in uses it (``_provider_endpoint``).
+SSO_URL_HTTPS_DETAIL = (
+    "OIDC provider endpoints must use https; check this SSO configuration's sso_url"
+)
+
+
+def _endpoints_use_sso_url(provider_type: Any) -> bool:
+    """Whether the provider's OIDC endpoints are built from ``sso_url``.
+
+    Okta's are (``{sso_url}/v1/token``); the other providers' are constants
+    and SAML has none, so their ``sso_url`` never reaches an OIDC request.
+    """
+    key = getattr(provider_type, "value", provider_type)
+    meta = _OIDC_PROVIDERS.get(key) if isinstance(key, str) else None
+    return bool(meta) and any("{sso_url}" in value for value in meta.values())
+
+
+def refuse_non_https_sso_url(provider_type: Any, sso_url: Any) -> None:
+    """400 when an endpoint built from ``sso_url`` would not be https, outside test.
+
+    The rule a sign-in applies to the provider endpoints built from
+    ``sso_url`` (:func:`_provider_endpoint`), applied when the configuration is
+    created or updated, so an ``http://`` URL is refused when it is saved
+    rather than at the first sign-in. It applies to the same providers: those
+    whose endpoints contain ``{sso_url}`` (Okta today). Google, GitHub and the
+    other providers ignore ``sso_url``, SAML is not OIDC, and an empty value
+    is not checked. The test environment, whose fake provider is local, is
+    exempt, as it is at sign-in.
+    """
+    if not sso_url or not _endpoints_use_sso_url(provider_type):
+        return
+    if core_settings.is_test:
+        return
+    try:
+        scheme = urlparse(str(sso_url)).scheme
+    except ValueError:
+        scheme = ""
+    if scheme != "https":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=SSO_URL_HTTPS_DETAIL,
+        )
 
 
 def _stored_domain_normalised() -> Any:
@@ -311,6 +355,8 @@ def create_sso_config(db: Session, config_data: Dict[str, Any]) -> SSOConfig:
 
     Raises:
         HTTPException 400 if ``org_domain`` is empty once normalised.
+        HTTPException 400 if the provider builds its endpoints from
+        ``sso_url`` and it is not https (:func:`refuse_non_https_sso_url`).
         HTTPException 409 if another configuration's ``org_domain``
         normalises to the same domain.
     """
@@ -320,6 +366,9 @@ def create_sso_config(db: Session, config_data: Dict[str, Any]) -> SSOConfig:
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=ORG_DOMAIN_REQUIRED_DETAIL,
         )
+    refuse_non_https_sso_url(
+        config_data.get("provider_type"), config_data.get("sso_url")
+    )
 
     _refuse_taken_domain(db, org_domain)
 
@@ -355,6 +404,9 @@ def update_sso_config(
     Raises:
         HTTPException 404 if not found.
         HTTPException 400 if a given ``org_domain`` is empty once normalised.
+        HTTPException 400 if the update sets ``sso_url`` or ``provider_type``
+        and the result is a provider that builds its endpoints from an
+        ``sso_url`` that is not https (:func:`refuse_non_https_sso_url`).
         HTTPException 409 if a given ``org_domain`` normalises to another
         configuration's.
 
@@ -366,6 +418,12 @@ def update_sso_config(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"SSO config '{config_id}' not found",
+        )
+
+    if "sso_url" in data or "provider_type" in data:
+        refuse_non_https_sso_url(
+            data.get("provider_type", sso_config.provider_type),
+            data.get("sso_url", sso_config.sso_url),
         )
 
     # Checked even when the normalised value equals this row's own: two
@@ -683,7 +741,7 @@ def _provider_endpoint(config: SSOConfig, meta: Dict[str, str], key: str) -> str
         logger.error("Refusing a non-https OIDC %s for SSO config %s", key, config.id)
         raise SSORefusal(
             status.HTTP_400_BAD_REQUEST,
-            "OIDC provider endpoints must use https; check this SSO configuration's sso_url",
+            SSO_URL_HTTPS_DETAIL,
             SSO_FAILED,
         )
     return url

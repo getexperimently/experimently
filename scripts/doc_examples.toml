@@ -12,7 +12,7 @@
 # scripts/doc_examples.py), and each page's residual counts can only fall.
 
 [meta]
-documents = 46
+documents = 47
 exec = 283
 universe = [
     ".github/pull_request_template.md",
@@ -428,6 +428,15 @@ exec = 0
 skip = 6
 expects = 0
 
+# Its sign-in is walked by the sso-sign-in docs journey (tests/acceptance/docs/),
+# on the compose stack its override file starts; its blocks need a tenant.
+[[document]]
+path = "docs/auth/sso.md"
+environment = "bare"
+exec = 0
+skip = 5
+expects = 0
+
 # Its blocks need a Kubernetes cluster: the chart-kind job extracts and runs
 # them (scripts/guide_blocks.py), so they carry that job's markers, not tags.
 [[exempt]]
@@ -442,7 +451,6 @@ reason = "run on a kind cluster by the chart-kind workflow (scripts/chart_kind.s
 "docs/architecture/models.md" = { comments = 0, unlabelled = 1, syntax = 1 }
 "docs/auth/auth-environment-variables.md" = { comments = 0, unlabelled = 4, syntax = 0 }
 "docs/auth/cognito-auth-testing.md" = { comments = 0, unlabelled = 0, syntax = 0 }
-"docs/auth/sso.md" = { comments = 0, unlabelled = 0, syntax = 0 }
 "docs/deployment/README.md" = { comments = 0, unlabelled = 0, syntax = 0 }
 "docs/deployment/deployment-guide.md" = { comments = 0, unlabelled = 1, syntax = 2 }
 "docs/deployment/disaster-recovery.md" = { comments = 0, unlabelled = 0, syntax = 0 }

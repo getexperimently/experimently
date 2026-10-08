@@ -10,7 +10,7 @@ needs the inventory to classify ``README.md`` as the journey ``docs-site``,
 without ``pending``)::
 
     guide: README.md                         # the nav path, as inventory.toml keys it
-    stack: docs-local                        # compose-dev | docs-local | docs-published | marketing-local
+    stack: docs-local                        # compose-dev | compose-sso | docs-local | docs-published | marketing-local
     profile: core                            # core | full
     video: true
     written: 2026-10-06                      # the day the expectations were written
@@ -73,7 +73,8 @@ docs-local), whose source (``mkdocs.yml`` and ``docs/``) the stack names:
   following redirects only within the site. A crawl's check is the action
   itself, so a crawl step has no ``expect``.
 
-Three are for following a guide on the compose stack (``compose-dev``) as its
+Three are for following a guide on the compose stack (``compose-dev``, and for
+``open`` also ``compose-sso``, the same stack brought up for SSO sign-in) as its
 reader does:
 
 * ``open: <URL>`` opens an address the guide gives, such as
@@ -205,12 +206,23 @@ from pydantic import (
 from docs_runner.redaction import credential_key, credential_path
 from docs_runner.sdk import required_placeholders
 
-STACKS = ("compose-dev", "docs-local", "docs-published", "marketing-local")
-Stack = Literal["compose-dev", "docs-local", "docs-published", "marketing-local"]
+STACKS = (
+    "compose-dev",
+    "compose-sso",
+    "docs-local",
+    "docs-published",
+    "marketing-local",
+)
+Stack = Literal[
+    "compose-dev", "compose-sso", "docs-local", "docs-published", "marketing-local"
+]
+#: The stacks with an API and a dashboard: ``api`` and ``open`` steps run on
+#: these. compose-sso is compose-dev's stack brought up for SSO sign-in.
+COMPOSE_STACKS = ("compose-dev", "compose-sso")
 Profile = Literal["core", "full"]
 
 #: Who an ``api`` step calls as: nobody, or one of the four role accounts the
-#: stack provides (on compose-dev, the ``demo`` seed's accounts).
+#: stack provides (on compose-dev and compose-sso, the ``demo`` seed's accounts).
 Caller = Literal["anonymous", "admin", "developer", "analyst", "viewer"]
 
 #: The ARIA roles Playwright's ``get_by_role`` accepts (playwright 1.63.0).

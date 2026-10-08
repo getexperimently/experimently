@@ -285,8 +285,9 @@ journey = "api-key-first-assignment"
 reason = "create an API key in the dashboard and use it for a first assignment; its API steps run in Doc Examples"
 
 [pages."auth/sso.md"]
-class = "external:oidc-provider"
-reason = "SSO sign-in needs an identity provider account (Okta, Google, GitHub)"
+class = "journey"
+journey = "sso-sign-in"
+reason = "an Okta (OIDC) configuration created as the page says, then Sign in with SSO from the dashboard on the compose stack started with the page's override file, against a local https identity provider; the new account and the role its groups map to are read back"
 
 [pages."hipaa/overview.md"]
 class = "reference"
