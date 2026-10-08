@@ -23,6 +23,8 @@ from typing import Any, Optional
 
 import structlog
 
+from backend.app.core.query_redaction import QUERY_VALUE_REDACTOR
+
 # ---------------------------------------------------------------------------
 # Per-request context variable
 # ---------------------------------------------------------------------------
@@ -228,6 +230,14 @@ def configure_logging(
         for existing in list(uv_logger.handlers):
             uv_logger.removeHandler(existing)
         uv_logger.propagate = True
+
+    # uvicorn writes the request target, query string included, on its access
+    # lines and its WebSocket handshake lines (uvicorn.error). The filter
+    # replaces the values listed in backend/app/core/query_redaction.py. It is
+    # a filter on the logger, not on the handler, so it applies to whichever
+    # handler ends up writing the line.
+    for name in ("uvicorn.error", "uvicorn.access"):
+        logging.getLogger(name).addFilter(QUERY_VALUE_REDACTOR)
 
 
 def log_format_from_env(default: str = "console") -> str:

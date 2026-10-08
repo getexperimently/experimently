@@ -14,6 +14,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.types import ASGIApp
 
 from backend.app.core.logging import LogContext, get_logger
+from backend.app.core.query_redaction import redact_query_params
 from backend.app.utils.masking import mask_request_data, mask_sensitive_data
 from backend.app.utils.metrics import MetricsCollector
 
@@ -53,7 +54,9 @@ class LoggingMiddleware(BaseHTTPMiddleware):
             request_data = {
                 "method": request.method,
                 "path": request.url.path,
-                "query_params": dict(request.query_params),
+                "query_params": redact_query_params(
+                    request.url.path, request.query_params
+                ),
                 "headers": dict(request.headers),
                 "client_host": request.client.host if request.client else None,
             }
