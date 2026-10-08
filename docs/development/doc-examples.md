@@ -249,8 +249,12 @@ past its project, so the check refuses a block that:
 
 A plain `docker compose down -v` is allowed: under the page's own project it removes only
 what the run created. After each page the runner removes the project and fails if any of
-its containers, volumes or networks remain; before a page it refuses, touching nothing,
-if a port the stack publishes is in use or a previous run left `docex-` resources behind.
+its containers, volumes or networks remain, and waits (up to 75 s) for the ports the
+stack published to be free again: a connection the API closed first keeps its port in
+TIME_WAIT for 60 s on Linux after every container is gone. A port still held after the
+wait fails the page, naming what holds it. Before a page it refuses, touching nothing,
+if a port the stack publishes is in use (naming what holds it) or a previous run left
+`docex-` resources behind.
 It also compares `docker volume ls` before and after the run and fails if any volume that
 existed before is gone. That is a detection, not a
 prevention: it reports a loss, it can't undo one. Running pages locally also rebuilds and

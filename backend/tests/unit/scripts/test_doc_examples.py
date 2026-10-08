@@ -13,12 +13,14 @@ copy.
 from __future__ import annotations
 
 import http.client
+import http.server
 import importlib.util
 import io
 import json
 import pathlib
 import re
 import socket
+import subprocess
 import sys
 import textwrap
 import threading
@@ -2774,3 +2776,180 @@ def test_no_path_filter_can_skip_the_summary():
     triggers = yaml.safe_load(DOC_EXAMPLES_WORKFLOW.read_text())[True]
     pull_request = triggers["pull_request"] or {}
     assert "paths" not in pull_request and "paths-ignore" not in pull_request
+
+
+# --- the stack's ports are free before the next page (#1075) -----------------
+
+
+def _listener() -> socket.socket:
+    server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    server.bind(("127.0.0.1", 0))
+    server.listen(1)
+    return server
+
+
+def _bare_page(monkeypatch, ports):
+    monkeypatch.setattr(dx, "preflight", lambda env: list(ports))
+    monkeypatch.setattr(dx, "project_resources", lambda project: [])
+    monkeypatch.setattr(
+        dx,
+        "_docker",
+        lambda *args, env=None, timeout=120: dx.subprocess.CompletedProcess(
+            ["docker", *args], 0, "", ""
+        ),
+    )
+    return {"path": "p.md", "environment": "bare", "exec": 0}
+
+
+def _hold(seconds: float) -> tuple[int, subprocess.Popen]:
+    """A free port, and another process listening on it for *seconds*.
+
+    A process, not a thread of this one: when a pytest run also collects a
+    locustfile (a bare `pytest` does), gevent patches this process, and a
+    thread would not run while the runner sleeps in its wait.
+    """
+    probe = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    probe.bind(("127.0.0.1", 0))
+    port = probe.getsockname()[1]
+    probe.close()
+    code = (
+        "import socket, sys, time\n"
+        "s = socket.socket()\n"
+        "s.bind(('127.0.0.1', int(sys.argv[1])))\n"
+        "s.listen(1)\n"
+        "print('listening', flush=True)\n"
+        "time.sleep(float(sys.argv[2]))\n"
+    )
+    holder = subprocess.Popen(
+        [sys.executable, "-c", code, str(port), str(seconds)],
+        stdout=subprocess.PIPE,
+        text=True,
+    )
+    assert holder.stdout.readline().strip() == "listening"
+    return port, holder
+
+
+def test_the_teardown_waits_until_the_stack_s_ports_are_free(monkeypatch):
+    """A port the stack published that is still held after `compose down`
+    (a connection in TIME_WAIT on it, say) is waited for, so the next page's
+    preflight finds it free, rather than refusing and ending the shard."""
+    port, holder = _hold(1.0)
+    try:
+        doc = _bare_page(monkeypatch, [port])
+        out = io.StringIO()
+        problems, _ = dx.run_document(doc, [], 0, {}, None, out)
+        assert not dx._port_in_use(port), "run_document returned with the port held"
+    finally:
+        holder.kill()
+        holder.wait()
+    assert problems == []
+    printed = out.getvalue()
+    assert f"p.md: port(s) [{port}] still in use after teardown ({port}: " in printed
+    assert re.search(
+        rf"p\.md: port\(s\) \[{port}\] free [0-9.]+s after teardown", printed
+    ), printed
+
+
+def test_a_port_held_past_the_wait_fails_the_page_naming_what_holds_it(monkeypatch):
+    server = _listener()
+    port = server.getsockname()[1]
+    monkeypatch.setattr(dx, "PORT_RELEASE_SECONDS", 1)
+    try:
+        doc = _bare_page(monkeypatch, [port])
+        problems, _ = dx.run_document(doc, [], 0, {}, None, io.StringIO())
+    finally:
+        server.close()
+    (problem,) = problems
+    assert problem.startswith(
+        f"p.md: port(s) [{port}] still in use 1s after teardown, so the next page "
+        "could not start its stack; they were held by: "
+    ), problem
+
+
+def test_past_the_run_deadline_the_ports_are_not_waited_for(monkeypatch):
+    server = _listener()
+    port = server.getsockname()[1]
+    try:
+        reached = dx.Deadline(at=0.0, clock=lambda: 1.0)
+        assert dx.release_ports("p.md", [port], reached, io.StringIO()) is None
+    finally:
+        server.close()
+
+
+def test_the_wait_polls_until_every_port_is_free():
+    now = [0.0]
+    held = {1: 2.0, 2: 3.5}  # port -> when it frees
+
+    def sleep(seconds):
+        now[0] += seconds
+
+    busy, waited = dx.wait_for_ports(
+        [1, 2], 75, lambda p: now[0] < held[p], lambda: now[0], sleep
+    )
+    assert (busy, waited) == ([], 3.5)
+    now[0] = 0.0
+    busy, waited = dx.wait_for_ports(
+        [1, 2], 3, lambda p: now[0] < held[p], lambda: now[0], sleep
+    )
+    assert (busy, waited) == ([2], 3.0)
+
+
+def test_a_busy_port_at_preflight_is_refused_naming_what_holds_it(monkeypatch):
+    server = _listener()
+    port = server.getsockname()[1]
+    monkeypatch.setattr(
+        dx,
+        "_docker",
+        lambda *args, env=None, timeout=120: dx.subprocess.CompletedProcess(
+            ["docker", *args], 0, "", ""
+        ),
+    )
+    monkeypatch.setattr(dx, "_published_ports", lambda env: [port])
+    try:
+        with pytest.raises(dx.Refused) as refusal:
+            dx.preflight({})
+    finally:
+        server.close()
+    assert f"port(s) [{port}] are in use" in str(refusal.value)
+    assert f"Held by: {port}: " in str(refusal.value)
+
+
+class _KeepAlive(http.server.BaseHTTPRequestHandler):
+    """HTTP/1.1 as the API speaks it: keeps the connection, unless asked to close."""
+
+    protocol_version = "HTTP/1.1"
+
+    def do_GET(self):
+        body = json.dumps({"profile": "full"}).encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def log_message(self, *args):
+        pass
+
+
+def test_the_full_profile_probe_leaves_the_api_s_port_free():
+    """#1075: urllib sends `Connection: close`, so the API closed first, and the
+    side of a TCP connection that closes first keeps it in TIME_WAIT (60 s on
+    Linux) on its own port: the stack's published port. The next page's
+    preflight could not bind it and refused, ending the full shard. The probe
+    keeps the connection alive and closes it itself."""
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), _KeepAlive)
+    server.daemon_threads = True
+    port = server.server_address[1]
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        assert dx._get_json(f"http://127.0.0.1:{port}/api/v1/modules") == {
+            "profile": "full"
+        }
+    finally:
+        server.shutdown()
+        server.server_close()
+    busy, _ = dx.wait_for_ports([port], 2)
+    assert busy == [], (
+        "the API's port is still held after the probe and the server are done"
+    )
