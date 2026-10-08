@@ -16,6 +16,7 @@ import httpx
 
 from backend.app.core.config import settings
 from backend.app.schemas.scheduler import NotificationEvent
+from backend.app.services.safety_service import format_metric_reading
 
 logger = logging.getLogger(__name__)
 
@@ -237,25 +238,44 @@ class NotificationService:
         feature_flag_id: str,
         feature_flag_name: str,
         reason: str,
-        error_rate: float = 0.0,
-        threshold: float = 0.0,
+        metric_name: Optional[str] = None,
+        value: Optional[float] = None,
+        threshold: Optional[float] = None,
         db=None,
     ) -> bool:
-        """Notify all channels that a feature flag was automatically rolled back."""
+        """Notify all channels that a feature flag was automatically rolled back.
+
+        ``metric_name``, ``value`` and ``threshold`` describe the metric that
+        breached its threshold. The Slack alert and the webhook ``message``
+        show them with the metric's unit (``format_metric_reading``: an error
+        rate as a percentage, a latency in ms); the webhook ``metadata``
+        carries the raw numbers, with ``error_rate`` set only when the metric
+        is ``error_rate``. Without a metric the alert gives only the reason.
+        """
         try:
+            label = value_text = threshold_text = None
+            summary = ""
+            if metric_name and value is not None and threshold is not None:
+                label = metric_name.replace("_", " ")
+                value_text = format_metric_reading(metric_name, value)
+                threshold_text = format_metric_reading(metric_name, threshold)
+                summary = f": {label} {value_text} exceeded threshold {threshold_text}"
+
             event = NotificationEvent(
                 event_type="safety_rollback",
                 feature_flag_id=feature_flag_id,
                 message=(
-                    f"Feature flag '{feature_flag_name}' was automatically rolled back. "
-                    f"Reason: {reason}"
+                    f"Feature flag '{feature_flag_name}' was automatically rolled "
+                    f"back{summary}. Reason: {reason}"
                 ),
                 timestamp=self._now_iso(),
                 metadata={
                     "feature_flag_name": feature_flag_name,
                     "reason": reason,
-                    "error_rate": error_rate,
+                    "metric": metric_name,
+                    "value": value,
                     "threshold": threshold,
+                    "error_rate": value if metric_name == "error_rate" else None,
                 },
             )
             webhook_ok = self._send(event)
@@ -264,9 +284,10 @@ class NotificationService:
             try:
                 self._slack.send_safety_rollback_alert(
                     flag_name=feature_flag_name,
-                    error_rate=error_rate,
-                    threshold=threshold,
                     reason=reason,
+                    metric_label=label,
+                    value=value_text,
+                    threshold=threshold_text,
                 )
             except Exception as exc:
                 logger.warning("Slack safety_rollback failed: %s", exc)

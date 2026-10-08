@@ -4,7 +4,9 @@ Unit tests for SafetyScheduler automatic rollbacks.
 The scheduler must roll an unhealthy flag back to the percentage configured
 in the flag's safety config (``rollback_percentage``) rather than always to 0,
 and must read its cadence from ``settings.SAFETY_CHECK_INTERVAL_MINUTES``.
-The reason it records rounds the measured value and the threshold (#1068).
+The reason it records rounds the measured value and the threshold (#1068),
+and the Slack alert and webhook it sends carry that value and threshold with
+the metric's unit (#1076).
 """
 
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -19,7 +21,13 @@ from backend.app.core.safety_scheduler import (
 from backend.app.models.feature_flag import FeatureFlagStatus
 from backend.app.models.safety import RollbackTriggerType
 from backend.app.schemas.safety import MetricStatus, SafetyCheckResponse
-from backend.app.services.safety_service import SafetyService, format_metric_value
+from backend.app.services.notification_service import NotificationService
+from backend.app.services.safety_service import (
+    SafetyService,
+    format_metric_reading,
+    format_metric_value,
+)
+from backend.app.services.slack_notifier import SlackNotifier
 
 
 def _unhealthy_scheduler_env(
@@ -302,3 +310,177 @@ async def test_should_rollback_reason_rounds_the_measured_value():
 )
 def test_format_metric_value_four_significant_figures_no_exponent(value, expected):
     assert format_metric_value(value) == expected
+
+
+# --- the alert carries the measured value and threshold (#1076) --------------
+
+
+def _capturing_notification_service():
+    """The real NotificationService and SlackNotifier, with Slack's client and
+    the webhook POST replaced by recorders.
+
+    Returns the service and the two lists the Slack messages and the webhook
+    payloads are appended to.
+    """
+    service = NotificationService()
+    service._webhook_url = "https://hooks.example.com/rollback"
+    slack = SlackNotifier()
+    slack._enabled = True
+    slack._token = "xoxb-test-token"
+    slack._sdk_available = True
+    service._slack = slack
+    service._email = MagicMock()
+    slack_messages: list = []
+    webhook_payloads: list = []
+    return service, slack_messages, webhook_payloads
+
+
+async def _run_rollback_with_real_alert(metric_name, current_value, threshold):
+    """Drive the scheduler's rollback path for one breaching metric and return
+    what Slack and the webhook were sent."""
+    db, safety, _ = _unhealthy_scheduler_env(rollback_percentage=0)
+    safety.check_feature_flag_safety = AsyncMock(
+        return_value=_one_breaching_metric(current_value, threshold, name=metric_name)
+    )
+    notifications, slack_messages, webhook_payloads = _capturing_notification_service()
+
+    slack_client = MagicMock()
+    slack_client.chat_postMessage.side_effect = lambda **kw: slack_messages.append(kw)
+
+    def fake_post(url, json=None, timeout=None):
+        webhook_payloads.append(json)
+        return MagicMock(status_code=200)
+
+    with (
+        patch("backend.app.core.safety_scheduler.SessionLocal", return_value=db),
+        patch("backend.app.core.safety_scheduler.SafetyService", return_value=safety),
+        patch(
+            "backend.app.services.slack_notifier.WebClient", return_value=slack_client
+        ),
+        patch(
+            "backend.app.services.notification_service.httpx.post",
+            side_effect=fake_post,
+        ),
+    ):
+        scheduler = SafetyScheduler()
+        scheduler._notification_service = notifications
+        await scheduler.check_feature_flags_safety()
+
+    assert len(slack_messages) == 1
+    assert len(webhook_payloads) == 1
+    # An automatic rollback sends no email.
+    assert notifications._email.method_calls == []
+    message = slack_messages[0]
+    fields = [f["text"] for f in message["blocks"][1]["fields"]]
+    return message["text"], fields, webhook_payloads[0]
+
+
+@pytest.mark.regression
+@pytest.mark.asyncio
+async def test_automatic_rollback_alert_carries_the_measured_error_rate():
+    """1 error in 14 evaluations against 0.05: Slack and the webhook show
+    7.143% and 5%, not 0.0% and 0.0%."""
+    text, fields, payload = await _run_rollback_with_real_alert(
+        "error_rate", 1 / 14, 0.05
+    )
+
+    assert text == (
+        "Safety Rollback: 'streampulse_player_v2' rolled back — "
+        "error rate 7.143% exceeded threshold 5%."
+    )
+    assert "*Error Rate:*\n7.143%" in fields
+    assert "*Threshold:*\n5%" in fields
+    assert "0.0%" not in text + "".join(fields)
+
+    assert payload["event_type"] == "safety_rollback"
+    assert "error rate 7.143% exceeded threshold 5%" in payload["message"]
+    assert payload["metadata"]["metric"] == "error_rate"
+    assert payload["metadata"]["value"] == 1 / 14
+    assert payload["metadata"]["threshold"] == 0.05
+    assert payload["metadata"]["error_rate"] == 1 / 14
+
+
+@pytest.mark.regression
+@pytest.mark.asyncio
+async def test_automatic_rollback_alert_shows_a_latency_in_ms():
+    """An average latency is labelled as one and reads in ms, not as a
+    percentage; the webhook's ``error_rate`` is empty rather than a latency."""
+    text, fields, payload = await _run_rollback_with_real_alert(
+        "avg_latency", 523.4567, 500.0
+    )
+
+    assert text == (
+        "Safety Rollback: 'streampulse_player_v2' rolled back — "
+        "avg latency 523.5 ms exceeded threshold 500 ms."
+    )
+    assert "*Avg Latency:*\n523.5 ms" in fields
+    assert "*Threshold:*\n500 ms" in fields
+    assert not any("Error Rate" in f for f in fields)
+    assert "%" not in text + "".join(fields)
+
+    assert "avg latency 523.5 ms exceeded threshold 500 ms" in payload["message"]
+    assert payload["metadata"]["metric"] == "avg_latency"
+    assert payload["metadata"]["value"] == 523.4567
+    assert payload["metadata"]["threshold"] == 500.0
+    assert payload["metadata"]["error_rate"] is None
+
+
+@pytest.mark.regression
+def test_rollback_alert_without_a_metric_shows_no_numbers():
+    """No breaching metric known: the alert gives the reason and no invented
+    0.0% value or threshold."""
+    notifications, slack_messages, webhook_payloads = _capturing_notification_service()
+    slack_client = MagicMock()
+    slack_client.chat_postMessage.side_effect = lambda **kw: slack_messages.append(kw)
+
+    def fake_post(url, json=None, timeout=None):
+        webhook_payloads.append(json)
+        return MagicMock(status_code=200)
+
+    with (
+        patch(
+            "backend.app.services.slack_notifier.WebClient", return_value=slack_client
+        ),
+        patch(
+            "backend.app.services.notification_service.httpx.post",
+            side_effect=fake_post,
+        ),
+    ):
+        notifications.notify_safety_rollback(
+            feature_flag_id="flag-1",
+            feature_flag_name="checkout_v2",
+            reason="Automatic rollback due to safety issues",
+        )
+
+    text = slack_messages[0]["text"]
+    fields = [f["text"] for f in slack_messages[0]["blocks"][1]["fields"]]
+    assert text == (
+        "Safety Rollback: 'checkout_v2' rolled back. "
+        "Reason: Automatic rollback due to safety issues"
+    )
+    assert fields == [
+        "*Flag:*\ncheckout_v2",
+        "*Reason:*\nAutomatic rollback due to safety issues",
+    ]
+    metadata = webhook_payloads[0]["metadata"]
+    assert metadata["value"] is None
+    assert metadata["threshold"] is None
+    assert metadata["error_rate"] is None
+
+
+@pytest.mark.regression
+@pytest.mark.parametrize(
+    "name, value, expected",
+    [
+        ("error_rate", 1 / 14, "7.143%"),
+        ("error_rate", 0.05, "5%"),
+        ("error_rate", 0.07, "7%"),
+        ("error_rate", 0.0, "0%"),
+        ("avg_latency", 523.4567, "523.5 ms"),
+        ("latency", 250.0, "250 ms"),
+        ("p95_latency", 30000.123, "30000 ms"),
+        ("error_count", 12.0, "12"),
+    ],
+)
+def test_format_metric_reading_gives_the_unit(name, value, expected):
+    assert format_metric_reading(name, value) == expected

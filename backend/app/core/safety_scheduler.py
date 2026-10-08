@@ -194,15 +194,17 @@ class SafetyScheduler:
 
                         # Find what metric triggered the rollback
                         trigger_reason = "Automatic rollback due to safety issues"
-                        for metric in safety_check.metrics:
-                            if not metric.is_healthy:
-                                trigger_reason = (
-                                    f"Automatic rollback due to {metric.name} "
-                                    "exceeding threshold "
-                                    f"({format_metric_value(metric.current_value)} > "
-                                    f"{format_metric_value(metric.threshold)})"
-                                )
-                                break
+                        failing = next(
+                            (m for m in safety_check.metrics if not m.is_healthy),
+                            None,
+                        )
+                        if failing is not None:
+                            trigger_reason = (
+                                f"Automatic rollback due to {failing.name} "
+                                "exceeding threshold "
+                                f"({format_metric_value(failing.current_value)} > "
+                                f"{format_metric_value(failing.threshold)})"
+                            )
 
                         # Roll back to the percentage configured for this flag
                         # (e.g. back to the internal 5% stage), not always to 0.
@@ -235,10 +237,15 @@ class SafetyScheduler:
                                 f"Successfully rolled back feature flag {feature_flag.key}: {rollback_result.message}"
                             )
                             try:
+                                # The alert shows the breaching metric's
+                                # measured value and threshold (#1076).
                                 self._notification_service.notify_safety_rollback(
                                     feature_flag_id=str(feature_flag.id),
                                     feature_flag_name=feature_flag.key,
                                     reason=trigger_reason,
+                                    metric_name=failing.name if failing else None,
+                                    value=failing.current_value if failing else None,
+                                    threshold=failing.threshold if failing else None,
                                 )
                             except Exception as exc:
                                 logger.warning(

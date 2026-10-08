@@ -164,6 +164,21 @@ def format_metric_value(value: float) -> str:
     return format(Decimal(f"{value:.4g}"), "f")
 
 
+def format_metric_reading(name: str, value: float) -> str:
+    """A metric value with its unit, as an alert shows it.
+
+    ``error_rate`` is a fraction and reads as a percentage (1/14 reads
+    ``7.143%``, 0.05 reads ``5%``); the latency metrics are milliseconds
+    (``523.5 ms``); anything else is a plain number. The number itself is
+    ``format_metric_value``'s, so it matches the rollback reason.
+    """
+    if name == "error_rate":
+        return f"{format_metric_value(value * 100)}%"
+    if name in _LATENCY_METRICS:
+        return f"{format_metric_value(value)} ms"
+    return format_metric_value(value)
+
+
 class SafetyService:
     """Service for safety monitoring and rollback functionality."""
 

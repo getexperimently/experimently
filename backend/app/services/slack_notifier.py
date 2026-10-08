@@ -122,11 +122,23 @@ class SlackNotifier:
     def _build_safety_block(
         self,
         flag_name: str,
-        error_rate: float,
-        threshold: float,
         reason: str,
+        metric_label: Optional[str] = None,
+        value: Optional[str] = None,
+        threshold: Optional[str] = None,
     ) -> List[dict]:
-        """Build Block Kit blocks for a safety rollback alert."""
+        """Build Block Kit blocks for a safety rollback alert.
+
+        ``value`` and ``threshold`` arrive formatted with their unit; without
+        a metric the alert shows the flag and the reason only.
+        """
+        fields = [{"type": "mrkdwn", "text": f"*Flag:*\n{flag_name}"}]
+        if metric_label:
+            fields += [
+                {"type": "mrkdwn", "text": f"*{metric_label.title()}:*\n{value}"},
+                {"type": "mrkdwn", "text": f"*Threshold:*\n{threshold}"},
+            ]
+        fields.append({"type": "mrkdwn", "text": f"*Reason:*\n{reason}"})
         return [
             {
                 "type": "header",
@@ -135,21 +147,7 @@ class SlackNotifier:
                     "text": "🚨 Safety Rollback Alert",
                 },
             },
-            {
-                "type": "section",
-                "fields": [
-                    {"type": "mrkdwn", "text": f"*Flag:*\n{flag_name}"},
-                    {
-                        "type": "mrkdwn",
-                        "text": f"*Error Rate:*\n{error_rate:.1%}",
-                    },
-                    {
-                        "type": "mrkdwn",
-                        "text": f"*Threshold:*\n{threshold:.1%}",
-                    },
-                    {"type": "mrkdwn", "text": f"*Reason:*\n{reason}"},
-                ],
-            },
+            {"type": "section", "fields": fields},
             {"type": "divider"},
         ]
 
@@ -188,14 +186,22 @@ class SlackNotifier:
     def send_safety_rollback_alert(
         self,
         flag_name: str,
-        error_rate: float,
-        threshold: float,
         reason: str,
+        metric_label: Optional[str] = None,
+        value: Optional[str] = None,
+        threshold: Optional[str] = None,
         channel: Optional[str] = None,
     ) -> bool:
         """
         Send a Slack alert when a feature flag has been automatically rolled back
         by the safety monitoring system.
+
+        Args:
+            metric_label: The breaching metric, as words (``"error rate"``,
+                          ``"avg latency"``); None when no single metric is known.
+            value:        Its measured value, formatted with its unit (``"7.143%"``,
+                          ``"523.5 ms"``).
+            threshold:    Its threshold, formatted the same way.
 
         Returns:
             True on success, False on any failure (exceptions swallowed).
@@ -203,14 +209,18 @@ class SlackNotifier:
         try:
             blocks = self._build_safety_block(
                 flag_name=flag_name,
-                error_rate=error_rate,
-                threshold=threshold,
                 reason=reason,
+                metric_label=metric_label,
+                value=value,
+                threshold=threshold,
             )
-            text = (
-                f"Safety Rollback: '{flag_name}' rolled back — "
-                f"error rate {error_rate:.1%} exceeded threshold {threshold:.1%}."
-            )
+            if metric_label:
+                text = (
+                    f"Safety Rollback: '{flag_name}' rolled back — "
+                    f"{metric_label} {value} exceeded threshold {threshold}."
+                )
+            else:
+                text = f"Safety Rollback: '{flag_name}' rolled back. Reason: {reason}"
             return self._send_message(channel=channel, blocks=blocks, text=text)
         except Exception as exc:
             logger.error("Error in send_safety_rollback_alert: %s", exc)
