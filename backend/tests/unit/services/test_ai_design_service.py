@@ -10,6 +10,7 @@ Tests cover:
 Claude API is always mocked — no real API calls are made.
 """
 
+import math
 import os
 from unittest.mock import MagicMock, PropertyMock, patch
 
@@ -21,6 +22,7 @@ from backend.app.services.ai_design_service import (
     ResultsInterpretation,
     SampleSizeEstimate,
 )
+from backend.app.services.power_calculator_service import PowerCalculatorService
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -314,6 +316,36 @@ class TestSampleSizeAdvisor:
         )
         assert estimate.days_to_significance is not None
         assert estimate.days_to_significance > 0
+
+    @pytest.mark.regression
+    def test_days_to_significance_splits_the_traffic_between_both_variants(self):
+        """The days count every variant's users, as the power calculator does.
+
+        docs/statistics/power-analysis.md's example: a 5% baseline, a 10%
+        relative (0.5 point) effect, 10,000 users a day, all of them in the
+        experiment. Each of the two variants gets 5,000 a day, so ~31,235 per
+        variant takes 6.25 days: 7 whole days. Dividing one variant's sample by
+        the whole day's traffic answered ceil(31,235 / 10,000) = 4.
+        """
+        estimate = AIDesignService.estimate_sample_size(
+            baseline_rate=0.05,
+            mde=0.005,
+            confidence=0.95,
+            power=0.80,
+            daily_traffic=10_000,
+        )
+        days = estimate.days_to_significance
+        assert days == 7
+        # In `days` days the experiment has every user it needs; a day sooner
+        # it has not.
+        assert days * 10_000 >= estimate.total_required > (days - 1) * 10_000
+        runtime = PowerCalculatorService().compute_runtime_estimate(
+            required_sample_size=estimate.required_per_variant,
+            daily_traffic=10_000,
+            traffic_allocation=1.0,
+            n_variants=2,
+        )
+        assert days == math.ceil(runtime.days_to_significance)
 
 
 # ---------------------------------------------------------------------------

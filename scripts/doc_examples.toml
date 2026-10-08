@@ -542,7 +542,7 @@ path = "docs/mcp-server.md"
 environment = "stack"
 exec = 12
 skip = 0
-expects = 33
+expects = 34
 
 # #1075: the API reference, compliance, RBAC and technical guide pages, each
 # signing in first and running as written.
