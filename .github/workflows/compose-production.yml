@@ -22,6 +22,7 @@ on:
       - backend/**
       - frontend/**
       - tests/alb/rehearse.sh
+      - tests/web/access_log.sh
       - scripts/check_compose_config.py
       - VERSION
       - .github/workflows/compose-production.yml
@@ -32,6 +33,7 @@ on:
       - backend/**
       - frontend/**
       - tests/alb/rehearse.sh
+      - tests/web/access_log.sh
       - scripts/check_compose_config.py
       - VERSION
       - .github/workflows/compose-production.yml
@@ -108,6 +110,12 @@ jobs:
           load: true
           tags: experimently-web:core
           cache-from: type=gha,scope=web
+
+      # The dashboard's access log writes no query string (#1098), checked in
+      # the image just built: the rendered nginx config, then the lines three
+      # requests leave. tests/web/access_log.sh says what a pass means.
+      - name: Dashboard access log leaves query strings out
+        run: bash tests/web/access_log.sh experimently-web:core
 
       # Tag the builds with whatever names the compose file resolves to, so the
       # stack below can only start if the file names what was built -- and the
