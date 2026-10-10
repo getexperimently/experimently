@@ -381,7 +381,7 @@ These are stack **ids** — what `cdk deploy` takes, and what `cdk list` prints.
 
 1. `experimentation-auth-<env>` — Cognito user pool, client and groups
 2. `experimentation-vpc-<env>` — VPC, subnets, NAT gateways
-3. `experimentation-dynamodb-<env>` — the five DynamoDB tables
+3. `experimentation-dynamodb-<env>` — the three DynamoDB tables (events, feature flags, overrides)
 4. `experimentation-database-<env>` — Aurora PostgreSQL cluster
 5. `experimentation-redis-<env>` — ElastiCache Redis replication group
 6. `experimentation-compute-<env>` — ECS cluster, task security group, database-access Lambda

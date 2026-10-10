@@ -406,7 +406,7 @@ dashboard is still on `:bootstrap`.
 
 ### experimentation-dynamodb-<env> and experimentation-dynamodb-counters-<env>
 
-- Core: the assignment, event and flag-evaluation tables
+- Core: the events, feature-flags and overrides tables
 - Full profile only (the `counters` module): the **experiment-counters**
   DynamoDB table with on-demand billing and a GSI for querying by experiment
 
@@ -564,7 +564,8 @@ is yours to remove.
 | The final snapshot CloudFormation takes of the Aurora cluster | the cluster's SNAPSHOT policy | prod | snapshot storage | `aws rds delete-db-cluster-snapshot` |
 | KMS key (the alias is deleted) | RETAIN; the final snapshot is encrypted with it | prod | per key per month | `aws kms schedule-key-deletion` -- only after the snapshot is gone |
 | Cognito user pool `experimentation-platform-users-prod` | RETAIN | prod | per monthly active user | `aws cognito-idp delete-user-pool` |
-| DynamoDB tables `experimentation-{assignments,events,experiments,feature-flags,overrides}-prod`, `experiment-counters-prod` | RETAIN | prod | capacity (the core tables are provisioned in prod) and storage | `aws dynamodb delete-table` |
+| DynamoDB tables `experimentation-{events,feature-flags,overrides}-prod`, `experiment-counters-prod` | RETAIN | prod | capacity (the core tables are provisioned in prod) and storage | `aws dynamodb delete-table` |
+| DynamoDB tables `experimentation-{assignments,experiments}-prod`, from a production deployment made before the stack stopped creating them (#605). Nothing reads them. They are not left by `cdk destroy` but by the first `cdk deploy` of `experimentation-dynamodb-prod` after the upgrade, which removes them from the stack (and their auto-scaling) and keeps the tables | RETAIN | prod | provisioned capacity and storage | `aws dynamodb create-backup` if you want a copy, then `aws dynamodb delete-table` |
 | Log groups `/ecs/experimentation-{backend,dashboard,migrate}-prod` | RETAIN | prod | log storage | `aws logs delete-log-group` |
 | Data-lake, Athena-results and Glue-scripts buckets | RETAIN | prod (full) | storage, every object version | empty (all versions), then `aws s3 rb` |
 | Kinesis stream and OpenSearch domain | RETAIN | prod (full) | per shard-hour; per instance-hour | `aws kinesis delete-stream`; `aws opensearch delete-domain` |

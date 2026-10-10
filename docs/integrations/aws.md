@@ -253,7 +253,7 @@ that and for the other required settings.
 | `experimentation-auth-<env>` | Cognito user pool, app client and groups |
 | `experimentation-database-<env>` | Aurora PostgreSQL cluster, parameter group, KMS key, security group |
 | `experimentation-redis-<env>` | ElastiCache Redis replication group, subnet group, security group |
-| `experimentation-dynamodb-<env>` | Five DynamoDB tables (assignments, events, experiments, feature flags, overrides) |
+| `experimentation-dynamodb-<env>` | Three DynamoDB tables (events, feature flags, overrides) |
 | `experimentation-compute-<env>` | ECS cluster, task security group, a placeholder Lambda (`DatabaseAccessLambda`) |
 | `experimentation-fargate-<env>` | ALB, HTTPS + test listeners, blue/green target groups, Fargate service, CodeDeploy application and deployment group, auto-scaling |
 | `experimentation-migrations-<env>` | One-off ECS task definition that runs the alembic upgrade |
