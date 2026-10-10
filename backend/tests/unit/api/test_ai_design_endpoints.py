@@ -234,6 +234,58 @@ class TestSampleSizeEndpoint:
             > r_large_mde.json()["required_per_variant"]
         )
 
+    @pytest.mark.regression
+    def test_days_to_significance_counts_both_variants(self, client_with_developer):
+        """10,000 users a day split between two variants: 7 days, not 4.
+
+        The inputs are docs/statistics/power-analysis.md's example with every
+        user in the experiment (~31,235 per variant at 5,000 each a day).
+        """
+        response = client_with_developer.get(
+            "/api/v1/ai/sample-size",
+            params={"baseline_rate": 0.05, "mde": 0.005, "daily_traffic": 10000},
+        )
+        assert response.status_code == 200
+        data = response.json()
+        days = data["days_to_significance"]
+        assert days == 7
+        assert days * 10000 >= data["total_required"] > (days - 1) * 10000
+
+    @pytest.mark.regression
+    @pytest.mark.parametrize(
+        "daily_traffic",
+        ["0", "-5", str(10**12 + 1), "1" + "0" * 400],
+        ids=["zero", "negative", "above-the-limit", "401-digits"],
+    )
+    def test_daily_traffic_outside_the_range_answers_422(
+        self, client_with_developer, daily_traffic
+    ):
+        """No users a day, fewer than none, or more than 10**12 is refused.
+
+        Before, 0 answered a null duration and -5 a negative number of days.
+        """
+        response = client_with_developer.get(
+            "/api/v1/ai/sample-size",
+            params={
+                "baseline_rate": 0.05,
+                "mde": 0.005,
+                "daily_traffic": daily_traffic,
+            },
+        )
+        assert response.status_code == 422
+        assert [e["loc"] for e in response.json()["detail"]] == [
+            ["query", "daily_traffic"]
+        ]
+
+    def test_daily_traffic_at_the_limit_is_accepted(self, client_with_developer):
+        """10**12 users a day, the power calculator's own limit, is one day."""
+        response = client_with_developer.get(
+            "/api/v1/ai/sample-size",
+            params={"baseline_rate": 0.05, "mde": 0.005, "daily_traffic": 10**12},
+        )
+        assert response.status_code == 200
+        assert response.json()["days_to_significance"] == 1
+
 
 # ---------------------------------------------------------------------------
 # GET /api/v1/ai/templates

@@ -18739,20 +18739,22 @@
             }
           },
           {
-            "description": "Daily traffic to compute days_to_significance",
+            "description": "Users a day who enter the experiment, split evenly between the two variants; used to compute days_to_significance",
             "in": "query",
             "name": "daily_traffic",
             "required": false,
             "schema": {
               "anyOf": [
                 {
+                  "exclusiveMinimum": 0,
+                  "maximum": 1000000000000,
                   "type": "integer"
                 },
                 {
                   "type": "null"
                 }
               ],
-              "description": "Daily traffic to compute days_to_significance",
+              "description": "Users a day who enter the experiment, split evenly between the two variants; used to compute days_to_significance",
               "title": "Daily Traffic"
             }
           }

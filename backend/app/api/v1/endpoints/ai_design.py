@@ -28,6 +28,7 @@ from backend.app.schemas.ai_design import (
     ResultsInterpretationResponse,
     SampleSizeEstimateResponse,
 )
+from backend.app.schemas.power_calculator import MAX_COUNT
 from backend.app.services.ai_design_service import AIDesignService
 from backend.app.services.experiment_template_service import ExperimentTemplateService
 
@@ -116,7 +117,13 @@ def estimate_sample_size(
         default=0.80, description="Desired statistical power (default 0.80)"
     ),
     daily_traffic: Optional[int] = Query(
-        default=None, description="Daily traffic to compute days_to_significance"
+        default=None,
+        gt=0,
+        le=MAX_COUNT,
+        description=(
+            "Users a day who enter the experiment, split evenly between the two "
+            "variants; used to compute days_to_significance"
+        ),
     ),
     current_user: User = Depends(deps.get_current_active_user),
 ) -> SampleSizeEstimateResponse:

@@ -196,18 +196,25 @@ Give a baseline rate (`baseline_rate`) and a minimum detectable effect
 0.95 and 0.80 by default. `mde` is an absolute change in the rate: 0.004 on a
 baseline of 0.08 plans for 8% against 8.4%, a 5% relative lift.
 
+The estimate is for a control and one treatment. Add `daily_traffic`, the
+users a day who enter the experiment (1 to 10^12), and `days_to_significance`
+is the whole days until each variant has `required_per_variant` users. The
+two variants split the day's users, so at 10,000 a day each gets 5,000, and
+73,855 per variant takes 14.8 days: 15. Without `daily_traffic` it is `null`.
+
 ```{.bash exec}
-curl -s "localhost:8000/api/v1/ai/sample-size?baseline_rate=0.08&mde=0.004&power=0.80" \
+curl -s "localhost:8000/api/v1/ai/sample-size?baseline_rate=0.08&mde=0.004&power=0.80&daily_traffic=10000" \
   -H "Authorization: Bearer $TOKEN" | jq .
 ```
 <!-- expect: "required_per_variant": 73855 -->
 <!-- expect: "total_required": 147710 -->
+<!-- expect: "days_to_significance": 15 -->
 
 ```json
 {
   "required_per_variant": 73855,
   "total_required": 147710,
-  "days_to_significance": null,
+  "days_to_significance": 15,
   "assumptions": {"baseline_rate": 0.08, "mde": 0.004, "confidence": 0.95, "power": 0.8}
 }
 ```

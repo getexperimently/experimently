@@ -16,6 +16,7 @@ from typing import Any, Dict, List, Optional
 
 from backend.app.core.anthropic_compat import first_text
 from backend.app.core.config import settings
+from backend.app.services.power_calculator_service import PowerCalculatorService
 
 logger = logging.getLogger(__name__)
 
@@ -25,6 +26,10 @@ logger = logging.getLogger(__name__)
 #: SDK's own defaults are a 600-second read timeout and 2 retries.
 CLAUDE_TIMEOUT_SECONDS = 30.0
 CLAUDE_MAX_RETRIES = 1
+
+#: The sample-size estimate plans a control and one treatment: ``total_required``
+#: is twice ``required_per_variant``, and the daily traffic is split between them.
+SAMPLE_SIZE_VARIANTS = 2
 
 
 # ---------------------------------------------------------------------------
@@ -179,7 +184,10 @@ class AIDesignService:
             mde: Minimum detectable effect — absolute change (0–1).
             confidence: Desired statistical confidence level (default 0.95).
             power: Desired statistical power (default 0.80).
-            daily_traffic: Optional daily users; used to compute days_to_significance.
+            daily_traffic: Optional users a day who enter the experiment, split
+                evenly between the two variants; used to compute
+                days_to_significance, the whole days until each variant has
+                ``required_per_variant`` users.
 
         Returns:
             SampleSizeEstimate with per-variant and total counts.
@@ -197,11 +205,22 @@ class AIDesignService:
         n = (z_alpha + z_beta) ** 2 * 2 * p_bar * (1 - p_bar) / (mde**2)
         n = math.ceil(n)
 
-        days = math.ceil(n / daily_traffic) if daily_traffic else None
+        days: Optional[int] = None
+        if daily_traffic is not None:
+            # Each variant receives only its share of the day's users, so the
+            # days are the power calculator's runtime estimate, not
+            # required_per_variant / daily_traffic (which counts one variant).
+            runtime = PowerCalculatorService().compute_runtime_estimate(
+                required_sample_size=n,
+                daily_traffic=daily_traffic,
+                traffic_allocation=1.0,
+                n_variants=SAMPLE_SIZE_VARIANTS,
+            )
+            days = math.ceil(runtime.days_to_significance)
 
         return SampleSizeEstimate(
             required_per_variant=n,
-            total_required=n * 2,
+            total_required=n * SAMPLE_SIZE_VARIANTS,
             days_to_significance=days,
             assumptions={
                 "baseline_rate": p1,
