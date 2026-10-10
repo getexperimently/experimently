@@ -26,7 +26,7 @@ it:
    to the configuration's `rollback_percentage`. A target of `0` (the default) turns the flag off
    (`status: inactive`) and sets its percentage to 0; any other target lowers only the global percentage
    (see [What a rollback changes](#what-a-rollback-changes)). It also pauses the flag's active rollout
-   schedule, records a `SafetyRollbackRecord`, and sends the configured Slack/email notification.
+   schedule, records a `SafetyRollbackRecord`, and sends the Slack alert and webhook event.
 
 Automatic rollback acts on the error reports that clients send with an API key, as well as on
 server-side evaluation failures, so enable it knowingly.
@@ -298,7 +298,13 @@ When the monitor finds a flag unhealthy and `enable_automatic_rollbacks` is on, 
    `Automatic rollback due to error_rate exceeding threshold (0.1 > 0.05)`. Its `new_value` holds
    `trigger_type` (`automatic`), `previous_percentage`, `new_percentage`, `deactivated` and
    `paused_schedules` (see [Audit Logging](../api/audit-logging.md#changes-the-platform-makes-on-its-own))
-4. Dispatches a notification to the configured Slack channels and email addresses
+4. Sends a Slack alert to `SLACK_DEFAULT_CHANNEL` and a `safety_rollback` event to
+   `NOTIFICATION_WEBHOOK_URL`, each when configured. Both name the first breaching metric with its
+   measured value and threshold in the metric's unit: an error rate as a percentage (1 error in 14
+   evaluations against `0.05` reads `error rate 7.143% exceeded threshold 5%`), a latency in
+   milliseconds (`avg latency 523.5 ms exceeded threshold 500 ms`). The webhook's `metadata` carries
+   the raw numbers as `metric`, `value` and `threshold`, and `error_rate` holds the value only when the
+   metric is `error_rate` (otherwise `null`). An automatic rollback sends no email
 
 Investigate the root cause before re-enabling.
 

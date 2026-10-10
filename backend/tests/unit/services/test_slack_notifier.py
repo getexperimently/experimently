@@ -190,8 +190,9 @@ class TestSendSafetyRollbackAlert:
         with patch.object(notifier, "_send_message", return_value=True):
             result = notifier.send_safety_rollback_alert(
                 flag_name="dark_mode",
-                error_rate=0.12,
-                threshold=0.05,
+                metric_label="error rate",
+                value="12%",
+                threshold="5%",
                 reason="Error rate exceeded threshold",
             )
 
@@ -204,8 +205,9 @@ class TestSendSafetyRollbackAlert:
         with patch.object(notifier, "_send_message", return_value=True) as mock_send:
             notifier.send_safety_rollback_alert(
                 flag_name="dark_mode",
-                error_rate=0.12,
-                threshold=0.05,
+                metric_label="error rate",
+                value="12%",
+                threshold="5%",
                 reason="Error rate exceeded threshold",
             )
 
@@ -224,8 +226,9 @@ class TestSendSafetyRollbackAlert:
         with patch.object(notifier, "_send_message", side_effect=capture_send):
             notifier.send_safety_rollback_alert(
                 flag_name="payments_v2",
-                error_rate=0.10,
-                threshold=0.05,
+                metric_label="error rate",
+                value="10%",
+                threshold="5%",
                 reason="Latency spike",
             )
 
@@ -245,14 +248,15 @@ class TestSendSafetyRollbackAlert:
         with patch.object(notifier, "_send_message", side_effect=capture_send):
             notifier.send_safety_rollback_alert(
                 flag_name="payments_v2",
-                error_rate=0.123,
-                threshold=0.05,
+                metric_label="error rate",
+                value="12.3%",
+                threshold="5%",
                 reason="Latency spike",
             )
 
-        block_text = str(captured.get("blocks", ""))
-        # error_rate is rendered as a percentage like "12.3%"
-        assert "12.3%" in block_text or "0.123" in block_text or "12.3" in block_text
+        fields = [f["text"] for f in captured["blocks"][1]["fields"]]
+        assert "*Error Rate:*\n12.3%" in fields
+        assert "*Threshold:*\n5%" in fields
 
 
 # ---------------------------------------------------------------------------
@@ -443,8 +447,9 @@ class TestBuildSafetyBlock:
 
         blocks = notifier._build_safety_block(
             flag_name="feature_x",
-            error_rate=0.08,
-            threshold=0.05,
+            metric_label="error rate",
+            value="8%",
+            threshold="5%",
             reason="High error rate",
         )
 
@@ -491,9 +496,7 @@ class TestExceptionContainment:
         ):
             # None of these should raise
             try:
-                notifier.send_safety_rollback_alert(
-                    flag_name="flag", error_rate=0.1, threshold=0.05, reason="test"
-                )
+                notifier.send_safety_rollback_alert(flag_name="flag", reason="test")
                 notifier.send_experiment_started(experiment_name="Exp")
                 notifier.send_experiment_completed(experiment_name="Exp")
                 notifier.send_rollout_advanced(flag_name="flag", from_pct=0, to_pct=10)
@@ -513,12 +516,7 @@ class TestSlackDisabledAllMethodsReturnFalse:
         """When SLACK_ENABLED=False every public method returns False."""
         notifier = _make_notifier(slack_enabled=False)
 
-        assert (
-            notifier.send_safety_rollback_alert(
-                flag_name="f", error_rate=0.1, threshold=0.05, reason="r"
-            )
-            is False
-        )
+        assert notifier.send_safety_rollback_alert(flag_name="f", reason="r") is False
         assert notifier.send_experiment_started(experiment_name="E") is False
         assert notifier.send_experiment_completed(experiment_name="E") is False
         assert (
