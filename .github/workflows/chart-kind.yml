@@ -170,6 +170,13 @@ jobs:
         id: version
         run: echo "version=$(cat VERSION)" >> "$GITHUB_OUTPUT"
 
+      # The UTC date, passed to the image builds below as OS_PACKAGES_REFRESHED:
+      # a new date re-runs the Dockerfiles' OS package upgrade layer even when
+      # the build cache holds an older copy of it (see backend/Dockerfile).
+      - name: OS package refresh date
+        id: os-packages
+        run: printf 'date=%s\n' "$(date -u +%Y-%m-%d)" >> "$GITHUB_OUTPUT"
+
       # Read-only use of the caches Docker Smoke writes (pr-qa-gate.yml); the
       # full dashboard image has no cache there, so it keeps its own.
       - name: Build API image
@@ -180,6 +187,7 @@ jobs:
           target: ${{ matrix.profile }}
           build-args: |
             VERSION=${{ steps.version.outputs.version }}
+            OS_PACKAGES_REFRESHED=${{ steps.os-packages.outputs.date }}
           load: true
           # env.API_IMAGE, written out: a `with:` value read from an image-named
           # env var is refused (test_workflow_account_id_private.py).
@@ -196,6 +204,7 @@ jobs:
           build-args: |
             EXPERIMENTLY_PROFILE=${{ matrix.profile }}
             VERSION=${{ steps.version.outputs.version }}
+            OS_PACKAGES_REFRESHED=${{ steps.os-packages.outputs.date }}
           load: true
           # env.WEB_IMAGE, written out (see the API image above).
           tags: chart-kind-web:${{ matrix.profile }}

@@ -204,6 +204,13 @@ jobs:
         if: github.event_name == 'pull_request'
         uses: docker/setup-buildx-action@v4
 
+      # The UTC date, passed to the image builds below as OS_PACKAGES_REFRESHED:
+      # a new date re-runs the Dockerfiles' OS package upgrade layer even when
+      # the build cache holds an older copy of it (see backend/Dockerfile).
+      - name: OS package refresh date
+        id: os-packages
+        run: printf 'date=%s\n' "$(date -u +%Y-%m-%d)" >> "$GITHUB_OUTPUT"
+
       # The build definitions come from docker-compose.yml itself (no second
       # copy); `source: .` builds the checkout, not the Git context. The
       # profile picks the API's build target and the dashboard's build argument
@@ -219,6 +226,7 @@ jobs:
           set: |
             api.cache-from=type=gha,scope=docex-api
             frontend.cache-from=type=gha,scope=docex-web
+            *.args.OS_PACKAGES_REFRESHED=${{ steps.os-packages.outputs.date }}
 
       # The full API reads `api-full`, which security-scan already writes on
       # main from the same Dockerfile and target, then `docex-api` for the
@@ -238,6 +246,7 @@ jobs:
             api.cache-from=type=gha,scope=api-full
             api.cache-from=type=gha,scope=docex-api
             frontend.cache-from=type=gha,scope=docex-web-full
+            *.args.OS_PACKAGES_REFRESHED=${{ steps.os-packages.outputs.date }}
 
       # PYTHONUNBUFFERED as well as the runner's own line buffering, so a job
       # killed mid-page still shows the page it was on. The timeout is the
@@ -328,6 +337,13 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: docker/setup-buildx-action@v4
+      # The UTC date, passed to the image builds below as OS_PACKAGES_REFRESHED:
+      # a new date re-runs the Dockerfiles' OS package upgrade layer even when
+      # the build cache holds an older copy of it (see backend/Dockerfile).
+      - name: OS package refresh date
+        id: os-packages
+        run: printf 'date=%s\n' "$(date -u +%Y-%m-%d)" >> "$GITHUB_OUTPUT"
+
       - uses: docker/bake-action@v7
         with:
           source: .
@@ -337,6 +353,7 @@ jobs:
             api.cache-to=type=gha,scope=docex-api,mode=max
             frontend.cache-to=type=gha,scope=docex-web,mode=max
             *.output=type=cacheonly
+            *.args.OS_PACKAGES_REFRESHED=${{ steps.os-packages.outputs.date }}
       - uses: docker/bake-action@v7
         env:
           EXPERIMENTLY_PROFILE: full
@@ -347,6 +364,7 @@ jobs:
           set: |
             frontend.cache-to=type=gha,scope=docex-web-full,mode=max
             *.output=type=cacheonly
+            *.args.OS_PACKAGES_REFRESHED=${{ steps.os-packages.outputs.date }}
 
   failure-issue:
     name: File an issue on failure

@@ -90,12 +90,21 @@ jobs:
 
       # The same builds as Docker Smoke (pr-qa-gate.yml), reading its cache.
       # No cache-to: Docker Smoke owns those scopes.
+      # The UTC date, passed to the image builds below as OS_PACKAGES_REFRESHED:
+      # a new date re-runs the Dockerfiles' OS package upgrade layer even when
+      # the build cache holds an older copy of it (see backend/Dockerfile).
+      - name: OS package refresh date
+        id: os-packages
+        run: printf 'date=%s\n' "$(date -u +%Y-%m-%d)" >> "$GITHUB_OUTPUT"
+
       - name: Build API image (core)
         uses: docker/build-push-action@v7
         with:
           context: .
           file: backend/Dockerfile
           target: core
+          build-args: |
+            OS_PACKAGES_REFRESHED=${{ steps.os-packages.outputs.date }}
           load: true
           tags: experimently-api:core
           cache-from: type=gha,scope=api
@@ -107,6 +116,7 @@ jobs:
           file: frontend/Dockerfile
           build-args: |
             EXPERIMENTLY_PROFILE=core
+            OS_PACKAGES_REFRESHED=${{ steps.os-packages.outputs.date }}
           load: true
           tags: experimently-web:core
           cache-from: type=gha,scope=web
