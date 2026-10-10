@@ -10,6 +10,26 @@ longer applies and release-please can generate this file directly. Until it
 does, entries below 0.2.2 are hand-written and the links in them are the
 reason why.
 
+## [0.28.0](https://github.com/getexperimently/experimently/compare/v0.27.0...v0.28.0) (2026-10-10)
+
+
+### Features
+
+* **infra:** the stacks no longer create the two DynamoDB tables nothing uses ([#1111](https://github.com/getexperimently/experimently/issues/1111)) ([45a579a](https://github.com/getexperimently/experimently/commit/45a579ace4761b9f0d948241b296ab040b5647fa))
+
+
+### Bug Fixes
+
+* **ai:** the sample-size answer's days to significance count every variant's users ([#1104](https://github.com/getexperimently/experimently/issues/1104)) ([3b913e4](https://github.com/getexperimently/experimently/commit/3b913e43dbd581855b094a7de2c7ccc03a9b4c09))
+* **fuzz:** graphql-core goes back to 3.2.13, which hypothesis-graphql accepts ([#1108](https://github.com/getexperimently/experimently/issues/1108)) ([a5cec59](https://github.com/getexperimently/experimently/commit/a5cec5998e17cd1125ea4e6b8b7fb1105a1fa28c))
+* **safety:** the automatic rollback alert carries the measured value and threshold ([#1105](https://github.com/getexperimently/experimently/issues/1105)) ([e3a53e0](https://github.com/getexperimently/experimently/commit/e3a53e00dc5ce42a4bffd3e3ab73200eb55fb881))
+
+
+### Documentation
+
+* the integration pages' setup and inbound webhook examples run as written ([#1101](https://github.com/getexperimently/experimently/issues/1101)) ([bf3ad9e](https://github.com/getexperimently/experimently/commit/bf3ad9e4a68a1cbf9b1ca0a06611307d64cee6c9))
+* the migration and load-testing pages run as written ([#1097](https://github.com/getexperimently/experimently/issues/1097)) ([2599366](https://github.com/getexperimently/experimently/commit/25993661ddc3a38d9066cd229926c50872d0ee5c))
+
 ## [0.27.0](https://github.com/getexperimently/experimently/compare/v0.26.4...v0.27.0) (2026-10-08)
 
 
