@@ -207,6 +207,11 @@ updates:
       - dependency-name: "pytest"
       - dependency-name: "PyYAML"
       - dependency-name: "requests"
+      # hypothesis-graphql 0.13.2 requires graphql-core < 3.3; #1027 moved it to
+      # 3.3.0 and every fuzz pass failed its pip check. Lift this when a
+      # hypothesis-graphql release accepts 3.3.
+      - dependency-name: "graphql-core"
+        versions: [">= 3.3"]
     labels: ["dependencies", "python"]
     groups:
       patch-and-minor:
