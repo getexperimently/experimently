@@ -103,7 +103,17 @@ ENV PYTHONUNBUFFERED=1 \
 # Debian archive has at build time rather than one named package, so the next
 # lag is covered too. Only this stage ships; `builder` and `modules-src` are
 # discarded.
-RUN apt-get update && apt-get upgrade -y --no-install-recommends \
+#
+# OS_PACKAGES_REFRESHED: the workflow steps that build this image pass the UTC
+# date (backend/tests/unit/infrastructure/test_runtime_image_os_updates.py
+# holds every one to it). A build cache keeps this layer while nothing it
+# depends on changes, and the Debian archive is not one of those things, so a
+# layer cached before an update kept shipping the old package. With the date,
+# a cached copy is reused only by builds that pass the same date. A plain
+# `docker build` gets the default, and its own cache decides as before.
+ARG OS_PACKAGES_REFRESHED=unset
+RUN printf 'OS packages refreshed: %s\n' "${OS_PACKAGES_REFRESHED}" \
+    && apt-get update && apt-get upgrade -y --no-install-recommends \
     && apt-get install -y --no-install-recommends \
         libpq5 \
         postgresql-client \
