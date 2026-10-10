@@ -4,42 +4,17 @@ This document explains the DynamoDB table designs used in the experimentation pl
 
 ## Table Design Overview
 
-The experimentation platform uses five primary DynamoDB tables:
+The `experimentation-dynamodb-<env>` stack creates three DynamoDB tables:
 
-1. **Assignments** - Tracks which users are assigned to which experiment variants
-2. **Events** - Stores user interaction events for experiment analysis
-3. **Experiments** - Contains experiment configurations and metadata
-4. **FeatureFlags** - Stores feature flag definitions
-5. **Overrides** - Manages user-specific experiment or feature overrides
+1. **Events** - Stores user interaction events for experiment analysis
+2. **FeatureFlags** - Stores feature flag definitions
+3. **Overrides** - Manages user-specific experiment or feature overrides
+
+Experiments and assignments are kept in PostgreSQL. The stack used to create
+an Assignments and an Experiments table as well; nothing read or wrote them, and
+they were removed (#605).
 
 ## Table Schemas and Access Patterns
-
-### Assignments Table
-
-**Primary Purpose**: Track user experiment assignments
-
-**Key Structure**:
-- **Partition Key**: `id` (UUID)
-- **Global Secondary Indexes**:
-  - **user-experiment-index**: `user_id` (partition), `experiment_id` (sort)
-  - **experiment-index**: `experiment_id` (partition), `assigned_at` (sort)
-  - **user-index**: `user_id` (partition), `assigned_at` (sort)
-  - **variation-index**: `variation` (partition), `assigned_at` (sort)
-
-**Common Fields**:
-- `id`: Unique identifier (UUID)
-- `user_id`: User identifier 
-- `experiment_id`: Experiment identifier
-- `variation`: Assigned variation ID
-- `assigned_at`: Timestamp when assignment was created
-- `ttl`: Time-to-live for automatic expiration
-
-**Access Patterns**:
-- Get assignment by ID
-- Get assignment for specific user and experiment (most common)
-- Get all assignments for a user
-- Get all users assigned to an experiment
-- Get all users assigned to a specific variation
 
 ### Events Table
 
@@ -68,34 +43,6 @@ The experimentation platform uses five primary DynamoDB tables:
 - Get all events for a user (with optional time range)
 - Get all events for an experiment (with optional time range)
 - Get all events of a specific type (with optional time range)
-
-### Experiments Table
-
-**Primary Purpose**: Store experiment definitions and metadata
-
-**Key Structure**:
-- **Partition Key**: `id` (UUID)
-- **Global Secondary Indexes**:
-  - **status-index**: `status` (partition), `created_at` (sort)
-  - **owner-index**: `owner` (partition), `created_at` (sort)
-  - **tag-index**: `tag` (partition), `created_at` (sort)
-
-**Common Fields**:
-- `id`: Unique identifier (UUID)
-- `name`: Experiment name
-- `description`: Experiment description
-- `status`: Experiment status (draft, active, paused, completed)
-- `variations`: Array of variation objects
-- `created_at`: ISO 8601 timestamp
-- `updated_at`: ISO 8601 timestamp
-- `owner`: User who created the experiment
-- `tags`: Array of tags
-
-**Access Patterns**:
-- Get experiment by ID
-- Get experiments by status
-- Get experiments by owner
-- Get experiments by tag
 
 ### FeatureFlags Table
 
@@ -165,7 +112,6 @@ The tables are configured with different billing modes based on the environment:
 
 Time-to-live is configured for these tables:
 
-- **Assignments**: 30 days by default
 - **Events**: 90 days by default
 - **Overrides**: 30 days by default
 
@@ -179,19 +125,6 @@ A `DynamoDBAccess` utility class is provided to simplify interaction with the ta
 # Example usage
 from db_access import dynamodb_access
 
-# Create an assignment
-assignment = dynamodb_access.create_assignment(
-    user_id="user123",
-    experiment_id="exp456",
-    variation="variant_b"
-)
-
-# Get a user's assignment for an experiment
-assignment = dynamodb_access.get_user_assignment(
-    user_id="user123",
-    experiment_id="exp456"
-)
-
 # Create an event
 event = dynamodb_access.create_event(
     user_id="user123",
@@ -200,8 +133,8 @@ event = dynamodb_access.create_event(
     experiment_id="exp456"
 )
 
-# Get active experiments
-active_experiments = dynamodb_access.get_experiments_by_status("active")
+# Get active feature flags
+active_flags = dynamodb_access.get_active_feature_flags()
 ```
 
 ## Deployment Instructions
