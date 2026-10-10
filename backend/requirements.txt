@@ -13,10 +13,10 @@ bcrypt==5.0.0
 SQLAlchemy==2.0.54
 alembic==1.20.0
 psycopg2-binary==2.9.13
-asyncpg==0.31.0
+asyncpg==0.32.0
 aioredis==2.0.1
 redis==8.1.0
-boto3==1.43.108
+boto3==1.43.109
 boto3-stubs==1.43.108
 mypy-boto3-dynamodb==1.43.106
 mypy-boto3-ssm==1.43.104
@@ -52,9 +52,9 @@ pytest-mock==3.16.0
 httpx==0.28.1
 slack-sdk==3.45.0
 sendgrid==6.12.5
-anthropic==1.11.0   # LLM provider SDKs (#196); same pins as backend/requirements/runtime.txt
-openai==3.24.0
-faker==40.40.0
+anthropic==1.12.0   # LLM provider SDKs (#196); same pins as backend/requirements/runtime.txt
+openai==3.26.0
+faker==40.41.0
 factory-boy==3.3.3
 freezegun==1.5.5
 moto==4.2.14
@@ -76,9 +76,9 @@ statsmodels==0.15.0
 python-dateutil==2.9.0.post0
 PyYAML==6.0.3
 Jinja2==3.1.6
-tenacity==9.1.4
+tenacity==9.2.1
 structlog==23.3.0
-orjson==3.12.0
+orjson==3.13.0
 ujson==6.0.0
 semver==3.1.0          # core/rules_engine.py semantic-version operators
 google-re2==1.1.20251105  # core/pattern_match.py regex conditions (RE2)
@@ -102,9 +102,9 @@ cryptography==50.0.2   # core/phi_encryption.py (Fernet)
 mock==5.2.0            # tests/unit/middleware/test_error_middleware.py
 
 # Monitoring & Tracing
-opentelemetry-api==1.45.0
-opentelemetry-sdk==1.45.0
-opentelemetry-exporter-otlp==1.45.0
+opentelemetry-api==1.45.1
+opentelemetry-sdk==1.45.1
+opentelemetry-exporter-otlp==1.45.1
 prometheus-client==0.26.0
 
 # Development
