@@ -12,8 +12,8 @@
 # scripts/doc_examples.py), and each page's residual counts can only fall.
 
 [meta]
-documents = 47
-exec = 283
+documents = 50
+exec = 305
 universe = [
     ".github/pull_request_template.md",
     ".github/qa-templates/README.md",
@@ -446,7 +446,6 @@ reason = "run on a kind cluster by the chart-kind workflow (scripts/chart_kind.s
 [pending]
 "backend/lambda/README.md" = { comments = 0, unlabelled = 1, syntax = 0 }
 "backend/lambda/event_processor/README.md" = { comments = 0, unlabelled = 1, syntax = 0 }
-"docs/api/integrations.md" = { comments = 0, unlabelled = 8, syntax = 0 }
 "docs/api/split-url.md" = { comments = 0, unlabelled = 3, syntax = 0 }
 "docs/architecture/models.md" = { comments = 0, unlabelled = 1, syntax = 1 }
 "docs/auth/auth-environment-variables.md" = { comments = 0, unlabelled = 4, syntax = 0 }
@@ -470,8 +469,6 @@ reason = "run on a kind cluster by the chart-kind workflow (scripts/chart_kind.s
 "docs/infrastructure/redis-summary.md" = { comments = 0, unlabelled = 0, syntax = 0 }
 "docs/infrastructure/vpc-stack-implementation.md" = { comments = 0, unlabelled = 0, syntax = 0 }
 "docs/integrations/aws.md" = { comments = 0, unlabelled = 0, syntax = 0 }
-"docs/integrations/github.md" = { comments = 0, unlabelled = 4, syntax = 0 }
-"docs/integrations/salesforce.md" = { comments = 0, unlabelled = 1, syntax = 0 }
 "docs/monitoring/dashboard-reference.md" = { comments = 0, unlabelled = 0, syntax = 0 }
 "docs/monitoring/index.md" = { comments = 0, unlabelled = 1, syntax = 0 }
 "docs/monitoring/monitoring-guide.md" = { comments = 0, unlabelled = 1, syntax = 0 }
@@ -598,3 +595,27 @@ environment = "stack-dev"
 exec = 10
 skip = 6
 expects = 8
+
+# #1075: the integration pages' setup and inbound webhook examples, each
+# signing in first and signing its deliveries as the page says. Nothing on
+# them calls Jira, Salesforce or GitHub; the one block that would is skipped.
+[[document]]
+path = "docs/api/integrations.md"
+environment = "stack-full"
+exec = 12
+skip = 0
+expects = 20
+
+[[document]]
+path = "docs/integrations/github.md"
+environment = "stack-full"
+exec = 4
+skip = 0
+expects = 9
+
+[[document]]
+path = "docs/integrations/salesforce.md"
+environment = "stack-full"
+exec = 6
+skip = 1
+expects = 13
