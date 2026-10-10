@@ -244,8 +244,8 @@ class = "exec"
 reason = "its API steps run on a full-profile stack in Doc Examples"
 
 [pages."api/integrations.md"]
-class = "external:jira-salesforce-github"
-reason = "an API reference whose syncs need a Jira, Salesforce or GitHub account"
+class = "exec"
+reason = "its configuration and signed-webhook examples run on a full-profile stack in Doc Examples; nothing on it calls Jira, Salesforce or GitHub"
 
 [pages."integrations/aws.md"]
 class = "aws"
@@ -260,12 +260,12 @@ class = "external:data-warehouse"
 reason = "runs an analysis on tables in your own Snowflake or BigQuery warehouse"
 
 [pages."integrations/salesforce.md"]
-class = "external:salesforce"
-reason = "needs a Salesforce org"
+class = "exec"
+reason = "its setup and webhook examples run on a full-profile stack in Doc Examples; the callout set up in Salesforce and the credentials check need a Salesforce org and are not run"
 
 [pages."integrations/github.md"]
-class = "external:github"
-reason = "needs a GitHub repository that sends events and receives issues"
+class = "exec"
+reason = "its setup and signed-webhook examples run on a full-profile stack in Doc Examples; adding the webhook on github.com needs a GitHub repository and is not run"
 
 [pages."api/alerting.md"]
 class = "exec"
