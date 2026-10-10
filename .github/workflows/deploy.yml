@@ -587,6 +587,13 @@ jobs:
         id: login-ecr
         uses: aws-actions/amazon-ecr-login@v2
 
+      # The UTC date, passed to the two image builds below as OS_PACKAGES_REFRESHED:
+      # a new date re-runs the Dockerfiles' OS package upgrade layer even when
+      # the build cache holds an older copy of it (see backend/Dockerfile).
+      - name: OS package refresh date
+        id: os-packages
+        run: printf 'date=%s\n' "$(date -u +%Y-%m-%d)" >> "$GITHUB_OUTPUT"
+
       # One tag per release and profile, `:<tag>-<profile>`, pushed once. No
       # `:latest` and no bare `:<tag>`: both used to be pushed on every build,
       # so a staging build of the core profile moved the tag prod's next
@@ -602,6 +609,7 @@ jobs:
         id: image
         env:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          OS_PACKAGES_REFRESHED: ${{ steps.os-packages.outputs.date }}
         run: |
           set -euo pipefail
           IMAGE_TAG="${VERSION}-${PROFILE}"
@@ -653,6 +661,7 @@ jobs:
               --build-arg BUILD_DATE="$(date -u +'%Y-%m-%dT%H:%M:%SZ')" \
               --build-arg GIT_COMMIT="$RELEASE_COMMIT" \
               --build-arg VERSION="${VERSION#v}" \
+              --build-arg OS_PACKAGES_REFRESHED="$OS_PACKAGES_REFRESHED" \
               --target "$PROFILE" \
               -t "$REF" \
               -f release/backend/Dockerfile \
@@ -687,6 +696,7 @@ jobs:
         id: web-image
         env:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          OS_PACKAGES_REFRESHED: ${{ steps.os-packages.outputs.date }}
         run: |
           set -euo pipefail
           IMAGE_TAG="${VERSION}-${PROFILE}"
@@ -736,6 +746,7 @@ jobs:
               --build-arg GIT_COMMIT="$RELEASE_COMMIT" \
               --build-arg VERSION="${VERSION#v}" \
               --build-arg EXPERIMENTLY_PROFILE="$PROFILE" \
+              --build-arg OS_PACKAGES_REFRESHED="$OS_PACKAGES_REFRESHED" \
               -t "$REF" \
               -f release/frontend/Dockerfile \
               release
