@@ -263,65 +263,6 @@ class DynamoDBClient:
 dynamodb_client = DynamoDBClient()
 ```
 
-### Assignment Operations
-
-```python
-def create_assignment(user_id, experiment_id, variation, ttl_days=30):
-    """Create a new user assignment to an experiment variation"""
-    assignments_table = dynamodb_client.get_table('assignments')
-    
-    assignment_id = str(uuid.uuid4())
-    timestamp = int(time.time())
-    ttl = timestamp + (ttl_days * 24 * 60 * 60)  # Convert days to seconds
-    
-    item = {
-        'id': assignment_id,
-        'user_id': user_id,
-        'experiment_id': experiment_id,
-        'variation': variation,
-        'assigned_at': timestamp,
-        'ttl': ttl
-    }
-    
-    assignments_table.put_item(Item=item)
-    return item
-
-def get_user_assignment(user_id, experiment_id):
-    """Get a user's assignment for a specific experiment"""
-    assignments_table = dynamodb_client.get_table('assignments')
-    
-    response = assignments_table.query(
-        IndexName='user-experiment-index',
-        KeyConditionExpression=Key('user_id').eq(user_id) & Key('experiment_id').eq(experiment_id),
-        Limit=1
-    )
-    
-    items = response.get('Items', [])
-    return items[0] if items else None
-
-def get_experiment_assignments(experiment_id, limit=100, last_key=None):
-    """Get assignments for a specific experiment with pagination"""
-    assignments_table = dynamodb_client.get_table('assignments')
-    
-    query_params = {
-        'IndexName': 'experiment-index',
-        'KeyConditionExpression': Key('experiment_id').eq(experiment_id),
-        'Limit': limit,
-        'ScanIndexForward': False  # Get most recent first
-    }
-    
-    # Add pagination token if provided
-    if last_key:
-        query_params['ExclusiveStartKey'] = last_key
-    
-    response = assignments_table.query(**query_params)
-    
-    return {
-        'items': response.get('Items', []),
-        'last_key': response.get('LastEvaluatedKey')
-    }
-```
-
 ### Event Tracking
 
 ```python
@@ -737,9 +678,9 @@ def batch_create_events(events):
 
 ```python
 # DynamoDB transaction example
-def update_experiment_with_override(experiment_id, status, user_id=None, variation=None):
-    """Update experiment status and optionally add a user override"""
-    experiments_table = dynamodb_client.get_table('experiments')
+def update_flag_with_override(flag_id, status, user_id=None, value=None):
+    """Update a feature flag's status and optionally add a user override"""
+    feature_flags_table = dynamodb_client.get_table('feature-flags')
     overrides_table = dynamodb_client.get_table('overrides')
     
     timestamp = time.strftime('%Y-%m-%dT%H:%M:%S.000Z', time.gmtime())
@@ -747,8 +688,8 @@ def update_experiment_with_override(experiment_id, status, user_id=None, variati
     transact_items = [
         {
             'Update': {
-                'TableName': experiments_table.name,
-                'Key': {'id': experiment_id},
+                'TableName': feature_flags_table.name,
+                'Key': {'id': flag_id},
                 'UpdateExpression': 'SET #status = :status, updated_at = :updated_at',
                 'ExpressionAttributeNames': {'#status': 'status'},
                 'ExpressionAttributeValues': {
@@ -759,8 +700,8 @@ def update_experiment_with_override(experiment_id, status, user_id=None, variati
         }
     ]
     
-    # Add override if user_id and variation provided
-    if user_id and variation:
+    # Add override if user_id and value provided
+    if user_id and value:
         override_id = str(uuid.uuid4())
         ttl = int(time.time()) + (30 * 24 * 60 * 60)  # 30 days
         
@@ -770,9 +711,9 @@ def update_experiment_with_override(experiment_id, status, user_id=None, variati
                 'Item': {
                     'id': override_id,
                     'user_id': user_id,
-                    'target_id': experiment_id,
-                    'type': 'experiment',
-                    'value': variation,
+                    'target_id': flag_id,
+                    'type': 'feature',
+                    'value': value,
                     'created_at': timestamp,
                     'ttl': ttl
                 }
@@ -785,9 +726,9 @@ def update_experiment_with_override(experiment_id, status, user_id=None, variati
     )
     
     return {
-        'experiment_id': experiment_id,
+        'flag_id': flag_id,
         'status': status,
-        'override_added': bool(user_id and variation)
+        'override_added': bool(user_id and value)
     }
 ```
 

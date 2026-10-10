@@ -31,7 +31,7 @@ def test_dynamodb_connection():
 
     try:
         # Step 1: Check that we can access table names
-        for table_key in ["assignments", "events", "experiments", "feature-flags", "overrides"]:
+        for table_key in ["events", "feature-flags", "overrides"]:
             try:
                 table_name = dynamodb_access._get_table_name(table_key)
                 logger.info(f"Retrieved table name for {table_key}: {table_name}")
@@ -41,61 +41,7 @@ def test_dynamodb_connection():
                 results["table_exists"][table_key] = False
                 results["issues"].append(f"Table {table_key} not accessible: {str(e)}")
 
-        # Step 2: Test basic operations if the tables exist
-        if results["table_exists"].get("experiments", False):
-            try:
-                # Generate a unique test experiment name
-                test_name = f"test_experiment_{uuid.uuid4().hex[:8]}"
-
-                # Create a test experiment
-                experiment = dynamodb_access.create_experiment(
-                    name=test_name,
-                    description="Test experiment for connection verification",
-                    variations=[
-                        {"name": "control", "description": "Control variation", "allocation": 50},
-                        {"name": "treatment", "description": "Treatment variation", "allocation": 50}
-                    ],
-                    status="draft"
-                )
-
-                logger.info(f"Created test experiment: {experiment['id']}")
-
-                # Retrieve the experiment
-                retrieved = dynamodb_access.get_experiment(experiment["id"])
-                if retrieved and retrieved["name"] == test_name:
-                    logger.info("Successfully retrieved experiment")
-                    results["basic_operations"]["experiment_create_retrieve"] = True
-                else:
-                    logger.error("Failed to retrieve experiment correctly")
-                    results["basic_operations"]["experiment_create_retrieve"] = False
-                    results["issues"].append("Failed to retrieve experiment correctly")
-
-                # Update the experiment status
-                updated = dynamodb_access.update_experiment_status(experiment["id"], "paused")
-                if updated and updated.get("status") == "paused":
-                    logger.info("Successfully updated experiment status")
-                    results["basic_operations"]["experiment_update"] = True
-                else:
-                    logger.error("Failed to update experiment status")
-                    results["basic_operations"]["experiment_update"] = False
-                    results["issues"].append("Failed to update experiment status")
-
-                # Get experiments by status
-                experiments = dynamodb_access.get_experiments_by_status("paused")
-                if any(exp["id"] == experiment["id"] for exp in experiments):
-                    logger.info("Successfully queried experiments by status")
-                    results["basic_operations"]["experiment_query"] = True
-                else:
-                    logger.error("Failed to query experiments by status")
-                    results["basic_operations"]["experiment_query"] = False
-                    results["issues"].append("Failed to query experiments by status")
-
-            except Exception as e:
-                logger.error(f"Error during experiment operations: {str(e)}")
-                results["basic_operations"]["experiments"] = False
-                results["issues"].append(f"Experiment operations failed: {str(e)}")
-
-        # Step 3: Test feature flag operations
+        # Step 2: Test feature flag operations
         if results["table_exists"].get("feature-flags", False):
             try:
                 # Generate a unique test feature flag name
