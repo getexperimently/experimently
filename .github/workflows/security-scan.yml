@@ -373,12 +373,21 @@ jobs:
       # the "~8 minutes for a cold job" pr-qa-gate's own comment cites, on a PR
       # path budgeted at ~13 minutes. It also set up buildx and then did not
       # use it.
+      # The UTC date, passed to the image builds below as OS_PACKAGES_REFRESHED:
+      # a new date re-runs the Dockerfiles' OS package upgrade layer even when
+      # the build cache holds an older copy of it (see backend/Dockerfile).
+      - name: OS package refresh date
+        id: os-packages
+        run: printf 'date=%s\n' "$(date -u +%Y-%m-%d)" >> "$GITHUB_OUTPUT"
+
       - name: Build the API image (core)
         uses: docker/build-push-action@v7
         with:
           context: .
           file: backend/Dockerfile
           target: core
+          build-args: |
+            OS_PACKAGES_REFRESHED=${{ steps.os-packages.outputs.date }}
           load: true
           tags: experimently-api:scan-core
           cache-from: type=gha,scope=api
@@ -390,6 +399,8 @@ jobs:
           context: .
           file: backend/Dockerfile
           target: full
+          build-args: |
+            OS_PACKAGES_REFRESHED=${{ steps.os-packages.outputs.date }}
           load: true
           tags: experimently-api:scan-full
           # BOTH scopes, as pr-qa-gate.yml does: `builder` and `runtime` are
@@ -419,6 +430,7 @@ jobs:
           file: frontend/Dockerfile
           build-args: |
             EXPERIMENTLY_PROFILE=core
+            OS_PACKAGES_REFRESHED=${{ steps.os-packages.outputs.date }}
           load: true
           tags: experimently-web:scan-core
           cache-from: type=gha,scope=web
@@ -430,6 +442,7 @@ jobs:
           file: frontend/Dockerfile
           build-args: |
             EXPERIMENTLY_PROFILE=full
+            OS_PACKAGES_REFRESHED=${{ steps.os-packages.outputs.date }}
           load: true
           tags: experimently-web:scan-full
           cache-from: |

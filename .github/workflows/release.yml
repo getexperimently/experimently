@@ -217,6 +217,13 @@ jobs:
           echo "build_date=$(date -u +'%Y-%m-%dT%H:%M:%SZ')" >> "$GITHUB_OUTPUT"
           echo "$tags"
 
+      # The UTC date, passed to the image builds below as OS_PACKAGES_REFRESHED:
+      # a new date re-runs the Dockerfiles' OS package upgrade layer even when
+      # the build cache holds an older copy of it (see backend/Dockerfile).
+      - name: OS package refresh date
+        id: os-packages
+        run: printf 'date=%s\n' "$(date -u +%Y-%m-%d)" >> "$GITHUB_OUTPUT"
+
       # The credential scan (#748). Nothing reaches the registry until trivy's
       # secret scanner has reported zero findings on the image as built.
       #
@@ -273,6 +280,7 @@ jobs:
           build-args: |
             VERSION=${{ needs.verify.outputs.version }}
             BUILD_DATE=${{ steps.tags.outputs.build_date }}
+            OS_PACKAGES_REFRESHED=${{ steps.os-packages.outputs.date }}
             GIT_COMMIT=${{ github.sha }}
           provenance: false
           sbom: false
@@ -358,6 +366,7 @@ jobs:
           build-args: |
             VERSION=${{ needs.verify.outputs.version }}
             BUILD_DATE=${{ steps.tags.outputs.build_date }}
+            OS_PACKAGES_REFRESHED=${{ steps.os-packages.outputs.date }}
             GIT_COMMIT=${{ github.sha }}
           provenance: mode=max
           cache-from: type=gha,scope=release-api-${{ matrix.profile }}
@@ -499,6 +508,13 @@ jobs:
           echo "build_date=$(date -u +'%Y-%m-%dT%H:%M:%SZ')" >> "$GITHUB_OUTPUT"
           echo "$tags"
 
+      # The UTC date, passed to the image builds below as OS_PACKAGES_REFRESHED:
+      # a new date re-runs the Dockerfiles' OS package upgrade layer even when
+      # the build cache holds an older copy of it (see backend/Dockerfile).
+      - name: OS package refresh date
+        id: os-packages
+        run: printf 'date=%s\n' "$(date -u +%Y-%m-%d)" >> "$GITHUB_OUTPUT"
+
       # The credential scan, as in the API images above (#748). The whole
       # dashboard payload lives under /usr/share/nginx/html, which trivy's
       # default rules skip with the rest of /usr/share, so the payload scan
@@ -537,6 +553,7 @@ jobs:
             EXPERIMENTLY_PROFILE=${{ matrix.profile }}
             VERSION=${{ needs.verify.outputs.version }}
             BUILD_DATE=${{ steps.tags.outputs.build_date }}
+            OS_PACKAGES_REFRESHED=${{ steps.os-packages.outputs.date }}
             GIT_COMMIT=${{ github.sha }}
           provenance: false
           sbom: false
@@ -615,6 +632,7 @@ jobs:
             EXPERIMENTLY_PROFILE=${{ matrix.profile }}
             VERSION=${{ needs.verify.outputs.version }}
             BUILD_DATE=${{ steps.tags.outputs.build_date }}
+            OS_PACKAGES_REFRESHED=${{ steps.os-packages.outputs.date }}
             GIT_COMMIT=${{ github.sha }}
           provenance: mode=max
           cache-from: type=gha,scope=release-web-${{ matrix.profile }}
