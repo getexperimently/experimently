@@ -535,6 +535,115 @@ class TestRuntimeEstimation:
             )
 
 
+@pytest.mark.regression
+class TestRuntimeUsesUnroundedDailyTraffic:
+    """#1109: the days divide by the unrounded users per variant per day,
+    ``daily_traffic * traffic_allocation / n_variants``, the dashboard's formula
+    (frontend/src/utils/power.ts). Rounding that down to a whole number (at
+    least 1) reported 31,235 days for 31,235 per variant at both 1 and 3 users
+    a day."""
+
+    @pytest.mark.parametrize(
+        "daily_traffic, expected_days",
+        [
+            # 0.5 users per variant a day: 31,235 / 0.5
+            pytest.param(1, 62_470.0, id="1-user-a-day"),
+            # 1.5 users per variant a day: 31,235 / 1.5 = 20,823.3
+            pytest.param(3, 31_235 / 1.5, id="3-users-a-day"),
+        ],
+    )
+    def test_low_traffic_days(self, calc, daily_traffic, expected_days):
+        result = calc.compute_runtime_estimate(
+            required_sample_size=31_235,
+            daily_traffic=daily_traffic,
+            traffic_allocation=1.0,
+            n_variants=2,
+        )
+        assert result.days_to_significance == pytest.approx(expected_days, rel=1e-12)
+        assert result.weeks_to_significance == pytest.approx(
+            expected_days / 7, rel=1e-12
+        )
+        lo, hi = result.confidence_interval_days
+        assert lo <= result.days_to_significance <= hi
+        # The whole-number figure keeps its type and its value.
+        assert result.daily_traffic_per_variant == 1
+
+    def test_fraction_above_one_user_a_day(self, calc):
+        """101 users a day over 2 variants is 50.5 each, not 50."""
+        result = calc.compute_runtime_estimate(
+            required_sample_size=10_100,
+            daily_traffic=101,
+            traffic_allocation=1.0,
+            n_variants=2,
+        )
+        assert result.days_to_significance == pytest.approx(200.0, rel=1e-12)
+        assert result.daily_traffic_per_variant == 50
+
+    def test_sample_size_runtime_days_at_one_user_a_day(self, calc):
+        result = calc.compute_sample_size(
+            baseline_rate=0.05,
+            minimum_detectable_effect=0.10,
+            daily_traffic=1,
+            traffic_allocation=1.0,
+        )
+        assert result.runtime_days == pytest.approx(2 * result.per_variant, rel=1e-12)
+
+    @pytest.mark.parametrize(
+        "daily_traffic, allocation, expected_days, per_variant_per_day",
+        [
+            # docs/statistics/power-analysis.md, "Runtime Estimation"
+            pytest.param(10_000, 0.5, 12.4936, 2_500, id="docs-50pct-allocation"),
+            # frontend/src/tests/utils/power.test.ts
+            pytest.param(10_000, 1.0, 6.2468, 5_000, id="dashboard-full-allocation"),
+        ],
+    )
+    def test_documented_examples_unchanged(
+        self, calc, daily_traffic, allocation, expected_days, per_variant_per_day
+    ):
+        result = calc.compute_runtime_estimate(
+            required_sample_size=31_234,
+            daily_traffic=daily_traffic,
+            traffic_allocation=allocation,
+            n_variants=2,
+        )
+        assert result.days_to_significance == pytest.approx(expected_days, rel=1e-12)
+        assert result.daily_traffic_per_variant == per_variant_per_day
+
+    @pytest.mark.parametrize("allocation", [5e-324, 1e-310])
+    def test_allocation_too_small_to_calculate_raises_overflow_error(
+        self, calc, allocation
+    ):
+        """The users per variant per day underflows to zero (5e-324) or the
+        days leave float range (1e-310): OverflowError, which the routes answer
+        with a 422, rather than a division by zero or an infinite day count."""
+        with pytest.raises(OverflowError):
+            calc.compute_runtime_estimate(
+                required_sample_size=31_235,
+                daily_traffic=1,
+                traffic_allocation=allocation,
+                n_variants=2,
+            )
+
+    @pytest.mark.parametrize(
+        "allocation, n_variants",
+        [
+            pytest.param(0.0, 2, id="allocation-0"),
+            pytest.param(1.0, 0, id="n_variants-0"),
+            pytest.param(1.0, 1, id="n_variants-1"),
+        ],
+    )
+    def test_zero_allocation_and_too_few_variants_still_refused(
+        self, calc, allocation, n_variants
+    ):
+        with pytest.raises(ValueError):
+            calc.compute_runtime_estimate(
+                required_sample_size=31_235,
+                daily_traffic=1,
+                traffic_allocation=allocation,
+                n_variants=n_variants,
+            )
+
+
 # ===========================================================================
 # TestPowerCurve
 # ===========================================================================

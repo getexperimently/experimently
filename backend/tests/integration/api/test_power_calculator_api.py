@@ -706,3 +706,60 @@ class TestOverflowAnswers422:
             headers={"content-type": "application/json"},
         )
         _assert_out_of_range(resp)
+
+
+@pytest.mark.regression
+class TestRuntimeAtLowTraffic:
+    """#1109: the runtime divides by the unrounded users per variant per day,
+    as the dashboard does, and an allocation too small to calculate with
+    answers 422 rather than 500."""
+
+    def test_runtime_at_one_user_a_day(self, client: TestClient):
+        resp = client.post(
+            RUNTIME_URL,
+            json=_runtime_payload(
+                required_sample_size=31_235,
+                daily_traffic=1,
+                traffic_allocation=1.0,
+                n_variants=2,
+            ),
+        )
+        assert resp.status_code == 200, resp.text
+        data = resp.json()
+        assert data["days_to_significance"] == pytest.approx(62_470.0)
+        assert data["daily_traffic_per_variant"] == 1
+
+    def test_sample_size_runtime_at_three_users_a_day(self, client: TestClient):
+        resp = client.post(
+            SAMPLE_SIZE_URL,
+            json=_sample_size_payload(
+                baseline_rate=0.05,
+                minimum_detectable_effect=0.10,
+                daily_traffic=3,
+                traffic_allocation=1.0,
+            ),
+        )
+        assert resp.status_code == 200, resp.text
+        data = resp.json()
+        assert data["runtime_days"] == pytest.approx(data["per_variant"] / 1.5)
+
+    @pytest.mark.parametrize(
+        "url, payload",
+        [
+            pytest.param(
+                RUNTIME_URL,
+                _runtime_payload(daily_traffic=1, traffic_allocation=5e-324),
+                id="runtime",
+            ),
+            pytest.param(
+                SAMPLE_SIZE_URL,
+                _sample_size_payload(daily_traffic=1, traffic_allocation=5e-324),
+                id="sample-size",
+            ),
+        ],
+    )
+    def test_allocation_too_small_to_calculate_answers_422(
+        self, client_no_raise: TestClient, url, payload
+    ):
+        resp = client_no_raise.post(url, json=payload)
+        _assert_out_of_range(resp)
