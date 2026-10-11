@@ -165,6 +165,7 @@ def api_settings(
         "REDIS_PORT": "1",
         "REDIS_URL": "redis://127.0.0.1:1",
         "REDIS_REQUIRED": "false",
+        "SDK_RATE_LIMIT_PER_MINUTE": str(config.SDK_RATE_LIMIT_PER_MINUTE),
         "CORS_ORIGINS": f"http://127.0.0.1:{dashboard_port}",
         "SHOPLAB_API_KEY": config.STATIC_NEEDLES[1],
         "STREAMPULSE_API_KEY": config.STATIC_NEEDLES[2],
