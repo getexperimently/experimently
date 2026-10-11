@@ -475,6 +475,23 @@ class PowerCalculatorService:
         Returns
         -------
         RuntimeEstimate
+            ``days_to_significance`` divides by the unrounded users per variant
+            per day (``daily_traffic * traffic_allocation / n_variants``), the
+            same formula as the dashboard's calculator
+            (``frontend/src/utils/power.ts``). Below one user per variant a day
+            that figure is a fraction: 1 user a day split between 2 variants is
+            0.5 each, so 31,235 per variant takes 62,470 days.
+            ``daily_traffic_per_variant`` is that figure as a whole number
+            (rounded down, at least 1); the days do not use it.
+
+        Raises
+        ------
+        ValueError
+            For a non-positive sample size or daily traffic, an allocation
+            outside (0, 1], or fewer than 2 variants.
+        OverflowError
+            When the days leave floating-point range (an allocation so small
+            that the users per variant per day is zero or near it).
         """
         if required_sample_size <= 0:
             raise ValueError("required_sample_size must be > 0")
@@ -485,9 +502,16 @@ class PowerCalculatorService:
         if n_variants < 2:
             raise ValueError("n_variants must be >= 2")
 
-        daily_per_variant = max(1, int(daily_traffic * traffic_allocation / n_variants))
-        days = required_sample_size / daily_per_variant
+        users_per_variant_per_day = daily_traffic * traffic_allocation / n_variants
+        if users_per_variant_per_day <= 0:
+            # Only an allocation that underflows gets here: every input above
+            # is positive.
+            raise OverflowError("users per variant per day underflows to zero")
+        days = required_sample_size / users_per_variant_per_day
+        if not math.isfinite(days):
+            raise OverflowError("runtime estimate leaves floating-point range")
         weeks = days / 7.0
+        daily_per_variant = max(1, int(users_per_variant_per_day))
 
         # 90% CI using Poisson approximation: traffic varies ~±sqrt(n) per day
         # CI width ≈ 1.645 * sqrt(days) / daily_per_variant * required_sample_size / required_sample_size

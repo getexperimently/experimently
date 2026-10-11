@@ -347,6 +347,33 @@ class TestSampleSizeAdvisor:
         )
         assert days == math.ceil(runtime.days_to_significance)
 
+    @pytest.mark.regression
+    @pytest.mark.parametrize(
+        "daily_traffic, expected_days",
+        [
+            # 0.5 users per variant a day: 31,235 / 0.5
+            pytest.param(1, 62_470, id="1-user-a-day"),
+            # 1.5 users per variant a day: 31,235 / 1.5 = 20,823.3, so 20,824
+            pytest.param(3, 20_824, id="3-users-a-day"),
+        ],
+    )
+    def test_days_at_low_traffic_use_the_unrounded_users_per_variant(
+        self, daily_traffic, expected_days
+    ):
+        """#1109: the runtime estimate divided by the users per variant a day
+        rounded down to a whole number (at least 1), so 1 and 3 users a day
+        both answered 31,235 days. The answer is still whole days, rounded up."""
+        estimate = AIDesignService.estimate_sample_size(
+            baseline_rate=0.05,
+            mde=0.005,
+            confidence=0.95,
+            power=0.80,
+            daily_traffic=daily_traffic,
+        )
+        assert estimate.required_per_variant == 31_235
+        assert estimate.days_to_significance == expected_days
+        assert isinstance(estimate.days_to_significance, int)
+
 
 # ---------------------------------------------------------------------------
 # TestGracefulDegradation (5 tests)
